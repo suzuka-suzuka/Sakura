@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Runtime data
+data/
+
+# User config (contains sensitive info like master QQ, cookies, etc.)
+config/
+
+# Ignore all plugins except system (demo plugin)
+plugins/*
+!plugins/system/
+
+# Environment variables
+.env
+.env.local
+.env.*.local

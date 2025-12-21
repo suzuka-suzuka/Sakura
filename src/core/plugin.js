@@ -1,0 +1,174 @@
+import { getBot } from "../api/client.js";
+export { Event } from "./event.js";
+
+
+export const PLUGIN_HANDLERS = Symbol.for("PLUGIN_HANDLERS");
+export const HANDLER_METADATA = Symbol.for("HANDLER_METADATA");
+
+/**
+ * 注册指令
+ * @param {RegExp} reg 正则表达式
+ * @param {string|number|object} [eventOrPriorityOrOptions] 事件类型 (string) 或 优先级 (number) 或 配置对象
+ * @param {number} [priority] 优先级 (仅当第二个参数为事件类型时有效)
+ * @param {Function} handler 处理函数
+ */
+export function Command(reg, ...args) {
+  const handler = args.pop();
+  const eventOrPriorityOrOptions = args[0];
+  const priority = args[1];
+
+  let eventName;
+  let p;
+  let permission;
+
+  if (typeof eventOrPriorityOrOptions === "number") {
+    p = eventOrPriorityOrOptions;
+  } else if (typeof eventOrPriorityOrOptions === "string") {
+    if (
+      eventOrPriorityOrOptions === "master" ||
+      eventOrPriorityOrOptions === "white"
+    ) {
+      permission = eventOrPriorityOrOptions;
+    } else {
+      eventName = eventOrPriorityOrOptions;
+    }
+    p = priority;
+  } else if (typeof eventOrPriorityOrOptions === "object") {
+    eventName = eventOrPriorityOrOptions.event;
+    p = eventOrPriorityOrOptions.priority;
+    permission = eventOrPriorityOrOptions.permission;
+  }
+
+  if (typeof handler === "function") {
+    handler[HANDLER_METADATA] = {
+      type: "regex",
+      reg,
+      eventName,
+      priority: p,
+      permission,
+    };
+  }
+  return handler;
+}
+
+/**
+ * 注册事件监听
+ * @param {string} eventName 事件名称 (如 'notice.group_increase')
+ * @param {number} [priority] 优先级 (可选)
+ * @param {Function} handler 处理函数
+ */
+export function OnEvent(eventName, ...args) {
+  const handler = args.pop();
+  const priority = args[0];
+
+  if (typeof handler === "function") {
+    handler[HANDLER_METADATA] = {
+      type: "event",
+      eventName,
+      priority,
+    };
+  }
+  return handler;
+}
+
+/**
+ * 注册定时任务
+ * @param {string} cronExpression Cron 表达式
+ * @param {Function} handler 处理函数
+ */
+export function Cron(cronExpression, handler) {
+  if (typeof handler === "function") {
+    handler[HANDLER_METADATA] = {
+      type: "cron",
+      cronExpression,
+    };
+  }
+  return handler;
+}
+
+
+export const contexts = {};
+
+export class plugin {
+  constructor(config = {}) {
+    const {
+      name = "Unknown Plugin",
+      event = "message",
+      priority = 5000,
+      log = true,
+      permission,
+    } = config;
+
+    this.name = name;
+    this.event = event;
+    this.priority = priority;
+    this.log = log;
+    this.permission = permission;
+    this.jobs = [];
+  }
+
+  async init() {}
+
+  destroy() {
+    this.jobs.forEach((job) => job.cancel());
+    this.jobs = [];
+  }
+
+  /**
+   * 获取指定 Bot 实例
+   * @param {number} selfId Bot QQ 号
+   */
+  getBot(selfId) {
+    return getBot(selfId);
+  }
+
+  /**
+   * 设置上下文
+   * @param {string} method 方法名
+   * @param {boolean|string|number} isGroup 是否为群组上下文，或者直接指定 ID
+   * @param {number} timeout 超时时间 (秒)
+   */
+  setContext(method, isGroup = false, timeout = 120) {
+    let id;
+    if (typeof isGroup === "boolean") {
+      if (!this.e) return;
+      id = isGroup ? this.e.group_id : this.e.user_id;
+    } else {
+      id = isGroup;
+    }
+
+    if (!id) return;
+
+    contexts[id] = {
+      plugin: this,
+      method,
+    };
+
+    if (timeout > 0) {
+      setTimeout(() => {
+        if (contexts[id] && contexts[id].plugin === this && contexts[id].method === method) {
+          delete contexts[id];
+        }
+      }, timeout * 1000);
+    }
+  }
+
+  /**
+   * 结束上下文
+   * @param {string} method 方法名
+   * @param {boolean|string|number} isGroup 是否为群组上下文，或者直接指定 ID
+   */
+  finish(method, isGroup = false) {
+    let id;
+    if (typeof isGroup === "boolean") {
+      if (!this.e) return;
+      id = isGroup ? this.e.group_id : this.e.user_id;
+    } else {
+      id = isGroup;
+    }
+
+    if (contexts[id] && contexts[id].method === method) {
+      delete contexts[id];
+    }
+  }
+}

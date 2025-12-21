@@ -1,0 +1,28 @@
+# 主人QQ：拥有最高权限
+master: 3103088569
+
+# 日志等级: trace, debug, info, warn, error, fatal
+logLevel: info
+
+# 白名单用户：拥有部分高级权限
+whiteUsers:
+  - 987654321
+
+# 群组白名单：如果填写，则只监听这些群 (优先级最高)
+whiteGroups:
+  - 1065791746
+
+# 群组黑名单：仅当白名单为空时生效，屏蔽这些群
+blackGroups:
+  - 111222333
+
+# 用户黑名单：屏蔽这些用户 (全局生效)
+blackUsers:
+  - 444555666
+
+# Redis 配置
+redis:
+  host: '127.0.0.1'
+  port: 6379
+  password: ''
+  db: 0
