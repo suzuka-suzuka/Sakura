@@ -52,7 +52,7 @@ export function getBot(selfId) {
 export function removeBot(selfId) {
     const id = Number(selfId);
     bots.delete(id);
-    if (bot && bot.selfId === id) {
+    if (bot && bot.self_id === id) {
         bot = undefined;
         if (typeof global !== 'undefined') global.bot = null;
         if (bots.size > 0) {
@@ -557,10 +557,11 @@ export class OneBotApi {
   constructor(server, selfId) {
     this.server = server;
     this._selfId = selfId;
+    this.nickname = "Bot";
     this.pendingRequests = new Map();
     
     if (!bot) {
-        bot = this; // Set the global instance for backward compatibility
+        bot = this;
         if (typeof global !== 'undefined') global.bot = this;
     }
     bots.set(selfId, this);
@@ -574,6 +575,19 @@ export class OneBotApi {
         }
       }
     });
+
+    this.init();
+  }
+
+  async init() {
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const info = await this.getLoginInfo();
+      if (info && info.nickname) {
+        this.nickname = info.nickname;
+      }
+    } catch (e) {
+    }
   }
 
   /**
@@ -592,7 +606,7 @@ export class OneBotApi {
     return new Group(this, group_id);
   }
 
-  get selfId() {
+  get self_id() {
     return this._selfId;
   }
 
@@ -627,7 +641,7 @@ export class OneBotApi {
         });
 
         try {
-          this.server.send(payload, this.selfId);
+          this.server.send(payload, this.self_id);
         } catch (e) {
           clearTimeout(timeout);
           this.pendingRequests.delete(echo);
@@ -660,7 +674,7 @@ export class OneBotApi {
     if (msgLog.length > 100) {
       msgLog = msgLog.substring(0, 100) + "...";
     }
-    const prefix = bots.size > 1 ? `[${this.selfId}] ` : "";
+    const prefix = bots.size > 1 ? `[${this.self_id}] ` : "";
     logger.info(`${prefix}发送 -> 群聊 ${group_id} ${msgLog}`);
     return this.sendRequest("send_group_msg", { group_id, message });
   }
@@ -685,7 +699,7 @@ export class OneBotApi {
     if (msgLog.length > 100) {
       msgLog = msgLog.substring(0, 100) + "...";
     }
-    const prefix = bots.size > 1 ? `[${this.selfId}] ` : "";
+    const prefix = bots.size > 1 ? `[${this.self_id}] ` : "";
     logger.info(`${prefix}发送 -> 私聊 ${user_id} ${msgLog}`);
     return this.sendRequest("send_private_msg", { user_id, message });
   }
@@ -964,7 +978,6 @@ export class OneBotApi {
     });
   }
 
-  // --- 账号相关 API ---
 
   /**
    * 设置账号信息
@@ -1264,7 +1277,6 @@ export class OneBotApi {
     return this.sendRequest("set_custom_status", { status, status_text });
   }
 
-  // --- 群聊相关 API ---
 
   /**
    * 获取群信息
@@ -1612,7 +1624,6 @@ export class OneBotApi {
     return this.sendRequest("send_group_sign", { group_id });
   }
 
-  // --- 文件相关 API ---
 
   /**
    * 获取文件信息

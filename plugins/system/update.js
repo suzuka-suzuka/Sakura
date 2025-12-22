@@ -63,6 +63,7 @@ export class GlobalUpdate extends plugin {
     let failCount = 0;
     let skipCount = 0;
     const results = [];
+    const detailedLogs = [];
 
     for (const repo of gitRepos) {
       const result = await this.updateRepository(
@@ -77,6 +78,9 @@ export class GlobalUpdate extends plugin {
         successCount++;
         if (result.updated) {
           results.push(`✓ ${repo.name}: 更新成功`);
+          if (result.logInfo) {
+            detailedLogs.push(result.logInfo);
+          }
         } else {
           results.push(`- ${repo.name}: 已是最新`);
           skipCount++;
@@ -98,7 +102,30 @@ export class GlobalUpdate extends plugin {
       ...results,
     ];
 
-    await e.sendForwardMsg(summary.join("\n"), {
+    const messages = [summary.join("\n")];
+
+    // 构建嵌套的详细日志
+    for (const logInfo of detailedLogs) {
+      const innerNodes = logInfo.msg.map((m) => ({
+        type: "node",
+        data: {
+          user_id: e.bot.self_id,
+          nickname: e.bot.nickname,
+          content: m,
+        },
+      }));
+
+      messages.push({
+        type: "node",
+        data: {
+          user_id: e.bot.self_id,
+          nickname: e.bot.nickname,
+          content: innerNodes,
+        },
+      });
+    }
+
+    await e.sendForwardMsg(messages, {
       prompt: "全局更新报告",
       summary: "查看详细报告",
       source: "系统更新",
@@ -271,6 +298,8 @@ export class GlobalUpdate extends plugin {
 
         if (!silent) {
           await this.getLog(repoPath, repoName, e);
+        } else {
+          result.logInfo = await this.getLog(repoPath, repoName, e, false);
         }
       }
 

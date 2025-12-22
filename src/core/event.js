@@ -378,7 +378,7 @@ export class Event {
   async sendForwardMsg(msg, info = {}) {
     const defaultInfo = {
       userid: this.bot.self_id,
-      nickname: this.bot.nickname || "Bot",
+      nickname: this.bot.nickname,
       prompt: "查看转发消息",
       summary: "点击查看详情",
       source: "聊天记录",
