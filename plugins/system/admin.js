@@ -16,7 +16,7 @@ export class SystemPlugin extends plugin {
     });
   }
 
-  restart = Command(/^#?重启$/, async (e) => {
+  restart = Command(/^#重启$/, async (e) => {
     await e.react(124);
     const restartInfo = {
       source_type: e.group_id ? "group" : "private",
@@ -37,7 +37,7 @@ export class SystemPlugin extends plugin {
     }
   });
 
-  shutdown = Command(/^#?关机$/, async (e) => {
+  shutdown = Command(/^#关机$/, async (e) => {
     await e.react(124);
 
     if (process.send) {
@@ -47,7 +47,7 @@ export class SystemPlugin extends plugin {
     }
   });
 
-  getLogs = Command(/^#?日志$/, async (e) => {
+  getLogs = Command(/^#日志$/, async (e) => {
     await e.react(124);
     if (!fs.existsSync(LOG_DIR)) {
       return e.reply("暂无日志文件");
