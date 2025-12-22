@@ -47,7 +47,7 @@ export class SystemPlugin extends plugin {
     }
   });
 
-  getLogs = Command(/^#日志$/, async (e) => {
+  getLogs = Command(/^#(全部)?日志$/, async (e) => {
     await e.react(124);
     if (!fs.existsSync(LOG_DIR)) {
       return e.reply("暂无日志文件");
@@ -64,24 +64,32 @@ export class SystemPlugin extends plugin {
     }
 
     const logFile = path.join(LOG_DIR, files[0]);
+    const isAll = e.msg.includes("全部");
 
     try {
       const content = fs.readFileSync(logFile, "utf-8");
-      const lines = content.split("\n");
+      const lines = content.split("\n").filter((line) => line.trim());
 
-      const errorLines = lines.filter(
-        (line) => line.includes("[ERROR]")
-      );
+      let targetLines;
+      let title;
 
-      if (errorLines.length === 0) {
-        return e.reply("今日暂无错误日志");
+      if (isAll) {
+        targetLines = lines;
+        title = "全部日志";
+      } else {
+        targetLines = lines.filter((line) => line.includes("[ERROR]"));
+        title = "错误日志";
       }
 
-      const lastErrors = errorLines.slice(-20);
+      if (targetLines.length === 0) {
+        return e.reply(isAll ? "今日暂无日志" : "今日暂无错误日志");
+      }
 
-      await e.sendForwardMsg(lastErrors, {
-        prompt: "查看错误日志",
-        summary: `共找到 ${errorLines.length} 条错误，显示最近 ${lastErrors.length} 条`,
+      const lastLogs = targetLines.reverse().slice(0, 20);
+
+      await e.sendForwardMsg(lastLogs, {
+        prompt: `${title}`,
+        summary: `共 ${targetLines.length} 条，显示最近 ${lastLogs.length} 条`,
         source: "系统日志",
       });
     } catch (err) {
