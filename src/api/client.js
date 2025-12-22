@@ -619,9 +619,7 @@ export class OneBotApi {
             response.status === "failed" ||
             (response.retcode !== undefined && response.retcode !== 0)
           ) {
-            const errMsg =
-              [response.message, response.wording].filter(Boolean).join("\n") ||
-              "Request failed";
+            const errMsg = response.message || "Request failed";
             reject(new Error(`Request ${action} failed: ${errMsg}`));
           } else {
             resolve(response.data);

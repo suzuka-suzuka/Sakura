@@ -40,6 +40,7 @@ export function loadConfig() {
         blackGroups: parsed.blackGroups || [],
         blackUsers: parsed.blackUsers || [],
         whiteUsers: parsed.whiteUsers || [],
+        onebot: parsed.onebot || {},
         redis: parsed.redis
       };
       

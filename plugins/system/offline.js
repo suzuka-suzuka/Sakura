@@ -7,7 +7,7 @@ export class OfflineNotify extends plugin {
       name: "离线通知",
       dsc: "Bot离线时通知主人",
       event: "notice.bot_offline",
-      priority: -infinity,
+      priority: -Infinity,
     });
   }
 

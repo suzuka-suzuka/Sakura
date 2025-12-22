@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { EventEmitter } from "events";
 import { logger } from "../utils/logger.js";
+import { getConfig } from "./config.js";
 
 export class OneBotServer extends EventEmitter {
   constructor(config, messageHandler) {
@@ -10,6 +11,33 @@ export class OneBotServer extends EventEmitter {
     this.wss = new WebSocketServer({
       port: config.port,
       path: config.path,
+      verifyClient: (info, callback) => {
+        const appConfig = getConfig();
+        const accessToken = appConfig.onebot?.accessToken;
+        
+        if (!accessToken) {
+          callback(true);
+          return;
+        }
+
+        // 检查 Authorization header
+        const auth = info.req.headers['authorization'];
+        if (auth === `Bearer ${accessToken}`) {
+          callback(true);
+          return;
+        }
+
+        // 检查 URL 参数中的 access_token
+        const url = new URL(info.req.url, `http://${info.req.headers.host}`);
+        const urlToken = url.searchParams.get('access_token');
+        if (urlToken === accessToken) {
+          callback(true);
+          return;
+        }
+
+        logger.warn(`客户端连接被拒绝: Token 验证失败`);
+        callback(false, 401, 'Unauthorized');
+      }
     });
     this.clients = new Map(); // self_id -> ws
 

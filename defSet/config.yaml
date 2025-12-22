@@ -20,9 +20,17 @@ blackGroups:
 blackUsers:
   - 444555666
 
+# OneBot 配置
+onebot:
+  # 访问令牌，留空则不验证
+  accessToken: ''
+
 # Redis 配置
 redis:
   host: '127.0.0.1'
   port: 6379
   password: ''
   db: 0
+# Redis 启动命令或路径，例如 'redis-server' 或 'C:/Redis/redis-server.exe'
+# 如果留空，则不会自动启动 Redis
+  execPath: 'D:/QQBot/Redis-8.0.3-Windows-x64-cygwin/redis-server.exe'
