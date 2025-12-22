@@ -32,7 +32,6 @@ export function loadConfig() {
       const fileContents = fs.readFileSync(CONFIG_PATH, 'utf8');
       const parsed = yaml.load(fileContents);
       
-      // Ensure arrays exist even if null in yaml
       config = {
         master: parsed.master,
         logLevel: parsed.logLevel || 'info',
@@ -44,7 +43,6 @@ export function loadConfig() {
         redis: parsed.redis
       };
       
-      // 更新日志等级
       logger.level = config.logLevel;
       
       logger.info(`[Config] 配置已加载，日志等级: ${config.logLevel}`);
@@ -65,5 +63,4 @@ fs.watchFile(CONFIG_PATH, () => {
   loadConfig();
 });
 
-// 初始化加载配置
 loadConfig();

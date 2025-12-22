@@ -250,7 +250,6 @@ export class PluginLoader {
         return;
       }
 
-      // 屏蔽私聊 (主人不受影响)
       if (config.blockPrivate && e.message_type === "private") {
         const masterId = config.master;
         const isMaster = Array.isArray(masterId)

@@ -20,14 +20,12 @@ export class OneBotServer extends EventEmitter {
           return;
         }
 
-        // 检查 Authorization header
         const auth = info.req.headers['authorization'];
         if (auth === `Bearer ${accessToken}`) {
           callback(true);
           return;
         }
 
-        // 检查 URL 参数中的 access_token
         const url = new URL(info.req.url, `http://${info.req.headers.host}`);
         const urlToken = url.searchParams.get('access_token');
         if (urlToken === accessToken) {
@@ -39,7 +37,7 @@ export class OneBotServer extends EventEmitter {
         callback(false, 401, 'Unauthorized');
       }
     });
-    this.clients = new Map(); // self_id -> ws
+    this.clients = new Map();
 
     this.init();
   }
@@ -69,7 +67,6 @@ export class OneBotServer extends EventEmitter {
 
           try {
             const json = JSON.parse(message);
-            // 确保 json 中包含 self_id，如果没有则补上
             if (!json.self_id && selfId) {
                 json.self_id = selfId;
             }
@@ -111,7 +108,6 @@ export class OneBotServer extends EventEmitter {
             logger.warn(`Bot ${selfId} 未连接或连接已断开`);
         }
     } else {
-        // 广播 (仅用于调试或特殊情况)
         this.wss.clients.forEach((client) => {
             if (client.readyState === WebSocket.OPEN) {
                 client.send(JSON.stringify(data));
