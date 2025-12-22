@@ -95,7 +95,7 @@ export class plugin {
       name = "Unknown Plugin",
       event = "message",
       priority = 5000,
-      log = true,
+      log = false,
       permission,
     } = config;
 
