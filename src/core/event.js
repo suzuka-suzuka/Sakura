@@ -32,13 +32,22 @@ export class Event {
 
   get msg() {
     if (Array.isArray(this.message)) {
-      return this.message
-        .filter((seg) => seg.type === "text")
-        .map((seg) => seg.data?.text || "")
-        .join("")
-        .trim();
-    } else if (typeof this.message === "string") {
-      return this.message;
+      let result = "";
+      for (let i = 0; i < this.message.length; i++) {
+        const seg = this.message[i];
+        if (seg.type === "text") {
+          let text = seg.data?.text || "";
+          if (
+            i > 0 &&
+            this.message[i - 1].type === "at" &&
+            text.startsWith(" ")
+          ) {
+            text = text.substring(1);
+          }
+          result += text;
+        }
+      }
+      return result.trim();
     }
     return "";
   }
