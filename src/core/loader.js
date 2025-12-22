@@ -250,6 +250,17 @@ export class PluginLoader {
         return;
       }
 
+      // 屏蔽私聊 (主人不受影响)
+      if (config.blockPrivate && e.message_type === "private") {
+        const masterId = config.master;
+        const isMaster = Array.isArray(masterId)
+          ? masterId.includes(user_id)
+          : masterId == user_id;
+        if (!isMaster) {
+          return;
+        }
+      }
+
       if (group_id) {
         if (config.whiteGroups.length > 0) {
           const whiteGroups = config.whiteGroups.map(String);

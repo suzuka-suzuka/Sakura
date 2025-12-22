@@ -4,6 +4,9 @@ master: 3103088569
 # 日志等级: trace, debug, info, warn, error, fatal
 logLevel: info
 
+# 屏蔽私聊：是否屏蔽所有私聊消息 (主人不受影响)
+blockPrivate: true
+
 # 白名单用户：拥有部分高级权限
 whiteUsers:
   - 987654321
