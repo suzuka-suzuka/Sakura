@@ -39,7 +39,7 @@ export class GlobalUpdate extends plugin {
     if (isGlobal) {
       await this.runGlobalUpdate(isForce, e);
     } else {
-      await this.updateRepository(".", "主仓库", isForce, e);
+      await this.updateRepository(".", "Sakura", isForce, e);
     }
 
     if (this.isUp) {
@@ -48,16 +48,16 @@ export class GlobalUpdate extends plugin {
   });
 
   async runGlobalUpdate(isForce, e) {
-    await e.reply("开始扫描并更新所有插件...");
+    await e.reply("开始更新 Sakura 和所有插件...");
 
     const gitRepos = await this.scanGitRepos();
 
-    if (gitRepos.length === 0) {
-      await e.reply("未发现任何 Git 仓库");
-      return;
-    }
+    const allRepos = [
+      { name: "Sakura", path: "." },
+      ...gitRepos
+    ];
 
-    await e.reply(`发现 ${gitRepos.length} 个 Git 仓库，开始更新...`);
+    await e.reply(`发现 ${allRepos.length} 个 Git 仓库，开始更新...`);
 
     let successCount = 0;
     let failCount = 0;
@@ -65,7 +65,7 @@ export class GlobalUpdate extends plugin {
     const results = [];
     const detailedLogs = [];
 
-    for (const repo of gitRepos) {
+    for (const repo of allRepos) {
       const result = await this.updateRepository(
         repo.path,
         repo.name,
@@ -104,7 +104,6 @@ export class GlobalUpdate extends plugin {
 
     const messages = [summary.join("\n")];
 
-    // 构建嵌套的详细日志
     for (const logInfo of detailedLogs) {
       const innerNodes = logInfo.msg.map((m) => ({
         type: "node",
