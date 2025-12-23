@@ -53,6 +53,7 @@ async function checkAndStartRedis() {
 
     try {
         const redisProcess = spawn(execPath, [], {
+            cwd: path.join(__dirname, 'data'),
             stdio: 'ignore',
             detached: true,
             shell: false

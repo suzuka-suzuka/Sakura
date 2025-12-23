@@ -24,7 +24,6 @@ export class GlobalUpdate extends plugin {
   }
 
   update = Command(/^#(强制)?(全局)?更新$/, async (e) => {
-    if (!e.isMaster) return false;
 
     if (uping) {
       await e.reply("已有命令更新中..请勿重复操作");
@@ -115,24 +114,19 @@ export class GlobalUpdate extends plugin {
       }));
 
       messages.push({
-        type: "node",
-        data: {
-          user_id: e.bot.self_id,
-          nickname: e.bot.nickname,
-          content: innerNodes,
-        },
+        user_id: e.bot.self_id,
+        nickname: e.bot.nickname,
+        content: innerNodes,
       });
     }
 
     await e.sendForwardMsg(messages, {
       prompt: "全局更新报告",
-      summary: "查看详细报告",
       source: "系统更新",
     });
   }
 
   updatePlugin = Command(/^#(强制)?更新(.+)插件$/, async (e) => {
-    if (!e.isMaster) return false;
 
     if (uping) {
       await e.reply("已有命令更新中..请勿重复操作");
@@ -174,7 +168,6 @@ export class GlobalUpdate extends plugin {
   });
 
   listPlugins = Command(/^#插件列表$/, async (e) => {
-    if (!e.isMaster) return false;
 
     const gitRepos = await this.scanGitRepos();
 

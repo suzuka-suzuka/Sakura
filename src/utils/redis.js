@@ -1,12 +1,11 @@
 import { Redis } from 'ioredis';
-import { getConfig } from '../core/config.js';
+import Config from '../core/config.js';
 import { logger } from './logger.js';
 
 let redisInstance = null;
 
 export async function connectRedis() {
-  const config = getConfig();
-  const redisConfig = config.redis;
+  const redisConfig = Config.get('redis');
   
   if (!redisConfig) {
     throw new Error('Redis 配置未找到，请在 config.yaml 中配置 redis');

@@ -56,8 +56,8 @@ export function logEvent(data) {
       content = event.raw_message || "";
     }
 
-    if (content.length > 100) {
-      content = content.substring(0, 100) + "...";
+    if (content.length > 200) {
+      content = content.substring(0, 200) + "...";
     }
 
     if (event.message_type === "group") {

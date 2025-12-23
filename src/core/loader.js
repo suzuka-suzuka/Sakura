@@ -9,7 +9,7 @@ import {
   Event,
   contexts,
 } from "./plugin.js";
-import { getConfig } from "./config.js";
+import Config from "./config.js";
 import schedule from "node-schedule";
 import { logger } from "../utils/logger.js";
 import { getBot } from "../api/client.js";
@@ -243,7 +243,7 @@ export class PluginLoader {
 
   async deal(e) {
     if (e.post_type !== "meta_event") {
-      const config = getConfig();
+      const config = Config.get();
       const { group_id, user_id } = e;
 
       if (user_id && config.blackUsers.includes(user_id)) {
@@ -308,7 +308,7 @@ export class PluginLoader {
       try {
         const permission = handler.permission || instance.permission;
         if (permission) {
-          const config = getConfig();
+          const config = Config.get();
           const uid = Number(e.user_id);
           const masterId = Number(config.master);
 

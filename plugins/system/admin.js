@@ -68,7 +68,21 @@ export class SystemPlugin extends plugin {
 
     try {
       const content = fs.readFileSync(logFile, "utf-8");
-      const lines = content.split("\n").filter((line) => line.trim());
+      const rawLines = content.split(/\r?\n/);
+      const lines = [];
+      let currentLog = "";
+      const timeRegex = /^\[\d{2}:\d{2}:\d{2}\]/;
+
+      for (const line of rawLines) {
+        if (!line.trim()) continue;
+        if (timeRegex.test(line)) {
+          if (currentLog) lines.push(currentLog);
+          currentLog = line;
+        } else {
+          currentLog = currentLog ? currentLog + "\n" + line : line;
+        }
+      }
+      if (currentLog) lines.push(currentLog);
 
       let targetLines;
       let title;
@@ -85,12 +99,15 @@ export class SystemPlugin extends plugin {
         return e.reply(isAll ? "今日暂无日志" : "今日暂无错误日志");
       }
 
-      const lastLogs = targetLines.reverse().slice(0, 20);
+      const lastLogs = targetLines.reverse().slice(0, 50);
 
       await e.sendForwardMsg(lastLogs, {
         prompt: `${title}`,
-        summary: `共 ${targetLines.length} 条，显示最近 ${lastLogs.length} 条`,
         source: "系统日志",
+        news: [
+          { text: `共 ${targetLines.length} 条` },
+          { text: `显示最近 ${lastLogs.length} 条` },
+        ],
       });
     } catch (err) {
       logger.error(`读取日志失败: ${err}`);

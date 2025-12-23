@@ -1,6 +1,5 @@
 import { Segment, Group, Friend } from "../api/client.js";
-import { getConfig } from "./config.js";
-
+import Config from "./config.js";
 export class Event {
   constructor(event, bot) {
     Object.assign(this, event);
@@ -72,7 +71,7 @@ export class Event {
   }
 
   get isMaster() {
-    const config = getConfig();
+    const config = Config.get();
     const master = config.master;
     if (Array.isArray(master)) {
       return master.includes(this.user_id);
@@ -82,7 +81,7 @@ export class Event {
 
   get isWhite() {
     if (this.isMaster) return true;
-    const config = getConfig();
+    const config = Config.get();
     const whiteUsers = config.whiteUsers || [];
     return whiteUsers.includes(this.user_id);
   }
@@ -96,11 +95,11 @@ export class Event {
   }
 
   getMaster() {
-    return getConfig().master;
+    return Config.get('master');
   }
 
   getWhite() {
-    const config = getConfig();
+    const config = Config.get();
     const masters = config.master
       ? Array.isArray(config.master)
         ? config.master
@@ -378,25 +377,13 @@ export class Event {
    * 制作并发送合并转发消息
    * @param {string|object|array} msg 消息内容或消息数组
    * @param {object} info 转发信息配置
-   * @param {string|number} info.userid 伪造的发送者ID
-   * @param {string} info.nickname 伪造的发送者昵称
-   * @param {string} info.prompt 外显摘要 (部分适配器支持)
-   * @param {string} info.summary 底部文本 (部分适配器支持)
-   * @param {string} info.source 来源标题 (部分适配器支持)
+   * @param {string} info.prompt 外显摘要
+   * @param {string} info.summary 底部文本
+   * @param {string} info.source 来源标题
+   * @param {Array} info.news 自定义摘要
    */
   async sendForwardMsg(msg, info = {}) {
-    const defaultInfo = {
-      userid: this.bot.self_id,
-      nickname: this.bot.nickname,
-      prompt: "查看转发消息",
-      summary: "点击查看详情",
-      source: "聊天记录",
-    };
-
-    const { userid, nickname, prompt, summary, source, news } = {
-      ...defaultInfo,
-      ...info,
-    };
+    const { prompt, summary, source, news } = info;
 
     let nodes = [];
     const msgs = Array.isArray(msg) ? msg : [msg];
@@ -406,26 +393,49 @@ export class Event {
 
       if (typeof m === "object" && m.type === "node") {
         nodes.push(m);
-      } else {
-        nodes.push({
-          type: "node",
-          data: {
-            user_id: userid,
-            nickname: nickname,
-            content: m,
-          },
-        });
+        continue;
       }
+
+      let content = m;
+      let uid = this.bot.self_id;
+      let name = this.bot.nickname;
+
+      if (typeof m === "object" && !Array.isArray(m) && m.content) {
+        content = m.content;
+        if (m.user_id) uid = m.user_id;
+        if (m.nickname) name = m.nickname;
+      }
+
+      if (Array.isArray(content)) {
+        content = content.map((item) =>
+          typeof item === "string" ? Segment.text(item) : item
+        );
+      } else {
+        content =
+          typeof content === "object" && content && content.type
+            ? [content]
+            : [Segment.text(content)];
+      }
+
+      nodes.push({
+        type: "node",
+        data: {
+          user_id: uid,
+          nickname: name,
+          content: content,
+        },
+      });
     }
 
     if (nodes.length === 0) return;
 
     const params = {
       messages: nodes,
-      prompt,
-      summary,
-      source,
     };
+
+    if (prompt) params.prompt = prompt;
+    if (summary) params.summary = summary;
+    if (source) params.source = source;
 
     if (news) {
       params.news = news;

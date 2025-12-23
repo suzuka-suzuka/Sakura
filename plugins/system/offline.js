@@ -1,4 +1,4 @@
-import { getConfig } from "../../src/core/config.js";
+import Config from "../../src/core/config.js";
 import { Friend } from "../../src/api/client.js";
 
 export class OfflineNotify extends plugin {
@@ -12,8 +12,7 @@ export class OfflineNotify extends plugin {
   }
 
   handleOffline = OnEvent("notice.bot_offline", async (e) => {
-    const config = getConfig();
-    const master = config.master;
+    const master = Config.get('master');
 
     if (!master) {
       return false;

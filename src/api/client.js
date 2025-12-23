@@ -160,6 +160,14 @@ export class Friend {
   async getFileUrl(file_id) {
     return this.bot.getPrivateFileUrl(this.user_id, file_id);
   }
+
+  /**
+   * 转发单条消息到私聊
+   * @param message_id 消息 ID
+   */
+  async forwardSingleMsg(message_id) {
+    return this.bot.forwardFriendSingleMsg(this.user_id, message_id);
+  }
 }
 
 export class Group {
@@ -410,22 +418,6 @@ export class Group {
   }
 
   /**
-   * 批量踢出群成员
-   * @param user_ids 成员 QQ 号列表
-   * @param reject_add_request 是否拒绝此人的加群请求
-   */
-  async kickMemberBatch(
-    user_ids,
-    reject_add_request = false
-  ) {
-    return this.bot.kickGroupMemberBatch(
-      this.group_id,
-      user_ids,
-      reject_add_request
-    );
-  }
-
-  /**
    * 设置群备注
    * @param remark 备注
    */
@@ -551,6 +543,82 @@ export class Group {
   async forwardSingleMsg(message_id) {
     return this.bot.forwardGroupSingleMsg(this.group_id, message_id);
   }
+
+  /**
+   * 删除群相册文件
+   * @param album_id 相册 ID
+   * @param photo_ids 图片 ID 列表
+   */
+  async deleteAlbumFile(album_id, photo_ids) {
+    return this.bot.deleteGroupAlbumFile(this.group_id, album_id, photo_ids);
+  }
+
+  /**
+   * 点赞群相册
+   * @param album_id 相册 ID
+   * @param photo_id 图片 ID
+   */
+  async albumLike(album_id, photo_id) {
+    return this.bot.groupAlbumLike(this.group_id, album_id, photo_id);
+  }
+
+  /**
+   * 查看群相册评论
+   * @param album_id 相册 ID
+   * @param photo_id 图片 ID
+   */
+  async getAlbumComments(album_id, photo_id) {
+    return this.bot.getGroupAlbumComments(this.group_id, album_id, photo_id);
+  }
+
+  /**
+   * 获取群相册列表
+   * @param album_id 相册 ID
+   */
+  async getAlbumList(album_id) {
+    return this.bot.getGroupAlbumList(this.group_id, album_id);
+  }
+
+  /**
+   * 上传图片到群相册
+   * @param album_id 相册 ID
+   * @param file 图片文件
+   * @param desc 描述
+   */
+  async uploadAlbumImage(album_id, album_name, file, desc) {
+    return this.bot.uploadGroupAlbumImage(this.group_id, album_id,album_name, file, desc);
+  }
+
+  /**
+   * 获取群相册总列表
+   */
+  async getAlbumMainList() {
+    return this.bot.getGroupAlbumMainList(this.group_id);
+  }
+
+  /**
+   * 设置群精华消息
+   * @param message_id 消息 ID
+   */
+  async setEssence(message_id) {
+    return this.bot.setGroupEssence(message_id);
+  }
+
+  /**
+   * 删除群精华消息
+   * @param message_id 消息 ID
+   */
+  async deleteEssence(message_id) {
+    return this.bot.deleteGroupEssence(message_id);
+  }
+
+  /**
+   * 设置群代办
+   * @param content 代办内容
+   */
+  async setTodo(content) {
+    return this.bot.setGroupTodo(this.group_id, content);
+  }
 }
 
 export class OneBotApi {
@@ -633,7 +701,7 @@ export class OneBotApi {
             response.status === "failed" ||
             (response.retcode !== undefined && response.retcode !== 0)
           ) {
-            const errMsg = response.message || "Request failed";
+            const errMsg = response.wording || "Request failed";
             reject(new Error(`Request ${action} failed: ${errMsg}`));
           } else {
             resolve(response.data);
@@ -671,8 +739,8 @@ export class OneBotApi {
       }
     }
 
-    if (msgLog.length > 100) {
-      msgLog = msgLog.substring(0, 100) + "...";
+    if (msgLog.length > 200) {
+      msgLog = msgLog.substring(0, 200) + "...";
     }
     const prefix = bots.size > 1 ? `[${this.self_id}] ` : "";
     logger.info(`${prefix}发送 -> 群聊 ${group_id} ${msgLog}`);
@@ -696,8 +764,8 @@ export class OneBotApi {
       }
     }
 
-    if (msgLog.length > 100) {
-      msgLog = msgLog.substring(0, 100) + "...";
+    if (msgLog.length > 200) {
+      msgLog = msgLog.substring(0, 200) + "...";
     }
     const prefix = bots.size > 1 ? `[${this.self_id}] ` : "";
     logger.info(`${prefix}发送 -> 私聊 ${user_id} ${msgLog}`);
@@ -948,6 +1016,15 @@ export class OneBotApi {
   }
 
   /**
+   * 转发单条消息到私聊
+   * @param user_id 对方 QQ 号
+   * @param message_id 消息 ID
+   */
+  async forwardFriendSingleMsg(user_id, message_id) {
+    return this.sendRequest("forward_friend_single_msg", { user_id, message_id });
+  }
+
+  /**
    * 获取语音消息详情
    * @param file 文件名
    * @param out_format 输出格式
@@ -977,7 +1054,6 @@ export class OneBotApi {
       text,
     });
   }
-
 
   /**
    * 设置账号信息
@@ -1026,6 +1102,13 @@ export class OneBotApi {
       approve,
       remark,
     });
+  }
+
+  /**
+   * 获取被过滤好友请求
+   */
+  async getFilteredFriendRequest() {
+    return this.sendRequest("get_filtered_friend_request", {});
   }
 
   /**
@@ -1198,6 +1281,13 @@ export class OneBotApi {
    */
   async getRecommendClient() {
     return this.sendRequest("get_recommend_client", {});
+  }
+
+  /**
+   * 获取推荐群聊卡片
+   */
+  async getRecommendGroupClient() {
+    return this.sendRequest("get_recommend_group_client", {});
   }
 
   /**
@@ -1566,24 +1656,6 @@ export class OneBotApi {
   }
 
   /**
-   * 批量踢出群成员
-   * @param group_id 群号
-   * @param user_ids 成员 QQ 号列表
-   * @param reject_add_request 是否拒绝此人的加群请求
-   */
-  async kickGroupMemberBatch(
-    group_id,
-    user_ids,
-    reject_add_request = false
-  ) {
-    return this.sendRequest("kick_group_member_batch", {
-      group_id,
-      user_ids,
-      reject_add_request,
-    });
-  }
-
-  /**
    * 设置群备注
    * @param group_id 群号
    * @param remark 备注
@@ -1622,6 +1694,15 @@ export class OneBotApi {
    */
   async sendGroupSign(group_id) {
     return this.sendRequest("send_group_sign", { group_id });
+  }
+
+  /**
+   * 设置群代办
+   * @param group_id 群号
+   * @param content 代办内容
+   */
+  async setGroupTodo(group_id, content) {
+    return this.sendRequest("set_group_todo", { group_id, content });
   }
 
 
@@ -1772,5 +1853,63 @@ export class OneBotApi {
       group_id,
       file_id,
     });
+  }
+
+  /**
+   * 删除群相册文件
+   * @param group_id 群号
+   * @param album_id 相册 ID
+   * @param photo_ids 图片 ID 列表
+   */
+  async deleteGroupAlbumFile(group_id, album_id, photo_ids) {
+    return this.sendRequest("delete_group_album_file", { group_id, album_id, photo_ids });
+  }
+
+  /**
+   * 点赞群相册
+   * @param group_id 群号
+   * @param album_id 相册 ID
+   * @param photo_id 图片 ID
+   */
+  async groupAlbumLike(group_id, album_id, photo_id) {
+    return this.sendRequest("group_album_like", { group_id, album_id, photo_id });
+  }
+
+  /**
+   * 查看群相册评论
+   * @param group_id 群号
+   * @param album_id 相册 ID
+   * @param photo_id 图片 ID
+   */
+  async getGroupAlbumComments(group_id, album_id, photo_id) {
+    return this.sendRequest("get_group_album_comments", { group_id, album_id, photo_id });
+  }
+
+  /**
+   * 获取群相册列表
+   * @param group_id 群号
+   * @param album_id 相册 ID
+   */
+  async getGroupAlbumList(group_id, album_id) {
+    return this.sendRequest("get_group_album_media_list", { group_id, album_id });
+  }
+
+  /**
+   * 上传图片到群相册
+   * @param group_id 群号
+   * @param album_id 相册 ID
+   * @param file 图片文件
+   * @param desc 描述
+   */
+  async uploadGroupAlbumImage(group_id, album_id,album_name, file, desc) {
+    return this.sendRequest("upload_image_to_qun_album", { group_id, album_id,album_name, file, desc });
+  }
+
+  /**
+   * 获取群相册总列表
+   * @param group_id 群号
+   */
+  async getGroupAlbumMainList(group_id) {
+    return this.sendRequest("get_qun_album_list", { group_id });
   }
 }

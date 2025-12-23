@@ -1,8 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { EventEmitter } from "events";
 import { logger } from "../utils/logger.js";
-import { getConfig } from "./config.js";
-
+import Config from "./config.js";
 export class OneBotServer extends EventEmitter {
   constructor(config, messageHandler) {
     super();
@@ -12,8 +11,7 @@ export class OneBotServer extends EventEmitter {
       port: config.port,
       path: config.path,
       verifyClient: (info, callback) => {
-        const appConfig = getConfig();
-        const accessToken = appConfig.onebot?.accessToken;
+        const accessToken = Config.get('onebot.accessToken');
         
         if (!accessToken) {
           callback(true);
