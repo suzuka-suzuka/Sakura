@@ -106,7 +106,6 @@ export class GlobalUpdate extends plugin {
           user_id: e.bot.self_id,
           nickname: e.bot.nickname,
           content: m,
-          news: [{ text: `${logInfo.name} 更新日志` }],
         },
       }));
 
@@ -114,6 +113,7 @@ export class GlobalUpdate extends plugin {
         user_id: e.bot.self_id,
         nickname: e.bot.nickname,
         content: innerNodes,
+        news: [{ text: `${logInfo.name} 更新日志` }],
       });
     }
 
