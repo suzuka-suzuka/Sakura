@@ -162,9 +162,6 @@ export class PluginLoader {
               });
             }
           }
-          logger.info(
-            `加载插件: ${instance.name} (功能数: ${handlers.length})`
-          );
         }
         this.loadedPlugins.set(filePath, instances);
       }

@@ -24,7 +24,6 @@ export class GlobalUpdate extends plugin {
   }
 
   update = Command(/^#(强制)?(全局)?更新$/, async (e) => {
-
     if (uping) {
       await e.reply("已有命令更新中..请勿重复操作");
       return;
@@ -51,10 +50,7 @@ export class GlobalUpdate extends plugin {
 
     const gitRepos = await this.scanGitRepos();
 
-    const allRepos = [
-      { name: "Sakura", path: "." },
-      ...gitRepos
-    ];
+    const allRepos = [{ name: "Sakura", path: "." }, ...gitRepos];
 
     await e.reply(`发现 ${allRepos.length} 个 Git 仓库，开始更新...`);
 
@@ -110,6 +106,7 @@ export class GlobalUpdate extends plugin {
           user_id: e.bot.self_id,
           nickname: e.bot.nickname,
           content: m,
+          news: [{ text: `${logInfo.name} 更新日志` }],
         },
       }));
 
@@ -127,7 +124,6 @@ export class GlobalUpdate extends plugin {
   }
 
   updatePlugin = Command(/^#(强制)?更新(.+)插件$/, async (e) => {
-
     if (uping) {
       await e.reply("已有命令更新中..请勿重复操作");
       return;
@@ -168,7 +164,6 @@ export class GlobalUpdate extends plugin {
   });
 
   listPlugins = Command(/^#插件列表$/, async (e) => {
-
     const gitRepos = await this.scanGitRepos();
 
     if (gitRepos.length === 0) {
@@ -318,7 +313,7 @@ export class GlobalUpdate extends plugin {
     }
   }
 
-  async getLog(repoPath, repoName, e) {
+  async getLog(repoPath, repoName, e, sendMsg = true) {
     let cm = `git -C ${repoPath} log -20 --oneline --pretty=format:"%h||[%cd]  %s" --date=format:"%m-%d %H:%M"`;
 
     let logAll;
@@ -341,7 +336,6 @@ export class GlobalUpdate extends plugin {
       log.push(str[1]);
     }
     let line = log.length;
-    log = log.join("\n\n");
 
     if (log.length <= 0) return null;
 
@@ -351,13 +345,20 @@ export class GlobalUpdate extends plugin {
       end = `更多详细信息，请前往仓库查看\n${remoteUrl}`;
     }
 
-    await e.sendForwardMsg([log, end].filter(Boolean), {
-      prompt: `${repoName} 更新日志`,
-      summary: `共${line}条`,
-      source: "更新日志",
-    });
-
-    return null;
+    if (sendMsg) {
+      let logStr = log.join("\n\n");
+      await e.sendForwardMsg([logStr, end].filter(Boolean), {
+        prompt: `${repoName} 更新日志`,
+        summary: `共${line}条`,
+        source: "更新日志",
+      });
+      return null;
+    } else {
+      return {
+        name: repoName,
+        msg: [...log, end].filter(Boolean),
+      };
+    }
   }
 
   async getRemoteUrl(repoPath) {
