@@ -23,7 +23,7 @@ export class GlobalUpdate extends plugin {
     });
   }
 
-  update = Command(/^#(强制)?(全局)?更新$/, async (e) => {
+  update = Command(/^#(强制)?(全局|全部)?更新$/, async (e) => {
     if (uping) {
       await e.reply("已有命令更新中..请勿重复操作");
       return;
@@ -32,7 +32,7 @@ export class GlobalUpdate extends plugin {
     if (!(await this.checkGit(e))) return;
 
     const isForce = e.msg.includes("强制");
-    const isGlobal = e.msg.includes("全局");
+    const isGlobal = e.msg.includes("全局") || e.msg.includes("全部");
 
     if (isGlobal) {
       await this.runGlobalUpdate(isForce, e);
@@ -46,7 +46,7 @@ export class GlobalUpdate extends plugin {
   });
 
   async runGlobalUpdate(isForce, e) {
-    await e.reply("开始更新 Sakura 和所有插件...");
+    await e.react(124);
 
     const gitRepos = await this.scanGitRepos();
 
