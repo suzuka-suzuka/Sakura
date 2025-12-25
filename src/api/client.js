@@ -693,7 +693,7 @@ export class OneBotApi {
             this.pendingRequests.delete(echo);
             reject(new Error(`Request ${action} timed out`));
           }
-        }, 100000);
+        }, 120000);
 
         this.pendingRequests.set(echo, (response) => {
           clearTimeout(timeout);

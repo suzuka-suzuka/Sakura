@@ -115,20 +115,24 @@ export class OneBotServer extends EventEmitter {
   }
 
   shutdown() {
-    logger.info("正在关闭服务器...");
+    return new Promise((resolve) => {
+      logger.info("正在关闭服务器...");
 
-    this.wss.clients.forEach((client) => {
-      client.terminate();
+      this.wss.clients.forEach((client) => {
+        client.terminate();
+      });
+
+      this.wss.close(() => {
+        logger.info("服务器已关闭");
+        resolve();
+        process.exit(0);
+      });
+
+      setTimeout(() => {
+        logger.warn("强制退出");
+        resolve();
+        process.exit(1);
+      }, 3000);
     });
-
-    this.wss.close(() => {
-      logger.info("服务器已关闭");
-      process.exit(0);
-    });
-
-    setTimeout(() => {
-      logger.warn("强制退出");
-      process.exit(1);
-    }, 3000);
   }
 }

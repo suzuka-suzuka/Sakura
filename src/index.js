@@ -73,4 +73,18 @@ server.on("connection_close", (selfId) => {
   removeBot(selfId);
 });
 
+// 优雅退出处理
+function gracefulShutdown(signal) {
+  logger.info(`收到 ${signal} 信号，正在优雅关闭...`);
+  server.shutdown();
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('message', (msg) => {
+  if (msg === 'shutdown') {
+    gracefulShutdown('IPC shutdown');
+  }
+});
+
 export { bot as api } from "./api/client.js";

@@ -70,16 +70,37 @@ async function checkAndStartRedis() {
     }
 }
 
+let currentChild = null;
+
+function setupSignalHandlers() {
+    const signals = ['SIGINT', 'SIGTERM'];
+    signals.forEach(signal => {
+        process.on(signal, () => {
+            if (currentChild) {
+                currentChild.send('shutdown');
+                setTimeout(() => {
+                    if (currentChild && !currentChild.killed) {
+                        currentChild.kill('SIGKILL');
+                    }
+                    process.exit(0);
+                }, 3000);
+            } else {
+                process.exit(0);
+            }
+        });
+    });
+}
+
+setupSignalHandlers();
+
 async function start() {
     await checkAndStartRedis();
 
     const child = fork(script, [], { stdio: ['inherit', 'inherit', 'inherit', 'ipc'] });
+    currentChild = child;
 
     child.on('message', (msg) => {
         if (msg === 'restart') {
-            child.kill();
-            setTimeout(start, 1000);
-        } else if (msg === 'hard-restart') {
             child.kill();
             setTimeout(() => {
                 const args = [process.argv[1], '--hard-restart', ...process.argv.slice(2)];
@@ -99,6 +120,7 @@ async function start() {
     });
 
     child.on('exit', (code) => {
+        currentChild = null;
         if (code !== 0 && code !== null) {
             setTimeout(start, 3000);
         }
