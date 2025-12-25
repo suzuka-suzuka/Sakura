@@ -85,12 +85,12 @@ async function start() {
                 const args = [process.argv[1], '--hard-restart', ...process.argv.slice(2)];
                 const newProcess = spawn(process.argv[0], args, {
                     cwd: process.cwd(),
-                    stdio: 'inherit',
+                    stdio: ['ignore', 'inherit', 'inherit'],
                     detached: true,
                     shell: false
                 });
                 newProcess.unref();
-                process.exit(0);
+                setTimeout(() => process.exit(0), 1000);
             }, 500);
         } else if (msg === 'shutdown') {
             child.kill();
