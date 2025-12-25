@@ -31,7 +31,7 @@ export class SystemPlugin extends plugin {
     );
 
     if (process.send) {
-      process.send("restart");
+      process.send("hard-restart");
     } else {
       process.exit(0);
     }

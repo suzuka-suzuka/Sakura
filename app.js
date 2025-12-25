@@ -9,6 +9,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const script = path.join(__dirname, 'src/index.js');
 const CONFIG_PATH = path.join(__dirname, 'config/config.yaml');
 
+// 检查是否需要硬重启（完全重启进程以解决 ES 模块缓存问题）
+const isHardRestart = process.argv.includes('--hard-restart');
+if (isHardRestart) {
+    // 移除标记，避免无限重启
+    const args = process.argv.slice(2).filter(arg => arg !== '--hard-restart');
+    process.argv = [process.argv[0], process.argv[1], ...args];
+}
+
 async function checkAndStartRedis() {
     let config;
     try {
@@ -71,8 +79,23 @@ async function start() {
 
     child.on('message', (msg) => {
         if (msg === 'restart') {
+            // 软重启：只重启子进程（快速但不能解决 ES 模块缓存问题）
             child.kill();
             setTimeout(start, 1000);
+        } else if (msg === 'hard-restart') {
+            // 硬重启：完全重启整个 Node.js 进程（解决 ES 模块缓存问题）
+            child.kill();
+            setTimeout(() => {
+                const args = [process.argv[1], '--hard-restart', ...process.argv.slice(2)];
+                const newProcess = spawn(process.argv[0], args, {
+                    cwd: process.cwd(),
+                    stdio: 'inherit',
+                    detached: true,
+                    shell: false
+                });
+                newProcess.unref();
+                process.exit(0);
+            }, 500);
         } else if (msg === 'shutdown') {
             child.kill();
             process.exit(0);
