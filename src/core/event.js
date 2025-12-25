@@ -399,11 +399,14 @@ export class Event {
       let content = m;
       let uid = this.bot.self_id;
       let name = this.bot.nickname;
+      let extraData = {};
 
       if (typeof m === "object" && !Array.isArray(m) && m.content) {
         content = m.content;
         if (m.user_id) uid = m.user_id;
         if (m.nickname) name = m.nickname;
+        const { content: _, user_id: __, nickname: ___, ...rest } = m;
+        extraData = rest;
       }
 
       if (Array.isArray(content)) {
@@ -423,6 +426,7 @@ export class Event {
           user_id: uid,
           nickname: name,
           content: content,
+          ...extraData,
         },
       });
     }
