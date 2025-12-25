@@ -614,10 +614,11 @@ export class Group {
 
   /**
    * 设置群代办
-   * @param content 代办内容
+   * @param message_id 消息 ID
+   * @param message_seq 消息序号 (可选)
    */
-  async setTodo(content) {
-    return this.bot.setGroupTodo(this.group_id, content);
+  async setTodo(message_id, message_seq) {
+    return this.bot.setGroupTodo(this.group_id, message_id, message_seq);
   }
 }
 
@@ -1699,10 +1700,15 @@ export class OneBotApi {
   /**
    * 设置群代办
    * @param group_id 群号
-   * @param content 代办内容
+   * @param message_id 消息 ID
+   * @param message_seq 消息序号 (可选)
    */
-  async setGroupTodo(group_id, content) {
-    return this.sendRequest("set_group_todo", { group_id, content });
+  async setGroupTodo(group_id, message_id, message_seq) {
+    const params = { group_id, message_id };
+    if (message_seq !== undefined) {
+      params.message_seq = message_seq;
+    }
+    return this.sendRequest("set_group_todo", params);
   }
 
 
