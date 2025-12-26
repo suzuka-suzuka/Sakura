@@ -30,7 +30,7 @@ export class GlobalUpdate extends plugin {
     }
 
     if (!(await this.checkGit(e))) return;
-
+    await e.react(124);
     const isForce = e.msg.includes("强制");
     const isGlobal = e.msg.includes("全局") || e.msg.includes("全部");
 
@@ -46,8 +46,6 @@ export class GlobalUpdate extends plugin {
   });
 
   async runGlobalUpdate(isForce, e) {
-    await e.react(124);
-
     const gitRepos = await this.scanGitRepos();
 
     const allRepos = [{ name: "Sakura", path: "." }, ...gitRepos];
@@ -164,6 +162,7 @@ export class GlobalUpdate extends plugin {
   });
 
   listPlugins = Command(/^#插件列表$/, async (e) => {
+    await e.react(124);
     const gitRepos = await this.scanGitRepos();
 
     if (gitRepos.length === 0) {
