@@ -56,7 +56,7 @@ export class Event {
       const atSeg = this.message.find((seg) => seg.type === "at");
       if (atSeg?.data?.qq) {
         if (atSeg.data.qq === "all") return undefined;
-        return Number(atSeg.data.qq);
+        return String(atSeg.data.qq);
       }
     }
     return undefined;

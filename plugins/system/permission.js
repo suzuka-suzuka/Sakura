@@ -17,7 +17,7 @@ export class Permission extends plugin {
 
   handlePermission = Command(/^(赋权|取消赋权)\s*(.*)$/, "white", async (e) => {
     const isAdd = e.match[1] === "赋权";
-    let targetId = e.at;
+    let targetId = e.at ? Number(e.at) : null;
 
     if (!targetId) {
       const text = e.match[2].trim();
@@ -130,7 +130,7 @@ export class Permission extends plugin {
 
   handleBlockUser = Command(/^(拉黑|解黑|取消拉黑)\s*(.*)$/, "master", async (e) => {
     const isAdd = e.match[1] === "拉黑";
-    let targetId = e.at;
+    let targetId = e.at ? Number(e.at) : null;
 
     if (!targetId) {
       const text = e.match[2].trim();
