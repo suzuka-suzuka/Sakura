@@ -54,18 +54,45 @@ export function Command(reg, ...args) {
 /**
  * 注册事件监听
  * @param {string} eventName 事件名称 (如 'notice.group_increase')
- * @param {number} [priority] 优先级 (可选)
+ * @param {number|string|object} [priorityOrPermissionOrOptions] 优先级 (number) 或 权限 (string: 'master'|'white') 或 配置对象
+ * @param {number|string} [priorityOrPermission] 优先级或权限 (取决于前一个参数)
  * @param {Function} handler 处理函数
  */
 export function OnEvent(eventName, ...args) {
   const handler = args.pop();
-  const priority = args[0];
+  const arg1 = args[0];
+  const arg2 = args[1];
+
+  let priority;
+  let permission;
+
+  if (typeof arg1 === "object" && arg1 !== null) {
+    priority = arg1.priority;
+    permission = arg1.permission;
+  } else if (typeof arg1 === "number") {
+    priority = arg1;
+    if (typeof arg2 === "string") {
+      permission = arg2;
+    }
+  } else if (typeof arg1 === "string") {
+    if (arg1 === "master" || arg1 === "white") {
+      permission = arg1;
+      if (typeof arg2 === "number") {
+        priority = arg2;
+      }
+    } else {
+      priority = arg1;
+    }
+  } else {
+    priority = arg1;
+  }
 
   if (typeof handler === "function") {
     handler[HANDLER_METADATA] = {
       type: "event",
       eventName,
       priority,
+      permission,
     };
   }
   return handler;
