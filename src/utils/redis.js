@@ -19,14 +19,13 @@ export async function connectRedis() {
       port: redisConfig.port,
       password: redisConfig.password,
       db: redisConfig.db || 0,
-      lazyConnect: true, // 手动调用 connect 以便捕获启动错误
+      lazyConnect: true,
     });
 
     client.connect().then(() => {
         logger.info('[Redis] 连接成功');
         redisInstance = client;
         
-        // 设置错误监听，防止后续运行中报错导致崩溃
         client.on('error', (err) => {
             logger.error(`[Redis] 运行时错误: ${err}`);
         });
