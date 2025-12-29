@@ -149,9 +149,6 @@ export class PluginLoader {
                 }
               );
               instance.jobs.push(job);
-              logger.info(
-                `[${instance.name}] 注册定时任务: ${handler.methodName}`
-              );
             } else {
               const priority = handler.priority ?? instance.priority ?? 5000;
               this.executableHandlers.push({
