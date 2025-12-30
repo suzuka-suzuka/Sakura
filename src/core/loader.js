@@ -278,7 +278,9 @@ export class PluginLoader {
 
     const eventObj = new Event(e, bot);
 
-    let context = contexts[e.group_id];
+    // 优先查找 group_id:user_id 格式的上下文（群组内用户独立上下文）
+    let context = e.group_id && e.user_id ? contexts[`${e.group_id}:${e.user_id}`] : null;
+    // 兼容旧的私聊上下文（仅使用 user_id）
     if (!context && e.user_id) {
       context = contexts[e.user_id];
     }

@@ -159,9 +159,15 @@ export class plugin {
     let id;
     if (typeof isGroup === "boolean") {
       if (!this.e) return;
-      id = isGroup ? this.e.group_id : this.e.user_id;
+      // 群组上下文使用 group_id:user_id 作为 key，避免不同用户上下文互相阻塞
+      id = isGroup ? `${this.e.group_id}:${this.e.user_id}` : this.e.user_id;
     } else {
-      id = isGroup;
+      // 兼容直接传入 ID 的情况，如果传入的是群号，需要配合 user_id 使用
+      if (this.e && this.e.group_id && isGroup === this.e.group_id) {
+        id = `${isGroup}:${this.e.user_id}`;
+      } else {
+        id = isGroup;
+      }
     }
 
     if (!id) return;
@@ -189,9 +195,15 @@ export class plugin {
     let id;
     if (typeof isGroup === "boolean") {
       if (!this.e) return;
-      id = isGroup ? this.e.group_id : this.e.user_id;
+      // 群组上下文使用 group_id:user_id 作为 key
+      id = isGroup ? `${this.e.group_id}:${this.e.user_id}` : this.e.user_id;
     } else {
-      id = isGroup;
+      // 兼容直接传入 ID 的情况
+      if (this.e && this.e.group_id && isGroup === this.e.group_id) {
+        id = `${isGroup}:${this.e.user_id}`;
+      } else {
+        id = isGroup;
+      }
     }
 
     if (contexts[id] && contexts[id].method === method) {
