@@ -111,12 +111,19 @@ export class Event {
 
   /**
    * 快速发送消息 (智能判断群/私聊)
+   * 支持智能参数：reply(msg, quote, at) 或 reply(msg, recall, quote, at)
    * @param msg 消息内容
-   * @param {number} [recall=0] 撤回时间 (秒)
-   * @param {boolean} [quote=false] 是否引用回复
+   * @param {number|boolean} [recall=0] 撤回时间 (秒) 或 是否引用回复
+   * @param {boolean} [quote=false] 是否引用回复 或 是否艾特发送者
    * @param {boolean} [at=false] 是否艾特发送者 (仅群聊有效)
    */
   async reply(msg, recall = 0, quote = false, at = false) {
+    if (typeof recall === "boolean") {
+      at = quote;
+      quote = recall;
+      recall = 0;
+    }
+
     if (!this.group_id && !this.user_id) return;
 
     let message;
