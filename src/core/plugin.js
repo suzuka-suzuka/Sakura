@@ -115,6 +115,7 @@ export function Cron(cronExpression, handler) {
 
 
 export const contexts = {};
+export const contextTimers = {};
 
 export class plugin {
   constructor(config = {}) {
@@ -154,8 +155,9 @@ export class plugin {
    * @param {string} method 方法名
    * @param {boolean|string|number} isGroup 是否为群组上下文，或者直接指定 ID
    * @param {number} timeout 超时时间 (秒)
+   * @param {boolean} refreshTimer 是否刷新超时计时器（默认 true 刷新，false 则保留原有计时器）
    */
-  setContext(method, isGroup = false, timeout = 120) {
+  setContext(method, isGroup = false, timeout = 120, refreshTimer = true) {
     let id;
     if (typeof isGroup === "boolean") {
       if (!this.e) return;
@@ -172,16 +174,30 @@ export class plugin {
 
     if (!id) return;
 
+    // 检查是否已存在相同的上下文，如果 refreshTimer 为 false 且上下文已存在，则不刷新计时器
+    const existingContext = contexts[id];
+    if (!refreshTimer && existingContext && existingContext.plugin === this && existingContext.method === method) {
+      // 保留原有上下文和计时器，不做任何操作
+      return;
+    }
+
+    // 清除旧的超时定时器
+    if (contextTimers[id]) {
+      clearTimeout(contextTimers[id]);
+      delete contextTimers[id];
+    }
+
     contexts[id] = {
       plugin: this,
       method,
     };
 
     if (timeout > 0) {
-      setTimeout(() => {
+      contextTimers[id] = setTimeout(() => {
         if (contexts[id] && contexts[id].plugin === this && contexts[id].method === method) {
           delete contexts[id];
         }
+        delete contextTimers[id];
       }, timeout * 1000);
     }
   }
@@ -208,6 +224,12 @@ export class plugin {
 
     if (contexts[id] && contexts[id].method === method) {
       delete contexts[id];
+    }
+    
+    // 清除关联的超时定时器
+    if (contextTimers[id]) {
+      clearTimeout(contextTimers[id]);
+      delete contextTimers[id];
     }
   }
 }
