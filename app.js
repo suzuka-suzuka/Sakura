@@ -71,22 +71,39 @@ async function checkAndStartRedis() {
 }
 
 let currentChild = null;
+let isShuttingDown = false;
 
 function setupSignalHandlers() {
     const signals = ['SIGINT', 'SIGTERM'];
     signals.forEach(signal => {
-        process.on(signal, () => {
+        process.on(signal, async () => {
+            if (isShuttingDown) {
+                return;
+            }
+            isShuttingDown = true;
+            
+            console.log(`\n收到 ${signal} 信号，正在关闭...`);
+            
             if (currentChild) {
                 currentChild.send('shutdown');
-                setTimeout(() => {
+                
+                const exitPromise = new Promise((resolve) => {
+                    currentChild.once('exit', resolve);
+                });
+                
+                const timeout = setTimeout(() => {
+                    console.log('强制关闭子进程');
                     if (currentChild && !currentChild.killed) {
                         currentChild.kill('SIGKILL');
                     }
                     process.exit(0);
-                }, 3000);
-            } else {
-                process.exit(0);
+                }, 5000);
+                
+                await exitPromise;
+                clearTimeout(timeout);
             }
+            
+            process.exit(0);
         });
     });
 }

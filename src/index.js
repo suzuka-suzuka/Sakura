@@ -74,9 +74,27 @@ server.on("connection_close", (selfId) => {
 });
 
 // 优雅退出处理
-function gracefulShutdown(signal) {
+let isShuttingDown = false;
+
+async function gracefulShutdown(signal) {
+  if (isShuttingDown) {
+    return;
+  }
+  isShuttingDown = true;
+  
   logger.info(`收到 ${signal} 信号，正在优雅关闭...`);
-  server.shutdown();
+  
+  try {
+    await server.shutdown();
+    
+    // 关闭 Redis 连接
+    if (global.redis) {
+      await global.redis.quit();
+      logger.info('Redis 连接已关闭');
+    }
+  } catch (e) {
+    logger.error(`关闭过程出错: ${e}`);
+  }
 }
 
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));

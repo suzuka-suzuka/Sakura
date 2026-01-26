@@ -212,9 +212,10 @@ export class Group {
   /**
    * 获取群历史消息
    * @param message_seq 起始消息序号
+   * @param count 获取消息数量
    */
-  async getMsgHistory(message_seq) {
-    return this.bot.getGroupMsgHistory(this.group_id, message_seq);
+  async getMsgHistory(message_seq, count) {
+    return this.bot.getGroupMsgHistory(this.group_id, message_seq, count);
   }
 
   /**
@@ -936,9 +937,12 @@ export class OneBotApi {
    * 获取群历史消息
    * @param group_id 群号
    * @param message_seq 起始消息序号
+   * @param count 获取消息数量
    */
-  async getGroupMsgHistory(group_id, message_seq) {
-    return this.sendRequest("get_group_msg_history", { group_id, message_seq });
+  async getGroupMsgHistory(group_id, message_seq, count) {
+    const params = { group_id, message_seq };
+    if (count !== undefined) params.count = count;
+    return this.sendRequest("get_group_msg_history", params);
   }
 
   /**
