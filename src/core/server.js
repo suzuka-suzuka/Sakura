@@ -35,6 +35,9 @@ export class OneBotServer extends EventEmitter {
         callback(false, 401, 'Unauthorized');
       }
     });
+    
+    // 保存内部 HTTP 服务器的引用，用于正确关闭
+    this._server = this.wss._server;
     this.clients = new Map();
 
     this.init();
@@ -118,33 +121,46 @@ export class OneBotServer extends EventEmitter {
     return new Promise((resolve) => {
       logger.info("正在关闭 WebSocket 服务器...");
 
-      // 向所有客户端发送关闭帧
+      // 强制终止所有客户端连接（不等待优雅关闭）
       this.wss.clients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.close(1000, 'Server shutdown');
-        } else {
+        try {
           client.terminate();
+        } catch (e) {
+          // 忽略终止错误
         }
       });
+      this.clients.clear();
 
-      // 超时强制关闭
+      // 超时保护
       const timeout = setTimeout(() => {
-        logger.warn("超时，强制关闭所有连接");
-        this.wss.clients.forEach((client) => {
-          client.terminate();
-        });
+        logger.warn("超时，强制关闭服务器");
+        // 强制关闭底层 HTTP 服务器
+        if (this._server) {
+          this._server.closeAllConnections?.();
+        }
         resolve();
-      }, 3000);
+      }, 2000);
 
-      // 关闭服务器
+      // 关闭 WebSocket 服务器
       this.wss.close((err) => {
         clearTimeout(timeout);
         if (err) {
-          logger.error(`关闭服务器时出错: ${err}`);
+          logger.error(`关闭 WebSocket 服务器时出错: ${err}`);
         } else {
           logger.info("WebSocket 服务器已关闭");
         }
-        resolve();
+        
+        // 确保底层 HTTP 服务器也关闭
+        if (this._server && this._server.listening) {
+          this._server.close(() => {
+            logger.info("底层 HTTP 服务器已关闭");
+            resolve();
+          });
+          // 强制关闭所有保持活动的连接
+          this._server.closeAllConnections?.();
+        } else {
+          resolve();
+        }
       });
     });
   }

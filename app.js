@@ -84,23 +84,34 @@ function setupSignalHandlers() {
             
             console.log(`\n收到 ${signal} 信号，正在关闭...`);
             
-            if (currentChild) {
-                currentChild.send('shutdown');
+            if (currentChild && !currentChild.killed) {
+                try {
+                    // 发送 shutdown 消息给子进程
+                    currentChild.send('shutdown');
+                } catch (e) {
+                    // 如果发送失败，直接终止子进程
+                    console.log('无法发送关闭消息，直接终止子进程');
+                    currentChild.kill('SIGTERM');
+                    process.exit(0);
+                    return;
+                }
                 
                 const exitPromise = new Promise((resolve) => {
                     currentChild.once('exit', resolve);
                 });
                 
+                // 给子进程最多 8 秒的时间来优雅关闭
                 const timeout = setTimeout(() => {
-                    console.log('强制关闭子进程');
+                    console.log('关闭超时，强制终止子进程');
                     if (currentChild && !currentChild.killed) {
                         currentChild.kill('SIGKILL');
                     }
                     process.exit(0);
-                }, 5000);
+                }, 8000);
                 
                 await exitPromise;
                 clearTimeout(timeout);
+                console.log('子进程已正常退出');
             }
             
             process.exit(0);

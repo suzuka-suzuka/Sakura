@@ -85,6 +85,7 @@ async function gracefulShutdown(signal) {
   logger.info(`收到 ${signal} 信号，正在优雅关闭...`);
   
   try {
+    // 先关闭 WebSocket 服务器
     await server.shutdown();
     
     // 关闭 Redis 连接
@@ -96,15 +97,24 @@ async function gracefulShutdown(signal) {
     logger.error(`关闭过程出错: ${e}`);
   }
   
-  process.exit(0);
+  // 确保进程退出
+  setTimeout(() => {
+    process.exit(0);
+  }, 500);
 }
 
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+// 只监听 IPC 消息，不直接监听 SIGINT/SIGTERM
+// 因为父进程会通过 IPC 发送 shutdown 消息
 process.on('message', (msg) => {
   if (msg === 'shutdown') {
     gracefulShutdown('IPC shutdown');
   }
 });
+
+// 作为备用，如果直接运行此脚本（不通过 app.js）
+if (!process.send) {
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+}
 
 export { bot as api } from "./api/client.js";
