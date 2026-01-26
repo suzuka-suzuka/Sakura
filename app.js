@@ -9,12 +9,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const script = path.join(__dirname, 'src/index.js');
 const CONFIG_PATH = path.join(__dirname, 'config/config.yaml');
 
-const isHardRestart = process.argv.includes('--hard-restart');
-if (isHardRestart) {
-    const args = process.argv.slice(2).filter(arg => arg !== '--hard-restart');
-    process.argv = [process.argv[0], process.argv[1], ...args];
-}
-
 async function checkAndStartRedis() {
     let config;
     try {
@@ -72,6 +66,7 @@ async function checkAndStartRedis() {
 
 let currentChild = null;
 let isShuttingDown = false;
+let isRestarting = false;  // 标记是否正在重启
 
 function setupSignalHandlers() {
     const signals = ['SIGINT', 'SIGTERM'];
@@ -127,20 +122,41 @@ async function start() {
     const child = fork(script, [], { stdio: ['inherit', 'inherit', 'inherit', 'ipc'] });
     currentChild = child;
 
-    child.on('message', (msg) => {
+    child.on('message', async (msg) => {
         if (msg === 'restart') {
-            child.kill();
-            setTimeout(() => {
-                const args = [process.argv[1], '--hard-restart', ...process.argv.slice(2)];
-                const newProcess = spawn(process.argv[0], args, {
-                    cwd: process.cwd(),
-                    stdio: 'inherit',
-                    detached: true,
-                    shell: false
+            isRestarting = true;  // 标记正在重启
+            
+            // 先发送 shutdown 消息让子进程优雅关闭
+            try {
+                child.send('shutdown');
+            } catch (e) {
+                // 忽略发送失败
+            }
+            
+            // 等待子进程退出或超时
+            await new Promise((resolve) => {
+                const timeout = setTimeout(() => {
+                    if (child && !child.killed) {
+                        child.kill('SIGKILL');
+                    }
+                    resolve();
+                }, 5000);
+                
+                child.once('exit', () => {
+                    clearTimeout(timeout);
+                    resolve();
                 });
-                newProcess.unref();
-                process.exit(0);
-            }, 500);
+            });
+            
+            // 重置状态，让 start() 函数重新启动子进程
+            currentChild = null;
+            isShuttingDown = false;
+            isRestarting = false;
+            
+            // 直接调用 start() 重新启动，而不是创建新的父进程
+            // 这样可以保持与终端的连接
+            console.log('正在重启...');
+            start();
         } else if (msg === 'shutdown') {
             child.kill();
             process.exit(0);
@@ -149,6 +165,10 @@ async function start() {
 
     child.on('exit', (code) => {
         currentChild = null;
+        // 如果是正在重启，不要自动重新启动（由 restart 逻辑处理）
+        if (isRestarting) {
+            return;
+        }
         if (code !== 0 && code !== null) {
             setTimeout(start, 3000);
         }
