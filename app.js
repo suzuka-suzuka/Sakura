@@ -10,6 +10,8 @@ const script = path.join(__dirname, 'src/index.js');
 const CONFIG_PATH = path.join(__dirname, 'config/config.yaml');
 const PID_FILE = path.join(__dirname, 'data/app.pid');
 
+let isFirstStart = true;  // 标记是否是首次启动
+
 // 单例保护：检查是否已有实例在运行
 async function checkSingleInstance() {
     // 确保 data 目录存在
@@ -21,6 +23,12 @@ async function checkSingleInstance() {
     if (fs.existsSync(PID_FILE)) {
         try {
             const oldPid = parseInt(fs.readFileSync(PID_FILE, 'utf8').trim(), 10);
+            
+            // 如果是自己的 PID，跳过
+            if (oldPid === process.pid) {
+                return;
+            }
+            
             // 检查进程是否还在运行
             try {
                 process.kill(oldPid, 0); // 信号0只检查进程是否存在，不发送实际信号
@@ -179,9 +187,10 @@ function setupSignalHandlers() {
 setupSignalHandlers();
 
 async function start() {
-    // 首次启动时检查单例
-    if (!currentChild) {
+    // 仅首次启动时检查单例
+    if (isFirstStart) {
         await checkSingleInstance();
+        isFirstStart = false;
     }
     
     await checkAndStartRedis();
