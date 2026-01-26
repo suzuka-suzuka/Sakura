@@ -8,6 +8,65 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const script = path.join(__dirname, 'src/index.js');
 const CONFIG_PATH = path.join(__dirname, 'config/config.yaml');
+const PID_FILE = path.join(__dirname, 'data/app.pid');
+
+// 单例保护：检查是否已有实例在运行
+async function checkSingleInstance() {
+    // 确保 data 目录存在
+    const dataDir = path.dirname(PID_FILE);
+    if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+    }
+
+    if (fs.existsSync(PID_FILE)) {
+        try {
+            const oldPid = parseInt(fs.readFileSync(PID_FILE, 'utf8').trim(), 10);
+            // 检查进程是否还在运行
+            try {
+                process.kill(oldPid, 0); // 信号0只检查进程是否存在，不发送实际信号
+                // 进程存在，终止它
+                console.log(`[Launcher] 检测到旧进程 (PID: ${oldPid})，正在终止...`);
+                process.kill(oldPid, 'SIGTERM');
+                // 等待一会儿让旧进程退出
+                let waited = 0;
+                while (waited < 5000) {
+                    try {
+                        process.kill(oldPid, 0);
+                        // 还在运行，继续等待
+                        await new Promise(r => setTimeout(r, 100));
+                        waited += 100;
+                    } catch {
+                        // 进程已退出
+                        break;
+                    }
+                }
+                if (waited >= 5000) {
+                    console.log(`[Launcher] 旧进程未响应，强制终止...`);
+                    try {
+                        process.kill(oldPid, 'SIGKILL');
+                    } catch {}
+                }
+                console.log(`[Launcher] 旧进程已终止`);
+            } catch {
+                // 进程不存在，删除过期的 PID 文件
+            }
+        } catch (e) {
+            // 读取失败，忽略
+        }
+    }
+    
+    // 写入当前进程的 PID
+    fs.writeFileSync(PID_FILE, process.pid.toString());
+}
+
+// 清理 PID 文件
+function cleanupPidFile() {
+    try {
+        if (fs.existsSync(PID_FILE)) {
+            fs.unlinkSync(PID_FILE);
+        }
+    } catch {}
+}
 
 async function checkAndStartRedis() {
     let config;
@@ -87,6 +146,7 @@ function setupSignalHandlers() {
                     // 如果发送失败，直接终止子进程
                     console.log('无法发送关闭消息，直接终止子进程');
                     currentChild.kill('SIGTERM');
+                    cleanupPidFile();
                     process.exit(0);
                     return;
                 }
@@ -101,6 +161,7 @@ function setupSignalHandlers() {
                     if (currentChild && !currentChild.killed) {
                         currentChild.kill('SIGKILL');
                     }
+                    cleanupPidFile();
                     process.exit(0);
                 }, 8000);
                 
@@ -109,6 +170,7 @@ function setupSignalHandlers() {
                 console.log('子进程已正常退出');
             }
             
+            cleanupPidFile();
             process.exit(0);
         });
     });
@@ -117,6 +179,11 @@ function setupSignalHandlers() {
 setupSignalHandlers();
 
 async function start() {
+    // 首次启动时检查单例
+    if (!currentChild) {
+        await checkSingleInstance();
+    }
+    
     await checkAndStartRedis();
 
     const child = fork(script, [], { stdio: ['inherit', 'inherit', 'inherit', 'ipc'] });
