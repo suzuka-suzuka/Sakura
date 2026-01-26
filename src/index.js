@@ -95,6 +95,8 @@ async function gracefulShutdown(signal) {
   } catch (e) {
     logger.error(`关闭过程出错: ${e}`);
   }
+  
+  process.exit(0);
 }
 
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));

@@ -127,8 +127,18 @@ export class OneBotServer extends EventEmitter {
         }
       });
 
+      // 超时强制关闭
+      const timeout = setTimeout(() => {
+        logger.warn("超时，强制关闭所有连接");
+        this.wss.clients.forEach((client) => {
+          client.terminate();
+        });
+        resolve();
+      }, 3000);
+
       // 关闭服务器
       this.wss.close((err) => {
+        clearTimeout(timeout);
         if (err) {
           logger.error(`关闭服务器时出错: ${err}`);
         } else {
@@ -136,15 +146,6 @@ export class OneBotServer extends EventEmitter {
         }
         resolve();
       });
-
-      // 超时强制关闭
-      setTimeout(() => {
-        logger.warn("超时，强制关闭所有连接");
-        this.wss.clients.forEach((client) => {
-          client.terminate();
-        });
-        resolve();
-      }, 3000);
     });
   }
 }
