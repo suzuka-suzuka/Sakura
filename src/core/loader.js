@@ -9,6 +9,7 @@ import {
   plugin,
   Event,
   contexts,
+  eventStorage,
 } from "./plugin.js";
 import Config from "./config.js";
 import pluginConfigManager from "./pluginConfig.js";
@@ -458,76 +459,80 @@ export class PluginLoader {
 
     const eventObj = new Event(e, bot);
 
+    // 使用 eventStorage 传播事件对象到所有异步操作中，
+    // 确保 setTimeout 等回调中 setContext/finish/getContext 能获取正确的事件
+    return eventStorage.run(eventObj, async () => {
 
-    let context = e.group_id && e.user_id ? contexts[`${e.group_id}:${e.user_id}`] : null;
+      let context = e.group_id && e.user_id ? contexts[`${e.group_id}:${e.user_id}`] : null;
 
-    if (!context && e.user_id) {
-      context = contexts[e.user_id];
-    }
-    if (context) {
-      const { plugin, method } = context;
-      plugin.e = eventObj;
-      try {
-        if (plugin.log) {
-        }
-        await plugin[method](eventObj);
-        return;
-      } catch (err) {
-        logger.error(`插件 ${plugin.name} 上下文执行出错: ${err}`);
+      if (!context && e.user_id) {
+        context = contexts[e.user_id];
       }
-    }
-
-    const handlers = this.categorizedHandlers ? (this.categorizedHandlers[e.post_type] || []) : this.executableHandlers;
-    for (const item of handlers) {
-      const { instance, handler } = item;
-      instance.e = eventObj;
-      try {
-        const permission = handler.permission || instance.permission;
-        if (permission) {
-          const config = Config.get();
-          const uid = Number(e.user_id);
-          const masterId = Number(config.master);
-
-          if (permission === "master") {
-            if (uid !== masterId) continue;
-          } else if (permission === "white") {
-            const whiteUsers = (config.whiteUsers || []).map(Number);
-            if (uid !== masterId && !whiteUsers.includes(uid)) continue;
+      if (context) {
+        const { plugin, method } = context;
+        plugin.e = eventObj;
+        try {
+          if (plugin.log) {
           }
-        }
-
-        if (handler.type === "event") {
-          if (!this.checkEvent(e, handler.eventName)) continue;
-        } else if (handler.type === "regex") {
-          const targetEvent = handler.eventName || instance.event || "message";
-          if (!this.checkEvent(e, targetEvent)) continue;
-
-          const match = handler.reg.exec(eventObj.msg);
-          if (!match) continue;
-          eventObj.match = match;
-        }
-
-
-
-        if (!eventObj.isMaster) {
-          const canProceed = await checkAndConsumeCoins(e, instance, handler);
-          if (!canProceed) {
-            continue;
-          }
-        }
-        if (instance.log) {
-          logger.info(`[${instance.name}] 触发: ${handler.methodName}`);
-        }
-
-        const result = await instance[handler.methodName](eventObj);
-
-        if (result !== false) {
+          await plugin[method](eventObj);
           return;
+        } catch (err) {
+          logger.error(`插件 ${plugin.name} 上下文执行出错: ${err}`);
         }
-      } catch (err) {
-        logger.error(`插件 ${instance.name} 执行出错: ${err}`);
       }
-    }
+
+      const handlers = this.categorizedHandlers ? (this.categorizedHandlers[e.post_type] || []) : this.executableHandlers;
+      for (const item of handlers) {
+        const { instance, handler } = item;
+        instance.e = eventObj;
+        try {
+          const permission = handler.permission || instance.permission;
+          if (permission) {
+            const config = Config.get();
+            const uid = Number(e.user_id);
+            const masterId = Number(config.master);
+
+            if (permission === "master") {
+              if (uid !== masterId) continue;
+            } else if (permission === "white") {
+              const whiteUsers = (config.whiteUsers || []).map(Number);
+              if (uid !== masterId && !whiteUsers.includes(uid)) continue;
+            }
+          }
+
+          if (handler.type === "event") {
+            if (!this.checkEvent(e, handler.eventName)) continue;
+          } else if (handler.type === "regex") {
+            const targetEvent = handler.eventName || instance.event || "message";
+            if (!this.checkEvent(e, targetEvent)) continue;
+
+            const match = handler.reg.exec(eventObj.msg);
+            if (!match) continue;
+            eventObj.match = match;
+          }
+
+
+
+          if (!eventObj.isMaster) {
+            const canProceed = await checkAndConsumeCoins(e, instance, handler);
+            if (!canProceed) {
+              continue;
+            }
+          }
+          if (instance.log) {
+            logger.info(`[${instance.name}] 触发: ${handler.methodName}`);
+          }
+
+          const result = await instance[handler.methodName](eventObj);
+
+          if (result !== false) {
+            return;
+          }
+        } catch (err) {
+          logger.error(`插件 ${instance.name} 执行出错: ${err}`);
+        }
+      }
+    });
   }
 
   checkEvent(e, targetEvent) {

@@ -1,5 +1,13 @@
 import { getBot } from "../api/client.js";
+import { AsyncLocalStorage } from "node:async_hooks";
 export { Event } from "./event.js";
+
+/**
+ * 用于在异步调用链中传播事件对象，
+ * 确保 setTimeout 等回调中也能获取到正确的事件引用，
+ * 而不依赖可能被覆盖的 this.e
+ */
+export const eventStorage = new AsyncLocalStorage();
 
 
 export const PLUGIN_HANDLERS = Symbol.for("PLUGIN_HANDLERS");
@@ -163,13 +171,15 @@ export class plugin {
   setContext(method, isGroup = false, timeout = 120, refreshTimer = true, data = null) {
     let id;
     if (typeof isGroup === "boolean") {
-      if (!this.e) return;
+      const e = eventStorage.getStore() || this.e;
+      if (!e) return;
       // 群组上下文使用 group_id:user_id 作为 key，避免不同用户上下文互相阻塞
-      id = isGroup ? `${this.e.group_id}:${this.e.user_id}` : this.e.user_id;
+      id = isGroup ? `${e.group_id}:${e.user_id}` : e.user_id;
     } else {
       // 兼容直接传入 ID 的情况，如果传入的是群号，需要配合 user_id 使用
-      if (this.e && this.e.group_id && isGroup === this.e.group_id) {
-        id = `${isGroup}:${this.e.user_id}`;
+      const e = eventStorage.getStore() || this.e;
+      if (e && e.group_id && isGroup === e.group_id) {
+        id = `${isGroup}:${e.user_id}`;
       } else {
         id = isGroup;
       }
@@ -214,13 +224,15 @@ export class plugin {
   finish(method, isGroup = false) {
     let id;
     if (typeof isGroup === "boolean") {
-      if (!this.e) return;
+      const e = eventStorage.getStore() || this.e;
+      if (!e) return;
       // 群组上下文使用 group_id:user_id 作为 key
-      id = isGroup ? `${this.e.group_id}:${this.e.user_id}` : this.e.user_id;
+      id = isGroup ? `${e.group_id}:${e.user_id}` : e.user_id;
     } else {
       // 兼容直接传入 ID 的情况
-      if (this.e && this.e.group_id && isGroup === this.e.group_id) {
-        id = `${isGroup}:${this.e.user_id}`;
+      const e = eventStorage.getStore() || this.e;
+      if (e && e.group_id && isGroup === e.group_id) {
+        id = `${isGroup}:${e.user_id}`;
       } else {
         id = isGroup;
       }
@@ -246,12 +258,14 @@ export class plugin {
   getContext(method = null, isGroup = false) {
     let id;
     if (typeof isGroup === "boolean") {
-      if (!this.e) return;
-      id = isGroup ? `${this.e.group_id}:${this.e.user_id}` : this.e.user_id;
+      const e = eventStorage.getStore() || this.e;
+      if (!e) return;
+      id = isGroup ? `${e.group_id}:${e.user_id}` : e.user_id;
     } else {
       // 兼容直接传入 ID 的情况
-      if (this.e && this.e.group_id && isGroup === this.e.group_id) {
-        id = `${isGroup}:${this.e.user_id}`;
+      const e = eventStorage.getStore() || this.e;
+      if (e && e.group_id && isGroup === e.group_id) {
+        id = `${isGroup}:${e.user_id}`;
       } else {
         id = isGroup;
       }
