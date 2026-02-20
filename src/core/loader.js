@@ -1,6 +1,7 @@
 import fs from "fs/promises";
 import fsSync from "fs";
 import path from "path";
+import chokidar from "chokidar";
 import { fileURLToPath, pathToFileURL } from "url";
 import {
   PLUGIN_HANDLERS,
@@ -10,11 +11,63 @@ import {
   contexts,
 } from "./plugin.js";
 import Config from "./config.js";
+import pluginConfigManager from "./pluginConfig.js";
 import schedule from "node-schedule";
 import { logger } from "../utils/logger.js";
 import { getBot } from "../api/client.js";
+import EconomyManager from "../../plugins/sakura-plugin/lib/economy/EconomyManager.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+let commandNamesCache = null;
+
+async function getCommandNames() {
+  if (commandNamesCache) return commandNamesCache;
+  try {
+    const schemaPath = path.join(__dirname, "../../plugins/sakura-plugin/configSchema.js");
+    const schemaUrl = pathToFileURL(schemaPath).href + '?t=' + Date.now();
+    const schemaMod = await import(schemaUrl);
+    commandNamesCache = schemaMod.commandNames || {};
+    return commandNamesCache;
+  } catch {
+    return {};
+  }
+}
+
+async function checkAndConsumeCoins(e, instance, handler) {
+  try {
+    const economyConfig = pluginConfigManager.getConfig("sakura-plugin", "economy");
+    if (!economyConfig?.enable) return true;
+
+    const groupId = e.group_id;
+    if (!groupId || !economyConfig.Groups?.includes(Number(groupId))) return true;
+
+    const commandKey = `${instance.constructor.name}.${handler.methodName}`;
+
+    const commandNames = await getCommandNames();
+    const commandDisplayName = commandNames[commandKey];
+
+    if (!commandDisplayName) return true;
+
+    const commandCosts = economyConfig.commandCosts || [];
+    const costConfig = commandCosts.find(c => c.command === commandDisplayName);
+
+    if (!costConfig || !costConfig.cost || costConfig.cost <= 0) return true;
+
+    const economyManager = new EconomyManager(e);
+
+    const userCoins = economyManager.getCoins(e);
+    if (userCoins < costConfig.cost) {
+      return false;
+    }
+
+    economyManager.reduceCoins(e, costConfig.cost);
+    return true;
+  } catch (err) {
+    logger.error(`[Loader] 检查指令消耗出错: ${err}`);
+    return true;
+  }
+}
 
 export class PluginLoader {
   constructor() {
@@ -22,6 +75,7 @@ export class PluginLoader {
     this.pluginDirs = [];
     this.watchers = [];
     this.loadedPlugins = new Map();
+    this.configToPlugins = new Map();
     this.pluginDirs.push(path.join(__dirname, "../../plugins"));
   }
 
@@ -63,7 +117,33 @@ export class PluginLoader {
           }
 
           if (hasIndex) {
+            const schemaPath = path.join(fullPath, 'configSchema.js');
+            const pluginName = entry.name;
+            try {
+              await fs.access(schemaPath);
+              const schemaUrl = pathToFileURL(schemaPath).href + '?t=' + Date.now();
+              const schemaMod = await import(schemaUrl);
+              const schemaMap = schemaMod.configSchema || schemaMod.default;
+              const categories = schemaMod.schemaCategories || null;
+              const pluginMeta = schemaMod.pluginMeta || null;
+              const dynamicOptionsConfig = schemaMod.dynamicOptionsConfig || null;
+              if (schemaMap && typeof schemaMap === 'object') {
+                if (!pluginConfigManager.schemas[pluginName]) {
+                  pluginConfigManager.register(pluginName, schemaMap, categories, pluginMeta, dynamicOptionsConfig);
+                }
+              }
+            } catch {
+            }
             await this.loadPlugin(indexPath);
+
+            this._registerConfigWatcher(pluginName);
+
+            const appsPath = path.join(fullPath, 'apps');
+            try {
+              await fs.access(appsPath);
+              await this.loadPluginsFromDir(appsPath);
+            } catch {
+            }
           } else {
             await this.loadPluginsFromDir(fullPath);
           }
@@ -82,6 +162,7 @@ export class PluginLoader {
     try {
       const fileUrl = pathToFileURL(filePath).href + "?t=" + Date.now();
       const module = await import(fileUrl);
+
 
       let pluginClasses = [];
       const isPluginClass = (obj) => {
@@ -127,6 +208,23 @@ export class PluginLoader {
           await instance.init();
           instances.push(instance);
 
+          if (instance.configWatch) {
+            const watchConfigs = Array.isArray(instance.configWatch)
+              ? instance.configWatch
+              : [instance.configWatch];
+
+            const pluginName = this._getPluginNameFromPath(filePath);
+            if (pluginName) {
+              for (const configName of watchConfigs) {
+                const key = `${pluginName}/${configName}`;
+                if (!this.configToPlugins.has(key)) {
+                  this.configToPlugins.set(key, new Set());
+                }
+                this.configToPlugins.get(key).add(filePath);
+              }
+            }
+          }
+
           const handlers = instance[PLUGIN_HANDLERS] || [];
 
           for (const handler of handlers) {
@@ -167,6 +265,36 @@ export class PluginLoader {
     }
   }
 
+  _getPluginNameFromPath(filePath) {
+    const normalized = filePath.replace(/\\/g, '/');
+    const match = normalized.match(/plugins\/([^/]+)/);
+    return match ? match[1] : null;
+  }
+
+
+  _registerConfigWatcher(pluginName) {
+    if (this._configWatcherRegistered?.has(pluginName)) return;
+    if (!this._configWatcherRegistered) this._configWatcherRegistered = new Set();
+    this._configWatcherRegistered.add(pluginName);
+    pluginConfigManager.onChange(pluginName, async (configName, newConfig) => {
+      const key = `${pluginName}/${configName}`;
+      const pluginPaths = this.configToPlugins.get(key);
+
+      if (pluginPaths && pluginPaths.size > 0) {
+        logger.info(`[Loader] 配置 ${key} 变更，正在重载 ${pluginPaths.size} 个相关插件...`);
+
+        for (const pluginPath of pluginPaths) {
+          try {
+            await this.loadPlugin(pluginPath);
+          } catch (e) {
+            logger.error(`[Loader] 重载插件失败 ${path.basename(pluginPath)}: ${e}`);
+          }
+        }
+        this.sortHandlers();
+      }
+    });
+  }
+
   unloadPlugin(filePath) {
     const instances = this.loadedPlugins.get(filePath);
     if (instances) {
@@ -178,6 +306,14 @@ export class PluginLoader {
       this.loadedPlugins.delete(filePath);
     }
 
+
+    for (const [key, paths] of this.configToPlugins.entries()) {
+      paths.delete(filePath);
+      if (paths.size === 0) {
+        this.configToPlugins.delete(key);
+      }
+    }
+
     const initialLength = this.executableHandlers.length;
     this.executableHandlers = this.executableHandlers.filter(
       (h) => h.filePath !== filePath
@@ -186,6 +322,21 @@ export class PluginLoader {
 
   sortHandlers() {
     this.executableHandlers.sort((a, b) => a.priority - b.priority);
+    this.categorizedHandlers = {};
+    for (const item of this.executableHandlers) {
+      const { instance, handler } = item;
+      const targetEvent = handler.type === "regex" ? (handler.eventName || instance.event || "message") : handler.eventName;
+      const rootType = targetEvent ? targetEvent.split('.')[0] : "all";
+
+      const typesToAttach = rootType === "all" ? ["message", "notice", "request", "meta_event"] : [rootType];
+
+      for (const t of typesToAttach) {
+        if (!this.categorizedHandlers[t]) {
+          this.categorizedHandlers[t] = [];
+        }
+        this.categorizedHandlers[t].push(item);
+      }
+    }
   }
 
   startWatch() {
@@ -197,18 +348,46 @@ export class PluginLoader {
       logger.info(`开始监听插件目录: ${dir}`);
       let debounceTimer;
 
-      const watcher = fsSync.watch(
-        dir,
-        { recursive: true },
-        (eventType, filename) => {
-          if (!filename) return;
-          if (!filename.endsWith(".js")) return;
+      const watcher = chokidar.watch(dir, {
+        ignored: /(^|[\/\\])\../,
+        persistent: true,
+        ignoreInitial: true,
+      }).on('all', (eventType, filePath) => {
+        if (!filePath || !filePath.endsWith(".js")) return;
+        if (eventType !== 'add' && eventType !== 'change') return;
 
-          const filePath = path.join(dir, filename);
+        const filename = path.relative(dir, filePath).replace(/\\/g, '/');
 
-          clearTimeout(debounceTimer);
-          debounceTimer = setTimeout(async () => {
-            try {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+          try {
+
+            const isInAppsDir = filename.includes("apps" + path.sep) || filename.includes("apps/");
+            const isInLibDir = false;
+            if (filename.includes("lib" + path.sep) || filename.includes("lib/")) return;
+            if (isInAppsDir) {
+
+              await fs.access(filePath);
+              logger.info(`检测到插件变更: ${filename}，正在重载...`);
+              await this.loadPlugin(filePath);
+              this.sortHandlers();
+            } else if (isInLibDir) {
+
+              const pathParts = filename.split(path.sep).length > 1 ? filename.split(path.sep) : filename.split('/');
+              const pluginName = pathParts[0];
+              const appsDir = path.join(dir, pluginName, 'apps');
+              if (fsSync.existsSync(appsDir)) {
+                logger.info(`检测到库文件变更: ${filename}，正在重载 ${pluginName} 的所有插件...`);
+                const appFiles = fsSync.readdirSync(appsDir).filter(f => f.endsWith('.js'));
+                for (const appFile of appFiles) {
+                  const appPath = path.join(appsDir, appFile);
+                  await this.loadPlugin(appPath);
+                }
+                this.sortHandlers();
+                logger.info(`已重载 ${appFiles.length} 个插件`);
+              }
+            } else {
+
               let entryPath = filePath;
               let currentDir = path.dirname(filePath);
 
@@ -222,14 +401,15 @@ export class PluginLoader {
               }
 
               await fs.access(entryPath);
-              logger.info(`检测到插件变更: ${filename}，正在重载...`);
+              logger.info(`检测到文件变更: ${filename}，正在重载...`);
               await this.loadPlugin(entryPath);
               this.sortHandlers();
-            } catch {
-              this.unloadPlugin(filePath);
             }
-          }, 100);
-        }
+          } catch {
+            this.unloadPlugin(filePath);
+          }
+        }, 100);
+      }
       );
       this.watchers.push(watcher);
     }
@@ -278,13 +458,12 @@ export class PluginLoader {
 
     const eventObj = new Event(e, bot);
 
-    // 优先查找 group_id:user_id 格式的上下文（群组内用户独立上下文）
+
     let context = e.group_id && e.user_id ? contexts[`${e.group_id}:${e.user_id}`] : null;
-    // 兼容旧的私聊上下文（仅使用 user_id）
+
     if (!context && e.user_id) {
       context = contexts[e.user_id];
     }
-
     if (context) {
       const { plugin, method } = context;
       plugin.e = eventObj;
@@ -298,7 +477,8 @@ export class PluginLoader {
       }
     }
 
-    for (const item of this.executableHandlers) {
+    const handlers = this.categorizedHandlers ? (this.categorizedHandlers[e.post_type] || []) : this.executableHandlers;
+    for (const item of handlers) {
       const { instance, handler } = item;
       instance.e = eventObj;
       try {
@@ -327,6 +507,14 @@ export class PluginLoader {
           eventObj.match = match;
         }
 
+
+
+        if (!eventObj.isMaster) {
+          const canProceed = await checkAndConsumeCoins(e, instance, handler);
+          if (!canProceed) {
+            continue;
+          }
+        }
         if (instance.log) {
           logger.info(`[${instance.name}] 触发: ${handler.methodName}`);
         }

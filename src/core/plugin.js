@@ -125,6 +125,7 @@ export class plugin {
       priority = 5000,
       log = false,
       permission,
+      configWatch,  // 声明依赖的配置文件名，配置变更时自动重载插件
     } = config;
 
     this.name = name;
@@ -132,10 +133,11 @@ export class plugin {
     this.priority = priority;
     this.log = log;
     this.permission = permission;
+    this.configWatch = configWatch;  // 如 "teatime" 或 ["teatime", "AI"]
     this.jobs = [];
   }
 
-  async init() {}
+  async init() { }
 
   destroy() {
     this.jobs.forEach((job) => job.cancel());
@@ -156,8 +158,9 @@ export class plugin {
    * @param {boolean|string|number} isGroup 是否为群组上下文，或者直接指定 ID
    * @param {number} timeout 超时时间 (秒)
    * @param {boolean} refreshTimer 是否刷新超时计时器（默认 true 刷新，false 则保留原有计时器）
+   * @param {any} data 上下文数据
    */
-  setContext(method, isGroup = false, timeout = 120, refreshTimer = true) {
+  setContext(method, isGroup = false, timeout = 120, refreshTimer = true, data = null) {
     let id;
     if (typeof isGroup === "boolean") {
       if (!this.e) return;
@@ -190,6 +193,7 @@ export class plugin {
     contexts[id] = {
       plugin: this,
       method,
+      data,
     };
 
     if (timeout > 0) {
@@ -225,11 +229,40 @@ export class plugin {
     if (contexts[id] && contexts[id].method === method) {
       delete contexts[id];
     }
-    
+
     // 清除关联的超时定时器
     if (contextTimers[id]) {
       clearTimeout(contextTimers[id]);
       delete contextTimers[id];
     }
+  }
+
+  /**
+   * 获取当前上下文
+   * @param {string} method 方法名 (可选/用于严格匹配)
+   * @param {boolean|string|number} isGroup 是否为群组上下文，或者直接指定 ID
+   * @returns {object|undefined} 返回当前的上下文对象
+   */
+  getContext(method = null, isGroup = false) {
+    let id;
+    if (typeof isGroup === "boolean") {
+      if (!this.e) return;
+      id = isGroup ? `${this.e.group_id}:${this.e.user_id}` : this.e.user_id;
+    } else {
+      // 兼容直接传入 ID 的情况
+      if (this.e && this.e.group_id && isGroup === this.e.group_id) {
+        id = `${isGroup}:${this.e.user_id}`;
+      } else {
+        id = isGroup;
+      }
+    }
+
+    const currentContext = contexts[id];
+
+    // 如果没有上下文，或者指定了 method 但不匹配，就返回 undefined
+    if (!currentContext) return undefined;
+    if (method && currentContext.method !== method) return undefined;
+
+    return currentContext;
   }
 }

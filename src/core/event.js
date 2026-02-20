@@ -191,9 +191,9 @@ export class Event {
   async getInfo(targetId = null, noCache = false) {
     const uid = targetId || this.user_id;
     if (this.group_id) {
-      return this.bot.getGroupMemberInfo(this.group_id, uid, noCache);
+      return this.bot.getGroupMemberInfo({ group_id: this.group_id, user_id: uid, no_cache: noCache });
     } else {
-      return this.bot.getStrangerInfo(uid, noCache);
+      return this.bot.getStrangerInfo({ user_id: uid });
     }
   }
 
@@ -208,15 +208,15 @@ export class Event {
 
     if (Array.isArray(targetId)) {
       if (targetId.length === 0) return false;
-      return this.bot.kickGroupMemberBatch(
-        this.group_id,
-        targetId,
-        rejectRequest
-      );
+      return this.bot.setGroupKickMembers({
+        group_id: this.group_id,
+        user_id: targetId,
+        reject_add_request: rejectRequest,
+      });
     }
 
     const uid = targetId || this.user_id;
-    return this.bot.setGroupKick(this.group_id, uid, rejectRequest);
+    return this.bot.setGroupKick({ group_id: this.group_id, user_id: uid, reject_add_request: rejectRequest });
   }
 
   /**
@@ -228,7 +228,7 @@ export class Event {
   async ban(duration = 6000, targetId = null) {
     if (!this.group_id) return false;
     const uid = targetId || this.user_id;
-    return this.bot.setGroupBan(this.group_id, uid, duration);
+    return this.bot.setGroupBan({ group_id: this.group_id, user_id: uid, duration });
   }
 
   /**
@@ -238,7 +238,7 @@ export class Event {
    */
   async wholeBan(enable = true) {
     if (!this.group_id) return false;
-    return this.bot.setGroupWholeBan(this.group_id, enable);
+    return this.bot.setGroupWholeBan({ group_id: this.group_id, enable });
   }
 
   /**
@@ -250,7 +250,7 @@ export class Event {
   async admin(enable = true, targetId = null) {
     if (!this.group_id) return false;
     const uid = targetId || this.user_id;
-    return this.bot.setGroupAdmin(this.group_id, uid, enable);
+    return this.bot.setGroupAdmin({ group_id: this.group_id, user_id: uid, enable });
   }
 
   /**
@@ -261,7 +261,7 @@ export class Event {
   async card(card, targetId = null) {
     if (!this.group_id) return false;
     const uid = targetId || this.user_id;
-    return this.bot.setGroupCard(this.group_id, uid, card);
+    return this.bot.setGroupCard({ group_id: this.group_id, user_id: uid, card });
   }
 
   /**
@@ -270,7 +270,7 @@ export class Event {
   async title(title, targetId = null) {
     if (!this.group_id) return false;
     const uid = targetId || this.user_id;
-    return this.bot.setGroupSpecialTitle(this.group_id, uid, title);
+    return this.bot.setGroupSpecialTitle({ group_id: this.group_id, user_id: uid, special_title: title });
   }
 
   /**
@@ -281,9 +281,9 @@ export class Event {
   async poke(targetId = null) {
     const uid = targetId || this.user_id;
     if (this.group_id) {
-      return this.bot.groupPoke(this.group_id, uid);
+      return this.bot.groupPoke({ group_id: this.group_id, user_id: uid });
     } else {
-      return this.bot.friendPoke(uid);
+      return this.bot.friendPoke({ user_id: uid });
     }
   }
 
@@ -296,7 +296,7 @@ export class Event {
   async react(emojiId, messageId = null) {
     const msgId = messageId || this.message_id;
     if (!this.group_id || !msgId) return false;
-    return this.bot.setMsgEmojiLike(msgId, emojiId);
+    return this.bot.setMsgEmojiLike({ message_id: msgId, emoji_id: String(emojiId) });
   }
 
   /**
@@ -307,10 +307,10 @@ export class Event {
     if (!targetFlag) return;
 
     if (this.request_type === "friend") {
-      return this.bot.setFriendAddRequest(targetFlag, true, remark);
+      return this.bot.setFriendAddRequest({ flag: targetFlag, approve: true, remark });
     }
     if (this.request_type === "group") {
-      return this.bot.setGroupAddRequest(targetFlag, this.sub_type, true);
+      return this.bot.setGroupAddRequest({ flag: targetFlag, approve: true });
     }
   }
 
@@ -322,15 +322,10 @@ export class Event {
     if (!targetFlag) return;
 
     if (this.request_type === "friend") {
-      return this.bot.setFriendAddRequest(targetFlag, false);
+      return this.bot.setFriendAddRequest({ flag: targetFlag, approve: false });
     }
     if (this.request_type === "group") {
-      return this.bot.setGroupAddRequest(
-        targetFlag,
-        this.sub_type,
-        false,
-        reason
-      );
+      return this.bot.setGroupAddRequest({ flag: targetFlag, approve: false, reason });
     }
   }
 
@@ -345,10 +340,14 @@ export class Event {
     let messages = [];
 
     if (this.group_id) {
-      const res = await this.bot.getGroupMsgHistory(this.group_id, messageSeq);
+      const params = { group_id: this.group_id };
+      if (messageSeq) params.message_seq = messageSeq;
+      const res = await this.bot.getGroupMsgHistory(params);
       messages = res?.messages || [];
     } else if (this.user_id) {
-      const res = await this.bot.getFriendMsgHistory(this.user_id, messageSeq);
+      const params = { user_id: this.user_id };
+      if (messageSeq) params.message_seq = messageSeq;
+      const res = await this.bot.getFriendMsgHistory(params);
       messages = res?.messages || [];
     }
 

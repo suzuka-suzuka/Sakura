@@ -417,8 +417,8 @@ export class GlobalUpdate extends plugin {
     if (errMsg.includes("be overwritten by merge")) {
       await e.reply(
         msg +
-          `\n存在冲突：\n${errMsg}\n` +
-          "请解决冲突后再更新，或者执行 #强制更新 放弃本地修改"
+        `\n存在冲突：\n${errMsg}\n` +
+        "请解决冲突后再更新，或者执行 #强制更新 放弃本地修改"
       );
       return;
     }
@@ -471,10 +471,6 @@ export class GlobalUpdate extends plugin {
       120
     );
 
-    if (process.send) {
-      process.send("restart");
-    } else {
-      process.exit(0);
-    }
+    process.exit(0);
   }
 }

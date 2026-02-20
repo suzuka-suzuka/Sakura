@@ -30,20 +30,25 @@ export class SystemPlugin extends plugin {
       120
     );
 
-    if (process.send) {
-      process.send("restart");
-    } else {
-      process.exit(0);
-    }
+    // 对于普通 Node 守护：调用 exit，父进程的监听会自动拉起它; pm2 也会拉起它
+    process.exit(0);
   });
 
   shutdown = Command(/^#关机$/, async (e) => {
     await e.react(124);
 
+    // 如果有 IPC 父进程（我们自己写的 fork 守护程序），发消息让其不要再重启自身
     if (process.send) {
       process.send("shutdown");
     } else {
-      process.exit(0);
+      // 如果没有父进程（例如 pm2 或者直接 node src/index.js），则使用 pm2 的命令或直接退出
+      import('child_process').then(cp => {
+        cp.exec('pm2 stop sakura-bot', (error) => {
+          if (error) {
+            process.exit(0);
+          }
+        });
+      });
     }
   });
 
