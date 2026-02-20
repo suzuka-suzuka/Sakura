@@ -59,17 +59,6 @@ class PluginConfigManager {
         const configFile = path.join(configDir, `${moduleName}.yaml`);
 
 
-        if (!fs.existsSync(configFile)) {
-            const oldConfigFile = path.join(__dirname, '../../plugins', pluginName, 'config', `${moduleName}.yaml`);
-            if (fs.existsSync(oldConfigFile)) {
-                try {
-                    fs.copyFileSync(oldConfigFile, configFile);
-                    logger.info(`[PluginConfig] 已迁移旧配置: plugins/${pluginName}/config/${moduleName}.yaml → config/${pluginName}/${moduleName}.yaml`);
-                } catch (e) {
-                    logger.error(`[PluginConfig] 迁移旧配置失败: ${e}`);
-                }
-            }
-        }
 
         if (fs.existsSync(configFile)) {
             this._loadModuleConfig(pluginName, moduleName, schema, configFile);

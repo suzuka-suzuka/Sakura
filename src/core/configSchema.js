@@ -65,7 +65,7 @@ export const ConfigSchema = z.object({
 
     // 配置面板
     web: z.object({
-        port: z.number().int().min(1).max(65535).default(3457).describe('配置面板端口'),
+        port: z.number().int().min(1).max(65535).default(1135).describe('配置面板端口'),
         password: z.string().default('admin').describe('面板登录密码'),
     }).default({}).describe('配置面板设置'),
 });
