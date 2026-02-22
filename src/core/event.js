@@ -413,8 +413,14 @@ export class Event {
           content = m.content;
           if (m.user_id) uid = m.user_id;
           if (m.nickname) name = m.nickname;
-          const { content: _, user_id: __, nickname: ___, ...rest } = m;
+          // 提取嵌套转发的配置字段
+          const { content: _, user_id: __, nickname: ___, source, news, prompt, summary, ...rest } = m;
           extraData = rest;
+          // 如果有嵌套转发配置，保留到 extraData
+          if (source) extraData.source = source;
+          if (news) extraData.news = news;
+          if (prompt) extraData.prompt = prompt;
+          if (summary) extraData.summary = summary;
         }
 
         // 检查是否是嵌套转发（content 是包含 user_id/nickname/content 的对象数组）
