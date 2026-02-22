@@ -172,7 +172,7 @@ export class Permission extends plugin {
     }
   }
 
-  handlePermission = Command(/^(赋权|取消赋权)\s*(.*)$/, "white", async (e) => {
+  handlePermission = Command(/^(赋权|取消赋权)\s*(.*)$/, "master", async (e) => {
     const isAdd = e.match[1] === "赋权";
     let targetId = e.at ? Number(e.at) : null;
 

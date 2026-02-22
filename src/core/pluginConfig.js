@@ -225,6 +225,9 @@ class PluginConfigManager {
         let label = '';
         let help = '';
         let uiType = '';
+        let step = null;
+        let min = null;
+        let max = null;
         if (description) {
             const parts = description.split('|');
             label = parts[0].trim();
@@ -233,7 +236,17 @@ class PluginConfigManager {
             for (let i = 1; i < parts.length; i++) {
                 const part = parts[i].trim();
                 if (part.startsWith('#')) {
-                    uiType = part.slice(1);
+                    const directive = part.slice(1);
+                    // 解析 #step:0.01 格式
+                    if (directive.startsWith('step:')) {
+                        step = parseFloat(directive.slice(5));
+                    } else if (directive.startsWith('min:')) {
+                        min = parseFloat(directive.slice(4));
+                    } else if (directive.startsWith('max:')) {
+                        max = parseFloat(directive.slice(4));
+                    } else {
+                        uiType = directive;
+                    }
                 } else {
                     remaining.push(part);
                 }
@@ -291,6 +304,9 @@ class PluginConfigManager {
             help,
             default: defaultValue,
             ...(uiType && { uiType }),
+            ...(step != null && { step }),
+            ...(min != null && { min }),
+            ...(max != null && { max }),
         };
     }
 
