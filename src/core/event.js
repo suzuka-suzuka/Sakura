@@ -391,51 +391,62 @@ export class Event {
   async sendForwardMsg(msg, info = {}) {
     const { prompt, summary, source, news } = info;
 
-    let nodes = [];
-    const msgs = Array.isArray(msg) ? msg : [msg];
+    // 递归处理节点，支持嵌套转发
+    const processNodes = (msgs) => {
+      let nodes = [];
+      const msgArray = Array.isArray(msgs) ? msgs : [msgs];
 
-    for (let m of msgs) {
-      if (!m) continue;
+      for (let m of msgArray) {
+        if (!m) continue;
 
-      if (typeof m === "object" && m.type === "node") {
-        nodes.push(m);
-        continue;
+        if (typeof m === "object" && m.type === "node") {
+          nodes.push(m);
+          continue;
+        }
+
+        let content = m;
+        let uid = this.bot.self_id;
+        let name = this.bot.nickname;
+        let extraData = {};
+
+        if (typeof m === "object" && !Array.isArray(m) && m.content) {
+          content = m.content;
+          if (m.user_id) uid = m.user_id;
+          if (m.nickname) name = m.nickname;
+          const { content: _, user_id: __, nickname: ___, ...rest } = m;
+          extraData = rest;
+        }
+
+        // 检查是否是嵌套转发（content 是包含 user_id/nickname/content 的对象数组）
+        if (Array.isArray(content) && content.length > 0 && 
+            typeof content[0] === "object" && content[0].content !== undefined) {
+          // 这是嵌套转发，递归处理
+          content = processNodes(content);
+        } else if (Array.isArray(content)) {
+          content = content.map((item) =>
+            typeof item === "string" ? Segment.text(item) : item
+          );
+        } else {
+          content =
+            typeof content === "object" && content && content.type
+              ? [content]
+              : [Segment.text(content)];
+        }
+
+        nodes.push({
+          type: "node",
+          data: {
+            user_id: uid,
+            nickname: name,
+            content: content,
+            ...extraData,
+          },
+        });
       }
+      return nodes;
+    };
 
-      let content = m;
-      let uid = this.bot.self_id;
-      let name = this.bot.nickname;
-      let extraData = {};
-
-      if (typeof m === "object" && !Array.isArray(m) && m.content) {
-        content = m.content;
-        if (m.user_id) uid = m.user_id;
-        if (m.nickname) name = m.nickname;
-        const { content: _, user_id: __, nickname: ___, ...rest } = m;
-        extraData = rest;
-      }
-
-      if (Array.isArray(content)) {
-        content = content.map((item) =>
-          typeof item === "string" ? Segment.text(item) : item
-        );
-      } else {
-        content =
-          typeof content === "object" && content && content.type
-            ? [content]
-            : [Segment.text(content)];
-      }
-
-      nodes.push({
-        type: "node",
-        data: {
-          user_id: uid,
-          nickname: name,
-          content: content,
-          ...extraData,
-        },
-      });
-    }
+    let nodes = processNodes(msg);
 
     if (nodes.length === 0) return;
 
