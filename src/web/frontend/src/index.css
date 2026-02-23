@@ -1059,14 +1059,14 @@ select.field-input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: 1.5px solid var(--accent);
-  border-radius: 50%;
-  font-size: 12px;
+  padding: 2px 10px;
+  background: rgba(255, 105, 135, 0.12);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
   font-weight: 600;
-  color: var(--accent);
+  color: #ff6987;
   flex-shrink: 0;
+  margin-left: 6px;
 }
 
 .modal-close {

@@ -82,6 +82,8 @@ export default function ConfigField({ name, meta, value, onChange }) {
                     value={value}
                     onChange={onChange}
                     itemMeta={meta.items}
+                    fixed={meta.fixed}
+                    nameField={meta.nameField}
                 />
             );
         }
@@ -545,8 +547,10 @@ function GroupSelectModal({ selected, onConfirm, onCancel }) {
 /**
  * 对象数组字段渲染器 - 列表 + 弹窗添加/编辑
  * 点击项目打开编辑弹窗，不再使用展开模式
+ * fixed: 是否为固定长度数组（不能添加/删除）
+ * nameField: 指定用于显示标题的字段名
  */
-function ObjectArrayField({ name, displayName, help, value, onChange, itemMeta }) {
+function ObjectArrayField({ name, displayName, help, value, onChange, itemMeta, fixed, nameField }) {
     const [showAddModal, setShowAddModal] = useState(false);
     const [editIndex, setEditIndex] = useState(-1);
     const items = Array.isArray(value) ? value : [];
@@ -570,8 +574,13 @@ function ObjectArrayField({ name, displayName, help, value, onChange, itemMeta }
 
     // 为每个 item 生成摘要标签
     const getItemSummary = (item, index) => {
-        const nameFields = ['name', 'cmd', 'trigger', 'prefix', 'group'];
-        for (const f of nameFields) {
+        // 优先使用指定的 nameField
+        if (nameField && item[nameField] !== undefined && item[nameField] !== '') {
+            return `${item[nameField]}`;
+        }
+        // 回退到默认字段
+        const defaultNameFields = ['name', 'cmd', 'trigger', 'prefix', 'group'];
+        for (const f of defaultNameFields) {
             if (item[f] !== undefined && item[f] !== '') {
                 return `${item[f]}`;
             }
@@ -585,6 +594,7 @@ function ObjectArrayField({ name, displayName, help, value, onChange, itemMeta }
                 {displayName}
                 <span className="field-type-badge">{name}</span>
                 <span className="field-type-badge">{items.length} 项</span>
+                {fixed && <span className="field-type-badge" title="固定数组，不能添加/删除">🔒</span>}
             </label>
             {help && <div className="field-help">{help}</div>}
 
@@ -599,29 +609,33 @@ function ObjectArrayField({ name, displayName, help, value, onChange, itemMeta }
                             <span className="object-array-summary">
                                 {getItemSummary(item, index)}
                             </span>
-                            <button
-                                type="button"
-                                className="object-array-remove"
-                                onClick={(e) => { e.stopPropagation(); removeItem(index); }}
-                                title="删除"
-                            >
-                                ✕
-                            </button>
+                            {!fixed && (
+                                <button
+                                    type="button"
+                                    className="object-array-remove"
+                                    onClick={(e) => { e.stopPropagation(); removeItem(index); }}
+                                    title="删除"
+                                >
+                                    ✕
+                                </button>
+                            )}
                         </div>
                     </div>
                 ))}
 
-                <button
-                    type="button"
-                    className="btn btn-secondary object-array-add"
-                    onClick={() => setShowAddModal(true)}
-                >
-                    + 添加
-                </button>
+                {!fixed && (
+                    <button
+                        type="button"
+                        className="btn btn-secondary object-array-add"
+                        onClick={() => setShowAddModal(true)}
+                    >
+                        + 添加
+                    </button>
+                )}
             </div>
 
-            {/* Add Modal */}
-            {showAddModal && (
+            {/* Add Modal - 仅在非固定数组时显示 */}
+            {!fixed && showAddModal && (
                 <AddObjectModal
                     title={`添加 ${displayName}`}
                     itemMeta={itemMeta}
@@ -636,13 +650,18 @@ function ObjectArrayField({ name, displayName, help, value, onChange, itemMeta }
                     title={
                         <>
                             编辑 {displayName}{' '}
-                            <span className="modal-item-number">{editIndex + 1}</span>
+                            <span className="modal-item-number">
+                                {nameField && items[editIndex][nameField] 
+                                    ? items[editIndex][nameField] 
+                                    : editIndex + 1}
+                            </span>
                         </>
                     }
                     itemMeta={itemMeta}
                     initialData={items[editIndex]}
                     onConfirm={handleEditItem}
                     onCancel={() => setEditIndex(-1)}
+                    readOnlyFields={fixed && nameField ? [nameField] : []}
                 />
             )}
         </div>
@@ -724,8 +743,9 @@ function AddObjectModal({ title, itemMeta, onConfirm, onCancel }) {
 /**
  * 编辑对象的弹窗表单
  * 所有字段预填充当前值
+ * readOnlyFields: 只读字段列表（固定数组中的标识字段）
  */
-function EditObjectModal({ title, itemMeta, initialData, onConfirm, onCancel }) {
+function EditObjectModal({ title, itemMeta, initialData, onConfirm, onCancel, readOnlyFields = [] }) {
     const [draft, setDraft] = useState(() => structuredClone(initialData));
 
     const handleFieldChange = useCallback((key, val) => {
@@ -747,15 +767,37 @@ function EditObjectModal({ title, itemMeta, initialData, onConfirm, onCancel }) 
                 </div>
                 <form onSubmit={handleSubmit}>
                     <div className="modal-body">
-                        {itemMeta.children && Object.entries(itemMeta.children).map(([childKey, childMeta]) => (
-                            <ConfigField
-                                key={childKey}
-                                name={childKey}
-                                meta={childMeta}
-                                value={draft[childKey]}
-                                onChange={(val) => handleFieldChange(childKey, val)}
-                            />
-                        ))}
+                        {itemMeta.children && Object.entries(itemMeta.children).map(([childKey, childMeta]) => {
+                            const isReadOnly = readOnlyFields.includes(childKey);
+                            if (isReadOnly) {
+                                // 只读字段显示为禁用状态
+                                return (
+                                    <div key={childKey} className="field-group">
+                                        <label className="field-label">
+                                            {childMeta.label || childMeta.description || childKey}
+                                            <span className="field-type-badge">{childKey}</span>
+                                            <span className="field-type-badge" title="此字段不可编辑">🔒</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            className="field-input"
+                                            value={draft[childKey] ?? ''}
+                                            disabled
+                                            style={{ opacity: 0.6, cursor: 'not-allowed' }}
+                                        />
+                                    </div>
+                                );
+                            }
+                            return (
+                                <ConfigField
+                                    key={childKey}
+                                    name={childKey}
+                                    meta={childMeta}
+                                    value={draft[childKey]}
+                                    onChange={(val) => handleFieldChange(childKey, val)}
+                                />
+                            );
+                        })}
                     </div>
                     <div className="modal-footer">
                         <button type="button" className="btn btn-secondary" onClick={onCancel}>

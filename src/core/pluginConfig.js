@@ -228,6 +228,8 @@ class PluginConfigManager {
         let step = null;
         let min = null;
         let max = null;
+        let fixed = false;
+        let nameField = null;
         if (description) {
             const parts = description.split('|');
             label = parts[0].trim();
@@ -244,6 +246,10 @@ class PluginConfigManager {
                         min = parseFloat(directive.slice(4));
                     } else if (directive.startsWith('max:')) {
                         max = parseFloat(directive.slice(4));
+                    } else if (directive === 'fixed') {
+                        fixed = true;
+                    } else if (directive.startsWith('nameField:')) {
+                        nameField = directive.slice(10);
                     } else {
                         uiType = directive;
                     }
@@ -272,7 +278,17 @@ class PluginConfigManager {
             if (itemSchema) {
                 itemMeta = this._schemaToMeta(itemSchema, '');
             }
-            return { type: 'array', description: displayName, label, help, items: itemMeta, default: defaultValue, ...(uiType && { uiType }) };
+            return { 
+                type: 'array', 
+                description: displayName, 
+                label, 
+                help, 
+                items: itemMeta, 
+                default: defaultValue, 
+                ...(uiType && { uiType }),
+                ...(fixed && { fixed }),
+                ...(nameField && { nameField }),
+            };
         }
 
         if (typeName === 'enum') {
