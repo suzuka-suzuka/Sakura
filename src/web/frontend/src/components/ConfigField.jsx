@@ -127,6 +127,19 @@ export default function ConfigField({ name, meta, value, onChange }) {
 
     // Number
     if (type === 'number') {
+        // Single group select → SingleGroupSelectField
+        if (uiType === 'groupSelect') {
+            return (
+                <SingleGroupSelectField
+                    name={name}
+                    displayName={displayName}
+                    help={help}
+                    value={value}
+                    onChange={onChange}
+                />
+            );
+        }
+
         const hasStep = meta.step != null;
         const hideSpinner = meta.hideSpinner || !hasStep;
 
@@ -182,6 +195,19 @@ export default function ConfigField({ name, meta, value, onChange }) {
                     onChange={(e) => onChange(e.target.value)}
                 />
             </div>
+        );
+    }
+
+    // Cron expression editor
+    if ((type === 'string' || !type) && uiType === 'cron') {
+        return (
+            <CronField
+                name={name}
+                displayName={displayName}
+                help={help}
+                value={value}
+                onChange={onChange}
+            />
         );
     }
 
@@ -545,6 +571,60 @@ function GroupSelectModal({ selected, onConfirm, onCancel }) {
 }
 
 /**
+ * 单选群号字段 — 下拉选择 bot 已加入的单个群
+ */
+function SingleGroupSelectField({ name, displayName, help, value, onChange }) {
+    const [groups, setGroups] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const token = localStorage.getItem('sakura_token');
+        fetch('/api/bot/groups', {
+            headers: { Authorization: `Bearer ${token}` },
+        })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success && d.data) {
+                    setGroups(d.data || []);
+                }
+            })
+            .catch(() => { })
+            .finally(() => setLoading(false));
+    }, []);
+
+    const currentGroup = groups.find(g => g.group_id === Number(value));
+    const displayValue = currentGroup 
+        ? `${currentGroup.group_name} (${currentGroup.group_id})`
+        : (value ? String(value) : '');
+
+    return (
+        <div className="field-group">
+            <label className="field-label">
+                {displayName}
+                <span className="field-type-badge">{name}</span>
+            </label>
+            {help && <div className="field-help">{help}</div>}
+            {loading ? (
+                <div className="field-input" style={{ color: 'var(--text-secondary)' }}>加载中...</div>
+            ) : (
+                <select
+                    className="field-input"
+                    value={value ?? 0}
+                    onChange={(e) => onChange(Number(e.target.value))}
+                >
+                    <option value={0}>请选择群...</option>
+                    {groups.map(g => (
+                        <option key={g.group_id} value={g.group_id}>
+                            {g.group_name} ({g.group_id})
+                        </option>
+                    ))}
+                </select>
+            )}
+        </div>
+    );
+}
+
+/**
  * 对象数组字段渲染器 - 列表 + 弹窗添加/编辑
  * 点击项目打开编辑弹窗，不再使用展开模式
  * fixed: 是否为固定长度数组（不能添加/删除）
@@ -651,8 +731,8 @@ function ObjectArrayField({ name, displayName, help, value, onChange, itemMeta, 
                         <>
                             编辑 {displayName}{' '}
                             <span className="modal-item-number">
-                                {nameField && items[editIndex][nameField] 
-                                    ? items[editIndex][nameField] 
+                                {nameField && items[editIndex][nameField]
+                                    ? items[editIndex][nameField]
                                     : editIndex + 1}
                             </span>
                         </>
@@ -1182,6 +1262,185 @@ function CommandCostField({ name, displayName, help, value, onChange }) {
                             </div>
                         ))}
                     </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+/**
+ * Cron 表达式可视化编辑器
+ * 支持 5 段标准格式（分 时 日 月 周）
+ */
+function CronField({ name, displayName, help, value, onChange }) {
+    const cronValue = value || '0 * * * *';
+    const parts = cronValue.trim().split(/\s+/);
+
+    const fieldDefs = [
+        { key: 'minute', label: '分', placeholder: '*', allowed: '0-59' },
+        { key: 'hour', label: '时', placeholder: '*', allowed: '0-23' },
+        { key: 'dom', label: '日', placeholder: '*', allowed: '1-31' },
+        { key: 'month', label: '月', placeholder: '*', allowed: '1-12' },
+        { key: 'dow', label: '周', placeholder: '*', allowed: '0-7' },
+    ];
+
+    const segments = {
+        minute: parts[0] || '*',
+        hour: parts[1] || '*',
+        dom: parts[2] || '*',
+        month: parts[3] || '*',
+        dow: parts[4] || '*'
+    };
+
+    const updateSegment = (key, val) => {
+        const updated = { ...segments, [key]: val || '*' };
+        const expr = `${updated.minute} ${updated.hour} ${updated.dom} ${updated.month} ${updated.dow}`;
+        onChange(expr);
+    };
+
+    // 简单的前端格式校验
+    const isValidSegment = (val) => /^[\d*,\-\/]+$/.test(val);
+    const allValid = Object.values(segments).every(isValidSegment) && parts.length === 5;
+
+    // 生成人类可读描述
+    const getReadable = () => {
+        const { minute, hour, dom, month, dow } = segments;
+        const descParts = [];
+
+        // 周
+        if (dow !== '*') {
+            const dayNames = ['日', '一', '二', '三', '四', '五', '六'];
+            const dayNum = parseInt(dow);
+            if (!isNaN(dayNum) && dayNum >= 0 && dayNum <= 7) {
+                descParts.push(`每周${dayNames[dayNum === 7 ? 0 : dayNum]}`);
+            } else {
+                descParts.push(`周(${dow})`);
+            }
+        }
+
+        // 月
+        if (month !== '*') {
+            const monthNum = parseInt(month);
+            if (!isNaN(monthNum)) {
+                descParts.push(`${monthNum}月`);
+            } else {
+                descParts.push(`月(${month})`);
+            }
+        }
+
+        // 日
+        if (dom !== '*') {
+            const domNum = parseInt(dom);
+            if (!isNaN(domNum)) {
+                descParts.push(`${domNum}号`);
+            } else {
+                descParts.push(`日(${dom})`);
+            }
+        } else if (dow === '*' && month === '*') {
+            descParts.push('每天');
+        }
+
+        // 时:分
+        const timeParts = [];
+        if (hour === '*') {
+            timeParts.push('每小时');
+        } else {
+            const h = parseInt(hour);
+            timeParts.push(!isNaN(h) ? `${h}点` : `时(${hour})`);
+        }
+
+        if (minute === '*') {
+            if (hour !== '*') timeParts.push('每分钟');
+            else timeParts.push('每分钟');
+        } else {
+            const m = parseInt(minute);
+            timeParts.push(!isNaN(m) ? `${String(m).padStart(2, '0')}分` : `分(${minute})`);
+        }
+
+        descParts.push(timeParts.join(''));
+
+        // 特殊情况处理
+        if (minute.includes('/')) {
+            const interval = minute.split('/')[1];
+            return `每 ${interval} 分钟执行一次`;
+        }
+        if (hour.includes('/')) {
+            const interval = hour.split('/')[1];
+            return `每 ${interval} 小时执行一次`;
+        }
+
+        return descParts.join(' ') + ' 执行';
+    };
+
+    const presets = [
+        { label: '每分钟', value: '* * * * *' },
+        { label: '每小时', value: '0 * * * *' },
+        { label: '每天 0:00', value: '0 0 * * *' },
+        { label: '每天 8:00', value: '0 8 * * *' },
+        { label: '每天 12:00', value: '0 12 * * *' },
+        { label: '每天 15:00', value: '0 15 * * *' },
+        { label: '每周日 11:00', value: '0 11 * * 0' },
+        { label: '每月 1 号', value: '0 0 1 * *' },
+    ];
+
+    return (
+        <div className="field-group">
+            <label className="field-label">
+                {displayName}
+                <span className="field-type-badge">{name}</span>
+            </label>
+            {help && <div className="field-help">{help}</div>}
+
+            {/* Raw input */}
+            <input
+                type="text"
+                className={`field-input ${!allValid ? 'cron-input-error' : ''}`}
+                value={value ?? ''}
+                onChange={(e) => onChange(e.target.value)}
+                placeholder="0 15 * * *"
+            />
+
+            {/* Human readable description */}
+            {allValid && (
+                <div className="cron-description">
+                    ⏰ {getReadable()}
+                </div>
+            )}
+            {!allValid && (
+                <div className="cron-error">
+                    ⚠️ 格式无效，请检查表达式
+                </div>
+            )}
+
+            {/* Visual segment editors */}
+            <div className="cron-segments">
+                {fieldDefs.map((fd) => (
+                    <div key={fd.key} className="cron-segment">
+                        <span className="cron-segment-label">{fd.label}</span>
+                        <input
+                            type="text"
+                            className={`cron-segment-input ${!isValidSegment(segments[fd.key]) ? 'cron-input-error' : ''}`}
+                            value={segments[fd.key]}
+                            placeholder={fd.placeholder}
+                            onChange={(e) => updateSegment(fd.key, e.target.value)}
+                            title={`${fd.label}: ${fd.allowed}, 支持 * , - /`}
+                        />
+                        <span className="cron-segment-range">{fd.allowed}</span>
+                    </div>
+                ))}
+            </div>
+
+            {/* Quick presets */}
+            <div className="cron-presets">
+                {presets.map((p) => (
+                    <button
+                        key={p.value}
+                        type="button"
+                        className={`cron-preset-btn ${value === p.value ? 'active' : ''}`}
+                        onClick={() => onChange(p.value)}
+                    >
+                        {p.label}
+                    </button>
                 ))}
             </div>
         </div>

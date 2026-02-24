@@ -230,10 +230,16 @@ export class PluginLoader {
 
           for (const handler of handlers) {
             if (handler.type === "cron" && handler.cronExpression) {
+              handler.isExecuting = false;
               const job = schedule.scheduleJob(
                 handler.cronExpression,
                 async () => {
+                  if (handler.isExecuting) {
+                    logger.warn(`[${instance.name}] 定时任务 ${handler.methodName} 仍在执行中，跳过本次触发`);
+                    return;
+                  }
                   try {
+                    handler.isExecuting = true;
                     if (instance.log) {
                       logger.info(
                         `[${instance.name}] 触发定时任务: ${handler.methodName}`
@@ -244,6 +250,8 @@ export class PluginLoader {
                     logger.error(
                       `[${instance.name}] 定时任务 ${handler.methodName} 执行出错: ${e}`
                     );
+                  } finally {
+                    handler.isExecuting = false;
                   }
                 }
               );

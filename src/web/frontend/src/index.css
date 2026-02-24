@@ -1766,3 +1766,116 @@ select.field-input {
     grid-template-columns: 1fr;
   }
 }
+
+/* ========== Cron Editor ========== */
+
+.cron-description {
+  font-size: 12px;
+  color: var(--accent-dark);
+  background: var(--accent-dim);
+  border: 1px solid rgba(219, 112, 147, 0.12);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  margin-top: 6px;
+  animation: tagIn 0.15s ease;
+}
+
+.cron-error {
+  font-size: 12px;
+  color: var(--error);
+  background: var(--error-dim);
+  border: 1px solid rgba(229, 57, 53, 0.12);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  margin-top: 6px;
+}
+
+.cron-input-error {
+  border-color: var(--error) !important;
+  box-shadow: 0 0 0 2px var(--error-dim) !important;
+}
+
+.cron-segments {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.cron-segment {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.cron-segment-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+}
+
+.cron-segment-input {
+  width: 100%;
+  padding: 6px 4px;
+  text-align: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-family: 'Courier New', Consolas, monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+  outline: none;
+  transition: all 0.15s ease;
+}
+
+.cron-segment-input:focus {
+  background: var(--bg-input-focus);
+  border-color: var(--border-active);
+  box-shadow: 0 0 0 2px var(--accent-dim);
+}
+
+.cron-segment-range {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.cron-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.cron-preset-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  font-weight: 500;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cron-preset-btn:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+  border-color: var(--border-default);
+}
+
+.cron-preset-btn.active {
+  background: var(--accent-dim);
+  color: var(--accent-dark);
+  border-color: rgba(219, 112, 147, 0.3);
+  font-weight: 600;
+}
+
+@media (max-width: 600px) {
+  .cron-segments {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
