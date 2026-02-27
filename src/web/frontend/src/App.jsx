@@ -93,6 +93,7 @@ function App() {
         icon: meta?.icon || '📦',
       };
     }),
+    { key: '__menu_editor__', label: '菜单编辑', icon: '📝' },
   ], [pluginNames, pluginMeta]);
 
   // Build category tabs for active section
@@ -203,7 +204,13 @@ function App() {
             <button
               key={item.key}
               className={`left-nav-item ${activeSection === item.key ? 'active' : ''}`}
-              onClick={() => handleSectionChange(item.key)}
+              onClick={() => {
+                if (item.key === '__menu_editor__') {
+                  window.open('/menu', '_self');
+                } else {
+                  handleSectionChange(item.key);
+                }
+              }}
             >
               <span className="left-nav-icon">{item.icon}</span>
               <span className="left-nav-label">{item.label}</span>

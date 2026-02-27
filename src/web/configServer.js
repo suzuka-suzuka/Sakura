@@ -8,7 +8,7 @@ import si from 'systeminformation';
 import Config from '../core/config.js';
 import pluginConfigManager from '../core/pluginConfig.js';
 import { logger } from '../utils/logger.js';
-
+import yaml from 'js-yaml';
 let cachedStaticInfo = null;
 let staticInfoTime = 0;
 const STATIC_INFO_CACHE_TIME = 60000;
@@ -203,10 +203,11 @@ function verifyToken(token) {
 
 function parseBody(req) {
     return new Promise((resolve, reject) => {
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
+        const chunks = [];
+        req.on('data', chunk => { chunks.push(chunk); });
         req.on('end', () => {
             try {
+                const body = Buffer.concat(chunks).toString('utf8');
                 resolve(body ? JSON.parse(body) : {});
             } catch (e) {
                 reject(new Error('Invalid JSON'));
@@ -314,6 +315,45 @@ async function handleApi(req, res) {
         return true;
     }
 
+    // 菜单编辑器 API
+    if (pathname === '/api/menu' && req.method === 'GET') {
+        if (!requireAuth(req, res)) return true;
+        try {
+            const yamlPath = path.join(__dirname, '../../plugins/sakura-plugin/resources/menu/menu.yaml');
+            if (fs.existsSync(yamlPath)) {
+                const fileContent = fs.readFileSync(yamlPath, 'utf8');
+                const menuConfig = yaml.load(fileContent) || {};
+                sendJson(res, { success: true, data: menuConfig });
+            } else {
+                sendJson(res, { success: true, data: { menu: [] } });
+            }
+        } catch (e) {
+            logger.error(`[ConfigServer] 获取菜单配置失败: ${e}`);
+            sendJson(res, { success: false, error: '获取菜单配置失败' });
+        }
+        return true;
+    }
+
+    if (pathname === '/api/menu' && req.method === 'POST') {
+        if (!requireAuth(req, res)) return true;
+        try {
+            const body = await parseBody(req);
+            const yamlPath = path.join(__dirname, '../../plugins/sakura-plugin/resources/menu/menu.yaml');
+
+            // 备份原文件
+            if (fs.existsSync(yamlPath)) {
+                fs.copyFileSync(yamlPath, yamlPath + '.bak');
+            }
+
+            const yamlStr = yaml.dump(body, { lineWidth: -1 });
+            fs.writeFileSync(yamlPath, yamlStr, 'utf8');
+            sendJson(res, { success: true, message: '菜单保存成功' });
+        } catch (e) {
+            logger.error(`[ConfigServer] 保存菜单配置失败: ${e}`);
+            sendJson(res, { success: false, error: '保存菜单配置失败' });
+        }
+        return true;
+    }
 
     if (pathname === '/api/system/static' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
@@ -630,6 +670,16 @@ export function startConfigServer() {
                 if (handled) return;
             }
 
+            // 拦截 /menu，服务独立的菜单编辑器
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            if (url.pathname === '/menu' || url.pathname === '/menu/') {
+                const editorPath = path.join(__dirname, '../../plugins/sakura-plugin/resources/menu/editor.html');
+                if (fs.existsSync(editorPath)) {
+                    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+                    res.end(fs.readFileSync(editorPath));
+                    return;
+                }
+            }
 
             serveStatic(req, res);
         } catch (e) {
