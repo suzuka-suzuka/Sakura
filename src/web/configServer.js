@@ -9,6 +9,7 @@ import Config from '../core/config.js';
 import pluginConfigManager from '../core/pluginConfig.js';
 import { logger } from '../utils/logger.js';
 import yaml from 'js-yaml';
+import { bots } from '../api/client.js';
 let cachedStaticInfo = null;
 let staticInfoTime = 0;
 const STATIC_INFO_CACHE_TIME = 60000;
@@ -153,21 +154,32 @@ async function getDynamicSystemInfo() {
 
 async function getBotInfo() {
     try {
-        const bot = global.bot;
-        if (!bot) {
-            return null;
+        if (bots.size === 0) {
+            return [];
         }
 
-        const loginInfo = await bot.getLoginInfo?.() || {};
-
-        return {
-            uin: loginInfo.user_id || bot.uin || null,
-            nickname: loginInfo.nickname || bot.nickname || null,
-            status: bot.status || 'online',
-        };
+        const results = [];
+        for (const [selfId, bot] of bots.entries()) {
+            try {
+                const loginInfo = await bot.getLoginInfo?.() || {};
+                results.push({
+                    uin: loginInfo.user_id || bot.uin || bot.self_id || selfId,
+                    nickname: loginInfo.nickname || bot.nickname || null,
+                    status: bot.status || 'online',
+                });
+            } catch (e) {
+                logger.error(`[ConfigServer] 获取 Bot ${selfId} 信息失败: ${e}`);
+                results.push({
+                    uin: bot.self_id || selfId,
+                    nickname: bot.nickname || null,
+                    status: 'error',
+                });
+            }
+        }
+        return results;
     } catch (e) {
         logger.error(`[ConfigServer] 获取 Bot 信息失败: ${e}`);
-        return null;
+        return [];
     }
 }
 
@@ -279,20 +291,35 @@ async function handleApi(req, res) {
     if (pathname === '/api/bot/groups' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
         try {
-            const bot = global.bot;
-            if (!bot) {
+            if (bots.size === 0) {
                 sendJson(res, { success: false, error: 'Bot 未连接' });
                 return true;
             }
-            const result = await bot.getGroupList();
-            const groups = Array.isArray(result) ? result : (result?.data || []);
-            const list = groups.map(g => ({
-                group_id: g.group_id,
-                group_name: g.group_name || String(g.group_id),
-            }));
-            sendJson(res, { success: true, data: list });
+            const targetUrl = url.searchParams.get('url');
+
+            const allGroups = new Map();
+            for (const bot of bots.values()) {
+                if (targetUrl && bot.ncws?._sakura_url && bot.ncws._sakura_url !== targetUrl) {
+                    continue;
+                }
+                try {
+                    const result = await bot.getGroupList();
+                    const groups = Array.isArray(result) ? result : (result?.data || []);
+                    for (const g of groups) {
+                        if (!allGroups.has(g.group_id)) {
+                            allGroups.set(g.group_id, {
+                                group_id: g.group_id,
+                                group_name: g.group_name || String(g.group_id),
+                            });
+                        }
+                    }
+                } catch (e) {
+                    logger.error(`[ConfigServer] 获取 Bot 群列表失败: ${e}`);
+                }
+            }
+            sendJson(res, { success: true, data: Array.from(allGroups.values()) });
         } catch (e) {
-            logger.error(`[ConfigServer] 获取群列表失败: ${e}`);
+            logger.error(`[ConfigServer] 获取群列表严重失败: ${e}`);
             sendJson(res, { success: false, error: '获取群列表失败' });
         }
         return true;

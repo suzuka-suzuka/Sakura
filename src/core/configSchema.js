@@ -24,15 +24,15 @@ export const ConfigSchema = z.object({
         .default([])
         .describe('白名单用户：拥有部分高级权限'),
 
-    // 群组白名单
+    // 全局群组白名单
     whiteGroups: z.array(z.number())
         .default([])
-        .describe('群组白名单：如果填写，则只监听这些群（优先级最高）'),
+        .describe('全局群白名单：如填写，则所有账号只监听这些群（优先级最高）'),
 
-    // 群组黑名单
+    // 全局群组黑名单
     blackGroups: z.array(z.number())
         .default([])
-        .describe('群组黑名单：仅当白名单为空时生效，屏蔽这些群'),
+        .describe('全局群黑名单：仅当全局白名单为空时生效，所有账号屏蔽这些群'),
 
     // 用户黑名单
     blackUsers: z.array(z.number())
@@ -40,19 +40,33 @@ export const ConfigSchema = z.object({
         .describe('用户黑名单：屏蔽这些用户（全局生效）'),
 
     // WebSocket 正向连接配置
-    ws: z.object({
+    ws: z.array(z.object({
         url: z.string()
             .default('ws://127.0.0.1:3001')
             .describe('WebSocket 地址'),
         accessToken: z.string()
             .default('')
             .describe('访问令牌，留空则不验证'),
+        whiteGroups: z.array(z.number())
+            .default([])
+            .describe('此类群白名单：如填写则只监听这些群'),
+        blackGroups: z.array(z.number())
+            .default([])
+            .describe('此类群黑名单：仅白名单为空时生效'),
         reconnection: z.object({
             enable: z.boolean().default(true).describe('启用重连'),
             attempts: z.number().int().min(1).max(999).default(99).describe('重连次数'),
             delay: z.number().int().min(1000).max(60000).default(5000).describe('重连间隔(ms)'),
         }).default({}).describe('重连配置'),
-    }).default({}).describe('WebSocket 正向连接配置'),
+    })).default([
+        {
+            url: 'ws://127.0.0.1:3001',
+            accessToken: '',
+            whiteGroups: [],
+            blackGroups: [],
+            reconnection: { enable: true, attempts: 99, delay: 5000 }
+        }
+    ]).describe('WebSocket 正向连接配置 (支持多账号)'),
 
     // Redis 配置
     redis: z.object({
@@ -78,8 +92,11 @@ export const FIELD_UI_HINTS = {
     'master': { hideSpinner: true },
     'whiteGroups': { uiType: 'groupSelect' },
     'blackGroups': { uiType: 'groupSelect' },
-    'ws.reconnection.attempts': { step: 1, min: 1, max: 999 },
-    'ws.reconnection.delay': { step: 1000, min: 1000, max: 60000 },
+    'ws': { uiType: 'list' }, // Tell frontend it's a list array
+    'ws[].whiteGroups': { uiType: 'groupSelect' },
+    'ws[].blackGroups': { uiType: 'groupSelect' },
+    'ws[].reconnection.attempts': { step: 1, min: 1, max: 999 },
+    'ws[].reconnection.delay': { step: 1000, min: 1000, max: 60000 },
     'redis.port': { step: 1, min: 1, max: 65535 },
     'redis.db': { step: 1, min: 0, max: 15 },
     'web.port': { step: 1, min: 1, max: 65535 },

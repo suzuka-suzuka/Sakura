@@ -7,7 +7,7 @@ import { createPortal } from 'react-dom';
  *
  * meta 可能包含: { type, description, label, help, default, step?, min?, max?, hideSpinner?, items?, children?, uiType? }
  */
-export default function ConfigField({ name, meta, value, onChange }) {
+export default function ConfigField({ name, meta, value, onChange, parentData }) {
     const { type, description, options, label, help, uiType } = meta;
 
     // 显示名称: 优先 label > description > name
@@ -96,6 +96,7 @@ export default function ConfigField({ name, meta, value, onChange }) {
                     help={help}
                     value={value}
                     onChange={onChange}
+                    parentData={parentData}
                 />
             );
         }
@@ -136,6 +137,7 @@ export default function ConfigField({ name, meta, value, onChange }) {
                     help={help}
                     value={value}
                     onChange={onChange}
+                    parentData={parentData}
                 />
             );
         }
@@ -224,6 +226,35 @@ export default function ConfigField({ name, meta, value, onChange }) {
                 onChange={onChange}
                 uiType={uiType}
             />
+        );
+    }
+
+    // Object
+    if (type === 'object' && meta.children) {
+        return (
+            <div className="field-group nested-object-field">
+                <label className="field-label" style={{ marginBottom: 12 }}>
+                    {displayName}
+                    <span className="field-type-badge">{name}</span>
+                </label>
+                {help && <div className="field-help" style={{ marginBottom: 12 }}>{help}</div>}
+                <div className="nested-object-container" style={{ paddingLeft: 12, borderLeft: '2px solid var(--border-color)', marginTop: 8 }}>
+                    {Object.entries(meta.children).map(([childKey, childMeta]) => (
+                        <ConfigField
+                            key={childKey}
+                            name={childKey}
+                            meta={childMeta}
+                            value={value?.[childKey]}
+                            onChange={(val) => {
+                                const nextVal = { ...(value || {}) };
+                                nextVal[childKey] = val;
+                                onChange(nextVal);
+                            }}
+                            parentData={value}
+                        />
+                    ))}
+                </div>
+            </div>
         );
     }
 
@@ -378,7 +409,7 @@ function ArrayField({ name, displayName, help, value, onChange, itemType }) {
 /**
  * 群号选择字段 — 弹窗多选 bot 已加入的群，标签显示群名
  */
-function GroupSelectField({ name, displayName, help, value, onChange }) {
+function GroupSelectField({ name, displayName, help, value, onChange, parentData }) {
     const [showModal, setShowModal] = useState(false);
     const [groupMap, setGroupMap] = useState(new Map());
     const items = Array.isArray(value) ? value : [];
@@ -386,7 +417,8 @@ function GroupSelectField({ name, displayName, help, value, onChange }) {
     // 获取群列表，建立 群号→群名 映射
     useEffect(() => {
         const token = localStorage.getItem('sakura_token');
-        fetch('/api/bot/groups', {
+        const urlParam = parentData?.url ? `?url=${encodeURIComponent(parentData.url)}` : '';
+        fetch(`/api/bot/groups${urlParam}`, {
             headers: { Authorization: `Bearer ${token}` },
         })
             .then(r => r.json())
@@ -442,6 +474,7 @@ function GroupSelectField({ name, displayName, help, value, onChange }) {
                     selected={items}
                     onConfirm={(selected) => { onChange(selected); setShowModal(false); }}
                     onCancel={() => setShowModal(false)}
+                    parentData={parentData}
                 />
             )}
         </div>
@@ -451,7 +484,7 @@ function GroupSelectField({ name, displayName, help, value, onChange }) {
 /**
  * 群选择弹窗 — 从 bot 群列表中多选
  */
-function GroupSelectModal({ selected, onConfirm, onCancel }) {
+function GroupSelectModal({ selected, onConfirm, onCancel, parentData }) {
     const [groups, setGroups] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -460,7 +493,8 @@ function GroupSelectModal({ selected, onConfirm, onCancel }) {
 
     useEffect(() => {
         const token = localStorage.getItem('sakura_token');
-        fetch('/api/bot/groups', {
+        const urlParam = parentData?.url ? `?url=${encodeURIComponent(parentData.url)}` : '';
+        fetch(`/api/bot/groups${urlParam}`, {
             headers: { Authorization: `Bearer ${token}` },
         })
             .then(r => r.json())
@@ -573,13 +607,14 @@ function GroupSelectModal({ selected, onConfirm, onCancel }) {
 /**
  * 单选群号字段 — 下拉选择 bot 已加入的单个群
  */
-function SingleGroupSelectField({ name, displayName, help, value, onChange }) {
+function SingleGroupSelectField({ name, displayName, help, value, onChange, parentData }) {
     const [groups, setGroups] = useState([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         const token = localStorage.getItem('sakura_token');
-        fetch('/api/bot/groups', {
+        const urlParam = parentData?.url ? `?url=${encodeURIComponent(parentData.url)}` : '';
+        fetch(`/api/bot/groups${urlParam}`, {
             headers: { Authorization: `Bearer ${token}` },
         })
             .then(r => r.json())
@@ -593,7 +628,7 @@ function SingleGroupSelectField({ name, displayName, help, value, onChange }) {
     }, []);
 
     const currentGroup = groups.find(g => g.group_id === Number(value));
-    const displayValue = currentGroup 
+    const displayValue = currentGroup
         ? `${currentGroup.group_name} (${currentGroup.group_id})`
         : (value ? String(value) : '');
 
@@ -658,14 +693,18 @@ function ObjectArrayField({ name, displayName, help, value, onChange, itemMeta, 
         if (nameField && item[nameField] !== undefined && item[nameField] !== '') {
             return `${item[nameField]}`;
         }
+        let suffix = '';
+        if (item.whiteGroups?.length > 0) suffix += ` | 白名单: ${item.whiteGroups.length}`;
+        if (item.blackGroups?.length > 0) suffix += ` | 黑名单: ${item.blackGroups.length}`;
+
         // 回退到默认字段
-        const defaultNameFields = ['name', 'cmd', 'trigger', 'prefix', 'group'];
+        const defaultNameFields = ['name', 'cmd', 'trigger', 'prefix', 'group', 'url', 'host'];
         for (const f of defaultNameFields) {
             if (item[f] !== undefined && item[f] !== '') {
-                return `${item[f]}`;
+                return <>{item[f]}<span style={{ fontSize: '0.85em', color: 'var(--text-secondary)', marginLeft: '8px' }}>{suffix}</span></>;
             }
         }
-        return <span className="array-item-number">{index + 1}</span>;
+        return <span className="array-item-number">{index + 1}<span style={{ fontSize: '0.85em', color: 'var(--text-secondary)', marginLeft: '8px' }}>{suffix}</span></span>;
     };
 
     return (
@@ -802,6 +841,7 @@ function AddObjectModal({ title, itemMeta, onConfirm, onCancel }) {
                                 meta={childMeta}
                                 value={draft[childKey]}
                                 onChange={(val) => handleFieldChange(childKey, val)}
+                                parentData={draft}
                             />
                         ))}
                     </div>
@@ -875,6 +915,7 @@ function EditObjectModal({ title, itemMeta, initialData, onConfirm, onCancel, re
                                     meta={childMeta}
                                     value={draft[childKey]}
                                     onChange={(val) => handleFieldChange(childKey, val)}
+                                    parentData={draft}
                                 />
                             );
                         })}
