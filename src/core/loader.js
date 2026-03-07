@@ -16,8 +16,6 @@ import pluginConfigManager from "./pluginConfig.js";
 import schedule from "node-schedule";
 import { logger } from "../utils/logger.js";
 import { getBot } from "../api/client.js";
-import EconomyManager from "../../plugins/sakura-plugin/lib/economy/EconomyManager.js";
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let commandNamesCache = null;
@@ -54,6 +52,15 @@ async function checkAndConsumeCoins(e, instance, handler) {
     const costConfig = commandCosts.find(c => c.command === commandDisplayName);
 
     if (!costConfig || !costConfig.cost || costConfig.cost <= 0) return true;
+
+    let EconomyManager;
+    try {
+      const EconomyManagerModule = await import("../../plugins/sakura-plugin/lib/economy/EconomyManager.js");
+      EconomyManager = EconomyManagerModule.default;
+    } catch (importErr) {
+      logger.error(`[Loader] 无法加载 EconomyManager: ${importErr.message}`);
+      return true;
+    }
 
     const economyManager = new EconomyManager(e);
 
@@ -424,7 +431,7 @@ export class PluginLoader {
     }
   }
 
-  async deal(e) {
+  async deal(e, wsConfig = null) {
     if (e.post_type !== "meta_event") {
       const config = Config.get();
       const { group_id, user_id } = e;
@@ -444,15 +451,34 @@ export class PluginLoader {
       }
 
       if (group_id) {
-        if (config.whiteGroups.length > 0) {
-          const whiteGroups = config.whiteGroups.map(String);
-          if (!whiteGroups.includes(String(group_id))) {
+        // 先进行全局黑白名单判断
+        if (config.whiteGroups && config.whiteGroups.length > 0) {
+          const globalWgs = config.whiteGroups.map(String);
+          if (!globalWgs.includes(String(group_id))) {
             return;
           }
-        } else {
-          const blackGroups = config.blackGroups.map(String);
-          if (blackGroups.includes(String(group_id))) {
+        } else if (config.blackGroups && config.blackGroups.length > 0) {
+          const globalBgs = config.blackGroups.map(String);
+          if (globalBgs.includes(String(group_id))) {
             return;
+          }
+        }
+
+        // 再进行当前账号（实例）黑白名单判断
+        if (wsConfig) {
+          const whiteGroups = wsConfig.whiteGroups || [];
+          const blackGroups = wsConfig.blackGroups || [];
+
+          if (whiteGroups.length > 0) {
+            const wgs = whiteGroups.map(String);
+            if (!wgs.includes(String(group_id))) {
+              return;
+            }
+          } else if (blackGroups.length > 0) {
+            const bgs = blackGroups.map(String);
+            if (bgs.includes(String(group_id))) {
+              return;
+            }
           }
         }
       }

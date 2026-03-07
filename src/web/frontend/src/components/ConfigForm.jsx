@@ -86,6 +86,7 @@ export default function ConfigForm({ config, schema, onSave, saving, activeTab }
                                             meta={subMeta}
                                             value={draft?.[key]?.[childKey]?.[subKey]}
                                             onChange={(value) => handleChange(`${key}.${childKey}.${subKey}`, value)}
+                                            parentData={draft?.[key]?.[childKey]}
                                         />
                                     ))}
                                 </div>
@@ -98,6 +99,7 @@ export default function ConfigForm({ config, schema, onSave, saving, activeTab }
                                 meta={childMeta}
                                 value={draft?.[key]?.[childKey]}
                                 onChange={(value) => handleChange(`${key}.${childKey}`, value)}
+                                parentData={draft?.[key]}
                             />
                         );
                     })}

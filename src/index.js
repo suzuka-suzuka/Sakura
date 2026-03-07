@@ -39,118 +39,135 @@ startConfigServer();
 
 // =================== 正向 WebSocket 连接 ===================
 
-const wsConfig = Config.get("ws") || {};
-const wsUrl = wsConfig.url || "ws://127.0.0.1:3001";
-const accessToken = wsConfig.accessToken || "";
-const reconnection = wsConfig.reconnection || {};
-
-logger.info(`正在连接  WebSocket: ${wsUrl}`);
-
-const ncws = new NCWebsocket(
-  {
-    baseUrl: wsUrl,
-    accessToken,
-    reconnection: {
-      enable: reconnection.enable ?? true,
-      attempts: reconnection.attempts ?? 99,
-      delay: reconnection.delay ?? 5000,
-    },
-  },
-  false
-);
-
-// =================== 事件监听 ===================
-
-/**
- * 统一事件处理：接收库解析好的事件，转发给框架的 logEvent + loader.deal
- */
-function handleEvent(data) {
-  if (!data || !data.post_type) return;
-
-  // 确保 self_id 存在
-  if (data.self_id && !getBot(data.self_id)) {
-    logger.info(`检测到新的 Bot 实例: ${data.self_id}`);
-    new OneBotApi(ncws, data.self_id);
+let wsConfigs = Config.get("ws");
+if (!Array.isArray(wsConfigs)) {
+  if (typeof wsConfigs === "object" && wsConfigs !== null) {
+    wsConfigs = [wsConfigs];
+  } else {
+    wsConfigs = [];
   }
-
-  logEvent(data);
-  loader.deal(data);
 }
 
-// 监听所有消息事件
-ncws.on("message", handleEvent);
+const activeConnections = [];
 
-// 监听自身发送消息事件
-ncws.on("message_sent", handleEvent);
+for (const wsConfig of wsConfigs) {
+  const wsUrl = wsConfig.url || "ws://127.0.0.1:3001";
+  const accessToken = wsConfig.accessToken || "";
+  const reconnection = wsConfig.reconnection || {};
 
-// 监听通知事件
-ncws.on("notice", handleEvent);
+  logger.info(`正在连接  WebSocket: ${wsUrl}`);
 
-// 监听请求事件
-ncws.on("request", handleEvent);
-
-// 监听元事件（心跳、生命周期等）
-ncws.on("meta_event", handleEvent);
-
-// =================== 连接管理 ===================
-
-ncws.on("socket.open", async (data) => {
-  logger.info("WebSocket 连接成功");
-});
-
-ncws.on("socket.close", (data) => {
-  logger.warn(
-    `WebSocket 连接断开 [code: ${data.code}] ${data.reason || ""}`
+  const ncws = new NCWebsocket(
+    {
+      baseUrl: wsUrl,
+      accessToken,
+      reconnection: {
+        enable: reconnection.enable ?? true,
+        attempts: reconnection.attempts ?? 99,
+        delay: reconnection.delay ?? 5000,
+      },
+    },
+    false
   );
-  // 清理所有 bot 实例
-  for (const [selfId] of bots) {
-    removeBot(selfId);
-  }
-});
+  ncws._sakura_url = wsUrl;
 
-ncws.on("socket.error", (data) => {
-  logger.error(`WebSocket 错误: ${data.error_type}`);
-});
+  activeConnections.push(ncws);
 
-ncws.on("socket.connecting", (data) => {
-  const { nowAttempts, attempts } = data.reconnection;
-  if (nowAttempts > 1) {
-    logger.info(`正在重连... (${nowAttempts}/${attempts})`);
-  }
-});
+  // =================== 事件监听 ===================
 
-// 生命周期连接事件 → 初始化 Bot
-ncws.on("meta_event.lifecycle.connect", async (data) => {
-  if (data.self_id) {
-    logger.info(`初始化 Bot 实例: ${data.self_id}`);
-    const botInstance = new OneBotApi(ncws, data.self_id);
+  /**
+   * 统一事件处理：接收库解析好的事件，转发给框架的 logEvent + loader.deal
+   */
+  function handleEvent(data) {
+    if (!data || !data.post_type) return;
 
-    try {
-      const restartInfoStr = await redis.get("sakura:restart_info");
-      if (restartInfoStr) {
-        const info = JSON.parse(restartInfoStr);
-        const timeTaken = ((Date.now() - info.start_time) / 1000).toFixed(2);
-        const msg = `重启成功，用时 ${timeTaken} 秒`;
-
-        if (info.source_type === "group") {
-          await botInstance.sendGroupMsg(info.source_id, msg);
-        } else {
-          await botInstance.sendPrivateMsg(info.source_id, msg);
-        }
-
-        await redis.del("sakura:restart_info");
-      }
-    } catch (e) {
-      logger.error(`检查重启状态失败: ${e}`);
+    // 确保 self_id 存在
+    if (data.self_id && !getBot(data.self_id)) {
+      logger.info(`检测到新连接的 Bot 实例: ${data.self_id} on ${wsUrl}`);
+      new OneBotApi(ncws, data.self_id);
     }
-  }
-});
 
-// 启动连接
-try {
-  await ncws.connect();
-} catch (e) {
-  logger.error(`WebSocket 连接失败: ${e}`);
+    logEvent(data);
+    loader.deal(data, wsConfig);
+  }
+
+  // 监听所有消息事件
+  ncws.on("message", handleEvent);
+
+  // 监听自身发送消息事件
+  ncws.on("message_sent", handleEvent);
+
+  // 监听通知事件
+  ncws.on("notice", handleEvent);
+
+  // 监听请求事件
+  ncws.on("request", handleEvent);
+
+  // 监听元事件（心跳、生命周期等）
+  ncws.on("meta_event", handleEvent);
+
+  // =================== 连接管理 ===================
+
+  ncws.on("socket.open", async (data) => {
+    logger.info(`WebSocket 连接成功: ${wsUrl}`);
+  });
+
+  ncws.on("socket.close", (data) => {
+    logger.warn(
+      `WebSocket 连接断开 [code: ${data.code}] ${data.reason || ""} (${wsUrl})`
+    );
+    // 清理属于这个连接的 bot 实例
+    for (const [selfId, botInstance] of bots.entries()) {
+      if (botInstance.ncws === ncws) {
+        removeBot(selfId);
+      }
+    }
+  });
+
+  ncws.on("socket.error", (data) => {
+    logger.error(`WebSocket 错误 (${wsUrl}): ${data.error_type}`);
+  });
+
+  ncws.on("socket.connecting", (data) => {
+    const { nowAttempts, attempts } = data.reconnection;
+    if (nowAttempts > 1) {
+      logger.info(`正在重连... (${nowAttempts}/${attempts}) [${wsUrl}]`);
+    }
+  });
+
+  // 生命周期连接事件 → 初始化 Bot
+  ncws.on("meta_event.lifecycle.connect", async (data) => {
+    if (data.self_id) {
+      logger.info(`初始化 Bot 实例: ${data.self_id} at ${wsUrl}`);
+      const botInstance = new OneBotApi(ncws, data.self_id);
+
+      try {
+        const restartInfoStr = await redis.get("sakura:restart_info");
+        if (restartInfoStr) {
+          const info = JSON.parse(restartInfoStr);
+          const timeTaken = ((Date.now() - info.start_time) / 1000).toFixed(2);
+          const msg = `重启成功，用时 ${timeTaken} 秒`;
+
+          if (info.source_type === "group") {
+            await botInstance.sendGroupMsg(info.source_id, msg);
+          } else {
+            await botInstance.sendPrivateMsg(info.source_id, msg);
+          }
+
+          await redis.del("sakura:restart_info");
+        }
+      } catch (e) {
+        logger.error(`检查重启状态失败: ${e}`);
+      }
+    }
+  });
+
+  // 启动连接
+  try {
+    await ncws.connect();
+  } catch (e) {
+    logger.error(`WebSocket 连接失败 (${wsUrl}): ${e}`);
+  }
 }
 
 // =================== 优雅退出处理 ===================
@@ -164,8 +181,10 @@ async function gracefulShutdown(signal) {
   logger.info(`收到 ${signal} 信号，正在优雅关闭...`);
 
   try {
-    // 断开 WebSocket 连接
-    ncws.disconnect();
+    // 断开所有 WebSocket 连接
+    for (const ncws of activeConnections) {
+      ncws.disconnect();
+    }
     logger.info("WebSocket 连接已断开");
 
     // 关闭 Redis 连接
