@@ -1,4 +1,4 @@
-import { logger } from "../utils/logger.js";
+import { logger, logContext } from "../utils/logger.js";
 
 /**
  * 驼峰 → 下划线
@@ -615,7 +615,9 @@ export class OneBotApi {
       msgLog = msgLog.substring(0, 200) + "...";
     }
     const prefix = bots.size > 1 ? `[${this.self_id}] ` : "";
-    logger.info(`${prefix}发送 -> 群聊 ${group_id} ${msgLog}`);
+    const ctx = logContext.getStore();
+    const target = ctx?.group_id === group_id ? "" : ` ${group_id}`;
+    logger.info(`${prefix}发送 -> 群聊${target} ${msgLog}`);
     return this.sendRequest("send_group_msg", { group_id, message });
   }
 
@@ -636,7 +638,9 @@ export class OneBotApi {
       msgLog = msgLog.substring(0, 200) + "...";
     }
     const prefix = bots.size > 1 ? `[${this.self_id}] ` : "";
-    logger.info(`${prefix}发送 -> 私聊 ${user_id} ${msgLog}`);
+    const ctx = logContext.getStore();
+    const target = ctx?.user_id === user_id ? "" : ` ${user_id}`;
+    logger.info(`${prefix}发送 -> 私聊${target} ${msgLog}`);
     return this.sendRequest("send_private_msg", { user_id, message });
   }
 
@@ -716,12 +720,51 @@ export class OneBotApi {
 
   /** 发送合并转发消息（参数处理复杂，保留） */
   async sendForwardMsg(messages, group_id, user_id) {
+    const prefix = bots.size > 1 ? `[${this.self_id}] ` : "";
+    const ctx = logContext.getStore();
+
+    const shrink = (text) => {
+      if (!text) return "";
+      return text.length > 200 ? text.substring(0, 200) + "..." : text;
+    };
+
+    const safeStringify = (value) => {
+      if (typeof value === "string") return value;
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
+    };
+
+    const buildTargetText = (gid, uid) => {
+      if (gid) {
+        const sameGroup = ctx?.group_id && String(ctx.group_id) === String(gid);
+        return `群聊${sameGroup ? "" : ` ${gid}`}`;
+      }
+      if (uid) {
+        const sameUser = ctx?.user_id && String(ctx.user_id) === String(uid);
+        return `私聊${sameUser ? "" : ` ${uid}`}`;
+      }
+      return "未知目标";
+    };
+
     if (!Array.isArray(messages)) {
       const params = { ...messages };
       if (group_id && !params.group_id) params.group_id = group_id;
       if (user_id && !params.user_id) params.user_id = user_id;
+
+      const targetText = buildTargetText(params.group_id, params.user_id);
+      const msgLog = shrink(safeStringify(params.messages ?? params));
+      logger.info(`${prefix}发送 -> 转发 ${targetText} ${msgLog}`);
+
       return this.sendRequest("send_forward_msg", params);
     }
+
+    const targetText = buildTargetText(group_id, user_id);
+    const msgLog = shrink(safeStringify(messages));
+    logger.info(`${prefix}发送 -> 转发 ${targetText} ${msgLog}`);
+
     return this.sendRequest("send_forward_msg", {
       messages,
       group_id,

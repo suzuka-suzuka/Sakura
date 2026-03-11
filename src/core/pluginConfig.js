@@ -292,7 +292,11 @@ class PluginConfigManager {
         }
 
         if (typeName === 'enum') {
-            const values = inner._zod?.def?.entries || inner._zod?.def?.values || [];
+            const entriesRaw = inner._zod?.def?.entries;
+            // Zod v4: entries 是 { key: value } 对象；Zod v3: values 是数组
+            const values = entriesRaw
+                ? Object.values(entriesRaw)
+                : (inner._zod?.def?.values || []);
             return { type: 'enum', description: displayName, label, help, options: values, default: defaultValue, ...(uiType && { uiType }) };
         }
 

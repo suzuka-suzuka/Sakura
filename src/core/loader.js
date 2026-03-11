@@ -14,13 +14,23 @@ import {
 import Config from "./config.js";
 import pluginConfigManager from "./pluginConfig.js";
 import schedule from "node-schedule";
-import { logger } from "../utils/logger.js";
+import { logger, logContext } from "../utils/logger.js";
 import { getBot } from "../api/client.js";
 import EconomyManager from "../../plugins/sakura-plugin/lib/economy/EconomyManager.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let commandNamesCache = null;
+
+function getEventLogContext(e) {
+  if (!e) return "[事件:unknown]";
+  const eventType = [e.post_type, e.message_type || e.notice_type || e.request_type || e.meta_event_type]
+    .filter(Boolean)
+    .join(".");
+  const groupPart = e.group_id ? `[群:${e.group_id}]` : "[私聊]";
+  const userPart = e.user_id ? `[用户:${e.user_id}]` : "";
+  return `${groupPart}${userPart}[事件:${eventType || "unknown"}]`;
+}
 
 async function getCommandNames() {
   if (commandNamesCache) return commandNamesCache;
@@ -469,7 +479,13 @@ export class PluginLoader {
 
     // 使用 eventStorage 传播事件对象到所有异步操作中，
     // 确保 setTimeout 等回调中 setContext/finish/getContext 能获取正确的事件
-    return eventStorage.run(eventObj, async () => {
+    const _logCtx = {
+      group_id: e.group_id,
+      user_id: e.user_id,
+      group_name: e.group_name,
+      user_name: e.sender?.card || e.sender?.nickname,
+    };
+    return logContext.run(_logCtx, () => eventStorage.run(eventObj, async () => {
 
       let context = e.group_id && e.user_id ? contexts[`${e.group_id}:${e.user_id}`] : null;
 
@@ -485,7 +501,7 @@ export class PluginLoader {
           await plugin[method](eventObj);
           return;
         } catch (err) {
-          logger.error(`插件 ${plugin.name} 上下文执行出错: ${err}`);
+          logger.error(`${getEventLogContext(e)} 插件 ${plugin.name} 上下文执行出错: ${err}`);
         }
       }
 
@@ -537,10 +553,10 @@ export class PluginLoader {
             return;
           }
         } catch (err) {
-          logger.error(`插件 ${instance.name} 执行出错: ${err}`);
+          logger.error(`${getEventLogContext(e)} 插件 ${instance.name} 执行出错: ${err}`);
         }
       }
-    });
+    }));
   }
 
   checkEvent(e, targetEvent) {

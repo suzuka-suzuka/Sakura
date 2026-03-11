@@ -52,7 +52,7 @@ export class SystemPlugin extends plugin {
     }
   });
 
-  getLogs = Command(/^#(全部)?日志$/, async (e) => {
+  getLogs = Command(/^#(全部)?(错误)?日志$/, async (e) => {
     await e.react(124);
     if (!fs.existsSync(LOG_DIR)) {
       return e.reply("暂无日志文件");
@@ -69,7 +69,9 @@ export class SystemPlugin extends plugin {
     }
 
     const logFile = path.join(LOG_DIR, files[0]);
-    const isAll = e.msg.includes("全部");
+    const isAllGroups = !e.group_id || e.match?.[1] === "全部"; // 私聊或#全部：不过滤群
+    const isErrorOnly = e.match?.[2] === "错误";                 // 有"错误"：只看 ERROR+WARN
+    const filterGroupId = isAllGroups ? null : e.group_id;
 
     try {
       const content = fs.readFileSync(logFile, "utf-8");
@@ -89,25 +91,27 @@ export class SystemPlugin extends plugin {
       }
       if (currentLog) lines.push(currentLog);
 
-      let targetLines;
-      let title;
+      let targetLines = isErrorOnly
+        ? lines.filter((line) => line.includes("[ERROR]") || line.includes("[WARN]"))
+        : lines;
 
-      if (isAll) {
-        targetLines = lines;
-        title = "全部日志";
-      } else {
-        targetLines = lines.filter((line) => line.includes("[ERROR]"));
-        title = "错误日志";
+      if (filterGroupId) {
+        const groupTagRegex = new RegExp(`\\[([^\\]]*\\()?${filterGroupId}\\)?\\]`);
+        targetLines = targetLines.filter((line) => groupTagRegex.test(line));
       }
 
+      const scopeLabel = isAllGroups ? "全部" : filterGroupId ? `群 ${filterGroupId} ` : "";
+      const typeLabel = isErrorOnly ? "错误日志" : "日志";
+      const title = `${scopeLabel}${typeLabel}`;
+
       if (targetLines.length === 0) {
-        return e.reply(isAll ? "今日暂无日志" : "今日暂无错误日志");
+        return e.reply(`今日暂无${title}`);
       }
 
       const lastLogs = targetLines.reverse().slice(0, 50);
 
       await e.sendForwardMsg(lastLogs, {
-        prompt: `${title}`,
+        prompt: title,
         source: "系统日志",
         news: [
           { text: `共 ${targetLines.length} 条` },

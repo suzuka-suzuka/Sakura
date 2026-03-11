@@ -65,13 +65,13 @@ export function logEvent(data) {
         ? `${event.group_name}(${event.group_id})`
         : `群:${event.group_id}`;
       logger.info(
-        `${prefix}接收 <- 群聊 [${groupInfo}] [${senderName}(${senderId})] ${content}`
+        `${prefix}[${groupInfo}][${senderName}(${senderId})] 接收 <- 群聊 ${content}`
       );
       return;
     }
 
     if (event.message_type === "private") {
-      logger.info(`${prefix}接收 <- 私聊 [${senderName}(${senderId})] ${content}`);
+      logger.info(`${prefix}[${senderName}(${senderId})] 接收 <- 私聊 ${content}`);
       return;
     }
   }

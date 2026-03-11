@@ -198,6 +198,17 @@ export class Event {
   }
 
   /**
+   * 获取陌生人信息 (适配层，屏蔽底层参数格式)
+   * e.getStrangerInfo()       -> 获取当前事件用户信息
+   * e.getStrangerInfo(userId) -> 获取指定用户信息
+   * @param {number|string} [userId] 目标用户 ID，默认为当前事件用户
+   */
+  async getStrangerInfo(userId = null) {
+    const uid = userId || this.user_id;
+    return this.bot.getStrangerInfo({ user_id: uid });
+  }
+
+  /**
    * 踢人 (智能判断)
    * e.kick() -> 踢出发送消息的人
    * e.kick(targetId) -> 踢出指定人
