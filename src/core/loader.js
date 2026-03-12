@@ -454,24 +454,15 @@ export class PluginLoader {
       }
 
       if (group_id) {
-        const masterId = config.master;
-        const isMaster = Array.isArray(masterId)
-          ? masterId.map(Number).includes(Number(user_id))
-          : Number(masterId) === Number(user_id);
-        const whiteUsers = (config.whiteUsers || []).map(Number);
-        const isWhiteUser = whiteUsers.includes(Number(user_id));
-
-        if (!isMaster && !isWhiteUser) {
-          if (config.whiteGroups.length > 0) {
-            const whiteGroups = config.whiteGroups.map(String);
-            if (!whiteGroups.includes(String(group_id))) {
-              return;
-            }
-          } else {
-            const blackGroups = config.blackGroups.map(String);
-            if (blackGroups.includes(String(group_id))) {
-              return;
-            }
+        if (config.whiteGroups.length > 0) {
+          const whiteGroups = config.whiteGroups.map(String);
+          if (!whiteGroups.includes(String(group_id))) {
+            return;
+          }
+        } else {
+          const blackGroups = config.blackGroups.map(String);
+          if (blackGroups.includes(String(group_id))) {
+            return;
           }
         }
       }
