@@ -1,5 +1,6 @@
 import { Segment, Group, Friend } from "../api/client.js";
 import Config from "./config.js";
+import { isMasterUser, normalizeMasters } from "../utils/common.js";
 export class Event {
   constructor(event, bot) {
     Object.assign(this, event);
@@ -72,11 +73,7 @@ export class Event {
 
   get isMaster() {
     const config = Config.get();
-    const master = config.master;
-    if (Array.isArray(master)) {
-      return master.includes(this.user_id);
-    }
-    return master == this.user_id;
+    return isMasterUser(this.user_id, config.master);
   }
 
   get isWhite() {
@@ -100,12 +97,8 @@ export class Event {
 
   getWhite() {
     const config = Config.get();
-    const masters = config.master
-      ? Array.isArray(config.master)
-        ? config.master
-        : [config.master]
-      : [];
-    const whiteUsers = config.whiteUsers || [];
+    const masters = normalizeMasters(config.master);
+    const whiteUsers = (config.whiteUsers || []).map(String);
     return [...new Set([...masters, ...whiteUsers])];
   }
 

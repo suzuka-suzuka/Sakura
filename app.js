@@ -3,7 +3,7 @@ import net from 'net';
 import yaml from 'js-yaml';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { spawn } from 'child_process';
+import { spawn, fork } from 'child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.join(__dirname, 'config/config.yaml');
@@ -76,28 +76,24 @@ async function start() {
 }
 
 function startBot() {
-    // 使用 fork 单独启动业务文件，以便捕获其崩溃或重启命令
-    // fork 已经在头部导入了，直接使用 child_process.fork
-    import('child_process').then(({ fork }) => {
-        const child = fork(script, [], { stdio: ['inherit', 'inherit', 'inherit', 'ipc'] });
+    const child = fork(script, [], { stdio: ['inherit', 'inherit', 'inherit', 'ipc'] });
 
-        child.on('message', (msg) => {
-            if (msg === 'shutdown') {
-                console.log('收到关机指令，主进程即将退出。');
-                child.kill();
-                process.exit(0);
-            }
-        });
+    child.on('message', (msg) => {
+        if (msg === 'shutdown') {
+            console.log('收到关机指令，主进程即将退出。');
+            child.kill();
+            process.exit(0);
+        }
+    });
 
-        child.on('exit', (code) => {
-            if (code !== 0 && code !== null) {
-                console.error(`子进程异常退出，3秒后自动重启...`);
-                setTimeout(startBot, 3000);
-            } else {
-                console.log(`子进程正常退出，执行完全重启操作...`);
-                setTimeout(startBot, 2000);
-            }
-        });
+    child.on('exit', (code) => {
+        if (code !== 0 && code !== null) {
+            console.error(`子进程异常退出，3秒后自动重启...`);
+            setTimeout(startBot, 3000);
+        } else {
+            console.log(`子进程正常退出，执行完全重启操作...`);
+            setTimeout(startBot, 2000);
+        }
     });
 }
 

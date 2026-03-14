@@ -76,7 +76,7 @@ class Config {
                 }
 
                 // 检查是否需要同步：缺失字段需补全 / 多余字段需清理
-                if (JSON.stringify(this.config) !== JSON.stringify(rawData)) {
+                if (!lodash.isEqual(this.config, rawData)) {
                     logger.info('[Config] 配置结构与 Schema 不一致，正在同步...');
                     this._syncSave();
                 }
