@@ -1,5 +1,5 @@
 import config from "../../src/core/config.js";
-import { getRedis } from "../../src/utils/redis.js";
+import { getRedis, onRedisKeyExpired } from "../../src/utils/redis.js";
 
 export function parseTime(timeStr) {
   if (!timeStr) return null;
@@ -140,16 +140,7 @@ export class Permission extends plugin {
 
   async initRedisExpireListener() {
     try {
-      const redis = getRedis();
-
-      await redis.config("SET", "notify-keyspace-events", "Ex");
-
-      const subscriber = redis.duplicate();
-      await subscriber.connect();
-
-      await subscriber.psubscribe("__keyevent@*__:expired");
-
-      subscriber.on("pmessage", async (pattern, channel, expiredKey) => {
+      await onRedisKeyExpired(async (expiredKey) => {
         if (expiredKey.startsWith("tempblock:")) {
           const userId = Number(expiredKey.split(":")[1]);
           await this.autoUnblock(userId);
