@@ -8,6 +8,7 @@ import {
   HANDLER_METADATA,
   plugin,
   Event,
+  buildContextKey,
   contexts,
   eventStorage,
 } from "./plugin.js";
@@ -15,23 +16,13 @@ import Config from "./config.js";
 import pluginConfigManager from "./pluginConfig.js";
 import schedule from "node-schedule";
 import { logger, logContext } from "../utils/logger.js";
-import { getBot } from "../api/client.js";
+import { getBot, getBots, withBotContext } from "../api/client.js";
 import { isMasterUser } from "../utils/common.js";
 import EconomyManager from "../../plugins/sakura-plugin/lib/economy/EconomyManager.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let commandNamesCache = null;
-
-function getEventLogContext(e) {
-  if (!e) return "[事件:unknown]";
-  const eventType = [e.post_type, e.message_type || e.notice_type || e.request_type || e.meta_event_type]
-    .filter(Boolean)
-    .join(".");
-  const groupPart = e.group_id ? `[群:${e.group_id}]` : "[私聊]";
-  const userPart = e.user_id ? `[用户:${e.user_id}]` : "";
-  return `${groupPart}${userPart}[事件:${eventType || "unknown"}]`;
-}
 
 async function getCommandNames() {
   if (commandNamesCache) return commandNamesCache;
@@ -79,6 +70,27 @@ async function checkAndConsumeCoins(e, instance, handler) {
     logger.error(`[Loader] 检查指令消耗出错: ${err}`);
     return true;
   }
+}
+
+function buildCronScopeIds(pluginName) {
+  const configuredIds = pluginConfigManager.getConfiguredSelfIds(pluginName);
+  const onlineIds = getBots().map((currentBot) => Number(currentBot.self_id)).filter((selfId) =>
+    Number.isFinite(selfId)
+  );
+  return [...new Set([...configuredIds, ...onlineIds])];
+}
+
+async function runCronInScope(instance, handler, selfId = null) {
+  const run = async () => {
+    instance.e = null;
+    await instance[handler.methodName].call(instance);
+  };
+
+  if (selfId == null) {
+    return run();
+  }
+
+  return withBotContext(selfId, run);
 }
 
 export class PluginLoader {
@@ -249,6 +261,7 @@ export class PluginLoader {
           }
 
           const handlers = instance[PLUGIN_HANDLERS] || [];
+          const pluginName = this._getPluginNameFromPath(filePath);
 
           for (const handler of handlers) {
             if (handler.type === "cron" && handler.cronExpression) {
@@ -267,7 +280,14 @@ export class PluginLoader {
                         `[${instance.name}] 触发定时任务: ${handler.methodName}`
                       );
                     }
-                    await instance[handler.methodName].call(instance);
+                    const scopeIds = pluginName ? buildCronScopeIds(pluginName) : [];
+                    if (scopeIds.length === 0) {
+                      await runCronInScope(instance, handler, null);
+                    } else {
+                      for (const selfId of scopeIds) {
+                        await runCronInScope(instance, handler, selfId);
+                      }
+                    }
                   } catch (e) {
                     logger.error(
                       `[${instance.name}] 定时任务 ${handler.methodName} 执行出错: ${e}`
@@ -394,33 +414,13 @@ export class PluginLoader {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(async () => {
           try {
+            const isInAppsDir = filename.split("/").includes("apps");
+            if (!isInAppsDir) return;
 
-            const isInAppsDir = filename.includes("apps" + path.sep) || filename.includes("apps/");
-            if (isInAppsDir) {
-
-              await fs.access(filePath);
-              logger.info(`检测到插件变更: ${filename}，正在重载..`);
-              await this.loadPlugin(filePath);
-              this.sortHandlers();
-            } else {
-
-              let entryPath = filePath;
-              let currentDir = path.dirname(filePath);
-
-              while (currentDir.length > dir.length) {
-                const indexPath = path.join(currentDir, "index.js");
-                if (fsSync.existsSync(indexPath)) {
-                  entryPath = indexPath;
-                  break;
-                }
-                currentDir = path.dirname(currentDir);
-              }
-
-              await fs.access(entryPath);
-              logger.info(`检测到文件变更: ${filename}，正在重载..`);
-              await this.loadPlugin(entryPath);
-              this.sortHandlers();
-            }
+            await fs.access(filePath);
+            logger.info(`检测到插件变更: ${filename}，正在重载..`);
+            await this.loadPlugin(filePath);
+            this.sortHandlers();
           } catch {
             this.unloadPlugin(filePath);
           }
@@ -433,7 +433,7 @@ export class PluginLoader {
 
   async deal(e) {
     if (e.post_type !== "meta_event") {
-      const config = Config.get();
+      const config = Config.getForSelf(e.self_id);
       const { group_id, user_id } = e;
 
       if (user_id && config.blackUsers.includes(user_id)) {
@@ -478,12 +478,12 @@ export class PluginLoader {
       group_name: e.group_name,
       user_name: e.sender?.card || e.sender?.nickname,
     };
-    return logContext.run(_logCtx, () => eventStorage.run(eventObj, async () => {
+    return logContext.run(_logCtx, () => withBotContext(e.self_id, () => eventStorage.run(eventObj, async () => {
 
-      let context = e.group_id && e.user_id ? contexts[`${e.group_id}:${e.user_id}`] : null;
+      let context = buildContextKey(e, true) ? contexts[buildContextKey(e, true)] : null;
 
       if (!context && e.user_id) {
-        context = contexts[e.user_id];
+        context = contexts[buildContextKey(e, false)];
       }
       if (context) {
         const { plugin, method } = context;
@@ -494,7 +494,7 @@ export class PluginLoader {
           await plugin[method](eventObj);
           return;
         } catch (err) {
-          logger.error(`${getEventLogContext(e)} 插件 ${plugin.name} 上下文执行出错: ${err}`);
+          logger.error(`插件 ${plugin.name} 上下文执行出错: ${err}`);
         }
       }
 
@@ -505,7 +505,7 @@ export class PluginLoader {
         try {
           const permission = handler.permission || instance.permission;
           if (permission) {
-            const config = Config.get();
+            const config = Config.getForSelf(e.self_id);
             const uid = String(e.user_id);
             const isUserMaster = isMasterUser(uid, config.master);
 
@@ -546,10 +546,10 @@ export class PluginLoader {
             return;
           }
         } catch (err) {
-          logger.error(`${getEventLogContext(e)} 插件 ${instance.name} 执行出错: ${err}`);
+          logger.error(`插件 ${instance.name} 执行出错: ${err}`);
         }
       }
-    }));
+    })));
   }
 
   checkEvent(e, targetEvent) {

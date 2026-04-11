@@ -1,6 +1,7 @@
-import { NCWebsocket } from "node-napcat-ts";
+import { OneBotWsClient } from "./core/wsClient.js";
+import { MilkyClient } from "./adapters/milkyClient.js";
 import { logger } from "./utils/logger.js";
-import { OneBotApi, Segment, removeBot, getBot, bots } from "./api/client.js";
+import { OneBotApi, Segment, removeBot, getBot, rememberBotTargets } from "./api/client.js";
 import { logEvent } from "./handlers/logging.js";
 import { PluginLoader } from "./core/loader.js";
 import { Command, OnEvent, plugin, Event, Cron } from "./core/plugin.js";
@@ -37,93 +38,116 @@ await loader.loadPlugins();
 // 启动配置面板
 startConfigServer();
 
-// =================== 正向 WebSocket 连接 ===================
+// =================== WebSocket 多客户端管理 ===================
 
-const wsConfig = Config.get("ws") || {};
-const wsUrl = wsConfig.url || "ws://127.0.0.1:3001";
-const accessToken = wsConfig.accessToken || "";
-const reconnection = wsConfig.reconnection || {};
+/** 所有活跃的 WS 客户端 */
+const wsClients = [];
 
-logger.info(`正在连接  WebSocket: ${wsUrl}`);
+/** selfId → { client, routeKey }，用于断线时精准清理对应 bot */
+const selfIdToClient = new Map();
 
-const ncws = new NCWebsocket(
-  {
-    baseUrl: wsUrl,
-    accessToken,
-    reconnection: {
-      enable: reconnection.enable ?? true,
-      attempts: reconnection.attempts ?? 99,
-      delay: reconnection.delay ?? 5000,
-    },
-  },
-  false
-);
-
-// =================== 事件监听 ===================
+/** 当前生效的 ws 配置快照，用于热重载比对 */
+let currentWsConfig = null;
 
 /**
- * 统一事件处理：接收库解析好的事件，转发给框架的 logEvent + loader.deal
+ * 为一个 WsClient 实例绑定所有事件监听
+ * @param {OneBotWsClient} client
+ * @param {string} label  日志标识，如 "正向" / "反向"
  */
-function handleEvent(data) {
-  if (!data || !data.post_type) return;
+function setupClient(client, label) {
+  const tag = `[${label}]`;
 
-  // 确保 self_id 存在
-  if (data.self_id && !getBot(data.self_id)) {
-    logger.info(`检测到新的 Bot 实例: ${data.self_id}`);
-    new OneBotApi(ncws, data.self_id);
+  function bindSelfId(selfId, routeKey) {
+    const id = Number(selfId);
+    if (!Number.isFinite(id)) return;
+    selfIdToClient.set(id, { client, routeKey: routeKey || label });
   }
 
-  logEvent(data);
-  loader.deal(data);
-}
+  function cleanupBotsForRoute(routeKey, explicitSelfIds = []) {
+    const normalizedSelfIds = explicitSelfIds
+      .map((selfId) => Number(selfId))
+      .filter((selfId) => Number.isFinite(selfId));
 
-// 监听所有消息事件
-ncws.on("message", handleEvent);
+    if (normalizedSelfIds.length > 0) {
+      for (const selfId of normalizedSelfIds) {
+        const bound = selfIdToClient.get(selfId);
+        if (bound?.client === client) {
+          selfIdToClient.delete(selfId);
+          removeBot(selfId);
+        }
+      }
+      return;
+    }
 
-// 监听自身发送消息事件
-ncws.on("message_sent", handleEvent);
-
-// 监听通知事件
-ncws.on("notice", handleEvent);
-
-// 监听请求事件
-ncws.on("request", handleEvent);
-
-// 监听元事件（心跳、生命周期等）
-ncws.on("meta_event", handleEvent);
-
-// =================== 连接管理 ===================
-
-ncws.on("socket.open", async (data) => {
-  logger.info("WebSocket 连接成功");
-});
-
-ncws.on("socket.close", (data) => {
-  logger.warn(
-    `WebSocket 连接断开 [code: ${data.code}] ${data.reason || ""}`
-  );
-  // 清理所有 bot 实例
-  for (const [selfId] of bots) {
-    removeBot(selfId);
+    for (const [selfId, bound] of selfIdToClient) {
+      if (bound.client !== client) continue;
+      if (routeKey && bound.routeKey !== routeKey) continue;
+      selfIdToClient.delete(selfId);
+      removeBot(selfId);
+    }
   }
-});
 
-ncws.on("socket.error", (data) => {
-  logger.error(`WebSocket 错误: ${data.error_type}`);
-});
+  // ---- 统一事件处理 ----
+  function handleEvent(data) {
+    if (!data || !data.post_type) return;
 
-ncws.on("socket.connecting", (data) => {
-  const { nowAttempts, attempts } = data.reconnection;
-  if (nowAttempts > 1) {
-    logger.info(`正在重连... (${nowAttempts}/${attempts})`);
+    const routeKey = data.__routeKey || label;
+
+    if (data.self_id) {
+      bindSelfId(data.self_id, routeKey);
+      rememberBotTargets(data);
+    }
+
+    // 首次出现的 self_id → 注册 bot 实例
+    if (data.self_id && !getBot(data.self_id)) {
+      logger.info(`${tag} 检测到新的 Bot 实例: ${data.self_id}`);
+      new OneBotApi(client, data.self_id);
+    }
+
+    logEvent(data);
+    loader.deal(data);
   }
-});
 
-// 生命周期连接事件 → 初始化 Bot
-ncws.on("meta_event.lifecycle.connect", async (data) => {
-  if (data.self_id) {
-    logger.info(`初始化 Bot 实例: ${data.self_id}`);
-    const botInstance = new OneBotApi(ncws, data.self_id);
+  client.on("message", handleEvent);
+  client.on("message_sent", handleEvent);
+  client.on("notice", handleEvent);
+  client.on("request", handleEvent);
+  client.on("meta_event", handleEvent);
+
+  // ---- 连接管理 ----
+
+  client.on("socket.open", (data = {}) => {
+    const routeText = data.routeKey ? ` (${data.routeKey})` : "";
+    logger.info(`${tag} WebSocket 连接成功${routeText}`);
+  });
+
+  client.on("socket.close", (data) => {
+    const routeText = data.routeKey ? ` (${data.routeKey})` : "";
+    logger.warn(`${tag} WebSocket 连接断开${routeText} [code: ${data.code}] ${data.reason || ""}`);
+    cleanupBotsForRoute(data.routeKey, data.selfIds || []);
+  });
+
+  client.on("socket.error", (data) => {
+    logger.error(`${tag} WebSocket 错误: ${data.error_type}`);
+  });
+
+  client.on("socket.connecting", () => {
+    logger.info(`${tag} 正在重连...`);
+  });
+
+  // ---- 生命周期: 初始化 Bot ----
+
+  client.on("meta_event.lifecycle.connect", async (data) => {
+    if (!data.self_id) return;
+
+    const routeKey = data.__routeKey || label;
+    bindSelfId(data.self_id, routeKey);
+
+    let botInstance = getBot(data.self_id);
+    if (!botInstance) {
+      logger.info(`${tag} 初始化 Bot 实例: ${data.self_id}`);
+      botInstance = new OneBotApi(client, data.self_id);
+    }
 
     try {
       const restartInfoStr = await redis.get("sakura:restart_info");
@@ -141,17 +165,134 @@ ncws.on("meta_event.lifecycle.connect", async (data) => {
         await redis.del("sakura:restart_info");
       }
     } catch (e) {
-      logger.error(`检查重启状态失败: ${e}`);
+      logger.error(`${tag} 检查重启状态失败: ${e}`);
+    }
+  });
+}
+
+// =================== 客户端创建工厂 ===================
+
+/**
+ * 根据 ws 配置创建并启动所有客户端
+ */
+async function createAndStartClients(wsConfig) {
+  const clients = [];
+
+  const forwardEntries = Array.isArray(wsConfig.forward) ? wsConfig.forward : [];
+  const reverseEntries = Array.isArray(wsConfig.reverse) ? wsConfig.reverse : [];
+  const milkyEntries = Array.isArray(wsConfig.milky) ? wsConfig.milky : [];
+
+  for (const [index, fwdCfg] of forwardEntries.entries()) {
+    if (fwdCfg?.enable === false) continue;
+    const url = fwdCfg?.url || "ws://127.0.0.1:3001";
+    const label = `正向:${fwdCfg?.name || index + 1}`;
+    logger.info(`[${label}] WebSocket: ${url}`);
+    const client = new OneBotWsClient({
+      mode: "forward",
+      url,
+      accessToken: fwdCfg?.accessToken || "",
+      reconnectDelay: fwdCfg?.reconnectDelay ?? 5000,
+      heartbeatInterval: fwdCfg?.heartbeatInterval ?? 30000,
+    });
+    setupClient(client, label);
+    clients.push(client);
+  }
+
+  for (const [index, revCfg] of reverseEntries.entries()) {
+    if (!revCfg?.enable) continue;
+    const port = revCfg?.port || 3002;
+    const label = `反向:${revCfg?.name || index + 1}`;
+    logger.info(`[${label}] WebSocket 监听端口: ${port}`);
+    const client = new OneBotWsClient({
+      mode: "reverse",
+      reversePort: port,
+      accessToken: revCfg?.accessToken || "",
+    });
+    setupClient(client, label);
+    clients.push(client);
+  }
+
+  for (const [index, milkyCfg] of milkyEntries.entries()) {
+    if (!milkyCfg?.enable) continue;
+    const url = milkyCfg?.url || "http://127.0.0.1:3000";
+    const label = `Milky:${milkyCfg?.name || index + 1}`;
+    logger.info(`[${label}] 协议连接: ${url}`);
+    const client = new MilkyClient({
+      url,
+      accessToken: milkyCfg?.accessToken || "",
+      reconnectDelay: milkyCfg?.reconnectDelay ?? 5000,
+      heartbeatInterval: milkyCfg?.heartbeatInterval ?? 30000,
+    });
+    setupClient(client, label);
+    clients.push(client);
+  }
+
+  if (clients.length === 0) {
+    logger.warn("未启用任何连接，请检查配置 ws.forward / ws.reverse / ws.milky");
+  }
+
+  // 启动所有客户端
+  for (const client of clients) {
+    try {
+      await client.connect();
+    } catch (e) {
+      logger.error(`连接失败: ${e}`);
     }
   }
-});
 
-// 启动连接
-try {
-  await ncws.connect();
-} catch (e) {
-  logger.error(`WebSocket 连接失败: ${e}`);
+  return clients;
 }
+
+/**
+ * 断开并清理所有现有客户端
+ */
+function disconnectAllClients() {
+  for (const client of wsClients) {
+    try {
+      client.disconnect();
+    } catch (e) {
+      logger.error(`断开连接失败: ${e}`);
+    }
+  }
+  // 清理 selfIdToClient 和 bot 实例
+  for (const [selfId, bound] of selfIdToClient) {
+    if (wsClients.includes(bound.client)) {
+      selfIdToClient.delete(selfId);
+      removeBot(selfId);
+    }
+  }
+  wsClients.length = 0;
+}
+
+// =================== 初始启动 ===================
+
+currentWsConfig = Config.get("ws") || {};
+const initialClients = await createAndStartClients(currentWsConfig);
+wsClients.push(...initialClients);
+
+// =================== 配置热重载 ===================
+
+Config.onChange((newConfig) => {
+  const newWsConfig = newConfig.ws || {};
+  const oldWsConfig = currentWsConfig || {};
+
+  // 深度比较 ws 配置，仅在变更时重连
+  const changed =
+    JSON.stringify(newWsConfig) !== JSON.stringify(oldWsConfig);
+
+  if (!changed) return;
+
+  logger.info("[Config] 检测到连接配置变更，正在重新连接...");
+  currentWsConfig = newWsConfig;
+
+  // 断开旧连接，用新配置创建新连接
+  disconnectAllClients();
+  createAndStartClients(newWsConfig).then((clients) => {
+    wsClients.push(...clients);
+  }).catch((e) => {
+    logger.error(`[Config] 重新连接失败: ${e}`);
+  });
+});
 
 // =================== 优雅退出处理 ===================
 
@@ -164,11 +305,9 @@ async function gracefulShutdown(signal) {
   logger.info(`收到 ${signal} 信号，正在优雅关闭...`);
 
   try {
-    // 断开 WebSocket 连接
-    ncws.disconnect();
-    logger.info("WebSocket 连接已断开");
+    disconnectAllClients();
+    logger.info("所有连接已断开");
 
-    // 关闭 Redis 连接
     if (global.redis) {
       await global.redis.quit();
       logger.info("Redis 连接已关闭");
@@ -177,7 +316,6 @@ async function gracefulShutdown(signal) {
     logger.error(`关闭过程出错: ${e}`);
   }
 
-  // 确保进程退出
   setTimeout(() => {
     process.exit(0);
   }, 500);
@@ -196,5 +334,9 @@ if (!process.send) {
   process.on("SIGINT", () => gracefulShutdown("SIGINT"));
   process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 }
+
+process.on("disconnect", () => {
+  gracefulShutdown("IPC disconnect");
+});
 
 export { bot as api } from "./api/client.js";

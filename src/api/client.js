@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { logger, logContext } from "../utils/logger.js";
 
 /**
@@ -47,22 +48,443 @@ export const Segment = {
 export let bot;
 export const bots = new Map();
 
+const botContextStorage = new AsyncLocalStorage();
+const botStates = new Map();
+const groupOwners = new Map();
+const privateOwners = new Map();
+const warnedRoutingKeys = new Set();
+let botFacade;
+
+function normalizeNumericId(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function getOrCreateBotState(selfId) {
+  const id = normalizeNumericId(selfId);
+  if (id == null) return null;
+
+  let state = botStates.get(id);
+  if (!state) {
+    state = {
+      selfId: id,
+      nickname: "Bot",
+      loginInfo: null,
+      groups: new Set(),
+      friends: new Set(),
+    };
+    botStates.set(id, state);
+  }
+  return state;
+}
+
+function bindTarget(map, targetId, selfId) {
+  const target = normalizeNumericId(targetId);
+  const id = normalizeNumericId(selfId);
+  if (target == null || id == null) return;
+
+  if (!map.has(target)) {
+    map.set(target, new Set());
+  }
+  map.get(target).add(id);
+}
+
+function unbindTarget(map, targetId, selfId) {
+  const target = normalizeNumericId(targetId);
+  const id = normalizeNumericId(selfId);
+  if (target == null || id == null) return;
+
+  const owners = map.get(target);
+  if (!owners) return;
+  owners.delete(id);
+  if (owners.size === 0) {
+    map.delete(target);
+  }
+}
+
+function syncOwnedTargets(map, currentTargets, nextTargets, selfId) {
+  for (const target of currentTargets) {
+    unbindTarget(map, target, selfId);
+  }
+  currentTargets.clear();
+
+  for (const target of nextTargets) {
+    currentTargets.add(target);
+    bindTarget(map, target, selfId);
+  }
+}
+
+function updateGlobalBotBinding() {
+  if (bots.size > 0) {
+    bot = botFacade;
+    if (typeof global !== "undefined") {
+      global.bot = botFacade;
+    }
+    return;
+  }
+
+  bot = undefined;
+  if (typeof global !== "undefined") {
+    global.bot = null;
+  }
+}
+
+function getCurrentContextBot() {
+  const selfId = botContextStorage.getStore();
+  if (selfId == null) return null;
+  return getBot(selfId) || null;
+}
+
+function getDefaultBot() {
+  return getCurrentContextBot() || bots.values().next().value || null;
+}
+
+function warnRouting(kind, targetId, selfIds) {
+  const key = `${kind}:${targetId}:${selfIds.join(",")}`;
+  if (warnedRoutingKeys.has(key)) return;
+  warnedRoutingKeys.add(key);
+  logger.warn(
+    `[BotRouter] ${kind} ${targetId} 同时匹配多个账号: ${selfIds.join(", ")}，将使用第一个可用账号`
+  );
+}
+
+function resolveBotFromOwners(map, kind, targetId) {
+  const normalizedTargetId = normalizeNumericId(targetId);
+  if (normalizedTargetId == null) return null;
+
+  const candidates = Array.from(map.get(normalizedTargetId) || []).filter((selfId) =>
+    bots.has(selfId)
+  );
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return getBot(candidates[0]);
+
+  const currentBot = getCurrentContextBot();
+  if (currentBot && candidates.includes(currentBot.self_id)) {
+    return currentBot;
+  }
+
+  warnRouting(kind, normalizedTargetId, candidates);
+  return getBot(candidates[0]);
+}
+
+function resolveBotForTarget({ selfId, groupId, userId } = {}) {
+  const explicitSelfId = normalizeNumericId(selfId);
+  if (explicitSelfId != null) {
+    return getBot(explicitSelfId) || null;
+  }
+
+  const byGroup = resolveBotFromOwners(groupOwners, "group", groupId);
+  if (byGroup) return byGroup;
+
+  const byPrivate = resolveBotFromOwners(privateOwners, "private", userId);
+  if (byPrivate) return byPrivate;
+
+  return getDefaultBot();
+}
+
+function extractRoutingParams(params = {}) {
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return {};
+  }
+  return {
+    selfId: params.self_id,
+    groupId: params.group_id,
+    userId: params.user_id,
+  };
+}
+
+function isPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+const POSITIONAL_PARAM_BUILDERS = {
+  getGroupInfo: (group_id, no_cache = false) => ({ group_id, no_cache }),
+  getGroupMemberInfo: (group_id, user_id, no_cache = false) => ({
+    group_id,
+    user_id,
+    no_cache,
+  }),
+  getGroupMemberList: (group_id, no_cache = false) => ({ group_id, no_cache }),
+  getGroupHonorInfo: (group_id, type) => ({ group_id, type }),
+  getStrangerInfo: (user_id, no_cache = false) => ({ user_id, no_cache }),
+  getGroupMsgHistory: (group_id, message_seq, count) => ({
+    group_id,
+    ...(message_seq !== undefined ? { message_seq } : {}),
+    ...(count !== undefined ? { count } : {}),
+  }),
+  getFriendMsgHistory: (user_id, message_seq, count) => ({
+    user_id,
+    ...(message_seq !== undefined ? { message_seq } : {}),
+    ...(count !== undefined ? { count } : {}),
+  }),
+  deleteMsg: (message_id) => ({ message_id }),
+  getMsg: (message_id) => ({ message_id }),
+};
+
 export function getBot(selfId) {
-  return bots.get(Number(selfId));
+  const id = normalizeNumericId(selfId);
+  return id == null ? undefined : bots.get(id);
+}
+
+export function getBots() {
+  return Array.from(bots.values());
+}
+
+export function getCurrentBotSelfId() {
+  return normalizeNumericId(botContextStorage.getStore());
+}
+
+export function withBotContext(selfId, callback) {
+  const id = normalizeNumericId(selfId);
+  return botContextStorage.run(id, callback);
+}
+
+export function rememberBotTargets(event) {
+  const selfId = normalizeNumericId(event?.self_id);
+  if (selfId == null) return;
+
+  const state = getOrCreateBotState(selfId);
+  if (!state) return;
+
+  const groupId = normalizeNumericId(event?.group_id);
+  if (groupId != null) {
+    state.groups.add(groupId);
+    bindTarget(groupOwners, groupId, selfId);
+  }
+
+  const userId = normalizeNumericId(event?.user_id);
+  const shouldTrackPrivateTarget =
+    userId != null &&
+    (
+      event?.message_type === "private" ||
+      event?.request_type === "friend" ||
+      event?.notice_type === "friend_add" ||
+      (!event?.group_id && event?.post_type === "message")
+    );
+
+  if (shouldTrackPrivateTarget) {
+    state.friends.add(userId);
+    bindTarget(privateOwners, userId, selfId);
+  }
+}
+
+export function updateBotDirectory(selfId, { loginInfo, nickname, groups, friends } = {}) {
+  const state = getOrCreateBotState(selfId);
+  if (!state) return;
+
+  if (loginInfo) {
+    state.loginInfo = { ...loginInfo };
+  }
+
+  if (nickname) {
+    state.nickname = nickname;
+  }
+
+  if (Array.isArray(groups)) {
+    const nextGroups = new Set();
+    for (const group of groups) {
+      const groupId = normalizeNumericId(group?.group_id ?? group);
+      if (groupId != null) nextGroups.add(groupId);
+    }
+    syncOwnedTargets(groupOwners, state.groups, nextGroups, state.selfId);
+  }
+
+  if (Array.isArray(friends)) {
+    const nextFriends = new Set();
+    for (const friend of friends) {
+      const userId = normalizeNumericId(friend?.user_id ?? friend);
+      if (userId != null) nextFriends.add(userId);
+    }
+    syncOwnedTargets(privateOwners, state.friends, nextFriends, state.selfId);
+  }
+}
+
+export function getBotSummaries() {
+  return Array.from(bots.values()).map((instance) => {
+    const state = botStates.get(instance.self_id);
+    const loginInfo = state?.loginInfo || {};
+    return {
+      self_id: instance.self_id,
+      uin: loginInfo.user_id || instance.self_id || null,
+      nickname: loginInfo.nickname || state?.nickname || instance.nickname || null,
+      status: "online",
+    };
+  });
 }
 
 export function removeBot(selfId) {
-  const id = Number(selfId);
+  const id = normalizeNumericId(selfId);
+  if (id == null) return;
+
   bots.delete(id);
-  if (bot && bot.self_id === id) {
-    bot = undefined;
-    if (typeof global !== "undefined") global.bot = null;
-    if (bots.size > 0) {
-      bot = bots.values().next().value;
-      if (typeof global !== "undefined") global.bot = bot;
+
+  const state = botStates.get(id);
+  if (state) {
+    for (const groupId of state.groups) {
+      unbindTarget(groupOwners, groupId, id);
     }
+    for (const userId of state.friends) {
+      unbindTarget(privateOwners, userId, id);
+    }
+    botStates.delete(id);
   }
+
+  updateGlobalBotBinding();
 }
+
+const botFacadeTarget = {
+  get self_id() {
+    return getDefaultBot()?.self_id;
+  },
+
+  get nickname() {
+    return getDefaultBot()?.nickname || "Bot";
+  },
+
+  get status() {
+    return bots.size > 0 ? "online" : "offline";
+  },
+
+  getBot(selfId) {
+    return getBot(selfId);
+  },
+
+  pickFriend(user_id) {
+    return new Friend(botFacade, user_id);
+  },
+
+  pickGroup(group_id) {
+    return new Group(botFacade, group_id);
+  },
+
+  async getLoginInfo() {
+    const currentBot = getDefaultBot();
+    if (!currentBot) return null;
+    return currentBot.getLoginInfo();
+  },
+
+  async getGroupList() {
+    const mergedGroups = [];
+    const seen = new Map();
+
+    for (const currentBot of bots.values()) {
+      try {
+        const groups = await currentBot.getGroupList();
+        if (Array.isArray(groups)) {
+          updateBotDirectory(currentBot.self_id, { groups });
+          for (const group of groups) {
+            const groupId = normalizeNumericId(group?.group_id);
+            if (groupId == null) continue;
+
+            if (!seen.has(groupId)) {
+              const nextGroup = { ...group, group_id: groupId };
+              nextGroup.bots = [{ self_id: currentBot.self_id, nickname: currentBot.nickname }];
+              seen.set(groupId, nextGroup);
+              mergedGroups.push(nextGroup);
+            } else {
+              const existing = seen.get(groupId);
+              existing.bots ||= [];
+              existing.bots.push({ self_id: currentBot.self_id, nickname: currentBot.nickname });
+            }
+          }
+        }
+      } catch (error) {
+        logger.warn(`[BotRouter] 获取账号 ${currentBot.self_id} 的群列表失败: ${error.message || error}`);
+      }
+    }
+
+    return mergedGroups;
+  },
+
+  async getFriendList() {
+    const mergedFriends = [];
+    const seen = new Map();
+
+    for (const currentBot of bots.values()) {
+      try {
+        const friends = await currentBot.getFriendList();
+        if (Array.isArray(friends)) {
+          updateBotDirectory(currentBot.self_id, { friends });
+          for (const friend of friends) {
+            const userId = normalizeNumericId(friend?.user_id);
+            if (userId == null) continue;
+
+            if (!seen.has(userId)) {
+              const nextFriend = { ...friend, user_id: userId };
+              nextFriend.bots = [{ self_id: currentBot.self_id, nickname: currentBot.nickname }];
+              seen.set(userId, nextFriend);
+              mergedFriends.push(nextFriend);
+            } else {
+              const existing = seen.get(userId);
+              existing.bots ||= [];
+              existing.bots.push({ self_id: currentBot.self_id, nickname: currentBot.nickname });
+            }
+          }
+        }
+      } catch (error) {
+        logger.warn(`[BotRouter] 获取账号 ${currentBot.self_id} 的好友列表失败: ${error.message || error}`);
+      }
+    }
+
+    return mergedFriends;
+  },
+
+  async sendGroupMsg(group_id, message) {
+    const currentBot = resolveBotForTarget({ groupId: group_id });
+    if (!currentBot) return null;
+    return currentBot.sendGroupMsg(group_id, message);
+  },
+
+  async sendPrivateMsg(user_id, message) {
+    const currentBot = resolveBotForTarget({ userId: user_id });
+    if (!currentBot) return null;
+    return currentBot.sendPrivateMsg(user_id, message);
+  },
+
+  async sendForwardMsg(messages, group_id, user_id) {
+    const currentBot = resolveBotForTarget({ groupId: group_id, userId: user_id });
+    if (!currentBot) return null;
+    return currentBot.sendForwardMsg(messages, group_id, user_id);
+  },
+
+  async callMethod(methodName, args) {
+    let params = null;
+    let forwardArgs = args;
+
+    if (args.length === 1 && isPlainObject(args[0])) {
+      params = args[0];
+      forwardArgs = [params];
+    } else if (POSITIONAL_PARAM_BUILDERS[methodName]) {
+      params = POSITIONAL_PARAM_BUILDERS[methodName](...args);
+      forwardArgs = [params];
+    }
+
+    const currentBot = resolveBotForTarget(extractRoutingParams(params));
+    if (!currentBot) return null;
+
+    const method = currentBot[methodName];
+    if (typeof method !== "function") {
+      return undefined;
+    }
+
+    return method(...forwardArgs);
+  },
+};
+
+botFacade = new Proxy(botFacadeTarget, {
+  get(target, prop, receiver) {
+    if (prop in target) {
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+
+    if (typeof prop !== "string") {
+      return undefined;
+    }
+
+    return (...args) => target.callMethod(prop, args);
+  },
+});
 
 export class Friend {
   constructor(bot, user_id) {
@@ -495,20 +917,20 @@ export class Group {
 }
 
 /**
- * OneBotApi —— 包裹 NCWebsocket 实例，用 ES6 Proxy 自动映射驼峰 → 下划线
+ * OneBotApi —— 包裹 OneBotWsClient 实例，用 ES6 Proxy 自动映射驼峰 → 下划线
  *
  * 使用方式:
- *   bot.sendGroupMsg(group_id, message)       // 保留的自定义方法
- *   bot.setGroupBan({ group_id, user_id, ... }) // Proxy 自动转发 → ncws.set_group_ban(params)
- *   bot.anyNewApi({ ... })                      // 未来新增 API 无需修改代码
+ *   bot.sendGroupMsg(group_id, message)         // 保留的自定义方法
+ *   bot.setGroupBan({ group_id, user_id, ... }) // Proxy 自动转发 → ws.set_group_ban(params)
+ *   bot.anyNewApi({ ... })                       // 任何 OneBot v11 API 无需修改代码
  */
 export class OneBotApi {
-  constructor(ncws, selfId) {
-    this.ncws = ncws;
-    this._selfId = selfId;
+  constructor(ws, selfId) {
+    this.ws = ws;
+    this._selfId = normalizeNumericId(selfId) ?? selfId;
     this.nickname = "Bot";
 
-    // ES6 Proxy: 自动将驼峰方法映射到 NCWebsocket 的下划线方法
+    // ES6 Proxy: 自动将驼峰方法映射到 OneBotWsClient 的下划线方法
     const proxy = new Proxy(this, {
       get(target, prop, receiver) {
         // 1. 实例自身属性（含原型链方法）优先
@@ -527,10 +949,14 @@ export class OneBotApi {
 
         // 3. 驼峰 → 下划线，生成代理方法
         const snakeName = camelToSnake(prop);
-
-        // 优先检查 NCWebsocket 实例上是否存在该方法
-        if (typeof target.ncws[snakeName] === "function") {
-          return (params) => target.ncws[snakeName](params);
+        if (typeof target.ws[snakeName] === "function") {
+          return (...args) => {
+            let params = args[0];
+            if (args.length > 1 && POSITIONAL_PARAM_BUILDERS[prop]) {
+              params = POSITIONAL_PARAM_BUILDERS[prop](...args);
+            }
+            return target.sendRequest(snakeName, params || {});
+          };
         }
 
         // 未知属性返回 undefined（不兜底，避免 Event Proxy 误判）
@@ -538,12 +964,9 @@ export class OneBotApi {
       },
     });
 
-    // 注册到 bots Map（必须存 Proxy 而非 this）
-    if (!bot) {
-      bot = proxy;
-      if (typeof global !== "undefined") global.bot = proxy;
-    }
-    bots.set(selfId, proxy);
+    bots.set(this._selfId, proxy);
+    updateBotDirectory(this._selfId, { nickname: this.nickname });
+    updateGlobalBotBinding();
 
     this.init();
 
@@ -554,8 +977,25 @@ export class OneBotApi {
     try {
       await new Promise((resolve) => setTimeout(resolve, 1000));
       const info = await this.getLoginInfo();
-      if (info && info.nickname) {
+      if (info?.nickname) {
         this.nickname = info.nickname;
+      }
+      updateBotDirectory(this._selfId, {
+        loginInfo: info,
+        nickname: this.nickname,
+      });
+
+      const [groupsResult, friendsResult] = await Promise.allSettled([
+        this.getGroupList?.(),
+        this.getFriendList?.(),
+      ]);
+
+      if (groupsResult.status === "fulfilled" && Array.isArray(groupsResult.value)) {
+        updateBotDirectory(this._selfId, { groups: groupsResult.value });
+      }
+
+      if (friendsResult.status === "fulfilled" && Array.isArray(friendsResult.value)) {
+        updateBotDirectory(this._selfId, { friends: friendsResult.value });
       }
     } catch (e) {
       // 忽略初始化错误
@@ -577,12 +1017,11 @@ export class OneBotApi {
   }
 
   /**
-   * 兜底请求方法 —— 直接调用 NCWebsocket.send()
-   * 兼容旧代码中 sendRequest(action, params) 的调用方式
+   * 兜底请求方法 —— 直接调用 OneBotWsClient.send()
    */
   async sendRequest(action, params) {
     try {
-      return await this.ncws.send(action, params || {});
+      return await this.ws.send(action, params || {}, { selfId: this._selfId });
     } catch (e) {
       logger.error(`Request ${action} failed: ${e.message || e}`);
       return null;
@@ -594,6 +1033,16 @@ export class OneBotApi {
   /** 获取登录号信息 */
   async getLoginInfo() {
     return this.sendRequest("get_login_info", {});
+  }
+
+  /** 获取群列表 */
+  async getGroupList() {
+    return this.sendRequest("get_group_list", {});
+  }
+
+  /** 获取好友列表 */
+  async getFriendList() {
+    return this.sendRequest("get_friend_list", {});
   }
 
   // =================== 消息发送（带日志） ===================
@@ -710,12 +1159,20 @@ export class OneBotApi {
 
   /** 撤回消息 */
   async deleteMsg(message_id) {
-    return this.sendRequest("delete_msg", { message_id });
+    const params =
+      message_id && typeof message_id === "object"
+        ? { ...message_id }
+        : { message_id };
+    return this.sendRequest("delete_msg", params);
   }
 
   /** 获取消息详情 */
   async getMsg(message_id) {
-    return this.sendRequest("get_msg", { message_id });
+    const params =
+      message_id && typeof message_id === "object"
+        ? { ...message_id }
+        : { message_id };
+    return this.sendRequest("get_msg", params);
   }
 
   /** 发送合并转发消息（参数处理复杂，保留） */

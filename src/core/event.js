@@ -72,13 +72,13 @@ export class Event {
   }
 
   get isMaster() {
-    const config = Config.get();
+    const config = Config.getForSelf(this.self_id);
     return isMasterUser(this.user_id, config.master);
   }
 
   get isWhite() {
     if (this.isMaster) return true;
-    const config = Config.get();
+    const config = Config.getForSelf(this.self_id);
     const whiteUsers = config.whiteUsers || [];
     return whiteUsers.includes(this.user_id);
   }
@@ -92,11 +92,11 @@ export class Event {
   }
 
   getMaster() {
-    return Config.get('master');
+    return Config.getForSelf(this.self_id, 'master');
   }
 
   getWhite() {
-    const config = Config.get();
+    const config = Config.getForSelf(this.self_id);
     const masters = normalizeMasters(config.master);
     const whiteUsers = (config.whiteUsers || []).map(String);
     return [...new Set([...masters, ...whiteUsers])];
@@ -164,13 +164,20 @@ export class Event {
   async recall(messageId = null, delay = 0) {
     const msgId = messageId || this.message_id;
     if (msgId) {
+      const params = { message_id: msgId };
+      if (this.group_id) {
+        params.group_id = this.group_id;
+      } else if (this.user_id) {
+        params.user_id = this.user_id;
+      }
+
       if (delay > 0) {
         setTimeout(() => {
-          this.bot.deleteMsg(msgId);
+          this.bot.deleteMsg(params);
         }, delay * 1000);
         return true;
       }
-      return this.bot.deleteMsg(msgId);
+      return this.bot.deleteMsg(params);
     }
   }
 
@@ -346,11 +353,13 @@ export class Event {
     if (this.group_id) {
       const params = { group_id: this.group_id };
       if (messageSeq) params.message_seq = messageSeq;
+      if (count !== undefined) params.count = count;
       const res = await this.bot.getGroupMsgHistory(params);
       messages = res?.messages || [];
     } else if (this.user_id) {
       const params = { user_id: this.user_id };
       if (messageSeq) params.message_seq = messageSeq;
+      if (count !== undefined) params.count = count;
       const res = await this.bot.getFriendMsgHistory(params);
       messages = res?.messages || [];
     }
@@ -370,7 +379,13 @@ export class Event {
   async getReplyMsg() {
     const replyId = this.reply_id;
     if (!replyId) return null;
-    return this.bot.getMsg(replyId);
+    const params = { message_id: replyId };
+    if (this.group_id) {
+      params.group_id = this.group_id;
+    } else if (this.user_id) {
+      params.user_id = this.user_id;
+    }
+    return this.bot.getMsg(params);
   }
 
   /**
@@ -380,7 +395,13 @@ export class Event {
    */
   async getMsg(messageId) {
     if (!messageId) return null;
-    return this.bot.getMsg(messageId);
+    const params = { message_id: messageId };
+    if (this.group_id) {
+      params.group_id = this.group_id;
+    } else if (this.user_id) {
+      params.user_id = this.user_id;
+    }
+    return this.bot.getMsg(params);
   }
 
   /**

@@ -1,13 +1,29 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
+function normalizeScopeSelfId(scopeSelfId) {
+    if (scopeSelfId == null) return null;
+    const num = Number(scopeSelfId);
+    return Number.isFinite(num) && num > 0 ? num : null;
+}
+
+function buildScopedUrl(basePath, scopeSelfId) {
+    const normalizedSelfId = normalizeScopeSelfId(scopeSelfId);
+    if (normalizedSelfId == null) {
+        return basePath;
+    }
+
+    const separator = basePath.includes('?') ? '&' : '?';
+    return `${basePath}${separator}selfId=${normalizedSelfId}`;
+}
+
 /**
  * 单个配置字段渲染器
  * 根据 schema 元数据中的 type 自动选择对应的输入控件
  *
  * meta 可能包含: { type, description, label, help, default, step?, min?, max?, hideSpinner?, items?, children?, uiType? }
  */
-export default function ConfigField({ name, meta, value, onChange }) {
+export default function ConfigField({ name, meta, value, onChange, scopeSelfId = null }) {
     const { type, description, options, label, help, uiType } = meta;
 
     // 显示名称: 优先 label > description > name
@@ -84,6 +100,7 @@ export default function ConfigField({ name, meta, value, onChange }) {
                     itemMeta={meta.items}
                     fixed={meta.fixed}
                     nameField={meta.nameField}
+                    scopeSelfId={scopeSelfId}
                 />
             );
         }
@@ -96,6 +113,7 @@ export default function ConfigField({ name, meta, value, onChange }) {
                     help={help}
                     value={value}
                     onChange={onChange}
+                    scopeSelfId={scopeSelfId}
                 />
             );
         }
@@ -109,6 +127,7 @@ export default function ConfigField({ name, meta, value, onChange }) {
                     value={value}
                     onChange={onChange}
                     uiType={uiType}
+                    scopeSelfId={scopeSelfId}
                 />
             );
         }
@@ -136,6 +155,7 @@ export default function ConfigField({ name, meta, value, onChange }) {
                     help={help}
                     value={value}
                     onChange={onChange}
+                    scopeSelfId={scopeSelfId}
                 />
             );
         }
@@ -216,14 +236,15 @@ export default function ConfigField({ name, meta, value, onChange }) {
     if ((type === 'string' || !type) && uiType && !uiType.endsWith('Array')) {
         // 可能是动态选择类型，让 DynamicSelectField 去判断
         return (
-            <DynamicSelectField
-                name={name}
-                displayName={displayName}
-                help={help}
-                value={value}
-                onChange={onChange}
-                uiType={uiType}
-            />
+                <DynamicSelectField
+                    name={name}
+                    displayName={displayName}
+                    help={help}
+                    value={value}
+                    onChange={onChange}
+                    uiType={uiType}
+                    scopeSelfId={scopeSelfId}
+                />
         );
     }
 
@@ -378,7 +399,7 @@ function ArrayField({ name, displayName, help, value, onChange, itemType }) {
 /**
  * 群号选择字段 — 弹窗多选 bot 已加入的群，标签显示群名
  */
-function GroupSelectField({ name, displayName, help, value, onChange }) {
+function GroupSelectField({ name, displayName, help, value, onChange, scopeSelfId = null }) {
     const [showModal, setShowModal] = useState(false);
     const [groupMap, setGroupMap] = useState(new Map());
     const items = Array.isArray(value) ? value : [];
@@ -386,7 +407,7 @@ function GroupSelectField({ name, displayName, help, value, onChange }) {
     // 获取群列表，建立 群号→群名 映射
     useEffect(() => {
         const token = localStorage.getItem('sakura_token');
-        fetch('/api/bot/groups', {
+        fetch(buildScopedUrl('/api/bot/groups', scopeSelfId), {
             headers: { Authorization: `Bearer ${token}` },
         })
             .then(r => r.json())
@@ -398,7 +419,7 @@ function GroupSelectField({ name, displayName, help, value, onChange }) {
                 }
             })
             .catch(() => { });
-    }, []);
+    }, [scopeSelfId]);
 
     const removeItem = (index) => {
         onChange(items.filter((_, i) => i !== index));
@@ -442,6 +463,7 @@ function GroupSelectField({ name, displayName, help, value, onChange }) {
                     selected={items}
                     onConfirm={(selected) => { onChange(selected); setShowModal(false); }}
                     onCancel={() => setShowModal(false)}
+                    scopeSelfId={scopeSelfId}
                 />
             )}
         </div>
@@ -451,7 +473,7 @@ function GroupSelectField({ name, displayName, help, value, onChange }) {
 /**
  * 群选择弹窗 — 从 bot 群列表中多选
  */
-function GroupSelectModal({ selected, onConfirm, onCancel }) {
+function GroupSelectModal({ selected, onConfirm, onCancel, scopeSelfId = null }) {
     const [groups, setGroups] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -460,7 +482,7 @@ function GroupSelectModal({ selected, onConfirm, onCancel }) {
 
     useEffect(() => {
         const token = localStorage.getItem('sakura_token');
-        fetch('/api/bot/groups', {
+        fetch(buildScopedUrl('/api/bot/groups', scopeSelfId), {
             headers: { Authorization: `Bearer ${token}` },
         })
             .then(r => r.json())
@@ -473,7 +495,7 @@ function GroupSelectModal({ selected, onConfirm, onCancel }) {
             })
             .catch(e => setError('请求失败: ' + e.message))
             .finally(() => setLoading(false));
-    }, []);
+    }, [scopeSelfId]);
 
     const filtered = groups.filter(g => {
         if (!search) return true;
@@ -553,7 +575,10 @@ function GroupSelectModal({ selected, onConfirm, onCancel }) {
                                     />
                                     <span className="group-select-info">
                                         <span className="group-select-name">{g.group_name}</span>
-                                        <span className="group-select-id">{g.group_id}</span>
+                                        <span className="group-select-id">
+                                            {g.group_id}
+                                            {Array.isArray(g.bots) && g.bots.length > 1 ? ` · ${g.bots.length} 个账号` : ''}
+                                        </span>
                                     </span>
                                 </div>
                             ))}
@@ -573,13 +598,13 @@ function GroupSelectModal({ selected, onConfirm, onCancel }) {
 /**
  * 单选群号字段 — 下拉选择 bot 已加入的单个群
  */
-function SingleGroupSelectField({ name, displayName, help, value, onChange }) {
+function SingleGroupSelectField({ name, displayName, help, value, onChange, scopeSelfId = null }) {
     const [groups, setGroups] = useState([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         const token = localStorage.getItem('sakura_token');
-        fetch('/api/bot/groups', {
+        fetch(buildScopedUrl('/api/bot/groups', scopeSelfId), {
             headers: { Authorization: `Bearer ${token}` },
         })
             .then(r => r.json())
@@ -590,7 +615,7 @@ function SingleGroupSelectField({ name, displayName, help, value, onChange }) {
             })
             .catch(() => { })
             .finally(() => setLoading(false));
-    }, []);
+    }, [scopeSelfId]);
 
     const currentGroup = groups.find(g => g.group_id === Number(value));
     const displayValue = currentGroup 
@@ -630,7 +655,7 @@ function SingleGroupSelectField({ name, displayName, help, value, onChange }) {
  * fixed: 是否为固定长度数组（不能添加/删除）
  * nameField: 指定用于显示标题的字段名
  */
-function ObjectArrayField({ name, displayName, help, value, onChange, itemMeta, fixed, nameField }) {
+function ObjectArrayField({ name, displayName, help, value, onChange, itemMeta, fixed, nameField, scopeSelfId = null }) {
     const [showAddModal, setShowAddModal] = useState(false);
     const [editIndex, setEditIndex] = useState(-1);
     const items = Array.isArray(value) ? value : [];
@@ -719,8 +744,10 @@ function ObjectArrayField({ name, displayName, help, value, onChange, itemMeta, 
                 <AddObjectModal
                     title={`添加 ${displayName}`}
                     itemMeta={itemMeta}
+                    nextIndex={items.length}
                     onConfirm={handleAddItem}
                     onCancel={() => setShowAddModal(false)}
+                    scopeSelfId={scopeSelfId}
                 />
             )}
 
@@ -742,6 +769,7 @@ function ObjectArrayField({ name, displayName, help, value, onChange, itemMeta, 
                     onConfirm={handleEditItem}
                     onCancel={() => setEditIndex(-1)}
                     readOnlyFields={fixed && nameField ? [nameField] : []}
+                    scopeSelfId={scopeSelfId}
                 />
             )}
         </div>
@@ -752,27 +780,42 @@ function ObjectArrayField({ name, displayName, help, value, onChange, itemMeta, 
  * 添加对象的弹窗表单
  * 所有字段初始为空，不填充默认值
  */
-function AddObjectModal({ title, itemMeta, onConfirm, onCancel }) {
-    // 初始化为空值（不用默认值）
+function AddObjectModal({ title, itemMeta, nextIndex = 0, onConfirm, onCancel, scopeSelfId = null }) {
+    const buildDefaultValue = useCallback((meta, key = '') => {
+        if (meta?.default !== undefined) {
+            if (
+                key === 'name' &&
+                typeof meta.default === 'string' &&
+                /\d+$/.test(meta.default)
+            ) {
+                return meta.default.replace(/\d+$/, String(nextIndex + 1));
+            }
+            return structuredClone(meta.default);
+        }
+        if (meta?.type === 'boolean') return false;
+        if (meta?.type === 'number') return 0;
+        if (meta?.type === 'array') return [];
+        if (meta?.type === 'object') {
+            const obj = {};
+            if (meta.children) {
+                for (const [childKey, childMeta] of Object.entries(meta.children)) {
+                    obj[childKey] = buildDefaultValue(childMeta, childKey);
+                }
+            }
+            return obj;
+        }
+        return '';
+    }, [scopeSelfId]);
+
     const buildEmptyItem = useCallback(() => {
         const item = {};
         if (itemMeta.children) {
             for (const [key, childMeta] of Object.entries(itemMeta.children)) {
-                if (childMeta.type === 'boolean') {
-                    item[key] = false;
-                } else if (childMeta.type === 'number') {
-                    item[key] = 0;
-                } else if (childMeta.type === 'array') {
-                    item[key] = [];
-                } else if (childMeta.type === 'object') {
-                    item[key] = {};
-                } else {
-                    item[key] = '';
-                }
+                item[key] = buildDefaultValue(childMeta, key);
             }
         }
         return item;
-    }, [itemMeta]);
+    }, [buildDefaultValue, itemMeta]);
 
     const [draft, setDraft] = useState(() => buildEmptyItem());
 
@@ -802,6 +845,7 @@ function AddObjectModal({ title, itemMeta, onConfirm, onCancel }) {
                                 meta={childMeta}
                                 value={draft[childKey]}
                                 onChange={(val) => handleFieldChange(childKey, val)}
+                                scopeSelfId={scopeSelfId}
                             />
                         ))}
                     </div>
@@ -825,7 +869,7 @@ function AddObjectModal({ title, itemMeta, onConfirm, onCancel }) {
  * 所有字段预填充当前值
  * readOnlyFields: 只读字段列表（固定数组中的标识字段）
  */
-function EditObjectModal({ title, itemMeta, initialData, onConfirm, onCancel, readOnlyFields = [] }) {
+function EditObjectModal({ title, itemMeta, initialData, onConfirm, onCancel, readOnlyFields = [], scopeSelfId = null }) {
     const [draft, setDraft] = useState(() => structuredClone(initialData));
 
     const handleFieldChange = useCallback((key, val) => {
@@ -875,6 +919,7 @@ function EditObjectModal({ title, itemMeta, initialData, onConfirm, onCancel, re
                                     meta={childMeta}
                                     value={draft[childKey]}
                                     onChange={(val) => handleFieldChange(childKey, val)}
+                                    scopeSelfId={scopeSelfId}
                                 />
                             );
                         })}
@@ -898,7 +943,7 @@ function EditObjectModal({ title, itemMeta, initialData, onConfirm, onCancel, re
  * 动态选择字段 — 从 API 获取选项列表
  * uiType: 动态选项类型标识（如 roleSelect, channelSelect）
  */
-function DynamicSelectField({ name, displayName, help, value, onChange, uiType }) {
+function DynamicSelectField({ name, displayName, help, value, onChange, uiType, scopeSelfId = null }) {
     const [options, setOptions] = useState([]);
     const [configLabel, setConfigLabel] = useState('');
     const [loading, setLoading] = useState(true);
@@ -906,7 +951,7 @@ function DynamicSelectField({ name, displayName, help, value, onChange, uiType }
 
     useEffect(() => {
         const token = localStorage.getItem('sakura_token');
-        fetch('/api/dynamic-options', {
+        fetch(buildScopedUrl('/api/dynamic-options', scopeSelfId), {
             headers: { Authorization: `Bearer ${token}` },
         })
             .then(r => r.json())
@@ -925,7 +970,7 @@ function DynamicSelectField({ name, displayName, help, value, onChange, uiType }
             })
             .catch(() => { setIsDynamic(false); })
             .finally(() => setLoading(false));
-    }, [uiType]);
+    }, [scopeSelfId, uiType]);
 
     // 如果不是动态类型，回退到普通文本输入
     if (!loading && !isDynamic) {
@@ -978,7 +1023,7 @@ function DynamicSelectField({ name, displayName, help, value, onChange, uiType }
  * 动态多选数组字段 — 从 API 获取选项列表，弹窗多选
  * uiType: 动态选项类型标识（如 roleSelectArray, channelSelectArray）
  */
-function DynamicSelectArrayField({ name, displayName, help, value, onChange, uiType }) {
+function DynamicSelectArrayField({ name, displayName, help, value, onChange, uiType, scopeSelfId = null }) {
     const [showModal, setShowModal] = useState(false);
     const [options, setOptions] = useState([]);
     const [configLabel, setConfigLabel] = useState('');
@@ -986,7 +1031,7 @@ function DynamicSelectArrayField({ name, displayName, help, value, onChange, uiT
 
     useEffect(() => {
         const token = localStorage.getItem('sakura_token');
-        fetch('/api/dynamic-options', {
+        fetch(buildScopedUrl('/api/dynamic-options', scopeSelfId), {
             headers: { Authorization: `Bearer ${token}` },
         })
             .then(r => r.json())
@@ -1000,7 +1045,7 @@ function DynamicSelectArrayField({ name, displayName, help, value, onChange, uiT
                 }
             })
             .catch(() => { });
-    }, [uiType]);
+    }, [scopeSelfId, uiType]);
 
     const removeItem = (index) => {
         onChange(items.filter((_, i) => i !== index));

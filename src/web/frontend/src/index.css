@@ -344,6 +344,68 @@ body {
   gap: 8px;
 }
 
+/* ========== Account Top Bar ========== */
+
+.account-topbar {
+  display: flex;
+  gap: 8px;
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.account-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 8px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border-subtle);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: var(--text-secondary);
+  font-family: inherit;
+  box-shadow: var(--shadow-sm);
+}
+
+.account-tab:hover {
+  border-color: var(--border-active);
+  background: var(--accent-dim);
+  color: var(--text-primary);
+}
+
+.account-tab.active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent-dark);
+  box-shadow: 0 0 0 3px rgba(219, 112, 147, 0.1);
+}
+
+.account-tab-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid var(--border-default);
+  flex-shrink: 0;
+}
+
+.account-tab.active .account-tab-avatar {
+  border-color: var(--accent);
+}
+
+.account-tab-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.account-tab-id {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 /* ========== Category Tabs ========== */
 
 .category-tabs {
@@ -1355,6 +1417,20 @@ select.field-input {
   flex-shrink: 0;
 }
 
+.bot-section-multi {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.bot-summary-block {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
 .bot-avatar-sm {
   width: 80px;
   height: 80px;
@@ -1402,6 +1478,72 @@ select.field-input {
   height: 8px;
   border-radius: 50%;
   background: currentColor;
+  animation: pulse 2s infinite;
+}
+
+/* Bot 多账号头像卡片 */
+.bot-cards-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.bot-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 12px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  min-width: 86px;
+  transition: border-color 0.15s;
+}
+
+.bot-card:hover {
+  border-color: var(--border-active);
+}
+
+.bot-card-avatar {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: 2.5px solid var(--accent);
+  box-shadow: 0 3px 10px rgba(219, 112, 147, 0.2);
+  object-fit: cover;
+}
+
+.bot-card-nick {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: center;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-card-id {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.bot-card-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--success);
+  font-weight: 500;
+}
+
+.bot-card-status .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
   animation: pulse 2s infinite;
 }
 

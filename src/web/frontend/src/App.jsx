@@ -9,9 +9,15 @@ import SystemMonitor from './components/SystemMonitor';
 
 function App() {
   const {
-    config, schema, loading, saving, errors,
-    isLoggedIn, token,
-    login, logout,
+    config,
+    schema,
+    loading,
+    saving,
+    errors,
+    isLoggedIn,
+    token,
+    login,
+    logout,
     saveConfig,
     updateFromWs,
     plugins,
@@ -21,6 +27,13 @@ function App() {
     pluginMeta,
     savePluginConfig,
     updatePluginFromWs,
+    botAccounts,
+    configuredAccountIds,
+    selectedPluginSelfId,
+    setSelectedPluginSelfId,
+    accountSchema,
+    accountConfigs,
+    saveAccountConfig,
   } = useConfig();
 
   const [toasts, setToasts] = useState([]);
@@ -29,9 +42,9 @@ function App() {
 
   const addToast = useCallback((message, type = 'info') => {
     const id = Date.now();
-    setToasts(prev => [...prev, { id, message, type }]);
+    setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
+      setToasts((prev) => prev.filter((item) => item.id !== id));
     }, 3000);
   }, []);
 
@@ -40,8 +53,8 @@ function App() {
     addToast('配置已从文件同步更新', 'info');
   }, [updateFromWs, addToast]);
 
-  const onPluginConfigChanged = useCallback((pluginName, moduleName, data) => {
-    updatePluginFromWs(pluginName, moduleName, data);
+  const onPluginConfigChanged = useCallback((pluginName, moduleName, data, selfId) => {
+    updatePluginFromWs(pluginName, moduleName, data, selfId);
     addToast(`${pluginName}/${moduleName} 已同步更新`, 'info');
   }, [updatePluginFromWs, addToast]);
 
@@ -51,7 +64,6 @@ function App() {
     onPluginConfigChanged,
   );
 
-  // 系统监控数据
   const {
     staticInfo,
     dynamicInfo,
@@ -63,50 +75,80 @@ function App() {
   const handleSave = useCallback(async (newConfig) => {
     const result = await saveConfig(newConfig);
     if (result.success) {
-      addToast('配置保存成功', 'success');
+      addToast('框架配置保存成功', 'success');
     } else {
-      const msg = result.errors?.map(e => e.message).join(', ') || '保存失败';
-      addToast(msg, 'error');
+      const message = result.errors?.map((item) => item.message).join(', ') || '保存失败';
+      addToast(message, 'error');
     }
   }, [saveConfig, addToast]);
 
-  const handlePluginSave = useCallback(async (pluginName, moduleName, data) => {
-    const result = await savePluginConfig(pluginName, moduleName, data);
-    if (result.success) {
-      addToast(`保存成功`, 'success');
-    } else {
-      const msg = result.errors?.map(e => e.message).join(', ') || '保存失败';
-      addToast(msg, 'error');
-    }
-  }, [savePluginConfig, addToast]);
+  const handleAccountSave = useCallback(async (newConfig) => {
+    if (!selectedPluginSelfId) return;
 
-  // Build left nav items
+    const result = await saveAccountConfig(selectedPluginSelfId, newConfig);
+    if (result.success) {
+      addToast('账号配置保存成功', 'success');
+    } else {
+      const message = result.errors?.map((item) => item.message).join(', ') || '保存失败';
+      addToast(message, 'error');
+    }
+  }, [saveAccountConfig, addToast, selectedPluginSelfId]);
+
+  const handlePluginSave = useCallback(async (pluginName, moduleName, data) => {
+    const result = await savePluginConfig(pluginName, moduleName, data, selectedPluginSelfId);
+    if (result.success) {
+      addToast('保存成功', 'success');
+    } else {
+      const message = result.errors?.map((item) => item.message).join(', ') || '保存失败';
+      addToast(message, 'error');
+    }
+  }, [savePluginConfig, addToast, selectedPluginSelfId]);
+
   const pluginNames = Object.keys(plugins || {});
+
   const navItems = useMemo(() => [
     { key: 'monitor', label: '系统监控', icon: '📊' },
     { key: 'framework', label: '框架配置', icon: '🌸' },
-    ...pluginNames.map(name => {
+    { key: 'account', label: '账号配置', icon: '👤' },
+    ...pluginNames.map((name) => {
       const meta = pluginMeta?.[name];
       return {
         key: name,
         label: meta?.displayName || name,
-        icon: meta?.icon || '📦',
+        icon: meta?.icon || '🧩',
       };
     }),
     { key: '__menu_editor__', label: '菜单编辑', icon: '📝' },
   ], [pluginNames, pluginMeta]);
 
-  // Build category tabs for active section
+  const accountTab = useMemo(() => {
+    if (!accountSchema?.children) {
+      return null;
+    }
+
+    return {
+      key: '__account__',
+      label: '账号配置',
+      title: '账号基础配置',
+      isAccount: true,
+      fields: Object.entries(accountSchema.children).map(([key, meta]) => ({ key, meta })),
+    };
+  }, [accountSchema]);
+
   const categoryTabs = useMemo(() => {
-    if (activeSection === 'monitor') {
-      return []; // 监控页面不需要分类标签
+    if (activeSection === 'monitor' || activeSection === 'account') {
+      return [];
     }
 
     if (activeSection === 'framework') {
-      if (!schema?.children) return [];
+      if (!schema?.children) {
+        return [];
+      }
+
       const tabs = [];
       const topLevelFields = [];
       const objectSections = [];
+
       for (const [key, meta] of Object.entries(schema.children)) {
         if (meta.type === 'object' && meta.children) {
           objectSections.push({ key, meta });
@@ -114,57 +156,81 @@ function App() {
           topLevelFields.push({ key, meta });
         }
       }
+
       if (topLevelFields.length > 0) {
-        tabs.push({ key: '__top__', label: '基本设置', fields: topLevelFields, isTop: true });
-      }
-      for (const s of objectSections) {
         tabs.push({
-          key: s.key,
-          label: s.meta.label || s.meta.description || s.key,
-          meta: s.meta,
+          key: '__global_basic__',
+          label: '日志等级',
+          title: '日志等级',
+          fields: topLevelFields,
+          isTop: true,
+        });
+      }
+
+      for (const section of objectSections) {
+        tabs.push({
+          key: section.key,
+          label: section.meta.label || section.meta.description || section.key,
+          title: section.meta.label || section.meta.description || section.key,
+          meta: section.meta,
           isObject: true,
         });
       }
+
       return tabs;
     }
 
-    const cats = pluginCategories[activeSection];
-    const mods = plugins[activeSection] || [];
-    if (!cats) {
-      return [{ key: '__all__', label: '全部配置', modules: mods }];
+    const categories = pluginCategories[activeSection];
+    const modules = plugins[activeSection] || [];
+    if (!categories) {
+      return [{ key: '__all__', label: '全部配置', modules }];
     }
 
     const categorizedModules = new Set();
-    Object.values(cats).forEach(modList => {
-      if (Array.isArray(modList)) modList.forEach(m => categorizedModules.add(m));
+    Object.values(categories).forEach((moduleList) => {
+      if (Array.isArray(moduleList)) {
+        moduleList.forEach((moduleName) => categorizedModules.add(moduleName));
+      }
     });
-    const uncategorized = mods.filter(m => !categorizedModules.has(m));
 
+    const uncategorized = modules.filter((moduleName) => !categorizedModules.has(moduleName));
     const tabs = [];
-    for (const [catName, catModules] of Object.entries(cats)) {
-      const validModules = catModules.filter(m => mods.includes(m));
+
+    for (const [categoryName, moduleList] of Object.entries(categories)) {
+      const validModules = moduleList.filter((moduleName) => modules.includes(moduleName));
       if (validModules.length > 0) {
-        tabs.push({ key: catName, label: catName, modules: validModules });
+        tabs.push({ key: categoryName, label: categoryName, modules: validModules });
       }
     }
+
     if (uncategorized.length > 0) {
       tabs.push({ key: '__other__', label: '其他', modules: uncategorized });
     }
+
     return tabs;
   }, [activeSection, schema, pluginCategories, plugins]);
 
   const safeIdx = Math.min(activeCategoryIdx, Math.max(categoryTabs.length - 1, 0));
   const currentTab = categoryTabs[safeIdx] || null;
+  const isAccountSection = activeSection === 'account';
+  const isPluginSection = activeSection !== 'framework' && activeSection !== 'monitor' && activeSection !== 'account';
+
+  const needsAccountTopbar = botAccounts.length > 1
+    || (botAccounts.length === 1 && configuredAccountIds.includes(Number(botAccounts[0]?.self_id)));
+  const showAccountTopbar = needsAccountTopbar && (isPluginSection || isAccountSection);
+
+  const currentPluginScopeKey = selectedPluginSelfId == null ? '__default__' : String(selectedPluginSelfId);
+  const currentPluginConfigs = pluginConfigs[activeSection]?.[currentPluginScopeKey] || {};
+  const selectedBotAccount = botAccounts.find((account) => Number(account.self_id) === Number(selectedPluginSelfId)) || null;
+  const currentAccountConfig = selectedPluginSelfId != null ? (accountConfigs[selectedPluginSelfId] ?? null) : null;
 
   const handleSectionChange = useCallback((key) => {
     setActiveSection(key);
     setActiveCategoryIdx(0);
   }, []);
 
-  // 获取当前 section 的显示名和图标
-  const currentNav = navItems.find(n => n.key === activeSection);
+  const currentNav = navItems.find((item) => item.key === activeSection);
   const sectionLabel = currentNav?.label || activeSection;
-  const sectionIcon = currentNav?.icon || '⚙️';
 
   if (!isLoggedIn) {
     return <LoginPage onLogin={login} />;
@@ -180,18 +246,15 @@ function App() {
 
   return (
     <div className="app-root">
-      {/* Toast */}
       <div className="toast-container">
-        {toasts.map(t => (
-          <div key={t.id} className={`toast ${t.type}`}>
-            {t.message}
+        {toasts.map((toast) => (
+          <div key={toast.id} className={`toast ${toast.type}`}>
+            {toast.message}
           </div>
         ))}
       </div>
 
-      {/* Main Layout: left nav + content */}
       <div className="app-layout">
-        {/* Left Navigation */}
         <aside className="left-nav">
           <div className="left-nav-brand">
             <span className="left-nav-brand-icon">🌸</span>
@@ -200,7 +263,7 @@ function App() {
           <div className="left-nav-divider"></div>
 
           <div className="left-nav-section">配置</div>
-          {navItems.map(item => (
+          {navItems.map((item) => (
             <button
               key={item.key}
               className={`left-nav-item ${activeSection === item.key ? 'active' : ''}`}
@@ -217,7 +280,6 @@ function App() {
             </button>
           ))}
 
-          {/* Bottom: status + logout */}
           <div className="left-nav-bottom">
             <div className="left-nav-status">
               <span className={`status-dot ${connected ? 'connected' : 'disconnected'}`}></span>
@@ -227,14 +289,34 @@ function App() {
           </div>
         </aside>
 
-        {/* Main content */}
         <main className="main-content">
-          {/* Section Heading */}
+          {showAccountTopbar && (
+            <div className="account-topbar">
+              {botAccounts.map((account) => (
+                <button
+                  key={account.self_id}
+                  className={`account-tab ${Number(account.self_id) === Number(selectedPluginSelfId) ? 'active' : ''}`}
+                  onClick={() => setSelectedPluginSelfId(account.self_id)}
+                >
+                  <img
+                    className="account-tab-avatar"
+                    src={`https://q1.qlogo.cn/g?b=qq&nk=${account.uin || account.self_id}&s=100`}
+                    alt=""
+                    onError={(event) => {
+                      event.target.src = 'https://q1.qlogo.cn/g?b=qq&nk=10000&s=100';
+                    }}
+                  />
+                  <span className="account-tab-name">{account.nickname || 'Bot'}</span>
+                  <span className="account-tab-id">{account.self_id}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="section-heading">
             <span className="heading-accent">{sectionLabel}</span>
           </div>
 
-          {/* Category Tabs */}
           {categoryTabs.length > 1 && (
             <div className="category-tabs">
               {categoryTabs.map((tab, idx) => (
@@ -249,23 +331,21 @@ function App() {
             </div>
           )}
 
-          {/* Validation errors */}
           {activeSection === 'framework' && errors && errors.length > 0 && (
             <div className="config-section" style={{ borderColor: 'rgba(229, 57, 53, 0.2)' }}>
               <div className="section-title" style={{ color: 'var(--error)' }}>
-                ⚠️ 配置验证警告
+                ⚠️ 配置校验警告
               </div>
               <div className="section-desc">
-                {errors.map((e, i) => (
-                  <div key={i} style={{ color: 'var(--warning)', marginBottom: 3 }}>
-                    • {e.path?.join('.') || '?'}: {e.message}
+                {errors.map((item, index) => (
+                  <div key={index} style={{ color: 'var(--warning)', marginBottom: 3 }}>
+                    • {item.path?.join('.') || '?'}: {item.message}
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Content */}
           <div className="content-area">
             {activeSection === 'monitor' && (
               <SystemMonitor
@@ -277,7 +357,7 @@ function App() {
               />
             )}
 
-            {activeSection === 'framework' && config && schema && currentTab && (
+            {activeSection === 'framework' && currentTab && config && schema && (
               <ConfigForm
                 config={config}
                 schema={schema}
@@ -287,14 +367,42 @@ function App() {
               />
             )}
 
-            {activeSection !== 'framework' && activeSection !== 'monitor' && currentTab && (
+            {activeSection === 'account' && (
+              selectedPluginSelfId == null ? (
+                <div className="empty-state">
+                  请先连接账号，或创建对应账号的配置文件后再编辑账号配置。
+                </div>
+              ) : currentAccountConfig && accountSchema && accountTab ? (
+                <ConfigForm
+                  config={currentAccountConfig}
+                  schema={accountSchema}
+                  onSave={handleAccountSave}
+                  saving={saving}
+                  activeTab={accountTab}
+                  scopeSelfId={selectedPluginSelfId}
+                />
+              ) : (
+                <div className="loading-container" style={{ minHeight: 120 }}>
+                  <div className="spinner"></div>
+                </div>
+              )
+            )}
+
+            {isPluginSection && !selectedBotAccount && (
+              <div className="empty-state">
+                暂无可配置账号，请先连接账号或创建该账号的配置作用域。
+              </div>
+            )}
+
+            {isPluginSection && currentTab && selectedBotAccount && (
               <PluginConfigPanel
                 pluginName={activeSection}
                 modules={currentTab.modules || []}
                 schemas={pluginSchemas[activeSection] || {}}
-                configs={pluginConfigs[activeSection] || {}}
+                configs={currentPluginConfigs}
                 saving={saving}
                 onSave={handlePluginSave}
+                scopeSelfId={selectedPluginSelfId}
               />
             )}
           </div>

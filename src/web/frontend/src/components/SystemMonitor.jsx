@@ -102,6 +102,8 @@ function StorageBar({ mount, used, total }) {
 
 // 主组件
 export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, networkSpeed, loading }) {
+    const accounts = botInfo?.accounts || [];
+
     // 计算总网络速度（所有网卡加起来）
     const totalNetworkSpeed = useMemo(() => {
         if (!networkSpeed || networkSpeed.length === 0) {
@@ -176,21 +178,40 @@ export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, networ
             {/* 第一行：Bot信息 + 环形图（合并为一个卡片） */}
             <div className="monitor-row-1">
                 {/* Bot 信息 */}
-                <div className="bot-section">
-                    <img
-                        className="bot-avatar-sm"
-                        src={botInfo?.uin ? `https://q1.qlogo.cn/g?b=qq&nk=${botInfo.uin}&s=640` : 'https://q1.qlogo.cn/g?b=qq&nk=10000&s=640'}
-                        alt="Avatar"
-                        onError={(e) => { e.target.src = 'https://q1.qlogo.cn/g?b=qq&nk=10000&s=640'; }}
-                    />
-                    <div className="bot-info-sm">
-                        <div className="bot-name-sm">{botInfo?.nickname || '未连接'}</div>
-                        <div className="bot-qq-sm">{botInfo?.uin || '-'}</div>
-                        <div className={`bot-status-sm ${botInfo?.uin ? 'online' : 'offline'}`}>
-                            <span className="dot"></span>
-                            {botInfo?.uin ? '在线' : '离线'}
+                <div className="bot-section bot-section-multi">
+                    {accounts.length === 0 ? (
+                        <div className="bot-summary-block">
+                            <img
+                                className="bot-avatar-sm"
+                                src="https://q1.qlogo.cn/g?b=qq&nk=10000&s=640"
+                                alt="Avatar"
+                            />
+                            <div className="bot-info-sm">
+                                <div className="bot-name-sm">未连接</div>
+                                <div className="bot-status-sm offline">
+                                    <span className="dot"></span>离线
+                                </div>
+                            </div>
                         </div>
-                    </div>
+                    ) : (
+                        <div className="bot-cards-row">
+                            {accounts.map((account) => (
+                                <div key={account.self_id} className="bot-card">
+                                    <img
+                                        className="bot-card-avatar"
+                                        src={`https://q1.qlogo.cn/g?b=qq&nk=${account.uin}&s=640`}
+                                        alt="Avatar"
+                                        onError={(e) => { e.target.src = 'https://q1.qlogo.cn/g?b=qq&nk=10000&s=640'; }}
+                                    />
+                                    <div className="bot-card-nick">{account.nickname || account.uin}</div>
+                                    <div className="bot-card-id">{account.uin}</div>
+                                    <div className="bot-card-status">
+                                        <span className="dot"></span>在线
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
 
                 {/* 分隔线 */}

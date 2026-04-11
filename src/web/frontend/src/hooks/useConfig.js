@@ -1,10 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
 
 const API_BASE = '';
+const PLUGIN_SELF_ID_STORAGE_KEY = 'sakura_plugin_self_id';
 
-/**
- * 配置数据管理 Hook — 支持框架 + 插件配置
- */
+function normalizeSelfId(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+function scopeKeyOf(selfId) {
+    return selfId == null ? '__default__' : String(selfId);
+}
+
 export function useConfig() {
     const [config, setConfig] = useState(null);
     const [schema, setSchema] = useState(null);
@@ -14,19 +21,35 @@ export function useConfig() {
     const [token, setToken] = useState(() => localStorage.getItem('sakura_token'));
     const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('sakura_token'));
 
-    // 插件相关状态
-    const [plugins, setPlugins] = useState({});           // { pluginName: [moduleNames] }
-    const [pluginCategories, setPluginCategories] = useState({}); // { pluginName: { Category: [Modules] } }
-    const [pluginMeta, setPluginMeta] = useState({});       // { pluginName: { displayName, icon } }
-    const [pluginSchemas, setPluginSchemas] = useState({}); // { pluginName: { moduleName: schemaMeta } }
-    const [pluginConfigs, setPluginConfigs] = useState({}); // { pluginName: { moduleName: config } }
+    const [plugins, setPlugins] = useState({});
+    const [pluginCategories, setPluginCategories] = useState({});
+    const [pluginMeta, setPluginMeta] = useState({});
+    const [pluginSchemas, setPluginSchemas] = useState({});
+    const [pluginConfigs, setPluginConfigs] = useState({});
+    const [botAccounts, setBotAccounts] = useState([]);
+    const [configuredAccountIds, setConfiguredAccountIds] = useState([]); // 已有独立配置文件的账号 ID
+    const [selectedPluginSelfId, setSelectedPluginSelfIdState] = useState(() =>
+        normalizeSelfId(localStorage.getItem(PLUGIN_SELF_ID_STORAGE_KEY))
+    );
+
+    // 分账号框架基本配置
+    const [accountSchema, setAccountSchema] = useState(null);
+    const [accountConfigs, setAccountConfigs] = useState({}); // selfId → config
 
     const headers = useCallback(() => ({
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
     }), [token]);
 
-    // ============ 认证 ============
+    const setSelectedPluginSelfId = useCallback((selfId) => {
+        const normalized = normalizeSelfId(selfId);
+        setSelectedPluginSelfIdState(normalized);
+        if (normalized == null) {
+            localStorage.removeItem(PLUGIN_SELF_ID_STORAGE_KEY);
+        } else {
+            localStorage.setItem(PLUGIN_SELF_ID_STORAGE_KEY, String(normalized));
+        }
+    }, []);
 
     const login = useCallback(async (password) => {
         try {
@@ -43,8 +66,8 @@ export function useConfig() {
                 return { success: true };
             }
             return { success: false, error: data.error };
-        } catch (e) {
-            return { success: false, error: '连接失败' };
+        } catch {
+            return { success: false, error: '杩炴帴澶辫触' };
         }
     }, []);
 
@@ -56,12 +79,14 @@ export function useConfig() {
         setPlugins({});
         setPluginSchemas({});
         setPluginConfigs({});
+        setPluginCategories({});
         setPluginMeta({});
-        setPluginMeta({});
+        setBotAccounts([]);
+        setConfiguredAccountIds([]);
+        setSelectedPluginSelfIdState(null);
         localStorage.removeItem('sakura_token');
+        localStorage.removeItem(PLUGIN_SELF_ID_STORAGE_KEY);
     }, []);
-
-    // ============ 框架配置 ============
 
     const fetchSchema = useCallback(async () => {
         try {
@@ -69,22 +94,78 @@ export function useConfig() {
             if (res.status === 401) { logout(); return; }
             const data = await res.json();
             if (data.success) setSchema(data.data);
-        } catch (e) {
-            console.error('获取 schema 失败:', e);
+        } catch (error) {
+            console.error('获取 schema 失败:', error);
         }
     }, [headers, logout]);
+
+    const fetchAccountSchema = useCallback(async () => {
+        try {
+            const res = await fetch(`${API_BASE}/api/account-schema`, { headers: headers() });
+            if (res.status === 401) { logout(); return; }
+            const data = await res.json();
+            if (data.success) setAccountSchema(data.data);
+        } catch (error) {
+            console.error('获取账号 schema 失败:', error);
+        }
+    }, [headers, logout]);
+
+    const fetchAccountConfig = useCallback(async (selfId) => {
+        const normalizedSelfId = normalizeSelfId(selfId);
+        if (!normalizedSelfId) return;
+        try {
+            const res = await fetch(`${API_BASE}/api/account-config?selfId=${normalizedSelfId}`, { headers: headers() });
+            if (res.status === 401) { logout(); return; }
+            const data = await res.json();
+            if (data.success) {
+                setAccountConfigs(prev => ({ ...prev, [normalizedSelfId]: data.data }));
+            }
+        } catch (error) {
+            console.error(`获取账号 ${selfId} 配置失败:`, error);
+        }
+    }, [headers, logout]);
+
+    const saveAccountConfig = useCallback(async (selfId, newConfig) => {
+        const normalizedSelfId = normalizeSelfId(selfId);
+        if (!normalizedSelfId) return { success: false, errors: [{ message: '请先选择账号' }] };
+        setSaving(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/account-config?selfId=${normalizedSelfId}`, {
+                method: 'POST',
+                headers: headers(),
+                body: JSON.stringify({ data: newConfig }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                setAccountConfigs(prev => ({ ...prev, [normalizedSelfId]: newConfig }));
+                // 保存后将此账号加入已配置列表（确保顶部标签栏下次显示）
+                setConfiguredAccountIds(prev =>
+                    prev.includes(normalizedSelfId) ? prev : [...prev, normalizedSelfId]
+                );
+                return { success: true };
+            }
+            return { success: false, errors: data.errors };
+        } catch {
+            return { success: false, errors: [{ message: '保存失败' }] };
+        } finally {
+            setSaving(false);
+        }
+    }, [headers]);
 
     const fetchConfig = useCallback(async () => {
         try {
             const res = await fetch(`${API_BASE}/api/config`, { headers: headers() });
-            if (res.status === 401) { logout(); return; }
+            if (res.status === 401) {
+                logout();
+                return;
+            }
             const data = await res.json();
             if (data.success) {
                 setConfig(data.data);
                 setErrors(data.errors);
             }
-        } catch (e) {
-            console.error('获取配置失败:', e);
+        } catch (error) {
+            console.error('鑾峰彇閰嶇疆澶辫触:', error);
         }
     }, [headers, logout]);
 
@@ -103,134 +184,222 @@ export function useConfig() {
                 return { success: true };
             }
             return { success: false, errors: data.errors };
-        } catch (e) {
-            return { success: false, errors: [{ message: '保存失败' }] };
+        } catch {
+            return { success: false, errors: [{ message: '淇濆瓨澶辫触' }] };
         } finally {
             setSaving(false);
         }
     }, [headers]);
 
-    // ============ 插件配置 ============
+    const fetchBotAccounts = useCallback(async () => {
+        try {
+            const res = await fetch(`${API_BASE}/api/bot/info`, { headers: headers() });
+            if (res.status === 401) {
+                logout();
+                return;
+            }
+            const data = await res.json();
+            if (!data.success) {
+                setBotAccounts([]);
+                setSelectedPluginSelfId(null);
+                return;
+            }
+
+            const accounts = Array.isArray(data.data?.accounts) ? data.data.accounts : [];
+            setBotAccounts(accounts);
+            setConfiguredAccountIds(Array.isArray(data.data?.configuredAccountIds) ? data.data.configuredAccountIds : []);
+
+            const storedSelfId = normalizeSelfId(localStorage.getItem(PLUGIN_SELF_ID_STORAGE_KEY));
+            const currentSelfId = normalizeSelfId(selectedPluginSelfId);
+            const preferredSelfId = currentSelfId ?? storedSelfId;
+            const hasPreferred = preferredSelfId != null && accounts.some((account) => Number(account.self_id) === preferredSelfId);
+            const nextSelfId = hasPreferred ? preferredSelfId : normalizeSelfId(accounts[0]?.self_id);
+            setSelectedPluginSelfId(nextSelfId);
+        } catch (error) {
+            console.error('鑾峰彇 Bot 淇℃伅澶辫触:', error);
+        }
+    }, [headers, logout, selectedPluginSelfId, setSelectedPluginSelfId]);
 
     const fetchPlugins = useCallback(async () => {
         try {
             const res = await fetch(`${API_BASE}/api/plugins`, { headers: headers() });
-            if (res.status === 401) { logout(); return; }
+            if (res.status === 401) {
+                logout();
+                return;
+            }
             const data = await res.json();
-            if (data.success) {
-                // 后端返回 { pluginName: { modules: [], categories: {} } }
-                // 或者旧版 { pluginName: [modules] }
+            if (!data.success) return;
 
-                const nextPlugins = {};
-                const nextCategories = {};
-                const nextMeta = {};
+            const nextPlugins = {};
+            const nextCategories = {};
+            const nextMeta = {};
 
-                for (const [name, info] of Object.entries(data.data)) {
-                    if (Array.isArray(info)) {
-                        nextPlugins[name] = info;
-                    } else {
-                        nextPlugins[name] = info.modules || [];
-                        nextCategories[name] = info.categories || null;
-                        if (info.meta) nextMeta[name] = info.meta;
+            for (const [name, info] of Object.entries(data.data)) {
+                if (Array.isArray(info)) {
+                    nextPlugins[name] = info;
+                } else {
+                    nextPlugins[name] = info.modules || [];
+                    nextCategories[name] = info.categories || null;
+                    if (info.meta) {
+                        nextMeta[name] = info.meta;
                     }
                 }
-
-                setPlugins(nextPlugins);
-                setPluginCategories(nextCategories);
-                setPluginMeta(nextMeta);
-
-                // 批量加载每个插件的 schema 和 config
-                for (const pluginName of Object.keys(data.data)) {
-                    // Schema
-                    fetch(`${API_BASE}/api/plugins/${pluginName}/schema`, { headers: headers() })
-                        .then(r => r.json())
-                        .then(d => {
-                            if (d.success) {
-                                setPluginSchemas(prev => ({ ...prev, [pluginName]: d.data }));
-                            }
-                        })
-                        .catch(() => { });
-
-                    // Config
-                    fetch(`${API_BASE}/api/plugins/${pluginName}/config`, { headers: headers() })
-                        .then(r => r.json())
-                        .then(d => {
-                            if (d.success) {
-                                setPluginConfigs(prev => ({ ...prev, [pluginName]: d.data }));
-                            }
-                        })
-                        .catch(() => { });
-                }
             }
-        } catch (e) {
-            console.error('获取插件列表失败:', e);
+
+            setPlugins(nextPlugins);
+            setPluginCategories(nextCategories);
+            setPluginMeta(nextMeta);
+
+            for (const pluginName of Object.keys(data.data)) {
+                fetch(`${API_BASE}/api/plugins/${pluginName}/schema`, { headers: headers() })
+                    .then((response) => response.json())
+                    .then((schemaData) => {
+                        if (schemaData.success) {
+                            setPluginSchemas((prev) => ({ ...prev, [pluginName]: schemaData.data }));
+                        }
+                    })
+                    .catch(() => { });
+            }
+        } catch (error) {
+            console.error('鑾峰彇鎻掍欢鍒楄〃澶辫触:', error);
         }
     }, [headers, logout]);
 
-    const savePluginConfig = useCallback(async (pluginName, moduleName, newConfig) => {
+    const fetchPluginConfigsForSelf = useCallback(async (selfId) => {
+        const normalizedSelfId = normalizeSelfId(selfId);
+        if (!isLoggedIn || normalizedSelfId == null) {
+            return;
+        }
+
+        const currentPlugins = Object.keys(plugins);
+        if (currentPlugins.length === 0) {
+            return;
+        }
+
+        const scopeKey = scopeKeyOf(normalizedSelfId);
+
+        await Promise.all(currentPlugins.map(async (pluginName) => {
+            try {
+                const res = await fetch(
+                    `${API_BASE}/api/plugins/${pluginName}/config?selfId=${normalizedSelfId}`,
+                    { headers: headers() }
+                );
+                if (res.status === 401) {
+                    logout();
+                    return;
+                }
+                const data = await res.json();
+                if (data.success) {
+                    setPluginConfigs((prev) => ({
+                        ...prev,
+                        [pluginName]: {
+                            ...(prev[pluginName] || {}),
+                            [scopeKey]: data.data,
+                        },
+                    }));
+                }
+            } catch (error) {
+                console.error(`鑾峰彇鎻掍欢 ${pluginName} 閰嶇疆澶辫触:`, error);
+            }
+        }));
+    }, [headers, isLoggedIn, logout, plugins]);
+
+    const savePluginConfig = useCallback(async (pluginName, moduleName, newConfig, selfId = selectedPluginSelfId) => {
+        const normalizedSelfId = normalizeSelfId(selfId);
+        if (normalizedSelfId == null) {
+            return { success: false, errors: [{ message: '璇峰厛閫夋嫨璐﹀彿' }] };
+        }
+
         setSaving(true);
         try {
-            const res = await fetch(`${API_BASE}/api/plugins/${pluginName}/${moduleName}/config`, {
+            const res = await fetch(`${API_BASE}/api/plugins/${pluginName}/${moduleName}/config?selfId=${normalizedSelfId}`, {
                 method: 'POST',
                 headers: headers(),
                 body: JSON.stringify({ data: newConfig }),
             });
             const data = await res.json();
             if (data.success) {
-                setPluginConfigs(prev => ({
+                const scopeKey = scopeKeyOf(normalizedSelfId);
+                setPluginConfigs((prev) => ({
                     ...prev,
                     [pluginName]: {
-                        ...prev[pluginName],
-                        [moduleName]: newConfig,
+                        ...(prev[pluginName] || {}),
+                        [scopeKey]: {
+                            ...(prev[pluginName]?.[scopeKey] || {}),
+                            [moduleName]: newConfig,
+                        },
                     },
                 }));
                 return { success: true };
             }
             return { success: false, errors: data.errors };
-        } catch (e) {
-            return { success: false, errors: [{ message: '保存失败' }] };
+        } catch {
+            return { success: false, errors: [{ message: '淇濆瓨澶辫触' }] };
         } finally {
             setSaving(false);
         }
-    }, [headers]);
-
-    // ============ 初始加载 ============
+    }, [headers, selectedPluginSelfId]);
 
     useEffect(() => {
-        if (isLoggedIn) {
-            Promise.all([
-                fetchSchema(),
-                fetchConfig(),
-                fetchPlugins(),
-            ]).finally(() => setLoading(false));
-        } else {
+        if (!isLoggedIn) {
             setLoading(false);
+            return;
         }
-    }, [isLoggedIn, fetchSchema, fetchConfig, fetchPlugins]);
 
-    // ============ WebSocket 回调 ============
+        setLoading(true);
+        Promise.all([
+            fetchSchema(),
+            fetchConfig(),
+            fetchPlugins(),
+            fetchBotAccounts(),
+            fetchAccountSchema(),
+        ]).finally(() => setLoading(false));
+    }, [isLoggedIn, fetchSchema, fetchConfig, fetchPlugins, fetchBotAccounts, fetchAccountSchema]);
+
+    // 当切换账号时，按需拉取该账号的基本配置
+    useEffect(() => {
+        if (!isLoggedIn || selectedPluginSelfId == null) return;
+        if (accountConfigs[selectedPluginSelfId] !== undefined) return; // 已缓存
+        fetchAccountConfig(selectedPluginSelfId);
+    }, [isLoggedIn, selectedPluginSelfId, accountConfigs, fetchAccountConfig]);
+
+    useEffect(() => {
+        if (!isLoggedIn || selectedPluginSelfId == null || Object.keys(plugins).length === 0) {
+            return;
+        }
+        fetchPluginConfigsForSelf(selectedPluginSelfId);
+    }, [isLoggedIn, plugins, selectedPluginSelfId, fetchPluginConfigsForSelf]);
 
     const updateFromWs = useCallback((newConfig) => {
         setConfig(newConfig);
     }, []);
 
-    const updatePluginFromWs = useCallback((pluginName, moduleName, data) => {
-        setPluginConfigs(prev => ({
+    const updatePluginFromWs = useCallback((pluginName, moduleName, data, selfId = null) => {
+        const scopeKey = scopeKeyOf(normalizeSelfId(selfId));
+        setPluginConfigs((prev) => ({
             ...prev,
             [pluginName]: {
-                ...prev[pluginName],
-                [moduleName]: data,
+                ...(prev[pluginName] || {}),
+                [scopeKey]: {
+                    ...(prev[pluginName]?.[scopeKey] || {}),
+                    [moduleName]: data,
+                },
             },
         }));
     }, []);
 
     return {
-        config, schema, loading, saving, errors,
-        isLoggedIn, token,
-        login, logout,
+        config,
+        schema,
+        loading,
+        saving,
+        errors,
+        isLoggedIn,
+        token,
+        login,
+        logout,
         saveConfig,
         updateFromWs,
-        // 插件
         plugins,
         pluginCategories,
         pluginMeta,
@@ -238,5 +407,13 @@ export function useConfig() {
         pluginConfigs,
         savePluginConfig,
         updatePluginFromWs,
+        botAccounts,
+        configuredAccountIds,
+        selectedPluginSelfId,
+        setSelectedPluginSelfId,
+        accountSchema,
+        accountConfigs,
+        fetchAccountConfig,
+        saveAccountConfig,
     };
 }

@@ -38,7 +38,7 @@ export function useWebSocket(token, onConfigChanged, onPluginConfigChanged) {
                     // 插件配置变更
                     if (msg.type === 'plugin_config_changed' && msg.pluginName && msg.moduleName) {
                         console.log(`[WS] 插件配置已更新: ${msg.pluginName}/${msg.moduleName}`);
-                        onPluginConfigChanged?.(msg.pluginName, msg.moduleName, msg.data);
+                        onPluginConfigChanged?.(msg.pluginName, msg.moduleName, msg.data, msg.selfId ?? null);
                     }
                 } catch (e) {
                     console.error('[WS] 消息解析失败:', e);

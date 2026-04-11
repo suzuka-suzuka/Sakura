@@ -1,15 +1,100 @@
-import config from "../../src/core/config.js";
+import { Command, plugin } from "../../src/core/plugin.js";
+import accountConfig from "../../src/core/accountConfig.js";
+import { logger } from "../../src/utils/logger.js";
 import { getRedis, onRedisKeyExpired } from "../../src/utils/redis.js";
+
+const TEMP_BLOCK_PREFIX = "tempblock";
+
+function getScopedPermissionConfig(selfId) {
+  return accountConfig.getConfig(selfId);
+}
+
+function saveScopedPermissionConfig(selfId, nextConfig) {
+  return accountConfig.setConfig(selfId, nextConfig);
+}
+
+function buildTempBlockKey(selfId, targetId) {
+  const scope = selfId ? String(selfId) : "global";
+  return `${TEMP_BLOCK_PREFIX}:${scope}:${targetId}`;
+}
+
+function parseTempBlockKey(key) {
+  const parts = String(key || "").split(":");
+  if (parts[0] !== TEMP_BLOCK_PREFIX) {
+    return null;
+  }
+
+  if (parts.length === 2) {
+    const userId = Number(parts[1]);
+    return Number.isFinite(userId) ? { selfId: null, userId } : null;
+  }
+
+  if (parts.length === 3) {
+    const selfId = parts[1] === "global" ? null : Number(parts[1]);
+    const userId = Number(parts[2]);
+    if (!Number.isFinite(userId)) return null;
+    return {
+      selfId: Number.isFinite(selfId) ? selfId : null,
+      userId,
+    };
+  }
+
+  return null;
+}
+
+async function removeTempBlockKeys(targetId, selfId = null) {
+  try {
+    const redis = getRedis();
+    const keys = [buildTempBlockKey(selfId, targetId)];
+    if (selfId != null) {
+      keys.push(buildTempBlockKey(null, targetId));
+    }
+    await redis.del(...keys);
+  } catch (error) {
+    logger.warn(`[Permission] failed to remove temp block key: ${error.message}`);
+  }
+}
+
+function updateScopedList(selfId, key, updater) {
+  const currentConfig = getScopedPermissionConfig(selfId);
+  const currentList = Array.isArray(currentConfig[key]) ? currentConfig[key].map(Number) : [];
+  const nextList = updater(currentList);
+  const result = saveScopedPermissionConfig(selfId, {
+    ...currentConfig,
+    [key]: nextList,
+  });
+
+  return {
+    result,
+    list: nextList,
+  };
+}
+
+async function removeUserFromBlacklist(targetId, selfId = null) {
+  if (selfId == null) {
+    const accountIds = accountConfig.listConfiguredSelfIds();
+    for (const accountId of accountIds) {
+      updateScopedList(accountId, "blackUsers", (blackUsers) =>
+        blackUsers.filter((id) => id !== targetId)
+      );
+    }
+    return;
+  }
+
+  updateScopedList(selfId, "blackUsers", (blackUsers) =>
+    blackUsers.filter((id) => id !== targetId)
+  );
+}
 
 export function parseTime(timeStr) {
   if (!timeStr) return null;
 
   let totalSeconds = 0;
-  const regex = /(\d+)\s*(秒|分钟?|时|小时|天|日|s|m|h|d)/gi;
+  const regex = /(\d+)\s*(秒|分钟?|小时|天|s|m|h|d)/gi;
   let match;
 
   while ((match = regex.exec(timeStr)) !== null) {
-    const value = parseInt(match[1]);
+    const value = parseInt(match[1], 10);
     const unit = match[2].toLowerCase();
 
     switch (unit) {
@@ -29,8 +114,9 @@ export function parseTime(timeStr) {
         break;
       case "d":
       case "天":
-      case "日":
         totalSeconds += value * 86400;
+        break;
+      default:
         break;
     }
   }
@@ -51,79 +137,89 @@ export function formatTime(seconds) {
   return parts.join("") || "不足1分钟";
 }
 
-export async function blockUser(targetId, duration = 0) {
+export async function blockUser(targetId, duration = 0, selfId = null) {
   try {
-    let blackUsers = (config.get("blackUsers") || []).map(Number);
+    if (selfId == null) {
+      return { success: false, message: "缺少账号作用域，无法写入账号黑名单" };
+    }
+
+    const currentConfig = getScopedPermissionConfig(selfId);
+    const blackUsers = (currentConfig.blackUsers || []).map(Number);
 
     if (blackUsers.includes(targetId)) {
       return { success: false, message: `${targetId} 已经在黑名单中了` };
     }
 
-    blackUsers.push(targetId);
-
     if (duration > 0) {
       try {
         const redis = getRedis();
         await redis.setex(
-          `tempblock:${targetId}`,
+          buildTempBlockKey(selfId, targetId),
           duration,
           Date.now().toString()
         );
-
-        if (config.set("blackUsers", blackUsers)) {
-          const timeDesc = formatTime(duration);
-          return {
-            success: true,
-            message: `已将 ${targetId} 临时拉黑 ${timeDesc}，到期后自动解除`,
-          };
-        } else {
-          return { success: false, message: "保存配置文件失败" };
-        }
-      } catch (err) {
-        logger.error(`[Permission] Redis 操作失败: ${err.message}`);
+      } catch (error) {
+        logger.error(`[Permission] Redis operation failed: ${error.message}`);
         return { success: false, message: "临时拉黑失败，Redis 操作异常" };
       }
-    } else {
-      if (config.set("blackUsers", blackUsers)) {
-        return {
-          success: true,
-          message: `已将 ${targetId} 添加到黑名单（永久）`,
-        };
-      } else {
-        return { success: false, message: "保存配置文件失败" };
-      }
     }
-  } catch (err) {
-    logger.error(`[Permission] 拉黑失败: ${err.message}`);
-    return { success: false, message: `拉黑失败: ${err.message}` };
+
+    const saveResult = saveScopedPermissionConfig(selfId, {
+      ...currentConfig,
+      blackUsers: [...blackUsers, targetId],
+    });
+
+    if (!saveResult.success) {
+      if (duration > 0) {
+        await removeTempBlockKeys(targetId, selfId);
+      }
+      return { success: false, message: "保存配置文件失败" };
+    }
+
+    if (duration > 0) {
+      return {
+        success: true,
+        message: `已将 ${targetId} 临时拉黑 ${formatTime(duration)}，到期后自动解除`,
+      };
+    }
+
+    return {
+      success: true,
+      message: `已将 ${targetId} 加入黑名单`,
+    };
+  } catch (error) {
+    logger.error(`[Permission] block user failed: ${error.message}`);
+    return { success: false, message: `拉黑失败: ${error.message}` };
   }
 }
 
-export async function unblockUser(targetId) {
+export async function unblockUser(targetId, selfId = null) {
   try {
-    let blackUsers = (config.get("blackUsers") || []).map(Number);
+    if (selfId == null) {
+      return { success: false, message: "缺少账号作用域，无法写入账号黑名单" };
+    }
+
+    const currentConfig = getScopedPermissionConfig(selfId);
+    const blackUsers = (currentConfig.blackUsers || []).map(Number);
 
     if (!blackUsers.includes(targetId)) {
       return { success: false, message: `${targetId} 不在黑名单中` };
     }
 
-    try {
-      const redis = getRedis();
-      await redis.del(`tempblock:${targetId}`);
-    } catch (err) {
-      logger.warn(`[Permission] Redis 删除 key 失败: ${err.message}`);
-    }
+    const saveResult = saveScopedPermissionConfig(selfId, {
+      ...currentConfig,
+      blackUsers: blackUsers.filter((id) => id !== targetId),
+    });
 
-    blackUsers = blackUsers.filter((id) => id !== targetId);
-
-    if (config.set("blackUsers", blackUsers)) {
-      return { success: true, message: `已将 ${targetId} 移出黑名单` };
-    } else {
+    if (!saveResult.success) {
       return { success: false, message: "保存配置文件失败" };
     }
-  } catch (err) {
-    logger.error(`[Permission] 解黑失败: ${err.message}`);
-    return { success: false, message: `解黑失败: ${err.message}` };
+
+    await removeTempBlockKeys(targetId, selfId);
+    return { success: true, message: `已将 ${targetId} 移出黑名单` };
+  } catch (error) {
+    logger.error(`[Permission] unblock user failed: ${error.message}`);
+    return { success: false, message: `解黑失败: ${error.message}` };
   }
 }
 
@@ -141,25 +237,20 @@ export class Permission extends plugin {
   async initRedisExpireListener() {
     try {
       await onRedisKeyExpired(async (expiredKey) => {
-        if (expiredKey.startsWith("tempblock:")) {
-          const userId = Number(expiredKey.split(":")[1]);
-          await this.autoUnblock(userId);
-        }
+        const parsed = parseTempBlockKey(expiredKey);
+        if (!parsed) return;
+        await this.autoUnblock(parsed.userId, parsed.selfId);
       });
-    } catch (err) {
-      logger.error(`[Permission] 初始化 Redis 监听失败: ${err.message}`);
+    } catch (error) {
+      logger.error(`[Permission] init Redis expire listener failed: ${error.message}`);
     }
   }
 
-  async autoUnblock(userId) {
+  async autoUnblock(userId, selfId = null) {
     try {
-      let blackUsers = (config.get("blackUsers") || []).map(Number);
-
-      if (blackUsers.includes(userId)) {
-        blackUsers = blackUsers.filter((id) => id !== userId);
-      }
-    } catch (err) {
-      logger.error(`[Permission] 自动解黑失败: ${err.message}`);
+      await removeUserFromBlacklist(userId, selfId);
+    } catch (error) {
+      logger.error(`[Permission] auto unblock failed: ${error.message}`);
     }
   }
 
@@ -178,28 +269,37 @@ export class Permission extends plugin {
       return false;
     }
 
-    let whiteUsers = (config.get("whiteUsers") || []).map(Number);
+    const currentConfig = getScopedPermissionConfig(e.self_id);
+    const whiteUsers = (currentConfig.whiteUsers || []).map(Number);
 
-    if (isAdd) {
-      if (whiteUsers.includes(targetId)) {
-        await e.reply(`${targetId} 已经在白名单中了`, 10);
-        return;
-      }
-      whiteUsers.push(targetId);
-      await e.reply(`已将 ${targetId} 添加到白名单`, 10);
-    } else {
-      if (!whiteUsers.includes(targetId)) {
-        await e.reply(`${targetId} 不在白名单中`, 10);
-        return;
-      }
-      whiteUsers = whiteUsers.filter((id) => id !== targetId);
-      await e.reply(`已将 ${targetId} 移出白名单`, 10);
+    if (isAdd && whiteUsers.includes(targetId)) {
+      await e.reply(`${targetId} 已经在白名单中了`, 10);
+      return;
     }
 
-    if (!config.set("whiteUsers", whiteUsers)) {
-      logger.error("保存配置文件失败");
+    if (!isAdd && !whiteUsers.includes(targetId)) {
+      await e.reply(`${targetId} 不在白名单中`, 10);
+      return;
+    }
+
+    const result = saveScopedPermissionConfig(e.self_id, {
+      ...currentConfig,
+      whiteUsers: isAdd
+        ? [...whiteUsers, targetId]
+        : whiteUsers.filter((id) => id !== targetId),
+    });
+
+    if (!result.success) {
       await e.reply("保存配置文件失败", 10);
+      return;
     }
+
+    await e.reply(
+      isAdd
+        ? `已将 ${targetId} 加入白名单`
+        : `已将 ${targetId} 移出白名单`,
+      10
+    );
   });
 
   handleGroupPermission = Command(
@@ -221,28 +321,37 @@ export class Permission extends plugin {
         return false;
       }
 
-      let whiteGroups = (config.get("whiteGroups") || []).map(Number);
+      const currentConfig = getScopedPermissionConfig(e.self_id);
+      const whiteGroups = (currentConfig.whiteGroups || []).map(Number);
 
-      if (isAdd) {
-        if (whiteGroups.includes(targetGroupId)) {
-          await e.reply(`${targetGroupId} 已经在白名单中了`, 10);
-          return;
-        }
-        whiteGroups.push(targetGroupId);
-        await e.reply(`已将 ${targetGroupId} 添加到白名单`, 10);
-      } else {
-        if (!whiteGroups.includes(targetGroupId)) {
-          await e.reply(`${targetGroupId} 不在白名单中`, 10);
-          return;
-        }
-        whiteGroups = whiteGroups.filter((id) => id !== targetGroupId);
-        await e.reply(`已将 ${targetGroupId} 移出白名单`, 10);
+      if (isAdd && whiteGroups.includes(targetGroupId)) {
+        await e.reply(`${targetGroupId} 已经在白名单中了`, 10);
+        return;
       }
 
-      if (!config.set("whiteGroups", whiteGroups)) {
-        logger.error("保存配置文件失败");
+      if (!isAdd && !whiteGroups.includes(targetGroupId)) {
+        await e.reply(`${targetGroupId} 不在白名单中`, 10);
+        return;
+      }
+
+      const result = saveScopedPermissionConfig(e.self_id, {
+        ...currentConfig,
+        whiteGroups: isAdd
+          ? [...whiteGroups, targetGroupId]
+          : whiteGroups.filter((id) => id !== targetGroupId),
+      });
+
+      if (!result.success) {
         await e.reply("保存配置文件失败", 10);
+        return;
       }
+
+      await e.reply(
+        isAdd
+          ? `已将 ${targetGroupId} 加入白名单`
+          : `已将 ${targetGroupId} 移出白名单`,
+        10
+      );
     }
   );
 
@@ -274,14 +383,9 @@ export class Permission extends plugin {
         return false;
       }
 
-      let result;
-
-      if (isAdd) {
-        const duration = parseTime(timeStr);
-        result = await blockUser(targetId, duration);
-      } else {
-        result = await unblockUser(targetId);
-      }
+      const result = isAdd
+        ? await blockUser(targetId, parseTime(timeStr), e.self_id)
+        : await unblockUser(targetId, e.self_id);
 
       await e.reply(result.message, 10);
     }

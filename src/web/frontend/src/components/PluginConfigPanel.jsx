@@ -4,7 +4,7 @@ import ConfigField from './ConfigField';
 /**
  * 递归渲染 schema 字段
  */
-function RenderFields({ schema, data, pathPrefix, onChange }) {
+function RenderFields({ schema, data, pathPrefix, onChange, scopeSelfId = null }) {
     if (!schema) return null;
 
     return Object.entries(schema).map(([key, meta]) => {
@@ -28,6 +28,7 @@ function RenderFields({ schema, data, pathPrefix, onChange }) {
                         data={data?.[key]}
                         pathPrefix={fullPath}
                         onChange={onChange}
+                        scopeSelfId={scopeSelfId}
                     />
                 </div>
             );
@@ -40,6 +41,7 @@ function RenderFields({ schema, data, pathPrefix, onChange }) {
                 meta={meta}
                 value={data?.[key]}
                 onChange={(value) => onChange(fullPath, value)}
+                scopeSelfId={scopeSelfId}
             />
         );
     });
@@ -56,6 +58,7 @@ export default function PluginConfigPanel({
     configs,
     saving,
     onSave,
+    scopeSelfId = null,
 }) {
     const [drafts, setDrafts] = useState({});
 
@@ -145,6 +148,7 @@ export default function PluginConfigPanel({
                                 data={draft}
                                 pathPrefix=""
                                 onChange={(path, value) => handleChange(mod, path, value)}
+                                scopeSelfId={scopeSelfId}
                             />
                         ) : (
                             <div className="field-group">

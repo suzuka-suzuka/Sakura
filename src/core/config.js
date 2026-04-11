@@ -5,10 +5,56 @@ import chokidar from 'chokidar';
 import lodash from 'lodash';
 import { fileURLToPath } from 'url';
 import { logger } from '../utils/logger.js';
+import accountConfig from './accountConfig.js';
 import { ConfigSchema, getDefaultConfig, schemaToMeta } from './configSchema.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.join(__dirname, '../../config/config.yaml');
+
+const WS_CONNECTION_NAMES = {
+    forward: 'Forward',
+    reverse: 'Reverse',
+    milky: 'Milky',
+};
+
+function normalizeWsConfigShape(rawData) {
+    if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) {
+        return rawData;
+    }
+
+    const normalized = lodash.cloneDeep(rawData);
+    const wsConfig = normalized.ws;
+    if (!wsConfig || typeof wsConfig !== 'object' || Array.isArray(wsConfig)) {
+        return normalized;
+    }
+
+    for (const key of ['forward', 'reverse', 'milky']) {
+        const value = wsConfig[key];
+        if (value == null) continue;
+
+        const ensureNamed = (item, index) => {
+            if (!item || typeof item !== 'object' || Array.isArray(item)) {
+                return item;
+            }
+            if (item.name) return item;
+            return {
+                name: `${WS_CONNECTION_NAMES[key] || key} ${index + 1}`,
+                ...item,
+            };
+        };
+
+        if (Array.isArray(value)) {
+            wsConfig[key] = value.map((item, index) => ensureNamed(item, index));
+            continue;
+        }
+
+        if (typeof value === 'object') {
+            wsConfig[key] = [ensureNamed(value, 0)];
+        }
+    }
+
+    return normalized;
+}
 
 class Config {
     constructor() {
@@ -56,7 +102,8 @@ class Config {
         try {
             if (fs.existsSync(CONFIG_PATH)) {
                 const fileContents = fs.readFileSync(CONFIG_PATH, 'utf8');
-                const rawData = yaml.load(fileContents) || {};
+                const sourceData = yaml.load(fileContents) || {};
+                const rawData = normalizeWsConfigShape(sourceData);
 
                 // 用 Zod 验证（自动补全缺失字段的默认值 + 剥离多余字段）
                 const result = ConfigSchema.safeParse(rawData);
@@ -76,7 +123,9 @@ class Config {
                 }
 
                 // 检查是否需要同步：缺失字段需补全 / 多余字段需清理
-                if (!lodash.isEqual(this.config, rawData)) {
+                const needsSchemaSync = !lodash.isEqual(this.config, rawData);
+                const needsLegacyMigration = !lodash.isEqual(sourceData, rawData);
+                if (needsSchemaSync || needsLegacyMigration) {
                     logger.info('[Config] 配置结构与 Schema 不一致，正在同步...');
                     this._syncSave();
                 }
@@ -170,6 +219,17 @@ class Config {
         return this.config;
     }
 
+    getForSelf(selfId, key) {
+        const scopedConfig = {
+            ...this.config,
+            ...accountConfig.getConfig(selfId),
+        };
+        if (key) {
+            return lodash.get(scopedConfig, key);
+        }
+        return scopedConfig;
+    }
+
     set(key, value) {
         lodash.set(this.config, key, value);
         return this.save();
@@ -180,7 +240,8 @@ class Config {
      */
     update(newConfig) {
         // 验证新配置
-        const result = ConfigSchema.safeParse(newConfig);
+        const normalizedConfig = normalizeWsConfigShape(newConfig);
+        const result = ConfigSchema.safeParse(normalizedConfig);
         if (!result.success) {
             this._lastErrors = result.error.issues;
             return { success: false, errors: result.error.issues };

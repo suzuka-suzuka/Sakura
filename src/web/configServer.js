@@ -7,7 +7,9 @@ import { fileURLToPath } from 'url';
 import si from 'systeminformation';
 import Config from '../core/config.js';
 import pluginConfigManager from '../core/pluginConfig.js';
+import accountConfig from '../core/accountConfig.js';
 import { logger } from '../utils/logger.js';
+import { bot as botFacade, getBotSummaries } from '../api/client.js';
 import yaml from 'js-yaml';
 let cachedStaticInfo = null;
 let staticInfoTime = 0;
@@ -153,17 +155,45 @@ async function getDynamicSystemInfo() {
 
 async function getBotInfo() {
     try {
-        const bot = global.bot;
-        if (!bot) {
+        const onlineAccounts = getBotSummaries();
+        const pluginScopedIds = pluginConfigManager.getConfiguredSelfIds('sakura-plugin');
+        const configuredAccountIds = accountConfig.listConfiguredSelfIds();
+        const configuredSelfIds = [...new Set([...pluginScopedIds, ...configuredAccountIds])];
+        const accountMap = new Map();
+
+        for (const account of onlineAccounts) {
+            const id = Number(account.self_id);
+            if (!id) continue; // 过滤 selfId=0 或无效账号
+            accountMap.set(id, {
+                ...account,
+                status: account.status || 'online',
+            });
+        }
+
+        for (const selfId of configuredSelfIds) {
+            const id = Number(selfId);
+            if (!id) continue; // 过滤 selfId=0
+            if (!accountMap.has(id)) {
+                accountMap.set(id, {
+                    self_id: id,
+                    uin: id,
+                    nickname: `Bot ${id}`,
+                    status: 'offline',
+                });
+            }
+        }
+
+        const accounts = Array.from(accountMap.values());
+        if (accounts.length === 0) {
             return null;
         }
 
-        const loginInfo = await bot.getLoginInfo?.() || {};
-
+        // 已有独立配置文件的账号 ID 列表，供前端判断是否需要显示账号标签栏
         return {
-            uin: loginInfo.user_id || bot.uin || null,
-            nickname: loginInfo.nickname || bot.nickname || null,
-            status: bot.status || 'online',
+            accounts,
+            total: accounts.length,
+            online: onlineAccounts.length,
+            configuredAccountIds,
         };
     } catch (e) {
         logger.error(`[ConfigServer] 获取 Bot 信息失败: ${e}`);
@@ -215,6 +245,13 @@ function parseBody(req) {
         });
         req.on('error', reject);
     });
+}
+
+function parseSelfIdParam(url) {
+    const raw = url.searchParams.get('selfId');
+    if (raw == null || raw === '') return null;
+    const selfId = Number(raw);
+    return Number.isFinite(selfId) ? selfId : null;
 }
 
 function sendJson(res, data, status = 200) {
@@ -279,16 +316,27 @@ async function handleApi(req, res) {
     if (pathname === '/api/bot/groups' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
         try {
-            const bot = global.bot;
-            if (!bot) {
+            if (!botFacade) {
                 sendJson(res, { success: false, error: 'Bot 未连接' });
                 return true;
             }
-            const result = await bot.getGroupList();
-            const groups = Array.isArray(result) ? result : (result?.data || []);
+            const selfId = parseSelfIdParam(url);
+            const targetBot = selfId != null ? botFacade.getBot?.(selfId) : botFacade;
+            if (!targetBot) {
+                sendJson(res, { success: false, error: `Account ${selfId} is offline` });
+                return true;
+            }
+
+            const result = selfId != null
+                ? await targetBot.getGroupList()
+                : await botFacade.getGroupList();
+            const groups = Array.isArray(result) ? result : [];
             const list = groups.map(g => ({
                 group_id: g.group_id,
                 group_name: g.group_name || String(g.group_id),
+                bots: selfId != null
+                    ? [{ self_id: selfId, nickname: targetBot.nickname || String(selfId) }]
+                    : (g.bots || []),
             }));
             sendJson(res, { success: true, data: list });
         } catch (e) {
@@ -436,6 +484,42 @@ async function handleApi(req, res) {
         return true;
     }
 
+    // ===== 分账号基本配置 =====
+
+    if (pathname === '/api/account-schema' && req.method === 'GET') {
+        if (!requireAuth(req, res)) return true;
+        sendJson(res, { success: true, data: accountConfig.getSchema() });
+        return true;
+    }
+
+    if (pathname === '/api/account-config' && req.method === 'GET') {
+        if (!requireAuth(req, res)) return true;
+        const selfId = parseSelfIdParam(url);
+        if (!selfId) {
+            sendJson(res, { success: false, error: '缺少 selfId 参数' }, 400);
+            return true;
+        }
+        sendJson(res, { success: true, data: accountConfig.getConfig(selfId) });
+        return true;
+    }
+
+    if (pathname === '/api/account-config' && req.method === 'POST') {
+        if (!requireAuth(req, res)) return true;
+        const selfId = parseSelfIdParam(url);
+        if (!selfId) {
+            sendJson(res, { success: false, error: '缺少 selfId 参数' }, 400);
+            return true;
+        }
+        const body = await parseBody(req);
+        const result = accountConfig.setConfig(selfId, body.data || body);
+        if (result.success) {
+            sendJson(res, { success: true, message: '保存成功' });
+        } else {
+            sendJson(res, { success: false, error: '配置验证失败', errors: result.errors });
+        }
+        return true;
+    }
+
 
     if (pathname === '/api/config' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
@@ -471,6 +555,7 @@ async function handleApi(req, res) {
     if (pathname === '/api/dynamic-options' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
         try {
+            const selfId = parseSelfIdParam(url);
             const dynamicConfig = pluginConfigManager.getDynamicOptionsConfig('sakura-plugin');
 
             if (!dynamicConfig) {
@@ -485,7 +570,7 @@ async function handleApi(req, res) {
                 const values = [];
 
                 for (const source of config.sources || []) {
-                    const moduleConfig = pluginConfigManager.getConfig('sakura-plugin', source.module);
+                    const moduleConfig = pluginConfigManager.getConfig('sakura-plugin', source.module, { selfId });
                     if (!moduleConfig) continue;
 
                     const arr = source.path.split('.').reduce((obj, key) => obj?.[key], moduleConfig);
@@ -554,6 +639,7 @@ async function handleApi(req, res) {
         }
 
         const { pluginName, moduleName, action } = parsed;
+        const selfId = parseSelfIdParam(url);
 
 
         if (action === 'schema' && req.method === 'GET') {
@@ -568,7 +654,7 @@ async function handleApi(req, res) {
 
 
         if (action === 'allConfig' && req.method === 'GET') {
-            const configs = pluginConfigManager.getAll(pluginName);
+            const configs = pluginConfigManager.getAll(pluginName, { selfId });
             if (!configs) {
                 sendJson(res, { success: false, error: `插件 ${pluginName} 未注册` }, 404);
             } else {
@@ -579,7 +665,7 @@ async function handleApi(req, res) {
 
 
         if (action === 'config' && moduleName && req.method === 'GET') {
-            const config = pluginConfigManager.getConfig(pluginName, moduleName);
+            const config = pluginConfigManager.getConfig(pluginName, moduleName, { selfId });
             if (config === null) {
                 sendJson(res, { success: false, error: `模块 ${moduleName} 不存在` }, 404);
             } else {
@@ -591,7 +677,7 @@ async function handleApi(req, res) {
 
         if (action === 'config' && moduleName && req.method === 'POST') {
             const body = await parseBody(req);
-            const result = pluginConfigManager.setConfig(pluginName, moduleName, body.data ?? body);
+            const result = pluginConfigManager.setConfig(pluginName, moduleName, body.data ?? body, { selfId });
             if (result.success) {
 
                 sendJson(res, { success: true, message: '保存成功' });
@@ -611,13 +697,14 @@ async function handleApi(req, res) {
 
 
 
-function broadcastPluginConfigChanged(pluginName, moduleName) {
-    const config = pluginConfigManager.getConfig(pluginName, moduleName);
+function broadcastPluginConfigChanged(pluginName, moduleName, selfId = null) {
+    const config = pluginConfigManager.getConfig(pluginName, moduleName, { selfId });
     const message = JSON.stringify({
         type: 'plugin_config_changed',
         pluginName,
         moduleName,
         data: config,
+        selfId,
         timestamp: Date.now(),
     });
 
@@ -726,12 +813,13 @@ export function startConfigServer() {
 
     const plugins = pluginConfigManager.getRegisteredPlugins();
     for (const pluginName of Object.keys(plugins)) {
-        pluginConfigManager.onChange(pluginName, (moduleName, newConfig) => {
+        pluginConfigManager.onChange(pluginName, (moduleName, newConfig, meta = {}) => {
             const message = JSON.stringify({
                 type: 'plugin_config_changed',
                 pluginName,
                 moduleName,
                 data: newConfig,
+                selfId: meta.selfId ?? null,
                 timestamp: Date.now(),
             });
             for (const client of wsClients) {

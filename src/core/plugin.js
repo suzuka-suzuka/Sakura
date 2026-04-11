@@ -125,6 +125,27 @@ export function Cron(cronExpression, handler) {
 export const contexts = {};
 export const contextTimers = {};
 
+export function buildContextKey(event, isGroup = false) {
+  if (!event) return null;
+
+  const selfId = event.self_id ?? "default";
+
+  if (typeof isGroup === "boolean") {
+    if (isGroup) {
+      if (!event.group_id || !event.user_id) return null;
+      return `${selfId}:${event.group_id}:${event.user_id}`;
+    }
+    if (!event.user_id) return null;
+    return `${selfId}:private:${event.user_id}`;
+  }
+
+  if (isGroup === event.group_id && event.user_id) {
+    return `${selfId}:${isGroup}:${event.user_id}`;
+  }
+
+  return `${selfId}:custom:${isGroup}`;
+}
+
 export class plugin {
   constructor(config = {}) {
     const {
@@ -143,6 +164,16 @@ export class plugin {
     this.permission = permission;
     this.configWatch = configWatch;  // 如 "teatime" 或 ["teatime", "AI"]
     this.jobs = [];
+    this._eventFallback = null;
+
+    Object.defineProperty(this, "e", {
+      configurable: true,
+      enumerable: false,
+      get: () => eventStorage.getStore() || this._eventFallback,
+      set: (value) => {
+        this._eventFallback = value || null;
+      },
+    });
   }
 
   async init() { }
@@ -160,6 +191,15 @@ export class plugin {
     return getBot(selfId);
   }
 
+  getScopeKey(...parts) {
+    const currentEvent = eventStorage.getStore() || this._eventFallback;
+    const selfId = currentEvent?.self_id ?? "default";
+    const normalizedParts = parts
+      .filter((part) => part !== undefined && part !== null && part !== "")
+      .map((part) => String(part));
+    return [String(selfId), ...normalizedParts].join(":");
+  }
+
   /**
    * 设置上下文
    * @param {string} method 方法名
@@ -169,21 +209,8 @@ export class plugin {
    * @param {any} data 上下文数据
    */
   setContext(method, isGroup = false, timeout = 120, refreshTimer = true, data = null) {
-    let id;
-    if (typeof isGroup === "boolean") {
-      const e = eventStorage.getStore() || this.e;
-      if (!e) return;
-      // 群组上下文使用 group_id:user_id 作为 key，避免不同用户上下文互相阻塞
-      id = isGroup ? `${e.group_id}:${e.user_id}` : e.user_id;
-    } else {
-      // 兼容直接传入 ID 的情况，如果传入的是群号，需要配合 user_id 使用
-      const e = eventStorage.getStore() || this.e;
-      if (e && e.group_id && isGroup === e.group_id) {
-        id = `${isGroup}:${e.user_id}`;
-      } else {
-        id = isGroup;
-      }
-    }
+    const e = eventStorage.getStore() || this.e;
+    const id = buildContextKey(e, isGroup);
 
     if (!id) return;
 
@@ -222,21 +249,8 @@ export class plugin {
    * @param {boolean|string|number} isGroup 是否为群组上下文，或者直接指定 ID
    */
   finish(method, isGroup = false) {
-    let id;
-    if (typeof isGroup === "boolean") {
-      const e = eventStorage.getStore() || this.e;
-      if (!e) return;
-      // 群组上下文使用 group_id:user_id 作为 key
-      id = isGroup ? `${e.group_id}:${e.user_id}` : e.user_id;
-    } else {
-      // 兼容直接传入 ID 的情况
-      const e = eventStorage.getStore() || this.e;
-      if (e && e.group_id && isGroup === e.group_id) {
-        id = `${isGroup}:${e.user_id}`;
-      } else {
-        id = isGroup;
-      }
-    }
+    const e = eventStorage.getStore() || this.e;
+    const id = buildContextKey(e, isGroup);
 
     if (contexts[id] && contexts[id].method === method) {
       delete contexts[id];
@@ -256,20 +270,8 @@ export class plugin {
    * @returns {object|undefined} 返回当前的上下文对象
    */
   getContext(method = null, isGroup = false) {
-    let id;
-    if (typeof isGroup === "boolean") {
-      const e = eventStorage.getStore() || this.e;
-      if (!e) return;
-      id = isGroup ? `${e.group_id}:${e.user_id}` : e.user_id;
-    } else {
-      // 兼容直接传入 ID 的情况
-      const e = eventStorage.getStore() || this.e;
-      if (e && e.group_id && isGroup === e.group_id) {
-        id = `${isGroup}:${e.user_id}`;
-      } else {
-        id = isGroup;
-      }
-    }
+    const e = eventStorage.getStore() || this.e;
+    const id = buildContextKey(e, isGroup);
 
     const currentContext = contexts[id];
 
