@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useConfig } from './hooks/useConfig';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useSystemInfo } from './hooks/useSystemInfo';
@@ -50,7 +50,7 @@ function App() {
 
   const onConfigChanged = useCallback((newConfig) => {
     updateFromWs(newConfig);
-    addToast('配置已从文件同步更新', 'info');
+    addToast('配置已同步更新', 'info');
   }, [updateFromWs, addToast]);
 
   const onPluginConfigChanged = useCallback((pluginName, moduleName, data, selfId) => {
@@ -62,15 +62,19 @@ function App() {
     isLoggedIn ? token : null,
     onConfigChanged,
     onPluginConfigChanged,
+    logout,
   );
 
   const {
     staticInfo,
     dynamicInfo,
     botInfo,
-    networkSpeed,
     loading: systemLoading,
-  } = useSystemInfo(token, isLoggedIn && activeSection === 'monitor');
+  } = useSystemInfo(
+    isLoggedIn ? token : null,
+    isLoggedIn && activeSection === 'monitor',
+    logout,
+  );
 
   const handleSave = useCallback(async (newConfig) => {
     const result = await saveConfig(newConfig);
@@ -102,6 +106,7 @@ function App() {
       const message = result.errors?.map((item) => item.message).join(', ') || '保存失败';
       addToast(message, 'error');
     }
+    return result;
   }, [savePluginConfig, addToast, selectedPluginSelfId]);
 
   const pluginNames = Object.keys(plugins || {});
@@ -160,8 +165,8 @@ function App() {
       if (topLevelFields.length > 0) {
         tabs.push({
           key: '__global_basic__',
-          label: '日志等级',
-          title: '日志等级',
+          label: '基础配置',
+          title: '基础配置',
           fields: topLevelFields,
           isTop: true,
         });
@@ -352,7 +357,6 @@ function App() {
                 staticInfo={staticInfo}
                 dynamicInfo={dynamicInfo}
                 botInfo={botInfo}
-                networkSpeed={networkSpeed}
                 loading={systemLoading}
               />
             )}

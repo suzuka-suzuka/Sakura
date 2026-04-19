@@ -1,6 +1,13 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import {
+  buildLogSections,
+  filterLogEntriesByLevel,
+  formatLogSections,
+  groupLogEntriesBySelfId,
+  parseLogEntries,
+} from "../../src/utils/logReader.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = path.join(__dirname, "../../logs");
@@ -30,20 +37,20 @@ export class SystemPlugin extends plugin {
       120
     );
 
-    // 对于普通 Node 守护：调用 exit，父进程的监听会自动拉起它; pm2 也会拉起它
+    if (process.send) {
+      process.send("restart");
+    }
     process.exit(0);
   });
 
   shutdown = Command(/^#关机$/, async (e) => {
     await e.react(124);
 
-    // 如果有 IPC 父进程（我们自己写的 fork 守护程序），发消息让其不要再重启自身
     if (process.send) {
       process.send("shutdown");
     } else {
-      // 如果没有父进程（例如 pm2 或者直接 node src/index.js），则使用 pm2 的命令或直接退出
-      import('child_process').then(cp => {
-        cp.exec('pm2 stop sakura-bot', (error) => {
+      import("child_process").then((cp) => {
+        cp.exec("pm2 stop sakura-bot", (error) => {
           if (error) {
             process.exit(0);
           }
@@ -60,7 +67,7 @@ export class SystemPlugin extends plugin {
 
     const files = fs
       .readdirSync(LOG_DIR)
-      .filter((f) => f.startsWith("bot.") && f.endsWith(".log"))
+      .filter((file) => file.startsWith("bot.") && file.endsWith(".log"))
       .sort()
       .reverse();
 
@@ -69,55 +76,59 @@ export class SystemPlugin extends plugin {
     }
 
     const logFile = path.join(LOG_DIR, files[0]);
-    const isAllGroups = !e.group_id || e.match?.[1] === "全部"; // 私聊或#全部：不过滤群
-    const isErrorOnly = e.match?.[2] === "错误";                 // 有"错误"：只看 ERROR+WARN
-    const filterGroupId = isAllGroups ? null : e.group_id;
+    const showAllAccounts = Boolean(e.match?.[1]);
+    const isErrorOnly = e.match?.[2] === "错误";
 
     try {
       const content = fs.readFileSync(logFile, "utf-8");
-      const rawLines = content.split(/\r?\n/);
-      const lines = [];
-      let currentLog = "";
-      const timeRegex = /^\[\d{2}:\d{2}:\d{2}\]/;
+      let entries = parseLogEntries(content);
+      entries = filterLogEntriesByLevel(entries, isErrorOnly ? "WARN" : "ALL");
 
-      for (const line of rawLines) {
-        if (!line.trim()) continue;
-        if (timeRegex.test(line)) {
-          if (currentLog) lines.push(currentLog);
-          currentLog = line;
-        } else {
-          currentLog = currentLog ? currentLog + "\n" + line : line;
-        }
-      }
-      if (currentLog) lines.push(currentLog);
+      const grouped = groupLogEntriesBySelfId(entries);
+      const hasMultipleAccounts = grouped.bySelfId.size > 1;
 
-      let targetLines = isErrorOnly
-        ? lines.filter((line) => line.includes("[ERROR]") || line.includes("[WARN]"))
-        : lines;
+      const sections = hasMultipleAccounts
+        ? (
+          showAllAccounts
+            ? buildLogSections(entries, {
+              groupBySelfId: true,
+              includeCommon: true,
+              limit: 50,
+            })
+            : buildLogSections(entries, {
+              targetSelfId: e.self_id,
+              includeCommon: true,
+              limit: 50,
+            })
+        )
+        : buildLogSections(entries, {
+          includeCommon: true,
+          limit: 50,
+        });
 
-      if (filterGroupId) {
-        const groupTagRegex = new RegExp(`\\[([^\\]]*\\()?${filterGroupId}\\)?\\]`);
-        targetLines = targetLines.filter((line) => groupTagRegex.test(line));
-      }
+      const validSections = sections.filter(
+        (section) => Array.isArray(section.entries) && section.entries.length > 0
+      );
 
-      const scopeLabel = isAllGroups ? "全部" : filterGroupId ? `群 ${filterGroupId} ` : "";
       const typeLabel = isErrorOnly ? "错误日志" : "日志";
-      const title = `${scopeLabel}${typeLabel}`;
+      const title = hasMultipleAccounts
+        ? (showAllAccounts ? `全部账号${typeLabel}` : `当前账号${typeLabel}`)
+        : typeLabel;
 
-      if (targetLines.length === 0) {
+      if (validSections.length === 0) {
         return e.reply(`今日暂无${title}`);
       }
 
-      const lastLogs = targetLines.reverse().slice(0, 50);
-
-      await e.sendForwardMsg(lastLogs, {
-        prompt: title,
-        source: "系统日志",
-        news: [
-          { text: `共 ${targetLines.length} 条` },
-          { text: `显示最近 ${lastLogs.length} 条` },
-        ],
-      });
+      await e.sendForwardMsg(
+        validSections.map((section) => formatLogSections([section])),
+        {
+          prompt: title,
+          source: "系统日志",
+          news: validSections.slice(0, 5).map((section) => ({
+            text: `${section.title} ${section.entries.length}/${section.total}`,
+          })),
+        }
+      );
     } catch (err) {
       logger.error(`读取日志失败: ${err}`);
       e.reply(`读取日志失败: ${err.message}`);

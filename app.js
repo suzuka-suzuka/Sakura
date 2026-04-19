@@ -8,10 +8,14 @@ import { spawn, fork } from 'child_process';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.join(__dirname, 'config/config.yaml');
 const script = path.join(__dirname, 'src/index.js');
+const IS_PM2_MANAGED = process.env.SAKURA_MANAGED_BY_PM2 === '1';
+const MAX_UNEXPECTED_RESTARTS = 1;
 
 let currentChild = null;
 let restartTimer = null;
 let isStopping = false;
+let restartRequested = false;
+let unexpectedRestartCount = 0;
 
 async function checkAndStartRedis() {
     let config;
@@ -94,6 +98,13 @@ function scheduleRestart(delay) {
     }, delay);
 }
 
+function exitParentWithChildStatus(code, signal = null) {
+    const exitCode = Number.isInteger(code) ? code : 1;
+    const signalText = signal ? ` [signal: ${signal}]` : '';
+    console.error(`子进程已退出，父进程同步退出${signalText} [code: ${exitCode}]`);
+    process.exit(exitCode);
+}
+
 function requestChildShutdown(reason = 'shutdown') {
     const child = currentChild;
     if (!child) {
@@ -165,10 +176,15 @@ function startBot() {
                 console.error('关闭主进程失败:', err);
                 process.exit(1);
             });
+            return;
+        }
+
+        if (msg === 'restart') {
+            restartRequested = true;
         }
     });
 
-    child.on('exit', (code) => {
+    child.on('exit', (code, signal) => {
         if (currentChild === child) {
             currentChild = null;
         }
@@ -177,13 +193,39 @@ function startBot() {
             return;
         }
 
-        if (code !== 0 && code !== null) {
-            console.error('子进程异常退出，3秒后自动重启...');
-            scheduleRestart(3000);
-        } else {
-            console.log('子进程正常退出，2秒后自动重启...');
+        if (restartRequested) {
+            restartRequested = false;
+            unexpectedRestartCount = 0;
+
+            if (IS_PM2_MANAGED) {
+                console.log('收到重启请求，交给 PM2 拉起主进程...');
+                process.exit(0);
+            }
+
+            console.log('收到重启请求，2秒后拉起子进程...');
             scheduleRestart(2000);
+            return;
         }
+
+        if (IS_PM2_MANAGED) {
+            exitParentWithChildStatus(code, signal);
+            return;
+        }
+
+        if (code === 0) {
+            console.log('子进程正常退出，父进程不再自动重启。');
+            process.exit(0);
+        }
+
+        if (unexpectedRestartCount < MAX_UNEXPECTED_RESTARTS) {
+            unexpectedRestartCount += 1;
+            console.error(`子进程异常退出，准备进行第 ${unexpectedRestartCount} 次也是最后一次自动重启...`);
+            scheduleRestart(3000);
+            return;
+        }
+
+        console.error('子进程再次异常退出，已达到最大自动重启次数，停止拉起。');
+        exitParentWithChildStatus(code, signal);
     });
 }
 

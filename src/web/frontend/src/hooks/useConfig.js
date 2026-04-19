@@ -1,7 +1,33 @@
 import { useState, useEffect, useCallback } from 'react';
 
 const API_BASE = '';
+const AUTH_TOKEN_STORAGE_KEY = 'sakura_token';
 const PLUGIN_SELF_ID_STORAGE_KEY = 'sakura_plugin_self_id';
+
+function readAuthToken() {
+    const sessionToken = sessionStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+    if (sessionToken) {
+        return sessionToken;
+    }
+
+    const legacyToken = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+    if (legacyToken) {
+        sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, legacyToken);
+        localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    }
+
+    return legacyToken;
+}
+
+function storeAuthToken(token) {
+    sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+    localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+}
+
+function clearAuthToken() {
+    sessionStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+}
 
 function normalizeSelfId(value) {
     const num = Number(value);
@@ -18,8 +44,8 @@ export function useConfig() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [errors, setErrors] = useState(null);
-    const [token, setToken] = useState(() => localStorage.getItem('sakura_token'));
-    const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('sakura_token'));
+    const [token, setToken] = useState(() => readAuthToken());
+    const [isLoggedIn, setIsLoggedIn] = useState(() => !!readAuthToken());
 
     const [plugins, setPlugins] = useState({});
     const [pluginCategories, setPluginCategories] = useState({});
@@ -62,12 +88,12 @@ export function useConfig() {
             if (data.success) {
                 setToken(data.token);
                 setIsLoggedIn(true);
-                localStorage.setItem('sakura_token', data.token);
+                storeAuthToken(data.token);
                 return { success: true };
             }
             return { success: false, error: data.error };
         } catch {
-            return { success: false, error: '杩炴帴澶辫触' };
+            return { success: false, error: '连接失败' };
         }
     }, []);
 
@@ -84,7 +110,7 @@ export function useConfig() {
         setBotAccounts([]);
         setConfiguredAccountIds([]);
         setSelectedPluginSelfIdState(null);
-        localStorage.removeItem('sakura_token');
+        clearAuthToken();
         localStorage.removeItem(PLUGIN_SELF_ID_STORAGE_KEY);
     }, []);
 
@@ -165,7 +191,7 @@ export function useConfig() {
                 setErrors(data.errors);
             }
         } catch (error) {
-            console.error('鑾峰彇閰嶇疆澶辫触:', error);
+            console.error('获取配置失败:', error);
         }
     }, [headers, logout]);
 
@@ -185,7 +211,7 @@ export function useConfig() {
             }
             return { success: false, errors: data.errors };
         } catch {
-            return { success: false, errors: [{ message: '淇濆瓨澶辫触' }] };
+            return { success: false, errors: [{ message: '保存失败' }] };
         } finally {
             setSaving(false);
         }
@@ -216,7 +242,7 @@ export function useConfig() {
             const nextSelfId = hasPreferred ? preferredSelfId : normalizeSelfId(accounts[0]?.self_id);
             setSelectedPluginSelfId(nextSelfId);
         } catch (error) {
-            console.error('鑾峰彇 Bot 淇℃伅澶辫触:', error);
+            console.error('获取 Bot 信息失败:', error);
         }
     }, [headers, logout, selectedPluginSelfId, setSelectedPluginSelfId]);
 
@@ -261,7 +287,7 @@ export function useConfig() {
                     .catch(() => { });
             }
         } catch (error) {
-            console.error('鑾峰彇鎻掍欢鍒楄〃澶辫触:', error);
+            console.error('获取插件列表失败:', error);
         }
     }, [headers, logout]);
 
@@ -299,7 +325,7 @@ export function useConfig() {
                     }));
                 }
             } catch (error) {
-                console.error(`鑾峰彇鎻掍欢 ${pluginName} 閰嶇疆澶辫触:`, error);
+                console.error(`获取插件 ${pluginName} 配置失败:`, error);
             }
         }));
     }, [headers, isLoggedIn, logout, plugins]);
@@ -307,7 +333,7 @@ export function useConfig() {
     const savePluginConfig = useCallback(async (pluginName, moduleName, newConfig, selfId = selectedPluginSelfId) => {
         const normalizedSelfId = normalizeSelfId(selfId);
         if (normalizedSelfId == null) {
-            return { success: false, errors: [{ message: '璇峰厛閫夋嫨璐﹀彿' }] };
+            return { success: false, errors: [{ message: '请先选择账号' }] };
         }
 
         setSaving(true);
@@ -334,7 +360,7 @@ export function useConfig() {
             }
             return { success: false, errors: data.errors };
         } catch {
-            return { success: false, errors: [{ message: '淇濆瓨澶辫触' }] };
+            return { success: false, errors: [{ message: '保存失败' }] };
         } finally {
             setSaving(false);
         }

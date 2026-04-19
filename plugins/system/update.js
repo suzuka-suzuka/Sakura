@@ -471,6 +471,9 @@ export class GlobalUpdate extends plugin {
       120
     );
 
+    if (process.send) {
+      process.send("restart");
+    }
     process.exit(0);
   }
 }

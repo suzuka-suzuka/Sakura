@@ -2,6 +2,7 @@ import http from 'http';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import si from 'systeminformation';
@@ -11,9 +12,12 @@ import accountConfig from '../core/accountConfig.js';
 import { logger } from '../utils/logger.js';
 import { bot as botFacade, getBotSummaries } from '../api/client.js';
 import yaml from 'js-yaml';
+import { AVAILABLE_TOOL_OPTIONS } from '../../plugins/sakura-plugin/lib/AIUtils/tools/tools.js';
 let cachedStaticInfo = null;
 let staticInfoTime = 0;
 const STATIC_INFO_CACHE_TIME = 60000;
+const WEB_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const MAX_REQUEST_BODY_SIZE = 1024 * 1024;
 
 async function getStaticSystemInfo() {
     const now = Date.now();
@@ -22,44 +26,31 @@ async function getStaticSystemInfo() {
     }
 
     try {
-        const [
-            system,
-            bios,
-            baseboard,
-            chassis,
-            osInfo,
-            cpu,
-            graphics,
-            memLayout,
-            diskLayout,
-            networkInterfaces,
-            uuid,
-        ] = await Promise.all([
-            si.system(),
-            si.bios(),
-            si.baseboard(),
-            si.chassis(),
+        const [osInfo, cpu, graphics] = await Promise.all([
             si.osInfo(),
             si.cpu(),
             si.graphics(),
-            si.memLayout(),
-            si.diskLayout(),
-            si.networkInterfaces(),
-            si.uuid(),
         ]);
 
         cachedStaticInfo = {
-            system,
-            bios,
-            baseboard,
-            chassis,
-            os: osInfo,
-            cpu,
-            graphics,
-            memLayout,
-            diskLayout,
-            networkInterfaces,
-            uuid,
+            os: {
+                distro: osInfo.distro,
+                release: osInfo.release,
+                platform: osInfo.platform,
+            },
+            cpu: {
+                brand: cpu.brand,
+                manufacturer: cpu.manufacturer,
+                physicalCores: cpu.physicalCores,
+                cores: cpu.cores,
+                speed: cpu.speed,
+            },
+            graphics: {
+                controllers: (graphics.controllers || []).map((controller) => ({
+                    model: controller.model,
+                    vendor: controller.vendor,
+                })),
+            },
         };
         staticInfoTime = now;
         return cachedStaticInfo;
@@ -74,24 +65,11 @@ let lastNetworkTime = 0;
 
 async function getDynamicSystemInfo() {
     try {
-        const [
-            currentLoad,
-            mem,
-            fsSize,
-            networkStats,
-            processes,
-            battery,
-            cpuTemperature,
-            cpuCurrentSpeed,
-            time,
-        ] = await Promise.all([
+        const [currentLoad, mem, fsSize, networkStats, cpuCurrentSpeed, time] = await Promise.all([
             si.currentLoad(),
             si.mem(),
             si.fsSize(),
             si.networkStats('*'),
-            si.processes(),
-            si.battery(),
-            si.cpuTemperature(),
             si.cpuCurrentSpeed(),
             si.time(),
         ]);
@@ -125,26 +103,39 @@ async function getDynamicSystemInfo() {
         }));
         lastNetworkTime = now;
 
+        const networkSummary = networkStatsWithSpeed.reduce((summary, current) => ({
+            rx_sec: summary.rx_sec + (current.rx_sec || 0),
+            tx_sec: summary.tx_sec + (current.tx_sec || 0),
+        }), { rx_sec: 0, tx_sec: 0 });
+
         const nodeProcess = {
             pid: process.pid,
-            memoryUsage: process.memoryUsage(),
-            cpuUsage: process.cpuUsage(),
             uptime: process.uptime(),
             version: process.version,
-            platform: process.platform,
-            arch: process.arch,
         };
 
         return {
-            currentLoad,
-            mem,
-            fsSize,
-            networkStats: networkStatsWithSpeed,
-            processes,
-            battery,
-            cpuTemperature,
-            cpuCurrentSpeed,
-            time,
+            currentLoad: {
+                currentLoad: currentLoad.currentLoad,
+            },
+            mem: {
+                total: mem.total,
+                used: mem.used,
+                swaptotal: mem.swaptotal,
+                swapused: mem.swapused,
+            },
+            fsSize: fsSize.map((current) => ({
+                mount: current.mount,
+                size: current.size,
+                used: current.used,
+            })),
+            networkSummary,
+            cpuCurrentSpeed: {
+                avg: cpuCurrentSpeed.avg,
+            },
+            time: {
+                uptime: time.uptime,
+            },
             nodeProcess,
         };
     } catch (e) {
@@ -217,33 +208,180 @@ const MIME_TYPES = {
 };
 
 const wsClients = new Set();
+const authSessions = new Map();
+let currentWebPassword = Config.get('web.password') || 'admin';
 
 
-function generateToken(password) {
-    return Buffer.from(`${password}:sakura_session`).toString('base64');
+function cleanupExpiredSessions(now = Date.now()) {
+    for (const [token, session] of authSessions.entries()) {
+        if ((session?.expiresAt || 0) <= now) {
+            authSessions.delete(token);
+        }
+    }
 }
 
-function verifyToken(token) {
-    if (!token) return false;
-    const webConfig = Config.get('web') || {};
-    const expectedPassword = webConfig.password || 'admin';
-    return token === generateToken(expectedPassword);
+async function getSystemOverview() {
+    const [staticInfo, dynamicInfo, botInfo] = await Promise.all([
+        getStaticSystemInfo(),
+        getDynamicSystemInfo(),
+        getBotInfo(),
+    ]);
+
+    return {
+        static: staticInfo,
+        dynamic: dynamicInfo,
+        bot: botInfo,
+    };
+}
+
+async function getSystemRuntime() {
+    const [dynamicInfo, botInfo] = await Promise.all([
+        getDynamicSystemInfo(),
+        getBotInfo(),
+    ]);
+
+    return {
+        dynamic: dynamicInfo,
+        bot: botInfo,
+    };
+}
+
+function closeAllWsClients(reason = 'Session reset') {
+    for (const client of wsClients) {
+        try {
+            client.close(1008, reason);
+        } catch {
+        }
+    }
+    wsClients.clear();
+}
+
+function clearAuthSessions(reason = 'Session reset') {
+    authSessions.clear();
+    closeAllWsClients(reason);
+}
+
+function createSessionToken() {
+    return `${crypto.randomUUID().replace(/-/g, '')}${crypto.randomBytes(16).toString('hex')}`;
+}
+
+function createSession() {
+    cleanupExpiredSessions();
+    const token = createSessionToken();
+    const expiresAt = Date.now() + WEB_SESSION_TTL_MS;
+    authSessions.set(token, { expiresAt });
+    return { token, expiresAt };
+}
+
+function safeCompareText(left, right) {
+    const leftBuffer = Buffer.from(String(left ?? ''));
+    const rightBuffer = Buffer.from(String(right ?? ''));
+    if (leftBuffer.length !== rightBuffer.length) {
+        return false;
+    }
+    return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function verifySessionToken(token, { touch = false } = {}) {
+    if (!token) return null;
+
+    cleanupExpiredSessions();
+    const session = authSessions.get(token);
+    if (!session) return null;
+
+    if (touch) {
+        session.expiresAt = Date.now() + WEB_SESSION_TTL_MS;
+    }
+
+    return {
+        token,
+        expiresAt: session.expiresAt,
+    };
+}
+
+function getBearerToken(req) {
+    const auth = req.headers.authorization;
+    if (!auth) return null;
+    const match = auth.match(/^Bearer\s+(.+)$/i);
+    return match ? match[1].trim() : null;
+}
+
+function getWsToken(req) {
+    try {
+        const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+        return url.searchParams.get('token');
+    } catch {
+        return null;
+    }
+}
+
+function getAllowedOrigin(req) {
+    const origin = req?.headers?.origin;
+    if (!origin) return null;
+
+    try {
+        const originUrl = new URL(origin);
+        return originUrl.host === req.headers.host ? origin : null;
+    } catch {
+        return null;
+    }
+}
+
+function buildResponseHeaders(req, extraHeaders = {}) {
+    const headers = {
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+        ...extraHeaders,
+    };
+
+    const allowedOrigin = getAllowedOrigin(req);
+    if (allowedOrigin) {
+        headers['Access-Control-Allow-Origin'] = allowedOrigin;
+        headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
+        headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+        headers.Vary = 'Origin';
+    }
+
+    return headers;
 }
 
 
 function parseBody(req) {
     return new Promise((resolve, reject) => {
         const chunks = [];
-        req.on('data', chunk => { chunks.push(chunk); });
+        let totalSize = 0;
+        let settled = false;
+
+        const finishResolve = (value) => {
+            if (settled) return;
+            settled = true;
+            resolve(value);
+        };
+
+        const finishReject = (error) => {
+            if (settled) return;
+            settled = true;
+            reject(error);
+        };
+
+        req.on('data', (chunk) => {
+            totalSize += chunk.length;
+            if (totalSize > MAX_REQUEST_BODY_SIZE) {
+                finishReject(new Error('Payload too large'));
+                req.destroy();
+                return;
+            }
+            chunks.push(chunk);
+        });
         req.on('end', () => {
             try {
                 const body = Buffer.concat(chunks).toString('utf8');
-                resolve(body ? JSON.parse(body) : {});
-            } catch (e) {
-                reject(new Error('Invalid JSON'));
+                finishResolve(body ? JSON.parse(body) : {});
+            } catch {
+                finishReject(new Error('Invalid JSON'));
             }
         });
-        req.on('error', reject);
+        req.on('error', finishReject);
     });
 }
 
@@ -255,26 +393,24 @@ function parseSelfIdParam(url) {
 }
 
 function sendJson(res, data, status = 200) {
-    res.writeHead(status, {
+    res.writeHead(status, buildResponseHeaders(res._sakuraReq, {
         'Content-Type': 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    });
+    }));
     res.end(JSON.stringify(data));
 }
 
 function requireAuth(req, res) {
-    const auth = req.headers.authorization;
-    if (!auth) {
+    const token = getBearerToken(req);
+    if (!token) {
         sendJson(res, { success: false, error: '未登录' }, 401);
         return false;
     }
-    const token = auth.replace('Bearer ', '');
-    if (!verifyToken(token)) {
+    const session = verifySessionToken(token, { touch: true });
+    if (!session) {
         sendJson(res, { success: false, error: 'Token 无效' }, 401);
         return false;
     }
+    req.authSession = session;
     return true;
 }
 
@@ -303,11 +439,10 @@ async function handleApi(req, res) {
 
 
     if (req.method === 'OPTIONS') {
-        res.writeHead(204, {
-            'Access-Control-Allow-Origin': '*',
+        res.writeHead(204, buildResponseHeaders(req, {
             'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
             'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        });
+        }));
         res.end();
         return true;
     }
@@ -436,22 +571,29 @@ async function handleApi(req, res) {
         return true;
     }
 
+    if (pathname === '/api/system/runtime' && req.method === 'GET') {
+        if (!requireAuth(req, res)) return true;
+        try {
+            const runtimeInfo = await getSystemRuntime();
+            sendJson(res, {
+                success: true,
+                data: runtimeInfo,
+            });
+        } catch (e) {
+            logger.error(`[ConfigServer] Failed to get system runtime info: ${e}`);
+            sendJson(res, { success: false, error: '获取系统信息失败' });
+        }
+        return true;
+    }
+
 
     if (pathname === '/api/system/all' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
         try {
-            const [staticInfo, dynamicInfo, botInfo] = await Promise.all([
-                getStaticSystemInfo(),
-                getDynamicSystemInfo(),
-                getBotInfo(),
-            ]);
+            const overview = await getSystemOverview();
             sendJson(res, {
                 success: true,
-                data: {
-                    static: staticInfo,
-                    dynamic: dynamicInfo,
-                    bot: botInfo,
-                },
+                data: overview,
             });
         } catch (e) {
             logger.error(`[ConfigServer] 获取系统信息失败: ${e}`);
@@ -466,9 +608,14 @@ async function handleApi(req, res) {
         const webConfig = Config.get('web') || {};
         const password = webConfig.password || 'admin';
 
-        if (body.password === password) {
-            const token = generateToken(password);
-            sendJson(res, { success: true, token: token });
+        if (safeCompareText(body.password, password)) {
+            const session = createSession();
+            sendJson(res, {
+                success: true,
+                token: session.token,
+                expiresAt: session.expiresAt,
+                ttlMs: WEB_SESSION_TTL_MS,
+            });
         } else {
             sendJson(res, { success: false, error: '密码错误' });
         }
@@ -619,6 +766,17 @@ async function handleApi(req, res) {
         return true;
     }
 
+    if (pathname === '/api/available-tools' && req.method === 'GET') {
+        if (!requireAuth(req, res)) return true;
+        try {
+            sendJson(res, { success: true, data: AVAILABLE_TOOL_OPTIONS || [] });
+        } catch (e) {
+            logger.error(`[ConfigServer] 获取可用工具列表失败: ${e}`);
+            sendJson(res, { success: false, error: '获取可用工具列表失败' });
+        }
+        return true;
+    }
+
 
 
 
@@ -699,7 +857,7 @@ async function handleApi(req, res) {
 
 function broadcastPluginConfigChanged(pluginName, moduleName, selfId = null) {
     const config = pluginConfigManager.getConfig(pluginName, moduleName, { selfId });
-    const message = JSON.stringify({
+    broadcastWsMessage({
         type: 'plugin_config_changed',
         pluginName,
         moduleName,
@@ -707,14 +865,24 @@ function broadcastPluginConfigChanged(pluginName, moduleName, selfId = null) {
         selfId,
         timestamp: Date.now(),
     });
+}
+
+function broadcastWsMessage(payload) {
+    const message = typeof payload === 'string' ? payload : JSON.stringify(payload);
 
     for (const client of wsClients) {
         try {
-            if (client.readyState === 1) {
-                client.send(message);
+            if (client.readyState !== 1) {
+                continue;
             }
-        } catch (e) {
-
+            if (!verifySessionToken(client.sessionToken)) {
+                client.close(1008, 'Session expired');
+                wsClients.delete(client);
+                continue;
+            }
+            client.send(message);
+        } catch {
+            wsClients.delete(client);
         }
     }
 }
@@ -751,6 +919,7 @@ export function startConfigServer() {
     const port = Config.get('web.port') || 3457;
     const server = http.createServer(async (req, res) => {
         try {
+            res._sakuraReq = req;
 
             if (req.url.startsWith('/api/')) {
                 const handled = await handleApi(req, res);
@@ -778,7 +947,16 @@ export function startConfigServer() {
 
     const wss = new WebSocketServer({ server });
 
-    wss.on('connection', (ws) => {
+    wss.on('connection', (ws, req) => {
+        const token = getWsToken(req);
+        const session = verifySessionToken(token, { touch: true });
+        if (!session) {
+            ws.close(1008, 'Unauthorized');
+            return;
+        }
+
+        ws.sessionToken = token;
+        ws.authSession = session;
         wsClients.add(ws);
         logger.debug('[ConfigServer] WebSocket 客户端已连接');
 
@@ -794,27 +972,23 @@ export function startConfigServer() {
 
 
     Config.onChange((newConfig) => {
-        const message = JSON.stringify({
+        const nextPassword = newConfig?.web?.password || 'admin';
+        if (nextPassword !== currentWebPassword) {
+            currentWebPassword = nextPassword;
+            clearAuthSessions('Password updated');
+        }
+
+        broadcastWsMessage({
             type: 'config_changed',
             data: newConfig,
             timestamp: Date.now(),
         });
-
-        for (const client of wsClients) {
-            try {
-                if (client.readyState === 1) {
-                    client.send(message);
-                }
-            } catch (e) {
-
-            }
-        }
     });
 
     const plugins = pluginConfigManager.getRegisteredPlugins();
     for (const pluginName of Object.keys(plugins)) {
         pluginConfigManager.onChange(pluginName, (moduleName, newConfig, meta = {}) => {
-            const message = JSON.stringify({
+            broadcastWsMessage({
                 type: 'plugin_config_changed',
                 pluginName,
                 moduleName,
@@ -822,15 +996,6 @@ export function startConfigServer() {
                 selfId: meta.selfId ?? null,
                 timestamp: Date.now(),
             });
-            for (const client of wsClients) {
-                try {
-                    if (client.readyState === 1) {
-                        client.send(message);
-                    }
-                } catch (e) {
-
-                }
-            }
         });
     }
 

@@ -143,7 +143,17 @@ function milkySegToOB(seg) {
     case "file":
       return {
         type: "file",
-        data: { file_id: d.file_id, name: d.file_name, size: d.file_size },
+        data: {
+          file_id: d.file_id,
+          name:
+            d.file_name ||
+            d.name ||
+            d.filename ||
+            d.fileName ||
+            d?.file?.file_name ||
+            "",
+          size: d.file_size ?? d.size ?? d?.file?.file_size ?? 0,
+        },
       };
     case "forward":
       return { type: "forward", data: { id: d.forward_id } };

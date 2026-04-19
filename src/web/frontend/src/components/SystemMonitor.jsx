@@ -1,6 +1,3 @@
-import { useMemo } from 'react';
-
-// 格式化字节
 function formatBytes(bytes, decimals = 1) {
     if (bytes === 0 || bytes === undefined || bytes === null) return '0 B';
     const k = 1024;
@@ -10,13 +7,11 @@ function formatBytes(bytes, decimals = 1) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-// 格式化速度
 function formatSpeed(bytesPerSec) {
     if (!bytesPerSec || bytesPerSec === 0) return '0 B/s';
-    return formatBytes(bytesPerSec) + '/s';
+    return `${formatBytes(bytesPerSec)}/s`;
 }
 
-// 格式化时间
 function formatUptime(seconds) {
     if (!seconds) return '0秒';
     const days = Math.floor(seconds / 86400);
@@ -28,14 +23,12 @@ function formatUptime(seconds) {
     return `${mins}分钟`;
 }
 
-// 环形进度条组件
 function CircleProgress({ value, label, subLabel, color = '#d87093', size = 90, strokeWidth = 8 }) {
     const radius = (size - strokeWidth) / 2;
     const circumference = radius * 2 * Math.PI;
     const percent = Math.min(Math.max(value || 0, 0), 100);
     const offset = circumference - (percent / 100) * circumference;
 
-    // 根据使用率变色
     const getColor = () => {
         if (percent >= 90) return '#e53935';
         if (percent >= 70) return '#f57c00';
@@ -72,9 +65,9 @@ function CircleProgress({ value, label, subLabel, color = '#d87093', size = 90, 
     );
 }
 
-// 存储条组件
 function StorageBar({ mount, used, total }) {
     const percent = total > 0 ? (used / total) * 100 : 0;
+
     const getBarColor = () => {
         if (percent >= 90) return 'bar-danger';
         if (percent >= 70) return 'bar-warning';
@@ -100,56 +93,16 @@ function StorageBar({ mount, used, total }) {
     );
 }
 
-// 主组件
-export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, networkSpeed, loading }) {
+export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, loading }) {
+    if (loading && !staticInfo && !dynamicInfo && !botInfo) {
+        return (
+            <div className="loading-container" style={{ minHeight: 240 }}>
+                <div className="spinner"></div>
+            </div>
+        );
+    }
+
     const accounts = botInfo?.accounts || [];
-
-    // 计算总网络速度（所有网卡加起来）
-    const totalNetworkSpeed = useMemo(() => {
-        if (!networkSpeed || networkSpeed.length === 0) {
-            return { rx: 0, tx: 0 };
-        }
-        return networkSpeed.reduce((acc, s) => ({
-            rx: acc.rx + (s.rxSpeed || 0),
-            tx: acc.tx + (s.txSpeed || 0),
-        }), { rx: 0, tx: 0 });
-    }, [networkSpeed]);
-
-    // 从 dynamicInfo.networkStats 计算所有网卡的总流量速度
-    const networkStatsSpeed = useMemo(() => {
-        const stats = dynamicInfo?.networkStats;
-        if (!stats || stats.length === 0) return null;
-
-        // 计算所有网卡的总速度（包括虚拟网卡、TUN等）
-        let totalRx = 0;
-        let totalTx = 0;
-
-        for (const s of stats) {
-            // rx_sec 和 tx_sec 是 systeminformation 计算的每秒字节数
-            totalRx += s.rx_sec || 0;
-            totalTx += s.tx_sec || 0;
-        }
-
-        return { rx_sec: totalRx, tx_sec: totalTx };
-    }, [dynamicInfo?.networkStats]);
-
-    // 最终网络速度
-    const finalNetworkSpeed = useMemo(() => {
-        // 优先使用 systeminformation 提供的实时速率
-        if (networkStatsSpeed && (networkStatsSpeed.rx_sec > 0 || networkStatsSpeed.tx_sec > 0)) {
-            return {
-                rx: networkStatsSpeed.rx_sec,
-                tx: networkStatsSpeed.tx_sec,
-            };
-        }
-        // 否则使用手动计算的速度
-        if (totalNetworkSpeed.rx > 0 || totalNetworkSpeed.tx > 0) {
-            return totalNetworkSpeed;
-        }
-        return { rx: 0, tx: 0 };
-    }, [totalNetworkSpeed, networkStatsSpeed]);
-
-
     const os = staticInfo?.os || {};
     const cpu = staticInfo?.cpu || {};
     const graphics = staticInfo?.graphics || {};
@@ -159,25 +112,19 @@ export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, networ
     const fsSize = dynamicInfo?.fsSize || [];
     const time = dynamicInfo?.time || {};
     const nodeProcess = dynamicInfo?.nodeProcess || {};
+    const networkSummary = dynamicInfo?.networkSummary || {};
 
-    // 计算各项使用率
     const cpuUsage = currentLoad.currentLoad || 0;
     const memUsage = mem.total > 0 ? (mem.used / mem.total) * 100 : 0;
     const swapUsage = mem.swaptotal > 0 ? (mem.swapused / mem.swaptotal) * 100 : 0;
-
-    // 获取主显卡信息
     const mainGpu = graphics.controllers?.[0];
-
-    // CPU 信息
     const cpuCores = cpu.physicalCores || cpu.cores || '-';
     const cpuThreads = cpu.cores || '-';
     const cpuFreq = cpuSpeed.avg?.toFixed(1) || cpu.speed || '-';
 
     return (
         <div className="system-monitor-compact">
-            {/* 第一行：Bot信息 + 环形图（合并为一个卡片） */}
             <div className="monitor-row-1">
-                {/* Bot 信息 */}
                 <div className="bot-section bot-section-multi">
                     {accounts.length === 0 ? (
                         <div className="bot-summary-block">
@@ -201,12 +148,14 @@ export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, networ
                                         className="bot-card-avatar"
                                         src={`https://q1.qlogo.cn/g?b=qq&nk=${account.uin}&s=640`}
                                         alt="Avatar"
-                                        onError={(e) => { e.target.src = 'https://q1.qlogo.cn/g?b=qq&nk=10000&s=640'; }}
+                                        onError={(event) => {
+                                            event.target.src = 'https://q1.qlogo.cn/g?b=qq&nk=10000&s=640';
+                                        }}
                                     />
                                     <div className="bot-card-nick">{account.nickname || account.uin}</div>
                                     <div className="bot-card-id">{account.uin}</div>
-                                    <div className="bot-card-status">
-                                        <span className="dot"></span>在线
+                                    <div className={`bot-card-status ${account.status === 'offline' ? 'offline' : ''}`}>
+                                        <span className="dot"></span>{account.status === 'offline' ? '离线' : '在线'}
                                     </div>
                                 </div>
                             ))}
@@ -214,10 +163,8 @@ export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, networ
                     )}
                 </div>
 
-                {/* 分隔线 */}
                 <div className="row-divider"></div>
 
-                {/* 环形图表 */}
                 <div className="circles-section">
                     <CircleProgress
                         value={cpuUsage}
@@ -240,9 +187,7 @@ export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, networ
                 </div>
             </div>
 
-            {/* 第二行：系统信息 + 存储/网络 */}
             <div className="monitor-row-2">
-                {/* 系统信息 */}
                 <div className="sys-info-compact">
                     <div className="sys-info-grid">
                         <div className="sys-item">
@@ -268,9 +213,7 @@ export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, networ
                     </div>
                 </div>
 
-                {/* 存储和网络 */}
                 <div className="storage-network-compact">
-                    {/* 存储条 */}
                     <div className="storage-bars">
                         {fsSize.slice(0, 4).map((fs, idx) => (
                             <StorageBar
@@ -282,19 +225,17 @@ export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, networ
                         ))}
                     </div>
 
-                    {/* 网络速度 */}
                     <div className="network-row">
                         <div className="speed-item">
                             <span className="speed-label">下载</span>
-                            <span className="speed-val">{formatSpeed(finalNetworkSpeed.rx)}</span>
+                            <span className="speed-val">{formatSpeed(networkSummary.rx_sec)}</span>
                         </div>
                         <div className="speed-item">
                             <span className="speed-label">上传</span>
-                            <span className="speed-val">{formatSpeed(finalNetworkSpeed.tx)}</span>
+                            <span className="speed-val">{formatSpeed(networkSummary.tx_sec)}</span>
                         </div>
                     </div>
 
-                    {/* 运行时间 */}
                     <div className="uptime-row">
                         <div className="uptime-item">
                             <span className="uptime-label">系统运行</span>

@@ -20,6 +20,7 @@ Thumbs.db
 
 # Runtime data
 data/
+temp/
 
 # User config (contains sensitive info like master QQ, cookies, etc.)
 config/

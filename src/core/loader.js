@@ -10,6 +10,7 @@ import {
   Event,
   buildContextKey,
   contexts,
+  contextTimers,
   eventStorage,
 } from "./plugin.js";
 import Config from "./config.js";
@@ -21,6 +22,9 @@ import { isMasterUser } from "../utils/common.js";
 import EconomyManager from "../../plugins/sakura-plugin/lib/economy/EconomyManager.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PLUGIN_RUNTIME_BASE_DIR = path.join(__dirname, "../../temp/plugin-runtime");
+const HOT_RELOAD_CODE_DIRS = new Set(["apps", "lib"]);
+const HOT_RELOAD_SHARED_DIRS = new Set([".git", ".runtime", "node_modules", "data", "logs"]);
 
 let commandNamesCache = null;
 
@@ -102,7 +106,11 @@ export class PluginLoader {
     this.configToPlugins = new Map();
     /** 记录每个插件文件对应的动态 import URL，用于卸载时清理模块缓存 */
     this.loadedModuleUrls = new Map();
+    this.pluginRuntimeState = new Map();
     this.pluginDirs.push(path.join(__dirname, "../../plugins"));
+
+    fsSync.rmSync(PLUGIN_RUNTIME_BASE_DIR, { recursive: true, force: true });
+    fsSync.mkdirSync(PLUGIN_RUNTIME_BASE_DIR, { recursive: true });
   }
 
   async loadPlugins() {
@@ -154,9 +162,7 @@ export class PluginLoader {
               const pluginMeta = schemaMod.pluginMeta || null;
               const dynamicOptionsConfig = schemaMod.dynamicOptionsConfig || null;
               if (schemaMap && typeof schemaMap === 'object') {
-                if (!pluginConfigManager.schemas[pluginName]) {
-                  pluginConfigManager.register(pluginName, schemaMap, categories, pluginMeta, dynamicOptionsConfig);
-                }
+                pluginConfigManager.register(pluginName, schemaMap, categories, pluginMeta, dynamicOptionsConfig);
               }
             } catch {
             }
@@ -194,7 +200,8 @@ export class PluginLoader {
         this.loadedModuleUrls.delete(filePath);
       }
 
-      const fileUrl = pathToFileURL(filePath).href + "?t=" + Date.now();
+      const runtimeFilePath = this._getRuntimeFilePath(filePath);
+      const fileUrl = pathToFileURL(runtimeFilePath).href;
       const module = await import(fileUrl);
       this.loadedModuleUrls.set(filePath, fileUrl);
 
@@ -322,6 +329,228 @@ export class PluginLoader {
     return match ? match[1] : null;
   }
 
+  _getPluginRootFromPath(filePath) {
+    const normalized = path.resolve(filePath).replace(/\\/g, "/");
+    const match = normalized.match(/^(.*\/plugins\/[^/]+)/);
+    return match ? path.normalize(match[1]) : null;
+  }
+
+  _getPluginRelativePath(filePath) {
+    const pluginRoot = this._getPluginRootFromPath(filePath);
+    if (!pluginRoot) return null;
+    return path.relative(pluginRoot, filePath).replace(/\\/g, "/");
+  }
+
+  _classifyWatchedPluginPath(filePath) {
+    const relativePath = this._getPluginRelativePath(filePath);
+    if (!relativePath || !relativePath.endsWith(".js")) return null;
+
+    const parts = relativePath.split("/");
+    if (parts[0] === "lib") {
+      return "dependency";
+    }
+    if (parts.length === 1) {
+      return relativePath === "configSchema.js" ? "meta" : "entry";
+    }
+    if (parts[0] === "apps") {
+      return "entry";
+    }
+    return null;
+  }
+
+  _getPluginRuntimeState(pluginName, pluginRoot) {
+    let state = this.pluginRuntimeState.get(pluginName);
+    if (!state || state.sourceRoot !== pluginRoot) {
+      state = {
+        sourceRoot: pluginRoot,
+        version: 0,
+        runtimeRoot: null,
+      };
+      this.pluginRuntimeState.set(pluginName, state);
+    }
+    return state;
+  }
+
+  _getPluginRuntimeRoot(pluginName, version) {
+    return path.join(PLUGIN_RUNTIME_BASE_DIR, `v${version}`, pluginName);
+  }
+
+  _createRuntimeJunction(sourcePath, targetPath) {
+    if (fsSync.existsSync(targetPath)) return;
+    fsSync.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fsSync.symlinkSync(path.resolve(sourcePath), targetPath, "junction");
+  }
+
+  /**
+   * 在运行时基础目录下创建指向项目真实 src/ 和 plugins/ 的 junction，
+   * 以便被复制到运行时快照中的插件代码通过相对路径 import 仍能正确解析。
+   * 例如 setting.js 中的 "../../../src/core/pluginConfig.js"
+   */
+  _ensureExternalJunctions() {
+    if (this._externalJunctionsDone) return;
+    const projectRoot = path.join(__dirname, "../..");
+    for (const dirName of ["src", "plugins"]) {
+      const target = path.join(PLUGIN_RUNTIME_BASE_DIR, dirName);
+      if (!fsSync.existsSync(target)) {
+        try {
+          fsSync.symlinkSync(path.resolve(projectRoot, dirName), target, "junction");
+        } catch { /* 已存在或无权限 */ }
+      }
+    }
+    this._externalJunctionsDone = true;
+  }
+
+  _buildPluginRuntimeSnapshot(pluginName, pluginRoot, version) {
+    const runtimeRoot = this._getPluginRuntimeRoot(pluginName, version);
+    if (fsSync.existsSync(runtimeRoot)) {
+      return runtimeRoot;
+    }
+
+    fsSync.mkdirSync(runtimeRoot, { recursive: true });
+
+    // 确保运行时基础目录中存在 src → 真实 src 的 junction，
+    // 以便插件代码中 "../../../src/..." 等相对引用能正确解析
+    this._ensureExternalJunctions();
+
+    const entries = fsSync.readdirSync(pluginRoot, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name === ".runtime") continue;
+
+      const sourcePath = path.join(pluginRoot, entry.name);
+      const targetPath = path.join(runtimeRoot, entry.name);
+
+      if (entry.isDirectory()) {
+        if (HOT_RELOAD_CODE_DIRS.has(entry.name)) {
+          fsSync.cpSync(sourcePath, targetPath, { recursive: true, force: true });
+        } else if (HOT_RELOAD_SHARED_DIRS.has(entry.name)) {
+          this._createRuntimeJunction(sourcePath, targetPath);
+        } else {
+          this._createRuntimeJunction(sourcePath, targetPath);
+        }
+        continue;
+      }
+
+      if (entry.isFile()) {
+        fsSync.copyFileSync(sourcePath, targetPath);
+      }
+    }
+
+    return runtimeRoot;
+  }
+
+  _ensurePluginRuntime(pluginName, pluginRoot, { bump = false } = {}) {
+    const state = this._getPluginRuntimeState(pluginName, pluginRoot);
+    if (!state.runtimeRoot || bump) {
+      state.version += 1;
+      state.runtimeRoot = this._buildPluginRuntimeSnapshot(pluginName, pluginRoot, state.version);
+    }
+    return state;
+  }
+
+  _getRuntimeFilePath(filePath) {
+    const pluginName = this._getPluginNameFromPath(filePath);
+    const pluginRoot = this._getPluginRootFromPath(filePath);
+
+    if (!pluginName || !pluginRoot) {
+      return filePath;
+    }
+
+    const state = this._ensurePluginRuntime(pluginName, pluginRoot);
+    const relativePath = path.relative(pluginRoot, filePath);
+    return path.join(state.runtimeRoot, relativePath);
+  }
+
+  _collectPluginEntryFiles(pluginName) {
+    const runtimeState = this.pluginRuntimeState.get(pluginName);
+    const pluginRoot = runtimeState?.sourceRoot || path.join(__dirname, "../../plugins", pluginName);
+
+    if (!fsSync.existsSync(pluginRoot)) {
+      return [];
+    }
+
+    const entryFiles = new Set();
+    const rootEntries = fsSync.readdirSync(pluginRoot, { withFileTypes: true });
+
+    for (const entry of rootEntries) {
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith(".js")) continue;
+      if (entry.name === "configSchema.js") continue;
+      entryFiles.add(path.join(pluginRoot, entry.name));
+    }
+
+    const appsDir = path.join(pluginRoot, "apps");
+    if (fsSync.existsSync(appsDir)) {
+      const walk = (dir) => {
+        const entries = fsSync.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            walk(fullPath);
+            continue;
+          }
+          if (entry.isFile() && entry.name.endsWith(".js")) {
+            entryFiles.add(fullPath);
+          }
+        }
+      };
+
+      walk(appsDir);
+    }
+
+    return [...entryFiles];
+  }
+
+  async _reloadPluginEntries(pluginName, reason = "change") {
+    const entryFiles = this._collectPluginEntryFiles(pluginName);
+    if (entryFiles.length === 0) {
+      return;
+    }
+
+    logger.info(`[Loader] 检测到 ${pluginName} ${reason}，正在重载 ${entryFiles.length} 个入口插件。`);
+
+    for (const entryFile of entryFiles) {
+      await this.loadPlugin(entryFile);
+    }
+
+    this.sortHandlers();
+  }
+
+  async _handleWatchedPluginChange(filePath, eventType) {
+    const pluginName = this._getPluginNameFromPath(filePath);
+    const pluginRoot = this._getPluginRootFromPath(filePath);
+    const changeType = this._classifyWatchedPluginPath(filePath);
+
+    if (!pluginName || !pluginRoot || !changeType) {
+      return;
+    }
+
+    if (path.basename(filePath) === "configSchema.js") {
+      commandNamesCache = null;
+    }
+
+    if (changeType === "dependency" || changeType === "meta") {
+      this._ensurePluginRuntime(pluginName, pluginRoot, { bump: true });
+      await this._reloadPluginEntries(
+        pluginName,
+        changeType === "dependency" ? "lib 变更" : "配置元数据变更"
+      );
+      return;
+    }
+
+    if (changeType === "entry") {
+      if (eventType === "unlink" || !fsSync.existsSync(filePath)) {
+        this.unloadPlugin(filePath);
+        this.sortHandlers();
+        return;
+      }
+
+      this._ensurePluginRuntime(pluginName, pluginRoot, { bump: true });
+      logger.info(`[Loader] 检测到插件变更: ${this._getPluginRelativePath(filePath)}，正在重载。`);
+      await this.loadPlugin(filePath);
+      this.sortHandlers();
+    }
+  }
+
 
   _registerConfigWatcher(pluginName) {
     if (this._configWatcherRegistered?.has(pluginName)) return;
@@ -349,11 +578,23 @@ export class PluginLoader {
   unloadPlugin(filePath) {
     const instances = this.loadedPlugins.get(filePath);
     if (instances) {
-      if (Array.isArray(instances)) {
-        instances.forEach((instance) => instance.destroy && instance.destroy());
-      } else {
-        instances.destroy && instances.destroy();
+      const normalizedInstances = Array.isArray(instances) ? instances : [instances];
+
+      for (const instance of normalizedInstances) {
+        if (instance?.destroy) {
+          instance.destroy();
+        }
+
+        for (const [key, context] of Object.entries(contexts)) {
+          if (context?.plugin !== instance) continue;
+          delete contexts[key];
+          if (contextTimers[key]) {
+            clearTimeout(contextTimers[key]);
+            delete contextTimers[key];
+          }
+        }
       }
+
       this.loadedPlugins.delete(filePath);
     }
 
@@ -392,8 +633,8 @@ export class PluginLoader {
     }
   }
 
-  startWatch() {
-    if (this.watchers.length > 0) return;
+  _legacyStartWatch() {
+    return undefined;
 
     for (const dir of this.pluginDirs) {
       if (!fsSync.existsSync(dir)) continue;
@@ -407,26 +648,53 @@ export class PluginLoader {
         ignoreInitial: true,
       }).on('all', (eventType, filePath) => {
         if (!filePath || !filePath.endsWith(".js")) return;
-        if (eventType !== 'add' && eventType !== 'change') return;
-
-        const filename = path.relative(dir, filePath).replace(/\\/g, '/');
+        if (!['add', 'change', 'unlink'].includes(eventType)) return;
 
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(async () => {
           try {
-            const isInAppsDir = filename.split("/").includes("apps");
-            if (!isInAppsDir) return;
+            await this._handleWatchedPluginChange(filePath, eventType);
 
-            await fs.access(filePath);
             logger.info(`检测到插件变更: ${filename}，正在重载..`);
-            await this.loadPlugin(filePath);
-            this.sortHandlers();
           } catch {
             this.unloadPlugin(filePath);
+            this.sortHandlers();
           }
         }, 100);
       }
       );
+      this.watchers.push(watcher);
+    }
+  }
+
+  startWatch() {
+    if (this.watchers.length > 0) return;
+
+    for (const dir of this.pluginDirs) {
+      if (!fsSync.existsSync(dir)) continue;
+
+      logger.info(`开始监听插件目录: ${dir}`);
+      let debounceTimer;
+
+      const watcher = chokidar.watch(dir, {
+        ignored: /(^|[\/\\])\../,
+        persistent: true,
+        ignoreInitial: true,
+      }).on("all", (eventType, filePath) => {
+        if (!filePath || !filePath.endsWith(".js")) return;
+        if (!["add", "change", "unlink"].includes(eventType)) return;
+
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+          try {
+            await this._handleWatchedPluginChange(filePath, eventType);
+          } catch {
+            this.unloadPlugin(filePath);
+            this.sortHandlers();
+          }
+        }, 100);
+      });
+
       this.watchers.push(watcher);
     }
   }
@@ -473,6 +741,7 @@ export class PluginLoader {
     // 使用 eventStorage 传播事件对象到所有异步操作中，
     // 确保 setTimeout 等回调中 setContext/finish/getContext 能获取正确的事件
     const _logCtx = {
+      self_id: e.self_id,
       group_id: e.group_id,
       user_id: e.user_id,
       group_name: e.group_name,

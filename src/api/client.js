@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { logger, logContext } from "../utils/logger.js";
+import { logger, logContext, setLoggerBotCount } from "../utils/logger.js";
 
 /**
  * 驼峰 → 下划线
@@ -115,6 +115,8 @@ function syncOwnedTargets(map, currentTargets, nextTargets, selfId) {
 }
 
 function updateGlobalBotBinding() {
+  setLoggerBotCount(bots.size);
+
   if (bots.size > 0) {
     bot = botFacade;
     if (typeof global !== "undefined") {

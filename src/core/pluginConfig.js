@@ -290,27 +290,22 @@ class PluginConfigManager {
             description = inner.description;
         }
 
-        if (inner._zod?.def?.type === 'default') {
-            defaultValue = typeof inner._zod.def.defaultValue === 'function'
-                ? inner._zod.def.defaultValue()
-                : inner._zod.def.defaultValue;
-            inner = inner._zod.def.innerType || inner;
-            if (!description && inner.description) {
-                description = inner.description;
+        while (inner?._zod?.def?.type) {
+            const wrappedType = inner._zod.def.type;
+            if (wrappedType === 'default') {
+                defaultValue = typeof inner._zod.def.defaultValue === 'function'
+                    ? inner._zod.def.defaultValue()
+                    : inner._zod.def.defaultValue;
+                inner = inner._zod.def.innerType || inner;
+            } else if (wrappedType === 'optional') {
+                inner = inner._zod.def.innerType || inner;
+            } else if (wrappedType === 'pipe') {
+                inner = inner._zod.def.out || inner;
+            } else {
+                break;
             }
-        }
-        if (inner._zod?.def?.type === 'optional') {
-            inner = inner._zod.def.innerType || inner;
-            if (!description && inner.description) {
-                description = inner.description;
-            }
-        }
-        if (inner._zod?.def?.type === 'default') {
-            defaultValue = typeof inner._zod.def.defaultValue === 'function'
-                ? inner._zod.def.defaultValue()
-                : inner._zod.def.defaultValue;
-            inner = inner._zod.def.innerType || inner;
-            if (!description && inner.description) {
+
+            if (!description && inner?.description) {
                 description = inner.description;
             }
         }

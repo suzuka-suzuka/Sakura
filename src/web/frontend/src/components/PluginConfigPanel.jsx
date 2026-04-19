@@ -1,5 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import ConfigField from './ConfigField';
+
+function isSameConfig(left, right) {
+    return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
 
 /**
  * 递归渲染 schema 字段
@@ -62,35 +66,36 @@ export default function PluginConfigPanel({
 }) {
     const [drafts, setDrafts] = useState({});
 
-    useEffect(() => {
-        if (configs) {
-            setDrafts(prev => {
-                const next = { ...prev };
-                for (const mod of modules) {
-                    if (configs[mod] && JSON.stringify(prev[mod]) !== JSON.stringify(configs[mod])) {
-                        next[mod] = structuredClone(configs[mod]);
-                    }
-                }
-                return next;
-            });
-        }
-    }, [configs, modules]);
-
     const handleChange = useCallback((moduleName, path, value) => {
         setDrafts(prev => {
-            const next = { ...prev };
-            next[moduleName] = structuredClone(prev[moduleName] || {});
-            setNestedValue(next[moduleName], path, value);
-            return next;
+            const nextDraft = structuredClone(prev[moduleName] ?? configs[moduleName] ?? {});
+            setNestedValue(nextDraft, path, value);
+
+            if (isSameConfig(nextDraft, configs[moduleName])) {
+                const { [moduleName]: _removed, ...rest } = prev;
+                return rest;
+            }
+
+            return {
+                ...prev,
+                [moduleName]: nextDraft,
+            };
         });
-    }, []);
+    }, [configs]);
+
+    const moduleDrafts = useMemo(() => {
+        const next = {};
+        for (const mod of modules) {
+            next[mod] = drafts[mod] ?? configs[mod] ?? null;
+        }
+        return next;
+    }, [modules, drafts, configs]);
 
     // 检查当前分类下是否有任何模块有变更
     const changedModules = useMemo(() => {
         return modules.filter(mod => {
             const draft = drafts[mod];
-            const currentConfig = configs[mod];
-            return draft && JSON.stringify(draft) !== JSON.stringify(currentConfig);
+            return draft !== undefined && !isSameConfig(draft, configs[mod]);
         });
     }, [modules, drafts, configs]);
 
@@ -101,8 +106,21 @@ export default function PluginConfigPanel({
     const handleBatchSave = useCallback(async () => {
         if (changedModules.length === 0) return;
         setBatchSaving(true);
+        const savedModules = [];
         for (const mod of changedModules) {
-            await onSave(pluginName, mod, drafts[mod]);
+            const result = await onSave(pluginName, mod, drafts[mod]);
+            if (result?.success) {
+                savedModules.push(mod);
+            }
+        }
+        if (savedModules.length > 0) {
+            setDrafts(prev => {
+                const next = { ...prev };
+                for (const mod of savedModules) {
+                    delete next[mod];
+                }
+                return next;
+            });
         }
         setBatchSaving(false);
     }, [changedModules, onSave, pluginName, drafts]);
@@ -119,7 +137,7 @@ export default function PluginConfigPanel({
         <div className="plugin-modules">
             {modules.map(mod => {
                 const currentSchema = schemas[mod];
-                const draft = drafts[mod];
+                const draft = moduleDrafts[mod];
 
                 if (!currentSchema || !draft) {
                     return (
@@ -159,10 +177,18 @@ export default function PluginConfigPanel({
                                     value={JSON.stringify(draft, null, 2)}
                                     onChange={(e) => {
                                         try {
-                                            setDrafts(prev => ({
-                                                ...prev,
-                                                [mod]: JSON.parse(e.target.value),
-                                            }));
+                                            const nextDraft = JSON.parse(e.target.value);
+                                            setDrafts(prev => {
+                                                if (isSameConfig(nextDraft, configs[mod])) {
+                                                    const { [mod]: _removed, ...rest } = prev;
+                                                    return rest;
+                                                }
+
+                                                return {
+                                                    ...prev,
+                                                    [mod]: nextDraft,
+                                                };
+                                            });
                                         } catch { /* ignore */ }
                                     }}
                                 />

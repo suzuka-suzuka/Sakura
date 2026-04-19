@@ -17,6 +17,10 @@ function buildScopedUrl(basePath, scopeSelfId) {
     return `${basePath}${separator}selfId=${normalizedSelfId}`;
 }
 
+function getAuthToken() {
+    return sessionStorage.getItem('sakura_token') || localStorage.getItem('sakura_token');
+}
+
 /**
  * 单个配置字段渲染器
  * 根据 schema 元数据中的 type 自动选择对应的输入控件
@@ -114,6 +118,18 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
                     value={value}
                     onChange={onChange}
                     scopeSelfId={scopeSelfId}
+                />
+            );
+        }
+        // Tool multi-select → ToolMultiSelectField
+        if (uiType === 'toolMultiSelect') {
+            return (
+                <ToolMultiSelectField
+                    name={name}
+                    displayName={displayName}
+                    help={help}
+                    value={value}
+                    onChange={onChange}
                 />
             );
         }
@@ -406,7 +422,7 @@ function GroupSelectField({ name, displayName, help, value, onChange, scopeSelfI
 
     // 获取群列表，建立 群号→群名 映射
     useEffect(() => {
-        const token = localStorage.getItem('sakura_token');
+        const token = getAuthToken();
         fetch(buildScopedUrl('/api/bot/groups', scopeSelfId), {
             headers: { Authorization: `Bearer ${token}` },
         })
@@ -481,7 +497,7 @@ function GroupSelectModal({ selected, onConfirm, onCancel, scopeSelfId = null })
     const [checked, setChecked] = useState(new Set(selected.map(Number)));
 
     useEffect(() => {
-        const token = localStorage.getItem('sakura_token');
+        const token = getAuthToken();
         fetch(buildScopedUrl('/api/bot/groups', scopeSelfId), {
             headers: { Authorization: `Bearer ${token}` },
         })
@@ -603,7 +619,7 @@ function SingleGroupSelectField({ name, displayName, help, value, onChange, scop
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const token = localStorage.getItem('sakura_token');
+        const token = getAuthToken();
         fetch(buildScopedUrl('/api/bot/groups', scopeSelfId), {
             headers: { Authorization: `Bearer ${token}` },
         })
@@ -616,11 +632,6 @@ function SingleGroupSelectField({ name, displayName, help, value, onChange, scop
             .catch(() => { })
             .finally(() => setLoading(false));
     }, [scopeSelfId]);
-
-    const currentGroup = groups.find(g => g.group_id === Number(value));
-    const displayValue = currentGroup 
-        ? `${currentGroup.group_name} (${currentGroup.group_id})`
-        : (value ? String(value) : '');
 
     return (
         <div className="field-group">
@@ -780,44 +791,44 @@ function ObjectArrayField({ name, displayName, help, value, onChange, itemMeta, 
  * 添加对象的弹窗表单
  * 所有字段初始为空，不填充默认值
  */
+function buildDefaultFieldValue(meta, nextIndex, key = '') {
+    if (meta?.default !== undefined) {
+        if (
+            key === 'name' &&
+            typeof meta.default === 'string' &&
+            /\d+$/.test(meta.default)
+        ) {
+            return meta.default.replace(/\d+$/, String(nextIndex + 1));
+        }
+        return structuredClone(meta.default);
+    }
+    if (meta?.type === 'boolean') return false;
+    if (meta?.type === 'number') return 0;
+    if (meta?.type === 'array') return [];
+    if (meta?.type === 'object') {
+        const obj = {};
+        if (meta.children) {
+            for (const [childKey, childMeta] of Object.entries(meta.children)) {
+                obj[childKey] = buildDefaultFieldValue(childMeta, nextIndex, childKey);
+            }
+        }
+        return obj;
+    }
+    return '';
+}
+
+function buildEmptyObjectItem(itemMeta, nextIndex) {
+    const item = {};
+    if (itemMeta.children) {
+        for (const [key, childMeta] of Object.entries(itemMeta.children)) {
+            item[key] = buildDefaultFieldValue(childMeta, nextIndex, key);
+        }
+    }
+    return item;
+}
+
 function AddObjectModal({ title, itemMeta, nextIndex = 0, onConfirm, onCancel, scopeSelfId = null }) {
-    const buildDefaultValue = useCallback((meta, key = '') => {
-        if (meta?.default !== undefined) {
-            if (
-                key === 'name' &&
-                typeof meta.default === 'string' &&
-                /\d+$/.test(meta.default)
-            ) {
-                return meta.default.replace(/\d+$/, String(nextIndex + 1));
-            }
-            return structuredClone(meta.default);
-        }
-        if (meta?.type === 'boolean') return false;
-        if (meta?.type === 'number') return 0;
-        if (meta?.type === 'array') return [];
-        if (meta?.type === 'object') {
-            const obj = {};
-            if (meta.children) {
-                for (const [childKey, childMeta] of Object.entries(meta.children)) {
-                    obj[childKey] = buildDefaultValue(childMeta, childKey);
-                }
-            }
-            return obj;
-        }
-        return '';
-    }, [scopeSelfId]);
-
-    const buildEmptyItem = useCallback(() => {
-        const item = {};
-        if (itemMeta.children) {
-            for (const [key, childMeta] of Object.entries(itemMeta.children)) {
-                item[key] = buildDefaultValue(childMeta, key);
-            }
-        }
-        return item;
-    }, [buildDefaultValue, itemMeta]);
-
-    const [draft, setDraft] = useState(() => buildEmptyItem());
+    const [draft, setDraft] = useState(() => buildEmptyObjectItem(itemMeta, nextIndex));
 
     const handleFieldChange = useCallback((key, val) => {
         setDraft(prev => ({ ...prev, [key]: val }));
@@ -940,6 +951,178 @@ function EditObjectModal({ title, itemMeta, initialData, onConfirm, onCancel, re
 }
 
 /**
+ * 工具多选字段 — 从 /api/available-tools 获取可选工具列表
+ * 用于工具组内的 tools 数组字段（uiType = toolMultiSelect）
+ */
+function ToolMultiSelectField({ name, displayName, help, value, onChange }) {
+    const [showModal, setShowModal] = useState(false);
+    const [toolOptions, setToolOptions] = useState([]);
+    const items = Array.isArray(value) ? value : [];
+
+    useEffect(() => {
+        const token = getAuthToken();
+        fetch('/api/available-tools', {
+            headers: { Authorization: `Bearer ${token}` },
+        })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success && Array.isArray(d.data)) {
+                    setToolOptions(d.data);
+                }
+            })
+            .catch(() => {});
+    }, []);
+
+    const removeItem = (index) => {
+        onChange(items.filter((_, i) => i !== index));
+    };
+
+    // key → label 查找
+    const labelMap = Object.fromEntries(toolOptions.map(t => [t.key, t.label]));
+
+    return (
+        <div className="field-group">
+            <label className="field-label">
+                {displayName}
+                <span className="field-type-badge">{name}</span>
+                <span className="field-type-badge">{items.length} 项</span>
+            </label>
+            {help && <div className="field-help">{help}</div>}
+            <div className="array-field group-select-field">
+                {items.map((item, index) => (
+                    <span key={index} className="array-tag">
+                        {labelMap[item] || item}
+                        <button
+                            type="button"
+                            className="array-tag-remove"
+                            onClick={(e) => { e.stopPropagation(); removeItem(index); }}
+                        >
+                            ×
+                        </button>
+                    </span>
+                ))}
+                <button
+                    type="button"
+                    className="btn btn-secondary group-select-btn"
+                    onClick={() => setShowModal(true)}
+                >
+                    + 选择工具
+                </button>
+            </div>
+            {showModal && (
+                <ToolMultiSelectModal
+                    title="选择工具"
+                    options={toolOptions}
+                    selected={items}
+                    onConfirm={(selected) => { onChange(selected); setShowModal(false); }}
+                    onCancel={() => setShowModal(false)}
+                />
+            )}
+        </div>
+    );
+}
+
+/**
+ * 工具多选弹窗 — 显示中文 label，存储 key
+ */
+function ToolMultiSelectModal({ title, options, selected, onConfirm, onCancel }) {
+    const [search, setSearch] = useState('');
+    const [checked, setChecked] = useState(new Set(selected));
+
+    const filtered = options.filter(opt => {
+        if (!search) return true;
+        const q = search.toLowerCase();
+        return opt.label.toLowerCase().includes(q) || opt.key.toLowerCase().includes(q);
+    });
+
+    const toggleOption = (key) => {
+        setChecked(prev => {
+            const next = new Set(prev);
+            if (next.has(key)) {
+                next.delete(key);
+            } else {
+                next.add(key);
+            }
+            return next;
+        });
+    };
+
+    const toggleAll = () => {
+        const allChecked = filtered.every(opt => checked.has(opt.key));
+        setChecked(prev => {
+            const next = new Set(prev);
+            if (allChecked) {
+                filtered.forEach(opt => next.delete(opt.key));
+            } else {
+                filtered.forEach(opt => next.add(opt.key));
+            }
+            return next;
+        });
+    };
+
+    const handleConfirm = () => {
+        onConfirm([...checked]);
+    };
+
+    return createPortal(
+        <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+            <div className="modal-card group-select-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header">
+                    <span className="modal-title">{title} ({checked.size} 已选)</span>
+                    <button className="modal-close" onClick={onCancel}>✕</button>
+                </div>
+                <div className="group-select-search">
+                    <input
+                        type="text"
+                        className="field-input"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="搜索工具..."
+                    />
+                </div>
+                <div className="modal-body group-select-list">
+                    {filtered.length === 0 && (
+                        <div className="empty-state" style={{ height: 80 }}>无匹配项</div>
+                    )}
+                    {filtered.length > 0 && (
+                        <>
+                            <label className="group-select-item group-select-all" onClick={toggleAll}>
+                                <input
+                                    type="checkbox"
+                                    checked={filtered.length > 0 && filtered.every(opt => checked.has(opt.key))}
+                                    readOnly
+                                />
+                                <span className="group-select-info">
+                                    <span className="group-select-name">全选 / 取消全选</span>
+                                </span>
+                            </label>
+                            {filtered.map(opt => (
+                                <div key={opt.key} className="group-select-item" onClick={() => toggleOption(opt.key)} style={{ cursor: 'pointer' }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={checked.has(opt.key)}
+                                        readOnly
+                                    />
+                                    <span className="group-select-info">
+                                        <span className="group-select-name">{opt.label}</span>
+                                        <span className="group-select-id">{opt.key}</span>
+                                    </span>
+                                </div>
+                            ))}
+                        </>
+                    )}
+                </div>
+                <div className="modal-footer">
+                    <button className="btn btn-secondary" onClick={onCancel}>取消</button>
+                    <button className="btn btn-primary" onClick={handleConfirm}>确定 ({checked.size})</button>
+                </div>
+            </div>
+        </div>,
+        document.body
+    );
+}
+
+/**
  * 动态选择字段 — 从 API 获取选项列表
  * uiType: 动态选项类型标识（如 roleSelect, channelSelect）
  */
@@ -950,7 +1133,7 @@ function DynamicSelectField({ name, displayName, help, value, onChange, uiType, 
     const [isDynamic, setIsDynamic] = useState(true);
 
     useEffect(() => {
-        const token = localStorage.getItem('sakura_token');
+        const token = getAuthToken();
         fetch(buildScopedUrl('/api/dynamic-options', scopeSelfId), {
             headers: { Authorization: `Bearer ${token}` },
         })
@@ -1030,7 +1213,7 @@ function DynamicSelectArrayField({ name, displayName, help, value, onChange, uiT
     const items = Array.isArray(value) ? value : [];
 
     useEffect(() => {
-        const token = localStorage.getItem('sakura_token');
+        const token = getAuthToken();
         fetch(buildScopedUrl('/api/dynamic-options', scopeSelfId), {
             headers: { Authorization: `Bearer ${token}` },
         })
@@ -1200,7 +1383,7 @@ function CommandCostField({ name, displayName, help, value, onChange }) {
 
     // 从 API 获取指令映射表
     useEffect(() => {
-        const token = localStorage.getItem('sakura_token');
+        const token = getAuthToken();
         fetch('/api/command-names', {
             headers: { Authorization: `Bearer ${token}` },
         })
@@ -1344,7 +1527,7 @@ function CronField({ name, displayName, help, value, onChange }) {
     };
 
     // 简单的前端格式校验
-    const isValidSegment = (val) => /^[\d*,\-\/]+$/.test(val);
+    const isValidSegment = (val) => /^[0-9*,/-]+$/.test(val);
     const allValid = Object.values(segments).every(isValidSegment) && parts.length === 5;
 
     // 生成人类可读描述
