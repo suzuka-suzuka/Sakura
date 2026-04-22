@@ -7,8 +7,13 @@ import { AccountConfigSchema, getDefaultAccountConfig, schemaToMeta } from './co
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ACCOUNT_CONFIG_DIR = path.join(__dirname, '../../config/account');
+const DEFAULT_CONFIG_CACHE_KEY = '__default__';
+const DEFAULT_CONFIG_FILE = path.join(ACCOUNT_CONFIG_DIR, 'default.yaml');
 
 function getConfigPath(selfId) {
+    if (selfId == null) {
+        return DEFAULT_CONFIG_FILE;
+    }
     return path.join(ACCOUNT_CONFIG_DIR, `${selfId}.yaml`);
 }
 
@@ -30,18 +35,20 @@ class AccountConfigManager {
 
     getConfig(selfId) {
         const normalizedSelfId = normalizeSelfId(selfId);
-        if (normalizedSelfId == null) {
-            return getDefaultAccountConfig();
-        }
+        const cacheKey = normalizedSelfId ?? DEFAULT_CONFIG_CACHE_KEY;
 
-        if (this._configCache.has(normalizedSelfId)) {
-            return structuredClone(this._configCache.get(normalizedSelfId));
+        if (this._configCache.has(cacheKey)) {
+            return structuredClone(this._configCache.get(cacheKey));
         }
 
         const filePath = getConfigPath(normalizedSelfId);
         if (!fs.existsSync(filePath)) {
+            if (normalizedSelfId != null) {
+                return this.getConfig(null);
+            }
+
             const defaults = getDefaultAccountConfig();
-            this._configCache.set(normalizedSelfId, defaults);
+            this._configCache.set(cacheKey, defaults);
             return structuredClone(defaults);
         }
 
@@ -52,21 +59,23 @@ class AccountConfigManager {
                 ? result.data
                 : { ...getDefaultAccountConfig(), ...(raw && typeof raw === 'object' ? raw : {}) };
 
-            this._configCache.set(normalizedSelfId, nextConfig);
+            this._configCache.set(cacheKey, nextConfig);
             return structuredClone(nextConfig);
         } catch (error) {
-            logger.error(`[账号配置] 加载账号 ${normalizedSelfId} 的配置失败：${error}`);
+            logger.error(`[账号配置] 加载${normalizedSelfId == null ? '默认' : `账号 ${normalizedSelfId}`}配置失败：${error}`);
+            if (normalizedSelfId != null) {
+                return this.getConfig(null);
+            }
+
             const defaults = getDefaultAccountConfig();
-            this._configCache.set(normalizedSelfId, defaults);
+            this._configCache.set(cacheKey, defaults);
             return structuredClone(defaults);
         }
     }
 
     setConfig(selfId, data) {
         const normalizedSelfId = normalizeSelfId(selfId);
-        if (normalizedSelfId == null) {
-            return { success: false, errors: [{ message: '无效的 selfId' }] };
-        }
+        const cacheKey = normalizedSelfId ?? DEFAULT_CONFIG_CACHE_KEY;
 
         const result = AccountConfigSchema.safeParse(data);
         if (!result.success) {
@@ -82,11 +91,11 @@ class AccountConfigManager {
                 quotingType: "'",
             });
             fs.writeFileSync(getConfigPath(normalizedSelfId), content, 'utf8');
-            this._configCache.set(normalizedSelfId, result.data);
-            logger.info(`[账号配置] 已保存账号 ${normalizedSelfId} 的配置`);
+            this._configCache.set(cacheKey, result.data);
+            logger.info(`[账号配置] 已保存${normalizedSelfId == null ? '默认' : `账号 ${normalizedSelfId}`}配置`);
             return { success: true };
         } catch (error) {
-            logger.error(`[账号配置] 保存账号 ${normalizedSelfId} 的配置失败：${error}`);
+            logger.error(`[账号配置] 保存${normalizedSelfId == null ? '默认' : `账号 ${normalizedSelfId}`}配置失败：${error}`);
             return { success: false, errors: [{ message: '保存文件失败' }] };
         }
     }

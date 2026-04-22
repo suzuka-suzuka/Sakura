@@ -7,6 +7,8 @@ import ConfigForm from './components/ConfigForm';
 import PluginConfigPanel from './components/PluginConfigPanel';
 import SystemMonitor from './components/SystemMonitor';
 
+const DEFAULT_SCOPE_KEY = '__default__';
+
 function App() {
   const {
     config,
@@ -28,7 +30,6 @@ function App() {
     savePluginConfig,
     updatePluginFromWs,
     botAccounts,
-    configuredAccountIds,
     selectedPluginSelfId,
     setSelectedPluginSelfId,
     accountSchema,
@@ -50,7 +51,7 @@ function App() {
 
   const onConfigChanged = useCallback((newConfig) => {
     updateFromWs(newConfig);
-    addToast('配置已同步更新', 'info');
+    addToast('框架配置已同步更新', 'info');
   }, [updateFromWs, addToast]);
 
   const onPluginConfigChanged = useCallback((pluginName, moduleName, data, selfId) => {
@@ -87,8 +88,6 @@ function App() {
   }, [saveConfig, addToast]);
 
   const handleAccountSave = useCallback(async (newConfig) => {
-    if (!selectedPluginSelfId) return;
-
     const result = await saveAccountConfig(selectedPluginSelfId, newConfig);
     if (result.success) {
       addToast('账号配置保存成功', 'success');
@@ -220,14 +219,17 @@ function App() {
   const isAccountSection = activeSection === 'account';
   const isPluginSection = activeSection !== 'framework' && activeSection !== 'monitor' && activeSection !== 'account';
 
-  const needsAccountTopbar = botAccounts.length > 1
-    || (botAccounts.length === 1 && configuredAccountIds.includes(Number(botAccounts[0]?.self_id)));
-  const showAccountTopbar = needsAccountTopbar && (isPluginSection || isAccountSection);
+  const showAccountTopbar = botAccounts.length > 1 && (isPluginSection || isAccountSection);
 
-  const currentPluginScopeKey = selectedPluginSelfId == null ? '__default__' : String(selectedPluginSelfId);
+  const currentPluginScopeKey = selectedPluginSelfId == null
+    ? DEFAULT_SCOPE_KEY
+    : String(selectedPluginSelfId);
   const currentPluginConfigs = pluginConfigs[activeSection]?.[currentPluginScopeKey] || {};
-  const selectedBotAccount = botAccounts.find((account) => Number(account.self_id) === Number(selectedPluginSelfId)) || null;
-  const currentAccountConfig = selectedPluginSelfId != null ? (accountConfigs[selectedPluginSelfId] ?? null) : null;
+  const currentAccountConfig = accountConfigs[currentPluginScopeKey] ?? null;
+  const selectedBotAccount = botAccounts.find(
+    (account) => Number(account.self_id) === Number(selectedPluginSelfId)
+  ) || null;
+  const canEditCurrentScope = selectedPluginSelfId == null || selectedBotAccount != null;
 
   const handleSectionChange = useCallback((key) => {
     setActiveSection(key);
@@ -339,12 +341,12 @@ function App() {
           {activeSection === 'framework' && errors && errors.length > 0 && (
             <div className="config-section" style={{ borderColor: 'rgba(229, 57, 53, 0.2)' }}>
               <div className="section-title" style={{ color: 'var(--error)' }}>
-                ⚠️ 配置校验警告
+                配置校验警告
               </div>
               <div className="section-desc">
                 {errors.map((item, index) => (
                   <div key={index} style={{ color: 'var(--warning)', marginBottom: 3 }}>
-                    • {item.path?.join('.') || '?'}: {item.message}
+                    {item.path?.join('.') || '?'}: {item.message}
                   </div>
                 ))}
               </div>
@@ -372,11 +374,7 @@ function App() {
             )}
 
             {activeSection === 'account' && (
-              selectedPluginSelfId == null ? (
-                <div className="empty-state">
-                  请先连接账号，或创建对应账号的配置文件后再编辑账号配置。
-                </div>
-              ) : currentAccountConfig && accountSchema && accountTab ? (
+              currentAccountConfig && accountSchema && accountTab ? (
                 <ConfigForm
                   config={currentAccountConfig}
                   schema={accountSchema}
@@ -392,13 +390,13 @@ function App() {
               )
             )}
 
-            {isPluginSection && !selectedBotAccount && (
+            {isPluginSection && !canEditCurrentScope && (
               <div className="empty-state">
-                暂无可配置账号，请先连接账号或创建该账号的配置作用域。
+                当前账号不在线，暂时无法编辑该账号作用域的配置。
               </div>
             )}
 
-            {isPluginSection && currentTab && selectedBotAccount && (
+            {isPluginSection && currentTab && canEditCurrentScope && (
               <PluginConfigPanel
                 pluginName={activeSection}
                 modules={currentTab.modules || []}

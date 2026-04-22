@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 const API_BASE = '';
 const AUTH_TOKEN_STORAGE_KEY = 'sakura_token';
 const PLUGIN_SELF_ID_STORAGE_KEY = 'sakura_plugin_self_id';
+const DEFAULT_SCOPE_KEY = '__default__';
 
 function readAuthToken() {
     const sessionToken = sessionStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
@@ -35,7 +36,12 @@ function normalizeSelfId(value) {
 }
 
 function scopeKeyOf(selfId) {
-    return selfId == null ? '__default__' : String(selfId);
+    return selfId == null ? DEFAULT_SCOPE_KEY : String(selfId);
+}
+
+function buildScopedQuery(selfId) {
+    const normalizedSelfId = normalizeSelfId(selfId);
+    return normalizedSelfId == null ? '' : `?selfId=${normalizedSelfId}`;
 }
 
 export function useConfig() {
@@ -53,14 +59,13 @@ export function useConfig() {
     const [pluginSchemas, setPluginSchemas] = useState({});
     const [pluginConfigs, setPluginConfigs] = useState({});
     const [botAccounts, setBotAccounts] = useState([]);
-    const [configuredAccountIds, setConfiguredAccountIds] = useState([]); // 已有独立配置文件的账号 ID
+    const [configuredAccountIds, setConfiguredAccountIds] = useState([]);
     const [selectedPluginSelfId, setSelectedPluginSelfIdState] = useState(() =>
         normalizeSelfId(localStorage.getItem(PLUGIN_SELF_ID_STORAGE_KEY))
     );
 
-    // 分账号框架基本配置
     const [accountSchema, setAccountSchema] = useState(null);
-    const [accountConfigs, setAccountConfigs] = useState({}); // selfId → config
+    const [accountConfigs, setAccountConfigs] = useState({});
 
     const headers = useCallback(() => ({
         'Content-Type': 'application/json',
@@ -109,6 +114,8 @@ export function useConfig() {
         setPluginMeta({});
         setBotAccounts([]);
         setConfiguredAccountIds([]);
+        setAccountSchema(null);
+        setAccountConfigs({});
         setSelectedPluginSelfIdState(null);
         clearAuthToken();
         localStorage.removeItem(PLUGIN_SELF_ID_STORAGE_KEY);
@@ -117,57 +124,79 @@ export function useConfig() {
     const fetchSchema = useCallback(async () => {
         try {
             const res = await fetch(`${API_BASE}/api/schema`, { headers: headers() });
-            if (res.status === 401) { logout(); return; }
+            if (res.status === 401) {
+                logout();
+                return;
+            }
             const data = await res.json();
-            if (data.success) setSchema(data.data);
+            if (data.success) {
+                setSchema(data.data);
+            }
         } catch (error) {
-            console.error('获取 schema 失败:', error);
+            console.error('Failed to fetch schema:', error);
         }
     }, [headers, logout]);
 
     const fetchAccountSchema = useCallback(async () => {
         try {
             const res = await fetch(`${API_BASE}/api/account-schema`, { headers: headers() });
-            if (res.status === 401) { logout(); return; }
+            if (res.status === 401) {
+                logout();
+                return;
+            }
             const data = await res.json();
-            if (data.success) setAccountSchema(data.data);
+            if (data.success) {
+                setAccountSchema(data.data);
+            }
         } catch (error) {
-            console.error('获取账号 schema 失败:', error);
+            console.error('Failed to fetch account schema:', error);
         }
     }, [headers, logout]);
 
     const fetchAccountConfig = useCallback(async (selfId) => {
         const normalizedSelfId = normalizeSelfId(selfId);
-        if (!normalizedSelfId) return;
+        const scopeKey = scopeKeyOf(normalizedSelfId);
+
         try {
-            const res = await fetch(`${API_BASE}/api/account-config?selfId=${normalizedSelfId}`, { headers: headers() });
-            if (res.status === 401) { logout(); return; }
+            const res = await fetch(
+                `${API_BASE}/api/account-config${buildScopedQuery(normalizedSelfId)}`,
+                { headers: headers() }
+            );
+            if (res.status === 401) {
+                logout();
+                return;
+            }
             const data = await res.json();
             if (data.success) {
-                setAccountConfigs(prev => ({ ...prev, [normalizedSelfId]: data.data }));
+                setAccountConfigs((prev) => ({ ...prev, [scopeKey]: data.data }));
             }
         } catch (error) {
-            console.error(`获取账号 ${selfId} 配置失败:`, error);
+            console.error(
+                `Failed to fetch ${normalizedSelfId == null ? 'default' : `account ${normalizedSelfId}`} config:`,
+                error
+            );
         }
     }, [headers, logout]);
 
     const saveAccountConfig = useCallback(async (selfId, newConfig) => {
         const normalizedSelfId = normalizeSelfId(selfId);
-        if (!normalizedSelfId) return { success: false, errors: [{ message: '请先选择账号' }] };
+        const scopeKey = scopeKeyOf(normalizedSelfId);
+
         setSaving(true);
         try {
-            const res = await fetch(`${API_BASE}/api/account-config?selfId=${normalizedSelfId}`, {
+            const res = await fetch(`${API_BASE}/api/account-config${buildScopedQuery(normalizedSelfId)}`, {
                 method: 'POST',
                 headers: headers(),
                 body: JSON.stringify({ data: newConfig }),
             });
             const data = await res.json();
             if (data.success) {
-                setAccountConfigs(prev => ({ ...prev, [normalizedSelfId]: newConfig }));
-                // 保存后将此账号加入已配置列表（确保顶部标签栏下次显示）
-                setConfiguredAccountIds(prev =>
-                    prev.includes(normalizedSelfId) ? prev : [...prev, normalizedSelfId]
-                );
+                setAccountConfigs((prev) => ({ ...prev, [scopeKey]: newConfig }));
+                if (normalizedSelfId != null) {
+                    setConfiguredAccountIds((prev) =>
+                        prev.includes(normalizedSelfId) ? prev : [...prev, normalizedSelfId]
+                    );
+                }
                 return { success: true };
             }
             return { success: false, errors: data.errors };
@@ -191,7 +220,7 @@ export function useConfig() {
                 setErrors(data.errors);
             }
         } catch (error) {
-            console.error('获取配置失败:', error);
+            console.error('Failed to fetch config:', error);
         }
     }, [headers, logout]);
 
@@ -224,25 +253,43 @@ export function useConfig() {
                 logout();
                 return;
             }
+
             const data = await res.json();
             if (!data.success) {
                 setBotAccounts([]);
+                setConfiguredAccountIds([]);
                 setSelectedPluginSelfId(null);
                 return;
             }
 
             const accounts = Array.isArray(data.data?.accounts) ? data.data.accounts : [];
+            const nextConfiguredIds = Array.isArray(data.data?.configuredScopeIds)
+                ? data.data.configuredScopeIds
+                : Array.isArray(data.data?.configuredAccountIds)
+                    ? data.data.configuredAccountIds
+                : [];
+
             setBotAccounts(accounts);
-            setConfiguredAccountIds(Array.isArray(data.data?.configuredAccountIds) ? data.data.configuredAccountIds : []);
+            setConfiguredAccountIds(nextConfiguredIds);
 
             const storedSelfId = normalizeSelfId(localStorage.getItem(PLUGIN_SELF_ID_STORAGE_KEY));
             const currentSelfId = normalizeSelfId(selectedPluginSelfId);
             const preferredSelfId = currentSelfId ?? storedSelfId;
-            const hasPreferred = preferredSelfId != null && accounts.some((account) => Number(account.self_id) === preferredSelfId);
-            const nextSelfId = hasPreferred ? preferredSelfId : normalizeSelfId(accounts[0]?.self_id);
+            const hasPreferred = preferredSelfId != null
+                && accounts.some((account) => Number(account.self_id) === preferredSelfId);
+
+            const soleAccountId = normalizeSelfId(accounts[0]?.self_id);
+            const hasSingleScopedConfig = accounts.length === 1
+                && soleAccountId != null
+                && nextConfiguredIds.includes(soleAccountId);
+
+            const nextSelfId = accounts.length > 1
+                ? (hasPreferred ? preferredSelfId : normalizeSelfId(accounts[0]?.self_id))
+                : (hasSingleScopedConfig ? soleAccountId : null);
+
             setSelectedPluginSelfId(nextSelfId);
         } catch (error) {
-            console.error('获取 Bot 信息失败:', error);
+            console.error('Failed to fetch bot info:', error);
         }
     }, [headers, logout, selectedPluginSelfId, setSelectedPluginSelfId]);
 
@@ -253,8 +300,11 @@ export function useConfig() {
                 logout();
                 return;
             }
+
             const data = await res.json();
-            if (!data.success) return;
+            if (!data.success) {
+                return;
+            }
 
             const nextPlugins = {};
             const nextCategories = {};
@@ -284,16 +334,16 @@ export function useConfig() {
                             setPluginSchemas((prev) => ({ ...prev, [pluginName]: schemaData.data }));
                         }
                     })
-                    .catch(() => { });
+                    .catch(() => {});
             }
         } catch (error) {
-            console.error('获取插件列表失败:', error);
+            console.error('Failed to fetch plugins:', error);
         }
     }, [headers, logout]);
 
     const fetchPluginConfigsForSelf = useCallback(async (selfId) => {
         const normalizedSelfId = normalizeSelfId(selfId);
-        if (!isLoggedIn || normalizedSelfId == null) {
+        if (!isLoggedIn) {
             return;
         }
 
@@ -307,13 +357,14 @@ export function useConfig() {
         await Promise.all(currentPlugins.map(async (pluginName) => {
             try {
                 const res = await fetch(
-                    `${API_BASE}/api/plugins/${pluginName}/config?selfId=${normalizedSelfId}`,
+                    `${API_BASE}/api/plugins/${pluginName}/config${buildScopedQuery(normalizedSelfId)}`,
                     { headers: headers() }
                 );
                 if (res.status === 401) {
                     logout();
                     return;
                 }
+
                 const data = await res.json();
                 if (data.success) {
                     setPluginConfigs((prev) => ({
@@ -325,27 +376,27 @@ export function useConfig() {
                     }));
                 }
             } catch (error) {
-                console.error(`获取插件 ${pluginName} 配置失败:`, error);
+                console.error(`Failed to fetch plugin config for ${pluginName}:`, error);
             }
         }));
     }, [headers, isLoggedIn, logout, plugins]);
 
     const savePluginConfig = useCallback(async (pluginName, moduleName, newConfig, selfId = selectedPluginSelfId) => {
         const normalizedSelfId = normalizeSelfId(selfId);
-        if (normalizedSelfId == null) {
-            return { success: false, errors: [{ message: '请先选择账号' }] };
-        }
+        const scopeKey = scopeKeyOf(normalizedSelfId);
 
         setSaving(true);
         try {
-            const res = await fetch(`${API_BASE}/api/plugins/${pluginName}/${moduleName}/config?selfId=${normalizedSelfId}`, {
-                method: 'POST',
-                headers: headers(),
-                body: JSON.stringify({ data: newConfig }),
-            });
+            const res = await fetch(
+                `${API_BASE}/api/plugins/${pluginName}/${moduleName}/config${buildScopedQuery(normalizedSelfId)}`,
+                {
+                    method: 'POST',
+                    headers: headers(),
+                    body: JSON.stringify({ data: newConfig }),
+                }
+            );
             const data = await res.json();
             if (data.success) {
-                const scopeKey = scopeKeyOf(normalizedSelfId);
                 setPluginConfigs((prev) => ({
                     ...prev,
                     [pluginName]: {
@@ -382,17 +433,24 @@ export function useConfig() {
         ]).finally(() => setLoading(false));
     }, [isLoggedIn, fetchSchema, fetchConfig, fetchPlugins, fetchBotAccounts, fetchAccountSchema]);
 
-    // 当切换账号时，按需拉取该账号的基本配置
     useEffect(() => {
-        if (!isLoggedIn || selectedPluginSelfId == null) return;
-        if (accountConfigs[selectedPluginSelfId] !== undefined) return; // 已缓存
+        if (!isLoggedIn) {
+            return;
+        }
+
+        const scopeKey = scopeKeyOf(selectedPluginSelfId);
+        if (accountConfigs[scopeKey] !== undefined) {
+            return;
+        }
+
         fetchAccountConfig(selectedPluginSelfId);
     }, [isLoggedIn, selectedPluginSelfId, accountConfigs, fetchAccountConfig]);
 
     useEffect(() => {
-        if (!isLoggedIn || selectedPluginSelfId == null || Object.keys(plugins).length === 0) {
+        if (!isLoggedIn || Object.keys(plugins).length === 0) {
             return;
         }
+
         fetchPluginConfigsForSelf(selectedPluginSelfId);
     }, [isLoggedIn, plugins, selectedPluginSelfId, fetchPluginConfigsForSelf]);
 

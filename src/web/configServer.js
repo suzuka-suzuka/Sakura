@@ -185,6 +185,7 @@ async function getBotInfo() {
             total: accounts.length,
             online: onlineAccounts.length,
             configuredAccountIds,
+            configuredScopeIds: configuredSelfIds,
         };
     } catch (e) {
         logger.error(`[ConfigServer] 获取 Bot 信息失败: ${e}`);
@@ -642,10 +643,6 @@ async function handleApi(req, res) {
     if (pathname === '/api/account-config' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
         const selfId = parseSelfIdParam(url);
-        if (!selfId) {
-            sendJson(res, { success: false, error: '缺少 selfId 参数' }, 400);
-            return true;
-        }
         sendJson(res, { success: true, data: accountConfig.getConfig(selfId) });
         return true;
     }
@@ -653,10 +650,6 @@ async function handleApi(req, res) {
     if (pathname === '/api/account-config' && req.method === 'POST') {
         if (!requireAuth(req, res)) return true;
         const selfId = parseSelfIdParam(url);
-        if (!selfId) {
-            sendJson(res, { success: false, error: '缺少 selfId 参数' }, 400);
-            return true;
-        }
         const body = await parseBody(req);
         const result = accountConfig.setConfig(selfId, body.data || body);
         if (result.success) {
