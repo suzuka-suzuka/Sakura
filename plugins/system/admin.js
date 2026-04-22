@@ -1,6 +1,5 @@
 import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import { getLatestBotLogPath } from "../../src/utils/logPaths.js";
 import {
   buildLogSections,
   filterLogEntriesByLevel,
@@ -8,9 +7,6 @@ import {
   groupLogEntriesBySelfId,
   parseLogEntries,
 } from "../../src/utils/logReader.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const LOG_DIR = path.join(__dirname, "../../logs");
 
 export class SystemPlugin extends plugin {
   constructor() {
@@ -61,21 +57,11 @@ export class SystemPlugin extends plugin {
 
   getLogs = Command(/^#(全部)?(错误)?日志$/, async (e) => {
     await e.react(124);
-    if (!fs.existsSync(LOG_DIR)) {
+    const logFile = getLatestBotLogPath();
+    if (!logFile) {
       return e.reply("暂无日志文件");
     }
 
-    const files = fs
-      .readdirSync(LOG_DIR)
-      .filter((file) => file.startsWith("bot.") && file.endsWith(".log"))
-      .sort()
-      .reverse();
-
-    if (files.length === 0) {
-      return e.reply("暂无日志文件");
-    }
-
-    const logFile = path.join(LOG_DIR, files[0]);
     const showAllAccounts = Boolean(e.match?.[1]);
     const isErrorOnly = e.match?.[2] === "错误";
 

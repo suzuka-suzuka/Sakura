@@ -1,6 +1,7 @@
 import log4js from "log4js";
 import chalk from "chalk";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { BOT_LOG_BASE } from "./logPaths.js";
 
 // 用于自动将当前事件的 self_id / 群 / 用户信息注入到日志前缀
 export const logContext = new AsyncLocalStorage();
@@ -21,7 +22,7 @@ log4js.configure({
     },
     file: {
       type: "dateFile",
-      filename: "logs/bot.log",
+      filename: BOT_LOG_BASE,
       pattern: "yyyy-MM-dd",
       keepFileExt: true,
       alwaysIncludePattern: true,
