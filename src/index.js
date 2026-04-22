@@ -7,6 +7,7 @@ import { PluginLoader } from "./core/loader.js";
 import { Command, OnEvent, plugin, Event, Cron } from "./core/plugin.js";
 import { connectRedis } from "./utils/redis.js";
 import Config from "./core/config.js";
+import { installOsCompatPatch } from "./utils/osCompat.js";
 import { startConfigServer } from "./web/configServer.js";
 
 logger.info(logger.magenta("-----------------sakura框架-----------------"))
@@ -24,6 +25,8 @@ global.plugin = plugin;
 global.Event = Event;
 global.segment = Segment;
 global.bot = null;
+
+installOsCompatPatch();
 
 try {
   global.redis = await connectRedis();
