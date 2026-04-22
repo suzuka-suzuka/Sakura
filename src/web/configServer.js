@@ -1004,35 +1004,46 @@ export function startConfigServer() {
         logger.info(`  ➜ 本地: http://localhost:${port}`);
 
 
-        const nets = os.networkInterfaces();
-        for (const name of Object.keys(nets)) {
-            for (const net of nets[name]) {
-                if (net.family === 'IPv4' && !net.internal) {
-                    logger.info(`  ➜ 局域网: http://${net.address}:${port}`);
+        try {
+            const nets = os.networkInterfaces();
+            for (const name of Object.keys(nets || {})) {
+                for (const net of nets[name] || []) {
+                    if (net.family === 'IPv4' && !net.internal) {
+                        logger.info(`  ➜ 局域网: http://${net.address}:${port}`);
+                    }
                 }
             }
+        } catch (e) {
+            logger.warn(`[ConfigServer] 无法获取网卡地址，跳过局域网地址展示: ${e.message || e}`);
         }
 
 
-        const req = http.get('http://api.ipify.org', (resp) => {
-            let data = '';
-            resp.on('data', (chunk) => { data += chunk; });
-            resp.on('end', () => {
-                const ip = data.trim();
-                if (/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) {
-                    logger.info(`  ➜ 公网: http://${ip}:${port}`);
-                }
+        try {
+            const req = http.get('http://api.ipify.org', (resp) => {
+                let data = '';
+                resp.on('data', (chunk) => { data += chunk; });
+                resp.on('error', () => {
+                    // Ignore public IP probe failures in restricted environments.
+                });
+                resp.on('end', () => {
+                    const ip = data.trim();
+                    if (/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) {
+                        logger.info(`  ➜ 公网: http://${ip}:${port}`);
+                    }
+                });
             });
-        });
 
-        req.on('error', () => {
+            req.on('error', () => {
+                // Ignore public IP probe failures in restricted environments.
+            });
 
-        });
 
-
-        req.setTimeout(2000, () => {
-            req.destroy();
-        });
+            req.setTimeout(2000, () => {
+                req.destroy();
+            });
+        } catch (e) {
+            // Ignore public IP probe failures in restricted environments.
+        }
     });
 
     return server;

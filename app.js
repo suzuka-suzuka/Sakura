@@ -219,12 +219,12 @@ function startBot() {
 
         if (unexpectedRestartCount < MAX_UNEXPECTED_RESTARTS) {
             unexpectedRestartCount += 1;
-            console.error(`子进程异常退出，准备进行第 ${unexpectedRestartCount} 次也是最后一次自动重启...`);
+            console.error(`子进程异常退出，准备进行自动重启...`);
             scheduleRestart(3000);
             return;
         }
 
-        console.error('子进程再次异常退出，已达到最大自动重启次数，停止拉起。');
+        console.error('子进程再次异常退出，停止拉起。');
         exitParentWithChildStatus(code, signal);
     });
 }
