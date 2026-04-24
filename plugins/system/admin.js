@@ -5,6 +5,7 @@ import {
   filterLogEntriesByLevel,
   filterLogEntriesByScope,
   parseLogEntries,
+  takeLatestLogEntries,
 } from "../../src/utils/logReader.js";
 
 const MAX_FORWARD_LOGS = 50;
@@ -117,7 +118,7 @@ export class SystemPlugin extends plugin {
         return e.reply(`今日暂无${title}`);
       }
 
-      const displayEntries = entries.slice(-MAX_FORWARD_LOGS);
+      const displayEntries = takeLatestLogEntries(entries, MAX_FORWARD_LOGS);
 
       await e.sendForwardMsg(
         displayEntries,

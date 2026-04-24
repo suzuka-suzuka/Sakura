@@ -264,6 +264,11 @@ export function filterLogEntriesByScope(entries, options = {}) {
   });
 }
 
+export function takeLatestLogEntries(entries, limit = 50) {
+  const normalizedLimit = Math.max(1, Number(limit) || 50);
+  return (Array.isArray(entries) ? entries : []).slice(-normalizedLimit).reverse();
+}
+
 export function buildLogSections(entries, options = {}) {
   const {
     limit = 50,
@@ -281,7 +286,7 @@ export function buildLogSections(entries, options = {}) {
         key: "common",
         title: "公共系统日志",
         total: common.length,
-        entries: common.slice(-normalizedLimit),
+        entries: takeLatestLogEntries(common, normalizedLimit),
       });
     }
 
@@ -293,7 +298,7 @@ export function buildLogSections(entries, options = {}) {
         key: `bot:${selfId}`,
         title: `账号 ${selfId}`,
         total: scopedEntries.length,
-        entries: scopedEntries.slice(-normalizedLimit),
+        entries: takeLatestLogEntries(scopedEntries, normalizedLimit),
       });
     }
 
@@ -306,7 +311,7 @@ export function buildLogSections(entries, options = {}) {
         key: "common",
         title: "公共系统日志",
         total: common.length,
-        entries: common.slice(-normalizedLimit),
+        entries: takeLatestLogEntries(common, normalizedLimit),
       });
     }
 
@@ -316,7 +321,7 @@ export function buildLogSections(entries, options = {}) {
         key: `bot:${targetSelfId}`,
         title: `账号 ${targetSelfId}`,
         total: scopedEntries.length,
-        entries: scopedEntries.slice(-normalizedLimit),
+        entries: takeLatestLogEntries(scopedEntries, normalizedLimit),
       });
     }
     return sections;
@@ -328,7 +333,7 @@ export function buildLogSections(entries, options = {}) {
       key: "all",
       title: "日志",
       total: flatEntries.length,
-      entries: flatEntries.slice(-normalizedLimit),
+      entries: takeLatestLogEntries(flatEntries, normalizedLimit),
     });
   }
 
