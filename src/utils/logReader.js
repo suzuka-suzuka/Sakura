@@ -278,14 +278,6 @@ export function filterLogEntriesByScope(entries, options = {}) {
       return false;
     }
 
-    if (
-      normalizedTargetSelfId != null &&
-      meta.selfId == null &&
-      (meta.groupId != null || meta.userId != null || hasScopedContext)
-    ) {
-      return false;
-    }
-
     if (normalizedGroupId != null) {
       if (meta.groupId != null) {
         return meta.groupId === normalizedGroupId;
