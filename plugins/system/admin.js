@@ -1,12 +1,36 @@
 import fs from "fs";
+import { logger } from "../../src/utils/logger.js";
 import { getLatestBotLogPath } from "../../src/utils/logPaths.js";
 import {
-  buildLogSections,
   filterLogEntriesByLevel,
-  formatLogSections,
-  groupLogEntriesBySelfId,
+  filterLogEntriesByScope,
   parseLogEntries,
 } from "../../src/utils/logReader.js";
+
+const MAX_FORWARD_LOGS = 50;
+
+function normalizeNumericId(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function buildLogSummary({ title, total, shown, usesAllLogs, groupId = null }) {
+  const scopeLabel = usesAllLogs
+    ? "当前账号全部群 + 通用日志"
+    : groupId != null
+      ? `当前群 ${groupId} + 通用日志`
+      : "当前账号全部群 + 通用日志";
+
+  return {
+    prompt: title,
+    source: "系统日志",
+    summary: `${scopeLabel}，共 ${total} 条，显示最近 ${shown} 条`,
+    news: [
+      { text: scopeLabel },
+      { text: `共 ${total} 条，显示最近 ${shown} 条` },
+    ],
+  };
+}
 
 export class SystemPlugin extends plugin {
   constructor() {
@@ -62,7 +86,7 @@ export class SystemPlugin extends plugin {
       return e.reply("暂无日志文件");
     }
 
-    const showAllAccounts = Boolean(e.match?.[1]);
+    const showAllGroups = Boolean(e.match?.[1]);
     const isErrorOnly = e.match?.[2] === "错误";
 
     try {
@@ -70,50 +94,40 @@ export class SystemPlugin extends plugin {
       let entries = parseLogEntries(content);
       entries = filterLogEntriesByLevel(entries, isErrorOnly ? "WARN" : "ALL");
 
-      const grouped = groupLogEntriesBySelfId(entries);
-      const hasMultipleAccounts = grouped.bySelfId.size > 1;
+      const currentSelfId = normalizeNumericId(e.self_id);
+      const currentGroupId = normalizeNumericId(e.group_id);
+      const usesAllLogs = showAllGroups || currentGroupId == null;
 
-      const sections = hasMultipleAccounts
-        ? (
-          showAllAccounts
-            ? buildLogSections(entries, {
-              groupBySelfId: true,
-              includeCommon: true,
-              limit: 50,
-            })
-            : buildLogSections(entries, {
-              targetSelfId: e.self_id,
-              includeCommon: true,
-              limit: 50,
-            })
-        )
-        : buildLogSections(entries, {
+      entries = usesAllLogs
+        ? filterLogEntriesByScope(entries, {
+          targetSelfId: currentSelfId,
+          allGroups: true,
           includeCommon: true,
-          limit: 50,
+        })
+        : filterLogEntriesByScope(entries, {
+          targetSelfId: currentSelfId,
+          groupId: currentGroupId,
+          includeCommon: true,
         });
 
-      const validSections = sections.filter(
-        (section) => Array.isArray(section.entries) && section.entries.length > 0
-      );
-
       const typeLabel = isErrorOnly ? "错误日志" : "日志";
-      const title = hasMultipleAccounts
-        ? (showAllAccounts ? `全部账号${typeLabel}` : `当前账号${typeLabel}`)
-        : typeLabel;
+      const title = `${showAllGroups ? "全部" : ""}${typeLabel}`;
 
-      if (validSections.length === 0) {
+      if (entries.length === 0) {
         return e.reply(`今日暂无${title}`);
       }
 
+      const displayEntries = entries.slice(-MAX_FORWARD_LOGS);
+
       await e.sendForwardMsg(
-        validSections.map((section) => formatLogSections([section])),
-        {
-          prompt: title,
-          source: "系统日志",
-          news: validSections.slice(0, 5).map((section) => ({
-            text: `${section.title} ${section.entries.length}/${section.total}`,
-          })),
-        }
+        displayEntries,
+        buildLogSummary({
+          title,
+          total: entries.length,
+          shown: displayEntries.length,
+          usesAllLogs,
+          groupId: currentGroupId,
+        })
       );
     } catch (err) {
       logger.error(`读取日志失败: ${err}`);

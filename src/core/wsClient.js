@@ -74,7 +74,9 @@ export class OneBotWsClient extends EventEmitter {
     }
 
     for (const [, pending] of this._pending) {
-      clearTimeout(pending.timer);
+      if (pending.timer != null) {
+        clearTimeout(pending.timer);
+      }
       pending.reject(new Error("WebSocket disconnected"));
     }
     this._pending.clear();
@@ -91,7 +93,7 @@ export class OneBotWsClient extends EventEmitter {
       const timer = setTimeout(() => {
         this._pending.delete(echo);
         reject(new Error(`请求超时: ${action}`));
-      }, 30000);
+      }, 10 * 60 * 1000);
 
       this._pending.set(echo, { resolve, reject, timer });
 
@@ -298,7 +300,9 @@ export class OneBotWsClient extends EventEmitter {
     if (data.echo != null && this._pending.has(data.echo)) {
       const pending = this._pending.get(data.echo);
       this._pending.delete(data.echo);
-      clearTimeout(pending.timer);
+      if (pending.timer != null) {
+        clearTimeout(pending.timer);
+      }
 
       if (data.status === "ok" || data.retcode === 0) {
         pending.resolve(data.data ?? null);
