@@ -115,7 +115,8 @@ export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, loadin
     const networkSummary = dynamicInfo?.networkSummary || {};
 
     const cpuUsage = currentLoad.currentLoad || 0;
-    const memUsage = mem.total > 0 ? (mem.used / mem.total) * 100 : 0;
+    const actualMemUsed = Number.isFinite(mem.actualUsed) ? mem.actualUsed : (mem.used || 0);
+    const memUsage = mem.total > 0 ? (actualMemUsed / mem.total) * 100 : 0;
     const swapUsage = mem.swaptotal > 0 ? (mem.swapused / mem.swaptotal) * 100 : 0;
     const mainGpu = graphics.controllers?.[0];
     const cpuCores = cpu.physicalCores || cpu.cores || '-';
@@ -175,7 +176,7 @@ export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, loadin
                     <CircleProgress
                         value={memUsage}
                         label="内存"
-                        subLabel={`${formatBytes(mem.used)} / ${formatBytes(mem.total)}`}
+                        subLabel={`${formatBytes(actualMemUsed)} / ${formatBytes(mem.total)}`}
                         color="#7c4dff"
                     />
                     <CircleProgress

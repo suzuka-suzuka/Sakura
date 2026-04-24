@@ -114,6 +114,10 @@ async function getDynamicSystemInfo() {
             version: process.version,
         };
 
+        const actualUsedMemory = Number.isFinite(mem.active)
+            ? mem.active
+            : (Number.isFinite(mem.available) ? Math.max(0, mem.total - mem.available) : mem.used);
+
         return {
             currentLoad: {
                 currentLoad: currentLoad.currentLoad,
@@ -121,6 +125,7 @@ async function getDynamicSystemInfo() {
             mem: {
                 total: mem.total,
                 used: mem.used,
+                actualUsed: actualUsedMemory,
                 swaptotal: mem.swaptotal,
                 swapused: mem.swapused,
             },
