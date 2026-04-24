@@ -68,6 +68,22 @@ const PRIVATE_ID_PATTERNS = [
   /^输入状态\s+私聊\s+(\d+)/,
 ];
 
+const FALLBACK_GROUP_ID_PATTERNS = [
+  /^(?:群成员增加|群成员减少|群禁言|群撤回|群文件上传|群管理员变动|群名片变更|群精华|表情回应|加群请求|群名变更|群头衔变更|通知)\s+(\d+)/,
+  /^戳一戳\s+(\d+)\s+\d+/,
+  /^输入状态\s+(\d+)\s+\d+/,
+  /^发送\s*->\s*群聊\s+(\d+)/,
+  /^发送\s*->\s*转发\s+群聊\s+(\d+)/,
+];
+
+const FALLBACK_PRIVATE_ID_PATTERNS = [
+  /^(?:私聊撤回|好友添加|好友请求)\s+(\d+)/,
+  /^戳一戳\s+私聊\s+(\d+)/,
+  /^输入状态\s+私聊\s+(\d+)/,
+  /^发送\s*->\s*私聊\s+(\d+)/,
+  /^发送\s*->\s*转发\s+私聊\s+(\d+)/,
+];
+
 function stripAnsi(text = "") {
   return String(text).replace(ANSI_REGEX, "");
 }
@@ -94,6 +110,24 @@ function extractTrailingNumericId(token = "") {
 
   const digitMatch = text.match(/(\d+)$/);
   return digitMatch ? Number(digitMatch[1]) : null;
+}
+
+function extractScopedContextId(token = "") {
+  const text = stripAnsi(token).trim();
+  if (!text) return null;
+
+  const explicitGroupMatch = text.match(/^群[:：]?\s*(\d+)$/);
+  if (explicitGroupMatch) {
+    return Number(explicitGroupMatch[1]);
+  }
+
+  const explicitPrivateMatch = text.match(/^私聊[:：]?\s*(\d+)$/);
+  if (explicitPrivateMatch) {
+    return Number(explicitPrivateMatch[1]);
+  }
+
+  const parenMatch = text.match(/\((\d+)\)$/);
+  return parenMatch ? Number(parenMatch[1]) : null;
 }
 
 function hasMessageHint(message = "", hints = []) {
@@ -138,8 +172,10 @@ export function getLogEntryMeta(entry = "") {
   const contextTokens = selfId == null ? bracketTokens : bracketTokens.slice(1);
   const firstToken = contextTokens[0] || null;
   const secondToken = contextTokens[1] || null;
-  const firstId = extractTrailingNumericId(firstToken);
-  const secondId = extractTrailingNumericId(secondToken);
+  const contextId = extractScopedContextId(firstToken);
+  const secondContextId = extractScopedContextId(secondToken);
+  const firstId = contextId ?? extractTrailingNumericId(firstToken);
+  const secondId = secondContextId ?? extractTrailingNumericId(secondToken);
   const hasGroupHint = hasMessageHint(remaining, GROUP_MESSAGE_HINTS);
   const hasPrivateHint = hasMessageHint(remaining, PRIVATE_MESSAGE_HINTS);
 
@@ -158,11 +194,15 @@ export function getLogEntryMeta(entry = "") {
   }
 
   if (groupId == null) {
-    groupId = extractIdFromMessage(remaining, GROUP_ID_PATTERNS);
+    groupId =
+      extractIdFromMessage(remaining, GROUP_ID_PATTERNS) ??
+      extractIdFromMessage(remaining, FALLBACK_GROUP_ID_PATTERNS);
   }
 
   if (userId == null) {
-    userId = extractIdFromMessage(remaining, PRIVATE_ID_PATTERNS);
+    userId =
+      extractIdFromMessage(remaining, PRIVATE_ID_PATTERNS) ??
+      extractIdFromMessage(remaining, FALLBACK_PRIVATE_ID_PATTERNS);
   }
 
   return {
@@ -170,6 +210,8 @@ export function getLogEntryMeta(entry = "") {
     selfId,
     groupId,
     userId,
+    contextId,
+    secondContextId,
     bracketTokens,
     contextTokens,
     message: remaining,
@@ -225,7 +267,8 @@ export function filterLogEntriesByScope(entries, options = {}) {
 
   return (entries || []).filter((entry) => {
     const meta = getLogEntryMeta(entry);
-    const isCommonEntry = meta.groupId == null && meta.userId == null;
+    const hasScopedContext = meta.contextId != null;
+    const isCommonEntry = meta.groupId == null && meta.userId == null && !hasScopedContext;
 
     if (
       normalizedTargetSelfId != null &&
@@ -238,7 +281,7 @@ export function filterLogEntriesByScope(entries, options = {}) {
     if (
       normalizedTargetSelfId != null &&
       meta.selfId == null &&
-      (meta.groupId != null || meta.userId != null)
+      (meta.groupId != null || meta.userId != null || hasScopedContext)
     ) {
       return false;
     }
@@ -247,6 +290,9 @@ export function filterLogEntriesByScope(entries, options = {}) {
       if (meta.groupId != null) {
         return meta.groupId === normalizedGroupId;
       }
+      if (meta.contextId != null) {
+        return meta.contextId === normalizedGroupId;
+      }
       return includeCommon && isCommonEntry;
     }
 
@@ -254,7 +300,7 @@ export function filterLogEntriesByScope(entries, options = {}) {
       if (meta.groupId != null) {
         return true;
       }
-      if (meta.userId != null) {
+      if (meta.userId != null || hasScopedContext) {
         return false;
       }
       return includeCommon && isCommonEntry;
