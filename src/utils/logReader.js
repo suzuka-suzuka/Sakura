@@ -139,6 +139,15 @@ function isExplicitGroupToken(token = "") {
   return /^群[:：]?\s*\d+$/.test(stripAnsi(token).trim());
 }
 
+function isExplicitPrivateToken(token = "") {
+  return /^私聊[:：]?\s*\d+$/.test(stripAnsi(token).trim());
+}
+
+function isLikelyGroupToken(token = "") {
+  const text = stripAnsi(token).trim();
+  return /群.*\(\d+\)$/.test(text);
+}
+
 function extractIdFromMessage(message = "", patterns = []) {
   const text = stripAnsi(message).trim();
   for (const pattern of patterns) {
@@ -178,12 +187,16 @@ export function getLogEntryMeta(entry = "") {
   const secondId = secondContextId ?? extractTrailingNumericId(secondToken);
   const hasGroupHint = hasMessageHint(remaining, GROUP_MESSAGE_HINTS);
   const hasPrivateHint = hasMessageHint(remaining, PRIVATE_MESSAGE_HINTS);
+  const firstTokenIsGroup = isExplicitGroupToken(firstToken) || isLikelyGroupToken(firstToken);
+  const firstTokenIsPrivate = isExplicitPrivateToken(firstToken);
 
   let groupId = null;
   let userId = null;
 
   if (firstId != null) {
-    if (isExplicitGroupToken(firstToken) || contextTokens.length >= 2) {
+    if (firstTokenIsPrivate) {
+      userId = firstId;
+    } else if (firstTokenIsGroup || contextTokens.length >= 2) {
       groupId = firstId;
       userId = secondId;
     } else if (hasPrivateHint && !hasGroupHint) {
@@ -292,8 +305,11 @@ export function filterLogEntriesByScope(entries, options = {}) {
       if (meta.groupId != null) {
         return true;
       }
-      if (meta.userId != null || hasScopedContext) {
+      if (meta.userId != null) {
         return false;
+      }
+      if (hasScopedContext) {
+        return true;
       }
       return includeCommon && isCommonEntry;
     }
