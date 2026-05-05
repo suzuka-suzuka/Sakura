@@ -28,6 +28,8 @@ export function Command(reg, ...args) {
   let eventName;
   let p;
   let permission;
+  let economy;
+  let preflight;
 
   if (typeof eventOrPriorityOrOptions === "number") {
     p = eventOrPriorityOrOptions;
@@ -45,6 +47,8 @@ export function Command(reg, ...args) {
     eventName = eventOrPriorityOrOptions.event;
     p = eventOrPriorityOrOptions.priority;
     permission = eventOrPriorityOrOptions.permission;
+    economy = eventOrPriorityOrOptions.economy;
+    preflight = eventOrPriorityOrOptions.preflight;
   }
 
   if (typeof handler === "function") {
@@ -54,6 +58,8 @@ export function Command(reg, ...args) {
       eventName,
       priority: p,
       permission,
+      economy,
+      preflight,
     };
   }
   return handler;
@@ -73,10 +79,14 @@ export function OnEvent(eventName, ...args) {
 
   let priority;
   let permission;
+  let economy;
+  let preflight;
 
   if (typeof arg1 === "object" && arg1 !== null) {
     priority = arg1.priority;
     permission = arg1.permission;
+    economy = arg1.economy;
+    preflight = arg1.preflight;
   } else if (typeof arg1 === "number") {
     priority = arg1;
     if (typeof arg2 === "string") {
@@ -101,6 +111,8 @@ export function OnEvent(eventName, ...args) {
       eventName,
       priority,
       permission,
+      economy,
+      preflight,
     };
   }
   return handler;

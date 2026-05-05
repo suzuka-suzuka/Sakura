@@ -19,62 +19,18 @@ import schedule from "node-schedule";
 import { logger, logContext } from "../utils/logger.js";
 import { getBot, getBots, withBotContext } from "../api/client.js";
 import { isMasterUser } from "../utils/common.js";
-import EconomyManager from "../../plugins/sakura-plugin/lib/economy/EconomyManager.js";
+import {
+  beforeExecute as beforeEconomyExecute,
+  afterExecute as afterEconomyExecute,
+  onError as onEconomyError,
+  isHandledResult,
+  clearEconomyCommandNamesCache,
+} from "./economyHook.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_RUNTIME_BASE_DIR = path.join(__dirname, "../../temp/plugin-runtime");
 const HOT_RELOAD_CODE_DIRS = new Set(["apps", "lib"]);
 const HOT_RELOAD_SHARED_DIRS = new Set([".git", ".runtime", "node_modules", "data", "logs"]);
-
-let commandNamesCache = null;
-
-async function getCommandNames() {
-  if (commandNamesCache) return commandNamesCache;
-  try {
-    const schemaPath = path.join(__dirname, "../../plugins/sakura-plugin/configSchema.js");
-    const schemaUrl = pathToFileURL(schemaPath).href + '?t=' + Date.now();
-    const schemaMod = await import(schemaUrl);
-    commandNamesCache = schemaMod.commandNames || {};
-    return commandNamesCache;
-  } catch {
-    return {};
-  }
-}
-
-async function checkAndConsumeCoins(e, instance, handler) {
-  try {
-    const economyConfig = pluginConfigManager.getConfig("sakura-plugin", "economy");
-    if (!economyConfig?.enable) return true;
-
-    const groupId = e.group_id;
-    if (!groupId || !economyConfig.Groups?.includes(Number(groupId))) return true;
-
-    const commandKey = `${instance.constructor.name}.${handler.methodName}`;
-
-    const commandNames = await getCommandNames();
-    const commandDisplayName = commandNames[commandKey];
-
-    if (!commandDisplayName) return true;
-
-    const commandCosts = economyConfig.commandCosts || [];
-    const costConfig = commandCosts.find(c => c.command === commandDisplayName);
-
-    if (!costConfig || !costConfig.cost || costConfig.cost <= 0) return true;
-
-    const economyManager = new EconomyManager(e);
-
-    const userCoins = economyManager.getCoins(e);
-    if (userCoins < costConfig.cost) {
-      return false;
-    }
-
-    economyManager.reduceCoins(e, costConfig.cost);
-    return true;
-  } catch (err) {
-    logger.error(`[Loader] 检查指令消耗出错: ${err}`);
-    return true;
-  }
-}
 
 function buildCronScopeIds(pluginName) {
   const configuredIds = pluginConfigManager.getConfiguredSelfIds(pluginName);
@@ -525,7 +481,7 @@ export class PluginLoader {
     }
 
     if (path.basename(filePath) === "configSchema.js") {
-      commandNamesCache = null;
+      clearEconomyCommandNamesCache();
     }
 
     if (changeType === "dependency" || changeType === "meta") {
@@ -771,6 +727,7 @@ export class PluginLoader {
       for (const item of handlers) {
         const { instance, handler } = item;
         instance.e = eventObj;
+        let economy = null;
         try {
           const permission = handler.permission || instance.permission;
           if (permission) {
@@ -797,24 +754,24 @@ export class PluginLoader {
             eventObj.match = match;
           }
 
-
-
-          if (!eventObj.isMaster) {
-            const canProceed = await checkAndConsumeCoins(e, instance, handler);
-            if (!canProceed) {
-              continue;
-            }
+          economy = await beforeEconomyExecute(eventObj, instance, handler);
+          if (!economy.accepted) {
+            continue;
           }
+
           if (instance.log) {
             logger.info(`[${instance.name}] 触发: ${handler.methodName}`);
           }
 
           const result = await instance[handler.methodName](eventObj);
 
-          if (result !== false) {
+          afterEconomyExecute(economy.ticket, result);
+
+          if (isHandledResult(result)) {
             return;
           }
         } catch (err) {
+          onEconomyError(economy?.ticket, err);
           logger.error(`插件 ${instance.name} 执行出错: ${err}`);
         }
       }
