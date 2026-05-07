@@ -11,8 +11,8 @@ import pluginConfigManager from '../core/pluginConfig.js';
 import accountConfig from '../core/accountConfig.js';
 import { logger } from '../utils/logger.js';
 import { bot as botFacade, getBotSummaries } from '../api/client.js';
-import yaml from 'js-yaml';
 import { AVAILABLE_TOOL_OPTIONS } from '../../plugins/sakura-plugin/lib/AIUtils/tools/tools.js';
+import { buildMenuData } from '../../plugins/sakura-plugin/lib/menu.js';
 let cachedStaticInfo = null;
 let staticInfoTime = 0;
 const STATIC_INFO_CACHE_TIME = 60000;
@@ -508,14 +508,8 @@ async function handleApi(req, res) {
     if (pathname === '/api/menu' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
         try {
-            const yamlPath = path.join(__dirname, '../../plugins/sakura-plugin/resources/menu/menu.yaml');
-            if (fs.existsSync(yamlPath)) {
-                const fileContent = fs.readFileSync(yamlPath, 'utf8');
-                const menuConfig = yaml.load(fileContent) || {};
-                sendJson(res, { success: true, data: menuConfig });
-            } else {
-                sendJson(res, { success: true, data: { menu: [] } });
-            }
+            const economyConfig = pluginConfigManager.getConfig('sakura-plugin', 'economy');
+            sendJson(res, { success: true, data: buildMenuData({ economyConfig }) });
         } catch (e) {
             logger.error(`[ConfigServer] 获取菜单配置失败: ${e}`);
             sendJson(res, { success: false, error: '获取菜单配置失败' });
@@ -525,22 +519,10 @@ async function handleApi(req, res) {
 
     if (pathname === '/api/menu' && req.method === 'POST') {
         if (!requireAuth(req, res)) return true;
-        try {
-            const body = await parseBody(req);
-            const yamlPath = path.join(__dirname, '../../plugins/sakura-plugin/resources/menu/menu.yaml');
-
-            // 备份原文件
-            if (fs.existsSync(yamlPath)) {
-                fs.copyFileSync(yamlPath, yamlPath + '.bak');
-            }
-
-            const yamlStr = yaml.dump(body, { lineWidth: -1 });
-            fs.writeFileSync(yamlPath, yamlStr, 'utf8');
-            sendJson(res, { success: true, message: '菜单保存成功' });
-        } catch (e) {
-            logger.error(`[ConfigServer] 保存菜单配置失败: ${e}`);
-            sendJson(res, { success: false, error: '保存菜单配置失败' });
-        }
+        sendJson(res, {
+            success: false,
+            error: 'Menu is code-defined; edit plugins/sakura-plugin/lib/menu.js',
+        });
         return true;
     }
 
