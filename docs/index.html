@@ -26,9 +26,6 @@
 
     <main id="top">
       <section class="hero">
-        <div class="hero-backdrop" aria-hidden="true">
-          <img src="./assets/sakura.jpg" alt="" />
-        </div>
         <div class="hero-content">
           <p class="eyebrow">Node.js / OneBot / Milky / Plugin Framework</p>
           <h1>Sakura Bot</h1>
@@ -41,46 +38,20 @@
           </div>
         </div>
 
-        <aside class="console-preview" aria-label="Sakura 配置面板预览">
-          <div class="window-bar">
-            <span></span>
-            <span></span>
-            <span></span>
-            <strong>localhost:3457</strong>
+        <div class="hero-visual">
+          <figure class="sakura-board">
+            <img src="./assets/sakura.jpg" alt="Sakura Bot 项目看板图" />
+            <figcaption>
+              <span>Sakura Board</span>
+              <strong>QQ Bot Framework</strong>
+            </figcaption>
+          </figure>
+          <div class="hero-facts" aria-label="项目摘要">
+            <span>Node.js 20+</span>
+            <span>Redis 状态</span>
+            <span>Web 配置面板</span>
           </div>
-          <div class="panel-grid">
-            <div class="side-rail">
-              <span class="rail-active"></span>
-              <span></span>
-              <span></span>
-              <span></span>
-            </div>
-            <div class="panel-main">
-              <div class="metric-row">
-                <div>
-                  <small>连接</small>
-                  <strong>OneBot Forward</strong>
-                </div>
-                <b>在线</b>
-              </div>
-              <div class="metric-row">
-                <div>
-                  <small>插件</small>
-                  <strong>Hot Reload</strong>
-                </div>
-                <b>就绪</b>
-              </div>
-              <div class="chart">
-                <span style="height: 36%"></span>
-                <span style="height: 62%"></span>
-                <span style="height: 48%"></span>
-                <span style="height: 76%"></span>
-                <span style="height: 58%"></span>
-                <span style="height: 86%"></span>
-              </div>
-            </div>
-          </div>
-        </aside>
+        </div>
       </section>
 
       <section class="intro band">
@@ -184,11 +155,11 @@
           <p>准备 Node.js 20、pnpm、Redis、Chrome/Chromium 和一个兼容 OneBot 或 Milky 的 QQ 客户端。</p>
         </div>
         <div class="code-panel">
-          <button class="copy-button" type="button" data-copy="git clone https://github.com/suzuka-suzuka/Sakura.git&#10;cd Sakura&#10;pnpm install&#10;pnpm dev">复制</button>
+          <button class="copy-button" type="button" data-copy="git clone https://github.com/suzuka-suzuka/Sakura.git&#10;cd Sakura&#10;pnpm install&#10;pnpm start">复制</button>
           <pre><code>git clone https://github.com/suzuka-suzuka/Sakura.git
 cd Sakura
 pnpm install
-pnpm dev</code></pre>
+pnpm start</code></pre>
         </div>
       </section>
 
