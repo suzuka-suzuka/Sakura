@@ -131,7 +131,7 @@ export async function beforeExecute(eventObj, instance, handler) {
     }
 
     const economyManager = new EconomyManager(eventObj);
-    const charged = economyManager.tryReduceCoins(eventObj, costConfig.cost);
+    const charged = economyManager.tryReduceCoins(eventObj, costConfig.cost, { record: false });
     if (!charged) {
       return { accepted: false, ticket: null };
     }
@@ -143,6 +143,7 @@ export async function beforeExecute(eventObj, instance, handler) {
         amount: costConfig.cost,
         command: commandDisplayName,
         refundOnFalse: preflight.refundOnFalse ?? handler.economy?.refundOnFalse,
+        recorded: false,
       },
     };
   } catch (err) {
@@ -152,11 +153,28 @@ export async function beforeExecute(eventObj, instance, handler) {
 }
 
 export function afterExecute(ticket, result) {
-  if (!shouldRefundOnResult(ticket, result)) return;
+  if (!ticket) return;
+
+  if (!shouldRefundOnResult(ticket, result)) {
+    if (!ticket.recorded) {
+      try {
+        const economyManager = new EconomyManager(ticket.e);
+        economyManager.recordTransaction(ticket.e, {
+          type: "指令消耗",
+          amount: -ticket.amount,
+          note: ticket.command,
+        });
+        ticket.recorded = true;
+      } catch (err) {
+        logger.error(`[EconomyHook] 记录指令消耗流水失败: ${err}`);
+      }
+    }
+    return;
+  }
 
   try {
     const economyManager = new EconomyManager(ticket.e);
-    economyManager.addCoins(ticket.e, ticket.amount);
+    economyManager.addCoins(ticket.e, ticket.amount, { record: false });
   } catch (err) {
     logger.error(`[EconomyHook] 退还指令消耗失败: ${err}`);
   }
