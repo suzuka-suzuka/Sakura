@@ -6,14 +6,12 @@ export function logEvent(data) {
   if (!event.post_type) return;
 
   const prefix = (bots.size > 1 && event.self_id) ? `[${event.self_id}] ` : "";
+  if (logger.isDebugEnabled()) {
+    logger.debug(`${prefix}事件 JSON ${JSON.stringify(event, null, 2)}`);
+  }
 
   if (event.post_type === "meta_event") {
     if (event.meta_event_type === "heartbeat") return;
-    if (event.meta_event_type === "lifecycle") {
-      logger.debug(`${prefix}生命周期 ${event.sub_type}`);
-      return;
-    }
-    logger.debug(`${prefix}元事件 ${event.meta_event_type}`);
     return;
   }
 
