@@ -32,6 +32,23 @@ const PLUGIN_RUNTIME_BASE_DIR = path.join(__dirname, "../../temp/plugin-runtime"
 const HOT_RELOAD_CODE_DIRS = new Set(["apps", "lib"]);
 const HOT_RELOAD_SHARED_DIRS = new Set([".git", ".runtime", "node_modules", "data", "logs"]);
 
+function isTruthyEnv(value) {
+  return ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase());
+}
+
+function isProductionRuntime() {
+  return process.env.SAKURA_MANAGED_BY_PM2 === "1"
+    || process.env.pm_id !== undefined
+    || process.env.NODE_APP_INSTANCE !== undefined
+    || process.env.NODE_ENV === "production";
+}
+
+function shouldUseRuntimeSnapshots() {
+  if (isTruthyEnv(process.env.SAKURA_PLUGIN_RUNTIME_SNAPSHOT)) return true;
+  if (isTruthyEnv(process.env.SAKURA_DISABLE_PLUGIN_RUNTIME_SNAPSHOT)) return false;
+  return !isProductionRuntime();
+}
+
 function buildCronScopeIds(pluginName) {
   const configuredIds = pluginConfigManager.getConfiguredSelfIds(pluginName);
   const onlineIds = getBots().map((currentBot) => Number(currentBot.self_id)).filter((selfId) =>
@@ -54,7 +71,7 @@ async function runCronInScope(instance, handler, selfId = null) {
 }
 
 export class PluginLoader {
-  constructor() {
+  constructor(options = {}) {
     this.executableHandlers = [];
     this.pluginDirs = [];
     this.watchers = [];
@@ -64,9 +81,16 @@ export class PluginLoader {
     this.loadedModuleUrls = new Map();
     this.pluginRuntimeState = new Map();
     this.pluginDirs.push(path.join(__dirname, "../../plugins"));
+    this.useRuntimeSnapshots = options.useRuntimeSnapshots ?? shouldUseRuntimeSnapshots();
 
-    fsSync.rmSync(PLUGIN_RUNTIME_BASE_DIR, { recursive: true, force: true });
-    fsSync.mkdirSync(PLUGIN_RUNTIME_BASE_DIR, { recursive: true });
+    if (this.useRuntimeSnapshots) {
+      fsSync.rmSync(PLUGIN_RUNTIME_BASE_DIR, { recursive: true, force: true });
+      fsSync.mkdirSync(PLUGIN_RUNTIME_BASE_DIR, { recursive: true });
+      logger.info(`[Loader] Plugin runtime snapshots enabled: ${PLUGIN_RUNTIME_BASE_DIR}`);
+    } else {
+      fsSync.rmSync(PLUGIN_RUNTIME_BASE_DIR, { recursive: true, force: true });
+      logger.info("[Loader] Plugin runtime snapshots disabled; loading plugins from source paths.");
+    }
   }
 
   async loadPlugins() {
@@ -404,6 +428,10 @@ export class PluginLoader {
   }
 
   _getRuntimeFilePath(filePath) {
+    if (!this.useRuntimeSnapshots) {
+      return filePath;
+    }
+
     const pluginName = this._getPluginNameFromPath(filePath);
     const pluginRoot = this._getPluginRootFromPath(filePath);
 
@@ -624,6 +652,11 @@ export class PluginLoader {
   }
 
   startWatch() {
+    if (!this.useRuntimeSnapshots) {
+      logger.info("[Loader] Plugin code hot reload disabled because runtime snapshots are disabled.");
+      return;
+    }
+
     if (this.watchers.length > 0) return;
 
     for (const dir of this.pluginDirs) {
