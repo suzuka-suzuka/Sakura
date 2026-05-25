@@ -23,7 +23,7 @@ export class GlobalUpdate extends plugin {
     });
   }
 
-  update = Command(/^#(强制)?(全局|全部)?更新$/, async (e) => {
+  update = Command(/^#(?:樱花)?(强制)?(全局|全部)?更新$/, async (e) => {
     if (uping) {
       await e.reply("已有命令更新中..请勿重复操作");
       return;
@@ -121,7 +121,7 @@ export class GlobalUpdate extends plugin {
     });
   }
 
-  updatePlugin = Command(/^#(强制)?更新(.+)插件$/, async (e) => {
+  updatePlugin = Command(/^#(?:樱花)?(强制)?更新(.+)插件$/, async (e) => {
     if (uping) {
       await e.reply("已有命令更新中..请勿重复操作");
       return;
@@ -131,10 +131,8 @@ export class GlobalUpdate extends plugin {
 
     const isForce = e.msg.includes("强制");
     const pluginName = e.msg
-      .replace(/#/g, "")
-      .replace(/强制/g, "")
-      .replace(/更新/g, "")
-      .replace(/插件/g, "")
+      .replace(/^#(?:樱花)?(?:强制)?更新/, "")
+      .replace(/插件$/, "")
       .trim();
 
     const pluginPath = path.join(PLUGINS_DIR, pluginName);
@@ -184,7 +182,7 @@ export class GlobalUpdate extends plugin {
     await e.sendForwardMsg(
       [
         list.join("\n"),
-        "使用 #更新[插件名]插件 来更新指定插件\n使用 #全局更新 来更新所有插件",
+        "使用 #更新[插件名]插件 / #樱花更新[插件名]插件 来更新指定插件\n使用 #全局更新 / #樱花全局更新 来更新所有插件",
       ],
       {
         prompt: `共 ${gitRepos.length} 个插件`,
@@ -418,7 +416,7 @@ export class GlobalUpdate extends plugin {
       await e.reply(
         msg +
         `\n存在冲突：\n${errMsg}\n` +
-        "请解决冲突后再更新，或者执行 #强制更新 放弃本地修改"
+        "请解决冲突后再更新，或者执行 #强制更新（或 #樱花强制更新）放弃本地修改"
       );
       return;
     }
@@ -428,7 +426,7 @@ export class GlobalUpdate extends plugin {
         msg + "\n存在冲突\n",
         errMsg,
         stdout,
-        "\n请解决冲突后再更新，或者执行 #强制更新 放弃本地修改",
+        "\n请解决冲突后再更新，或者执行 #强制更新（或 #樱花强制更新）放弃本地修改",
       ]);
       return;
     }
