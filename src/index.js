@@ -26,6 +26,14 @@ global.Event = Event;
 global.segment = Segment;
 global.bot = null;
 
+process.on("unhandledRejection", (reason) => {
+  logger.error("[全局] 未处理的 Promise 拒绝:", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  logger.error("[全局] 未捕获异常:", err);
+});
+
 installOsCompatPatch();
 
 try {
@@ -107,8 +115,15 @@ function setupClient(client, label) {
       new OneBotApi(client, data.self_id);
     }
 
-    logEvent(data);
-    loader.deal(data);
+    try {
+      logEvent(data);
+    } catch (err) {
+      logger.error("[LogEvent] 记录事件失败:", err);
+    }
+
+    void loader.deal(data).catch((err) => {
+      logger.error("[Loader] 事件处理未捕获异常:", err);
+    });
   }
 
   client.on("message", handleEvent);
