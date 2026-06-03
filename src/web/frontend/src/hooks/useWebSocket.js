@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { touchAuthToken } from '../utils/authStorage';
 
 export function useWebSocket(token, onConfigChanged, onPluginConfigChanged, onUnauthorized) {
     const [connected, setConnected] = useState(false);
@@ -47,10 +48,12 @@ export function useWebSocket(token, onConfigChanged, onPluginConfigChanged, onUn
                 wsRef.current = ws;
 
                 ws.onopen = () => {
+                    touchAuthToken(token);
                     setConnected(true);
                 };
 
                 ws.onmessage = (event) => {
+                    touchAuthToken(token);
                     try {
                         const msg = JSON.parse(event.data);
 

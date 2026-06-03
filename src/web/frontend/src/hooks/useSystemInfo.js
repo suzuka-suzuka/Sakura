@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { touchAuthToken } from '../utils/authStorage';
 
 const API_BASE = '';
 const RUNTIME_REFRESH_INTERVAL_MS = 3000;
@@ -15,10 +16,16 @@ export function useSystemInfo(token, enabled = true, onUnauthorized) {
         unauthorizedRef.current = onUnauthorized;
     }, [onUnauthorized]);
 
-    const headers = useCallback(() => ({
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    }), [token]);
+    const headers = useCallback(() => {
+        if (token) {
+            touchAuthToken(token);
+        }
+
+        return {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        };
+    }, [token]);
 
     const fetchJson = useCallback(async (path) => {
         const res = await fetch(`${API_BASE}${path}`, { headers: headers() });

@@ -16,7 +16,8 @@ import { buildMenuData } from '../../plugins/sakura-plugin/lib/menu.js';
 let cachedStaticInfo = null;
 let staticInfoTime = 0;
 const STATIC_INFO_CACHE_TIME = 60000;
-const WEB_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const WEB_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SESSION_PERSIST_MIN_INTERVAL_MS = 60 * 1000;
 const MAX_REQUEST_BODY_SIZE = 1024 * 1024;
 
 async function getStaticSystemInfo() {
@@ -200,6 +201,7 @@ async function getBotInfo() {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const SESSION_STORE_PATH = path.join(__dirname, '../../data/web-sessions.json');
 
 const MIME_TYPES = {
     '.html': 'text/html; charset=utf-8',
@@ -215,14 +217,21 @@ const MIME_TYPES = {
 
 const wsClients = new Set();
 const authSessions = new Map();
+let sessionSaveTimer = null;
+let sessionsLoaded = false;
 let currentWebPassword = Config.get('web.password') || 'admin';
 
 
-function cleanupExpiredSessions(now = Date.now()) {
-    for (const [token, session] of authSessions.entries()) {
+function cleanupExpiredSessions(now = Date.now(), { persist = true } = {}) {
+    let changed = false;
+    for (const [tokenHash, session] of authSessions.entries()) {
         if ((session?.expiresAt || 0) <= now) {
-            authSessions.delete(token);
+            authSessions.delete(tokenHash);
+            changed = true;
         }
+    }
+    if (changed && persist) {
+        schedulePersistSessions();
     }
 }
 
@@ -264,6 +273,12 @@ function closeAllWsClients(reason = 'Session reset') {
 
 function clearAuthSessions(reason = 'Session reset') {
     authSessions.clear();
+    sessionsLoaded = true;
+    if (sessionSaveTimer) {
+        clearTimeout(sessionSaveTimer);
+        sessionSaveTimer = null;
+    }
+    removeSessionStoreFile();
     closeAllWsClients(reason);
 }
 
@@ -271,11 +286,145 @@ function createSessionToken() {
     return `${crypto.randomUUID().replace(/-/g, '')}${crypto.randomBytes(16).toString('hex')}`;
 }
 
+function hashSessionToken(token) {
+    return crypto
+        .createHmac('sha256', String(currentWebPassword || 'admin'))
+        .update(String(token))
+        .digest('hex');
+}
+
+function normalizeSessionRecord(record) {
+    if (!record || typeof record !== 'object') return null;
+    const tokenHash = String(record.tokenHash || '');
+    const expiresAt = Number(record.expiresAt);
+    if (!/^[a-f0-9]{64}$/i.test(tokenHash) || !Number.isFinite(expiresAt)) {
+        return null;
+    }
+
+    return {
+        tokenHash,
+        session: {
+            createdAt: Number.isFinite(Number(record.createdAt)) ? Number(record.createdAt) : Date.now(),
+            lastUsedAt: Number.isFinite(Number(record.lastUsedAt)) ? Number(record.lastUsedAt) : Date.now(),
+            expiresAt,
+            persistedExpiresAt: expiresAt,
+        },
+    };
+}
+
+function loadPersistedSessions() {
+    if (sessionsLoaded) return;
+    sessionsLoaded = true;
+
+    try {
+        if (!fs.existsSync(SESSION_STORE_PATH)) {
+            return;
+        }
+
+        const raw = JSON.parse(fs.readFileSync(SESSION_STORE_PATH, 'utf8') || '{}');
+        const records = Array.isArray(raw?.sessions) ? raw.sessions : (Array.isArray(raw) ? raw : []);
+        const now = Date.now();
+
+        for (const record of records) {
+            const normalized = normalizeSessionRecord(record);
+            if (!normalized || normalized.session.expiresAt <= now) {
+                continue;
+            }
+            authSessions.set(normalized.tokenHash, normalized.session);
+        }
+
+        cleanupExpiredSessions(now, { persist: false });
+    } catch (error) {
+        logger.warn(`[ConfigServer] 加载网页登录状态失败，已忽略旧状态: ${error.message || error}`);
+    }
+}
+
+function ensureSessionStoreDir() {
+    fs.mkdirSync(path.dirname(SESSION_STORE_PATH), { recursive: true });
+}
+
+function removeSessionStoreFile() {
+    try {
+        if (fs.existsSync(SESSION_STORE_PATH)) {
+            fs.unlinkSync(SESSION_STORE_PATH);
+        }
+    } catch (error) {
+        logger.warn(`[ConfigServer] 清理网页登录状态失败: ${error.message || error}`);
+    }
+}
+
+function persistSessionsNow() {
+    if (sessionSaveTimer) {
+        clearTimeout(sessionSaveTimer);
+        sessionSaveTimer = null;
+    }
+
+    const now = Date.now();
+    const sessions = [];
+
+    for (const [tokenHash, session] of authSessions.entries()) {
+        if ((session?.expiresAt || 0) <= now) {
+            authSessions.delete(tokenHash);
+            continue;
+        }
+
+        sessions.push({
+            tokenHash,
+            createdAt: session.createdAt || now,
+            lastUsedAt: session.lastUsedAt || now,
+            expiresAt: session.expiresAt,
+        });
+    }
+
+    try {
+        if (sessions.length === 0) {
+            removeSessionStoreFile();
+            return;
+        }
+
+        ensureSessionStoreDir();
+        const payload = {
+            version: 1,
+            updatedAt: now,
+            ttlMs: WEB_SESSION_TTL_MS,
+            sessions,
+        };
+        const tempPath = `${SESSION_STORE_PATH}.tmp`;
+        fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2), 'utf8');
+        fs.renameSync(tempPath, SESSION_STORE_PATH);
+
+        for (const { tokenHash, expiresAt } of sessions) {
+            const session = authSessions.get(tokenHash);
+            if (session) {
+                session.persistedExpiresAt = expiresAt;
+            }
+        }
+    } catch (error) {
+        logger.warn(`[ConfigServer] 保存网页登录状态失败: ${error.message || error}`);
+    }
+}
+
+function schedulePersistSessions() {
+    if (sessionSaveTimer) return;
+    sessionSaveTimer = setTimeout(() => {
+        persistSessionsNow();
+    }, 1000);
+    sessionSaveTimer.unref?.();
+}
+
 function createSession() {
+    loadPersistedSessions();
     cleanupExpiredSessions();
+    const now = Date.now();
     const token = createSessionToken();
-    const expiresAt = Date.now() + WEB_SESSION_TTL_MS;
-    authSessions.set(token, { expiresAt });
+    const expiresAt = now + WEB_SESSION_TTL_MS;
+    authSessions.set(hashSessionToken(token), {
+        createdAt: now,
+        lastUsedAt: now,
+        expiresAt,
+        persistedExpiresAt: 0,
+    });
+    persistSessionsNow();
     return { token, expiresAt };
 }
 
@@ -291,12 +440,19 @@ function safeCompareText(left, right) {
 function verifySessionToken(token, { touch = false } = {}) {
     if (!token) return null;
 
+    loadPersistedSessions();
     cleanupExpiredSessions();
-    const session = authSessions.get(token);
+    const tokenHash = hashSessionToken(token);
+    const session = authSessions.get(tokenHash);
     if (!session) return null;
 
     if (touch) {
-        session.expiresAt = Date.now() + WEB_SESSION_TTL_MS;
+        const now = Date.now();
+        session.lastUsedAt = now;
+        session.expiresAt = now + WEB_SESSION_TTL_MS;
+        if (session.expiresAt - (session.persistedExpiresAt || 0) >= SESSION_PERSIST_MIN_INTERVAL_MS) {
+            schedulePersistSessions();
+        }
     }
 
     return {

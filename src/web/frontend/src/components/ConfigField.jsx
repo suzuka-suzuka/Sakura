@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { readAuthToken } from '../utils/authStorage';
 
 function normalizeScopeSelfId(scopeSelfId) {
     if (scopeSelfId == null) return null;
@@ -18,7 +19,7 @@ function buildScopedUrl(basePath, scopeSelfId) {
 }
 
 function getAuthToken() {
-    return sessionStorage.getItem('sakura_token') || localStorage.getItem('sakura_token');
+    return readAuthToken({ touch: true });
 }
 
 /**

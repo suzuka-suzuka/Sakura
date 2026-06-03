@@ -1,34 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
+import { clearAuthState, readAuthToken, storeAuthState, touchAuthToken } from '../utils/authStorage';
 
 const API_BASE = '';
-const AUTH_TOKEN_STORAGE_KEY = 'sakura_token';
 const PLUGIN_SELF_ID_STORAGE_KEY = 'sakura_plugin_self_id';
 const DEFAULT_SCOPE_KEY = '__default__';
-
-function readAuthToken() {
-    const sessionToken = sessionStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
-    if (sessionToken) {
-        return sessionToken;
-    }
-
-    const legacyToken = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
-    if (legacyToken) {
-        sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, legacyToken);
-        localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-    }
-
-    return legacyToken;
-}
-
-function storeAuthToken(token) {
-    sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
-    localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-}
-
-function clearAuthToken() {
-    sessionStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-    localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-}
 
 function normalizeSelfId(value) {
     const num = Number(value);
@@ -67,10 +42,16 @@ export function useConfig() {
     const [accountSchema, setAccountSchema] = useState(null);
     const [accountConfigs, setAccountConfigs] = useState({});
 
-    const headers = useCallback(() => ({
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    }), [token]);
+    const headers = useCallback(() => {
+        if (token) {
+            touchAuthToken(token);
+        }
+
+        return {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        };
+    }, [token]);
 
     const setSelectedPluginSelfId = useCallback((selfId) => {
         const normalized = normalizeSelfId(selfId);
@@ -93,7 +74,7 @@ export function useConfig() {
             if (data.success) {
                 setToken(data.token);
                 setIsLoggedIn(true);
-                storeAuthToken(data.token);
+                storeAuthState(data.token, data.expiresAt);
                 return { success: true };
             }
             return { success: false, error: data.error };
@@ -117,7 +98,7 @@ export function useConfig() {
         setAccountSchema(null);
         setAccountConfigs({});
         setSelectedPluginSelfIdState(null);
-        clearAuthToken();
+        clearAuthState();
         localStorage.removeItem(PLUGIN_SELF_ID_STORAGE_KEY);
     }, []);
 
