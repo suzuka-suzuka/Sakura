@@ -1,6 +1,7 @@
 import Config from "../../src/core/config.js";
 import { Friend, bots } from "../../src/api/client.js";
 import { OnEvent, plugin } from "../../src/core/plugin.js";
+import { normalizeMasters } from "../../src/utils/common.js";
 
 export class OfflineNotify extends plugin {
   constructor() {
@@ -13,8 +14,8 @@ export class OfflineNotify extends plugin {
   }
 
   handleOffline = OnEvent("notice.bot_offline", async (e) => {
-    const master = Config.getForSelf(e.self_id, "master");
-    if (!master) {
+    const pendingMasters = new Set(normalizeMasters(Config.getForSelf(e.self_id, "master")));
+    if (pendingMasters.size === 0) {
       return false;
     }
 
@@ -23,26 +24,27 @@ export class OfflineNotify extends plugin {
     const message = e.message;
     const notifyMsg = `[${selfId}] ${tag}：${message}`;
 
+    const notifyWith = async (botInstance) => {
+      for (const master of [...pendingMasters]) {
+        try {
+          const friend = new Friend(botInstance, master);
+          const res = await friend.sendMsg(notifyMsg);
+          if (res?.message_id) {
+            pendingMasters.delete(master);
+          }
+        } catch {}
+      }
+    };
+
     if (e.bot) {
-      try {
-        const friend = new Friend(e.bot, master);
-        const res = await friend.sendMsg(notifyMsg);
-        if (res?.message_id) {
-          return false;
-        }
-      } catch {}
+      await notifyWith(e.bot);
     }
 
     for (const [botId, botInstance] of bots) {
+      if (pendingMasters.size === 0) break;
       if (botId === selfId) continue;
 
-      try {
-        const friend = new Friend(botInstance, master);
-        const res = await friend.sendMsg(notifyMsg);
-        if (res?.message_id) {
-          return false;
-        }
-      } catch {}
+      await notifyWith(botInstance);
     }
 
     return false;

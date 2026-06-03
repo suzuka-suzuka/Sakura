@@ -84,9 +84,9 @@ export const ConfigSchema = z.object({
 });
 
 export const AccountConfigSchema = z.object({
-    master: z.union([z.number(), z.string()])
-        .default('')
-        .describe('主人 QQ'),
+    master: z.array(z.union([z.number(), z.string()]))
+        .default([])
+        .describe('主人 QQ 列表'),
 
     whiteUsers: z.array(z.number())
         .default([])

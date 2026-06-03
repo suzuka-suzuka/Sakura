@@ -345,13 +345,14 @@ function ArrayField({ name, displayName, help, value, onChange, itemType }) {
     const [inputValue, setInputValue] = useState('');
     const inputRef = useRef(null);
     const items = Array.isArray(value) ? value : [];
+    const numericItem = itemType === 'number' || itemType === 'number|string' || itemType === 'string|number';
 
     const addItem = () => {
         const trimmed = inputValue.trim();
         if (!trimmed) return;
 
         let newValue = trimmed;
-        if (itemType === 'number') {
+        if (numericItem) {
             newValue = Number(trimmed);
             if (isNaN(newValue)) return;
         }
@@ -400,7 +401,7 @@ function ArrayField({ name, displayName, help, value, onChange, itemType }) {
                 <input
                     ref={inputRef}
                     type="text"
-                    inputMode={itemType === 'number' ? 'numeric' : 'text'}
+                    inputMode={numericItem ? 'numeric' : 'text'}
                     className="array-input"
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
