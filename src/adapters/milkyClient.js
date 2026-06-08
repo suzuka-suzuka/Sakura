@@ -184,11 +184,45 @@ function normalizeImageSubType(subType) {
   return "normal";
 }
 
+function normalizeOutgoingSegment(seg) {
+  if (seg === null || seg === undefined || seg === false) return null;
+  if (typeof seg === "string" || typeof seg === "number" || typeof seg === "boolean") {
+    return { type: "text", data: { text: String(seg) } };
+  }
+  return seg;
+}
+
+function mergeAdjacentTextSegments(segments) {
+  const merged = [];
+  for (const seg of segments) {
+    if (!seg) continue;
+
+    if (seg.type === "text") {
+      const text = String(seg.data?.text ?? "");
+      if (!text) continue;
+
+      const last = merged[merged.length - 1];
+      if (last?.type === "text") {
+        last.data.text = `${last.data?.text ?? ""}${text}`;
+      } else {
+        merged.push({
+          ...seg,
+          data: { ...(seg.data || {}), text },
+        });
+      }
+      continue;
+    }
+
+    merged.push(seg);
+  }
+  return merged;
+}
+
 function obSegToMilky(seg) {
   const d = seg.data || {};
   switch (seg.type) {
     case "text":
-      return { type: "text", data: { text: d.text || "" } };
+      return { type: "text", data: { text: String(d.text ?? "") } };
     case "at":
       if (String(d.qq) === "all") return { type: "mention_all", data: {} };
       return { type: "mention", data: { user_id: Number(d.qq) } };
@@ -219,10 +253,17 @@ function obSegToMilky(seg) {
 }
 
 function convertToMilky(message) {
-  if (!message) return [];
-  if (typeof message === "string") return [{ type: "text", data: { text: message } }];
-  if (!Array.isArray(message)) return [obSegToMilky(message)];
-  return message.map(obSegToMilky).filter(Boolean);
+  if (message === null || message === undefined || message === false) return [];
+
+  const sourceSegments = Array.isArray(message) ? message : [message];
+  const milkySegments = sourceSegments
+    .map(normalizeOutgoingSegment)
+    .filter(Boolean)
+    .map(obSegToMilky)
+    .filter(Boolean);
+
+  // 连续 text 段对 QQNT/Milky 端没有语义差异，但有过渲染/复制乱码案例；发送前合并。
+  return mergeAdjacentTextSegments(milkySegments);
 }
 
 function convertFromMilky(segments) {
