@@ -4,6 +4,7 @@ import { clearAuthState, readAuthToken, storeAuthState, touchAuthToken } from '.
 const API_BASE = '';
 const PLUGIN_SELF_ID_STORAGE_KEY = 'sakura_plugin_self_id';
 const DEFAULT_SCOPE_KEY = '__default__';
+const BOT_ACCOUNTS_REFRESH_INTERVAL_MS = 3000;
 
 function normalizeSelfId(value) {
     const num = Number(value);
@@ -243,12 +244,21 @@ export function useConfig() {
                 return;
             }
 
-            const accounts = Array.isArray(data.data?.accounts) ? data.data.accounts : [];
-            const nextConfiguredIds = Array.isArray(data.data?.configuredScopeIds)
+            const accounts = (Array.isArray(data.data?.accounts) ? data.data.accounts : [])
+                .filter((account) => account?.status !== 'offline');
+            const onlineAccountIds = new Set(
+                accounts
+                    .map((account) => normalizeSelfId(account?.self_id))
+                    .filter((selfId) => selfId != null)
+            );
+            const configuredIds = Array.isArray(data.data?.configuredScopeIds)
                 ? data.data.configuredScopeIds
                 : Array.isArray(data.data?.configuredAccountIds)
                     ? data.data.configuredAccountIds
                 : [];
+            const nextConfiguredIds = configuredIds
+                .map((selfId) => normalizeSelfId(selfId))
+                .filter((selfId) => selfId != null && onlineAccountIds.has(selfId));
 
             setBotAccounts(accounts);
             setConfiguredAccountIds(nextConfiguredIds);
@@ -434,6 +444,18 @@ export function useConfig() {
 
         fetchPluginConfigsForSelf(selectedPluginSelfId);
     }, [isLoggedIn, plugins, selectedPluginSelfId, fetchPluginConfigsForSelf]);
+
+    useEffect(() => {
+        if (!isLoggedIn) {
+            return undefined;
+        }
+
+        const interval = window.setInterval(() => {
+            void fetchBotAccounts();
+        }, BOT_ACCOUNTS_REFRESH_INTERVAL_MS);
+
+        return () => window.clearInterval(interval);
+    }, [isLoggedIn, fetchBotAccounts]);
 
     const updateFromWs = useCallback((newConfig) => {
         setConfig(newConfig);

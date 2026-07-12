@@ -150,11 +150,20 @@ async function getDynamicSystemInfo() {
     }
 }
 
-async function getBotInfo({ includeConfiguredOffline = false } = {}) {
+async function getBotInfo() {
     try {
         const onlineAccounts = getBotSummaries();
-        const pluginScopedIds = pluginConfigManager.getConfiguredSelfIds('sakura-plugin');
-        const configuredAccountIds = accountConfig.listConfiguredSelfIds();
+        const onlineSelfIds = new Set(
+            onlineAccounts
+                .map((account) => Number(account.self_id))
+                .filter((selfId) => Number.isFinite(selfId) && selfId > 0)
+        );
+        const pluginScopedIds = pluginConfigManager
+            .getConfiguredSelfIds('sakura-plugin')
+            .filter((selfId) => onlineSelfIds.has(Number(selfId)));
+        const configuredAccountIds = accountConfig
+            .listConfiguredSelfIds()
+            .filter((selfId) => onlineSelfIds.has(Number(selfId)));
         const configuredSelfIds = [...new Set([...pluginScopedIds, ...configuredAccountIds])];
         const accountMap = new Map();
 
@@ -167,27 +176,12 @@ async function getBotInfo({ includeConfiguredOffline = false } = {}) {
             });
         }
 
-        if (includeConfiguredOffline) {
-            for (const selfId of configuredSelfIds) {
-                const id = Number(selfId);
-                if (!id) continue; // 过滤 selfId=0
-                if (!accountMap.has(id)) {
-                    accountMap.set(id, {
-                        self_id: id,
-                        uin: id,
-                        nickname: `Bot ${id}`,
-                        status: 'offline',
-                    });
-                }
-            }
-        }
-
         const accounts = Array.from(accountMap.values());
         if (accounts.length === 0) {
             return null;
         }
 
-        // 已有独立配置文件的账号 ID 列表，供前端判断是否需要显示账号标签栏
+        // 仅返回在线账号的配置作用域，离线账号不进入配置页。
         return {
             accounts,
             total: accounts.length,
@@ -649,7 +643,7 @@ async function handleApi(req, res) {
     if (pathname === '/api/bot/info' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
         try {
-            const botInfo = await getBotInfo({ includeConfiguredOffline: true });
+            const botInfo = await getBotInfo();
             if (!botInfo) {
                 sendJson(res, { success: false, error: 'Bot 未连接' });
                 return true;
