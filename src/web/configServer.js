@@ -150,7 +150,7 @@ async function getDynamicSystemInfo() {
     }
 }
 
-async function getBotInfo() {
+async function getBotInfo({ includeConfiguredOffline = false } = {}) {
     try {
         const onlineAccounts = getBotSummaries();
         const pluginScopedIds = pluginConfigManager.getConfiguredSelfIds('sakura-plugin');
@@ -167,16 +167,18 @@ async function getBotInfo() {
             });
         }
 
-        for (const selfId of configuredSelfIds) {
-            const id = Number(selfId);
-            if (!id) continue; // 过滤 selfId=0
-            if (!accountMap.has(id)) {
-                accountMap.set(id, {
-                    self_id: id,
-                    uin: id,
-                    nickname: `Bot ${id}`,
-                    status: 'offline',
-                });
+        if (includeConfiguredOffline) {
+            for (const selfId of configuredSelfIds) {
+                const id = Number(selfId);
+                if (!id) continue; // 过滤 selfId=0
+                if (!accountMap.has(id)) {
+                    accountMap.set(id, {
+                        self_id: id,
+                        uin: id,
+                        nickname: `Bot ${id}`,
+                        status: 'offline',
+                    });
+                }
             }
         }
 
@@ -647,7 +649,7 @@ async function handleApi(req, res) {
     if (pathname === '/api/bot/info' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
         try {
-            const botInfo = await getBotInfo();
+            const botInfo = await getBotInfo({ includeConfiguredOffline: true });
             if (!botInfo) {
                 sendJson(res, { success: false, error: 'Bot 未连接' });
                 return true;

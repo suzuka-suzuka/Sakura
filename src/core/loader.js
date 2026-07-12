@@ -26,6 +26,7 @@ import {
   isHandledResult,
   clearEconomyCommandNamesCache,
 } from "./economyHook.js";
+import { canRunBotScopedTask } from "./botLifecycle.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_RUNTIME_BASE_DIR = path.join(__dirname, "../../temp/plugin-runtime");
@@ -58,16 +59,25 @@ function buildCronScopeIds(pluginName) {
 }
 
 async function runCronInScope(instance, handler, selfId = null) {
+  if (!canRunBotScopedTask(selfId, getBot)) {
+    logger.debug(
+      `[${instance.name}] 跳过离线账号 ${selfId} 的定时任务: ${handler.methodName}`
+    );
+    return false;
+  }
+
   const run = async () => {
     instance.e = null;
     await instance[handler.methodName].call(instance);
   };
 
   if (selfId == null) {
-    return run();
+    await run();
+    return true;
   }
 
-  return withBotContext(selfId, run);
+  await withBotContext(selfId, run);
+  return true;
 }
 
 export class PluginLoader {

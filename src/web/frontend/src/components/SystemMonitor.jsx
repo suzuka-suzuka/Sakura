@@ -102,7 +102,7 @@ export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, loadin
         );
     }
 
-    const accounts = botInfo?.accounts || [];
+    const accounts = (botInfo?.accounts || []).filter((account) => account?.status !== 'offline');
     const os = staticInfo?.os || {};
     const cpu = staticInfo?.cpu || {};
     const graphics = staticInfo?.graphics || {};

@@ -9,6 +9,7 @@ import { connectRedis } from "./utils/redis.js";
 import Config from "./core/config.js";
 import { installOsCompatPatch } from "./utils/osCompat.js";
 import { startConfigServer } from "./web/configServer.js";
+import { bindBotRoute, cleanupBotRoutes, isBotOfflineEvent } from "./core/botLifecycle.js";
 
 logger.info(logger.magenta("-----------------sakura框架-----------------"))
 logger.info(logger.magenta("  ____   ____   __  __  __ __ _____   ____ "))
@@ -69,33 +70,16 @@ function setupClient(client, label) {
   const tag = `[${label}]`;
 
   function bindSelfId(selfId, routeKey) {
-    const id = Number(selfId);
-    if (!Number.isFinite(id)) return;
-    selfIdToClient.set(id, { client, routeKey: routeKey || label });
+    bindBotRoute(selfIdToClient, selfId, client, routeKey || label);
   }
 
   function cleanupBotsForRoute(routeKey, explicitSelfIds = []) {
-    const normalizedSelfIds = explicitSelfIds
-      .map((selfId) => Number(selfId))
-      .filter((selfId) => Number.isFinite(selfId));
-
-    if (normalizedSelfIds.length > 0) {
-      for (const selfId of normalizedSelfIds) {
-        const bound = selfIdToClient.get(selfId);
-        if (bound?.client === client) {
-          selfIdToClient.delete(selfId);
-          removeBot(selfId);
-        }
-      }
-      return;
-    }
-
-    for (const [selfId, bound] of selfIdToClient) {
-      if (bound.client !== client) continue;
-      if (routeKey && bound.routeKey !== routeKey) continue;
-      selfIdToClient.delete(selfId);
-      removeBot(selfId);
-    }
+    return cleanupBotRoutes(selfIdToClient, {
+      client,
+      routeKey,
+      selfIds: explicitSelfIds,
+      removeBot,
+    });
   }
 
   // ---- 统一事件处理 ----
@@ -103,14 +87,15 @@ function setupClient(client, label) {
     if (!data || !data.post_type) return;
 
     const routeKey = data.__routeKey || label;
+    const isOffline = isBotOfflineEvent(data);
 
-    if (data.self_id) {
+    if (data.self_id && !isOffline) {
       bindSelfId(data.self_id, routeKey);
       rememberBotTargets(data);
     }
 
     // 首次出现的 self_id → 注册 bot 实例
-    if (data.self_id && !getBot(data.self_id)) {
+    if (data.self_id && !isOffline && !getBot(data.self_id)) {
       logger.info(`${tag} 检测到新的 Bot 实例: ${data.self_id}`);
       new OneBotApi(client, data.self_id);
     }
@@ -121,7 +106,18 @@ function setupClient(client, label) {
       logger.error("[LogEvent] 记录事件失败:", err);
     }
 
-    void loader.deal(data).catch((err) => {
+    // deal() 会在首次异步让出前构造 Event 并保存当前 e.bot。
+    // 随后立即注销，既让离线通知仍可使用原实例，也避免状态继续对外暴露。
+    const dealPromise = loader.deal(data);
+
+    if (isOffline && data.self_id) {
+      const removedSelfIds = cleanupBotsForRoute(routeKey, [data.self_id]);
+      if (removedSelfIds.length > 0) {
+        logger.info(`${tag} Bot 实例已注销: ${removedSelfIds.join(", ")}`);
+      }
+    }
+
+    void dealPromise.catch((err) => {
       logger.error("[Loader] 事件处理未捕获异常:", err);
     });
   }
