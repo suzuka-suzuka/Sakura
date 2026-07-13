@@ -130,6 +130,10 @@ function milkySegToOB(seg) {
         data: {
           file: d.temp_url || d.resource_id,
           url: d.temp_url,
+          resource_id: d.resource_id,
+          width: d.width,
+          height: d.height,
+          summary: d.summary,
           sub_type: normalizeIncomingImageSubType(d.sub_type),
           raw_sub_type: d.sub_type,
         },
