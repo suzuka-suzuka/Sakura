@@ -15,7 +15,9 @@ export function logEvent(data) {
     return;
   }
 
-  if (event.post_type === "message") {
+  if (event.post_type === "message" || event.post_type === "message_sent") {
+    const isSent = event.post_type === "message_sent";
+    const direction = isSent ? "发送 ->" : "接收 <-";
     const senderName =
       event.sender?.card || event.sender?.nickname || "Unknown";
     const senderId = event.user_id;
@@ -63,13 +65,13 @@ export function logEvent(data) {
         ? `${event.group_name}(${event.group_id})`
         : `群:${event.group_id}`;
       logger.info(
-        `${prefix}[${groupInfo}][${senderName}(${senderId})] 接收 <- 群聊 ${content}`
+        `${prefix}[${groupInfo}][${senderName}(${senderId})] ${direction} 群聊 ${content}`
       );
       return;
     }
 
     if (event.message_type === "private") {
-      logger.info(`${prefix}[${senderName}(${senderId})] 接收 <- 私聊 ${content}`);
+      logger.info(`${prefix}[${senderName}(${senderId})] ${direction} 私聊 ${content}`);
       return;
     }
   }

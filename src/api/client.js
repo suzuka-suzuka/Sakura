@@ -1068,7 +1068,6 @@ export class OneBotApi {
     const prefix = bots.size > 1 ? `[${this.self_id}] ` : "";
     const ctx = logContext.getStore();
     const target = ctx?.group_id === group_id ? "" : ` ${group_id}`;
-    logger.info(`${prefix}发送 -> 群聊${target} ${msgLog}`);
     return this.sendRequest("send_group_msg", { group_id, message });
   }
 
@@ -1091,7 +1090,6 @@ export class OneBotApi {
     const prefix = bots.size > 1 ? `[${this.self_id}] ` : "";
     const ctx = logContext.getStore();
     const target = ctx?.user_id === user_id ? "" : ` ${user_id}`;
-    logger.info(`${prefix}发送 -> 私聊${target} ${msgLog}`);
     return this.sendRequest("send_private_msg", { user_id, message });
   }
 
@@ -1215,14 +1213,12 @@ export class OneBotApi {
 
       const targetText = buildTargetText(params.group_id, params.user_id);
       const msgLog = shrink(safeStringify(params.messages ?? params));
-      logger.info(`${prefix}发送 -> 转发 ${targetText} ${msgLog}`);
 
       return this.sendRequest("send_forward_msg", params);
     }
 
     const targetText = buildTargetText(group_id, user_id);
     const msgLog = shrink(safeStringify(messages));
-    logger.info(`${prefix}发送 -> 转发 ${targetText} ${msgLog}`);
 
     return this.sendRequest("send_forward_msg", {
       messages,

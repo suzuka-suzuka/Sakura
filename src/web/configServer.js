@@ -13,6 +13,16 @@ import { logger } from '../utils/logger.js';
 import { bot as botFacade, getBotSummaries } from '../api/client.js';
 import { AVAILABLE_TOOL_OPTIONS } from '../../plugins/sakura-plugin/lib/AIUtils/tools/tools.js';
 import { buildMenuData } from '../../plugins/sakura-plugin/lib/menu.js';
+import {
+    getProviderModelDiscoveryFingerprint,
+    listProviderModels,
+    refreshProviderModelCatalog,
+} from '../../plugins/sakura-plugin/lib/AIUtils/modelCatalog.js';
+import {
+    importVertexCredential,
+    listVertexCredentials,
+} from '../../plugins/sakura-plugin/lib/AIUtils/vertexCredentialStore.js';
+import { getManagedVertexCredentialPath } from '../../plugins/sakura-plugin/lib/AIUtils/vertexAuth.js';
 let cachedStaticInfo = null;
 let staticInfoTime = 0;
 const STATIC_INFO_CACHE_TIME = 60000;
@@ -831,6 +841,60 @@ async function handleApi(req, res) {
 
 
 
+    if (pathname === '/api/ai/vertex-credentials' && req.method === 'GET') {
+        if (!requireAuth(req, res)) return true;
+        sendJson(res, { success: true, data: listVertexCredentials() });
+        return true;
+    }
+
+    if (pathname === '/api/ai/vertex-credentials' && req.method === 'POST') {
+        if (!requireAuth(req, res)) return true;
+        try {
+            const body = await parseBody(req);
+            const metadata = await importVertexCredential(body.credential ?? body);
+            sendJson(res, { success: true, data: metadata });
+        } catch (error) {
+            logger.warn(`[ConfigServer] Vertex 服务账号导入失败: ${error.message}`);
+            sendJson(res, { success: false, error: error.message }, 422);
+        }
+        return true;
+    }
+
+    if (pathname === '/api/ai/models' && req.method === 'GET') {
+        if (!requireAuth(req, res)) return true;
+        try {
+            const selfId = parseSelfIdParam(url);
+            const providerId = url.searchParams.get('providerId')?.trim();
+            if (!providerId) {
+                sendJson(res, { success: false, error: '缺少 providerId' }, 400);
+                return true;
+            }
+
+            const providersConfig = pluginConfigManager.getConfig(
+                'sakura-plugin',
+                'Providers',
+                { selfId }
+            );
+            const provider = providersConfig?.providers?.find(
+                (item) => item.id === providerId
+            );
+            if (!provider) {
+                sendJson(res, { success: false, error: `未找到供应商：${providerId}` }, 404);
+                return true;
+            }
+
+            const result = await listProviderModels(provider, {
+                scopeKey: selfId == null ? 'default' : String(selfId),
+                force: url.searchParams.get('refresh') === '1',
+            });
+            sendJson(res, { success: true, data: result });
+        } catch (error) {
+            logger.warn(`[ConfigServer] 拉取 AI 模型列表失败: ${error.message}`);
+            sendJson(res, { success: false, error: error.message }, 502);
+        }
+        return true;
+    }
+
     if (pathname === '/api/dynamic-options' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
         try {
@@ -967,8 +1031,56 @@ async function handleApi(req, res) {
 
         if (action === 'config' && moduleName && req.method === 'POST') {
             const body = await parseBody(req);
-            const result = pluginConfigManager.setConfig(pluginName, moduleName, body.data ?? body, { selfId });
+            const isProvidersConfig = pluginName === 'sakura-plugin' && moduleName === 'Providers';
+            const proposedConfig = body.data ?? body;
+            if (isProvidersConfig) {
+                const missingReferences = (proposedConfig?.providers || []).flatMap((provider, providerIndex) =>
+                    provider?.protocol === 'gemini' && provider?.vertex === true
+                        ? (provider.credentials || [])
+                            .map((credential, credentialIndex) => ({
+                                reference: credential?.serviceAccountRef,
+                                path: ['providers', providerIndex, 'credentials', credentialIndex, 'serviceAccountRef'],
+                            }))
+                            .filter((item) => item.reference && !getManagedVertexCredentialPath(item.reference))
+                        : []
+                );
+                if (missingReferences.length > 0) {
+                    sendJson(res, {
+                        success: false,
+                        error: 'Vertex 服务账号文件不存在',
+                        errors: missingReferences.map((item) => ({
+                            path: item.path,
+                            message: `未找到服务账号：${item.reference}`,
+                        })),
+                    }, 422);
+                    return true;
+                }
+            }
+            const previousProviders = isProvidersConfig
+                ? pluginConfigManager.getConfig(pluginName, moduleName, { selfId })?.providers || []
+                : [];
+            const previousDiscoveryFingerprint = isProvidersConfig
+                ? getProviderModelDiscoveryFingerprint(previousProviders)
+                : null;
+            const result = pluginConfigManager.setConfig(pluginName, moduleName, proposedConfig, { selfId });
             if (result.success) {
+                if (isProvidersConfig) {
+                    const providersConfig = pluginConfigManager.getConfig(pluginName, moduleName, { selfId });
+                    const providers = providersConfig?.providers || [];
+                    const nextDiscoveryFingerprint = getProviderModelDiscoveryFingerprint(providers);
+                    if (nextDiscoveryFingerprint !== previousDiscoveryFingerprint) {
+                        const scopeKey = selfId == null ? 'default' : String(selfId);
+                        void refreshProviderModelCatalog(providers, { scopeKey }).then((refreshResults) => {
+                            refreshResults.forEach((refreshResult, index) => {
+                                if (refreshResult.status === 'rejected') {
+                                    logger.warn(
+                                        `[ConfigServer] 供应商 ${providers[index]?.id || index + 1} 自动刷新模型失败: ${refreshResult.reason?.message || refreshResult.reason}`
+                                    );
+                                }
+                            });
+                        });
+                    }
+                }
 
                 sendJson(res, { success: true, message: '保存成功' });
             } else {

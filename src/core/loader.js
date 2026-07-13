@@ -18,6 +18,7 @@ import pluginConfigManager from "./pluginConfig.js";
 import schedule from "node-schedule";
 import { logger, logContext } from "../utils/logger.js";
 import { getBot, getBots, withBotContext } from "../api/client.js";
+import { getCronPluginScopeIds } from "./pluginScope.js";
 import { isMasterUser } from "../utils/common.js";
 import {
   beforeExecute as beforeEconomyExecute,
@@ -50,12 +51,11 @@ function shouldUseRuntimeSnapshots() {
   return !isProductionRuntime();
 }
 
-function buildCronScopeIds(pluginName) {
-  const configuredIds = pluginConfigManager.getConfiguredSelfIds(pluginName);
+function buildCronScopeIds() {
   const onlineIds = getBots().map((currentBot) => Number(currentBot.self_id)).filter((selfId) =>
     Number.isFinite(selfId)
   );
-  return [...new Set([...configuredIds, ...onlineIds])];
+  return getCronPluginScopeIds(onlineIds);
 }
 
 async function runCronInScope(instance, handler, selfId = null) {
@@ -277,7 +277,7 @@ export class PluginLoader {
                         `[${instance.name}] 触发定时任务: ${handler.methodName}`
                       );
                     }
-                    const scopeIds = pluginName ? buildCronScopeIds(pluginName) : [];
+                    const scopeIds = pluginName ? buildCronScopeIds() : [];
                     if (scopeIds.length === 0) {
                       await runCronInScope(instance, handler, null);
                     } else {

@@ -28,7 +28,7 @@ function getAuthToken() {
  *
  * meta 可能包含: { type, description, label, help, default, step?, min?, max?, hideSpinner?, items?, children?, uiType? }
  */
-export default function ConfigField({ name, meta, value, onChange, scopeSelfId = null }) {
+export default function ConfigField({ name, meta, value, onChange, scopeSelfId = null, formValue = null }) {
     const { type, description, options, label, help, uiType } = meta;
 
     // 显示名称: 优先 label > description > name
@@ -84,7 +84,7 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
                     onChange={(e) => onChange(e.target.value)}
                 >
                     {options.map(opt => (
-                        <option key={opt} value={opt}>{opt}</option>
+                        <option key={opt} value={opt}>{meta.optionLabels?.[opt] || opt}</option>
                     ))}
                 </select>
             </div>
@@ -93,6 +93,20 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
 
     // Array
     if (type === 'array') {
+        if (uiType === 'providerCredentials' && meta.items?.type === 'object') {
+            return (
+                <ProviderCredentialsField
+                    name={name}
+                    displayName={displayName}
+                    help={help}
+                    value={value}
+                    onChange={onChange}
+                    itemMeta={meta.items}
+                    providerDraft={formValue}
+                    scopeSelfId={scopeSelfId}
+                />
+            );
+        }
         // Array of objects → ObjectArrayField
         if (meta.items?.type === 'object' && meta.items?.children) {
             return (
@@ -248,6 +262,32 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
         );
     }
 
+    if ((type === 'string' || !type) && uiType === 'vertexCredentialSelect') {
+        return (
+            <VertexCredentialSelectField
+                name={name}
+                displayName={displayName}
+                help={help}
+                value={value}
+                onChange={onChange}
+            />
+        );
+    }
+
+    if ((type === 'string' || !type) && uiType === 'modelSelect') {
+        return (
+            <ModelSelectField
+                name={name}
+                displayName={displayName}
+                help={help}
+                value={value}
+                onChange={onChange}
+                providerId={formValue?.provider || ''}
+                scopeSelfId={scopeSelfId}
+            />
+        );
+    }
+
     // Dynamic select fields (roleSelect, channelSelect, etc.)
     // 检查 uiType 是否在动态选项配置中（不以 Array 结尾的单选类型）
     if ((type === 'string' || !type) && uiType && !uiType.endsWith('Array')) {
@@ -266,7 +306,8 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
     }
 
     // String / Union / Default
-    const isPassword = name.toLowerCase().includes('password');
+    const isApiKey = /api.?key/i.test(name);
+    const isPassword = !isApiKey && /(password|token|secret)/i.test(name);
 
     return (
         <div className="field-group">
@@ -859,6 +900,7 @@ function AddObjectModal({ title, itemMeta, nextIndex = 0, onConfirm, onCancel, s
                                 value={draft[childKey]}
                                 onChange={(val) => handleFieldChange(childKey, val)}
                                 scopeSelfId={scopeSelfId}
+                                formValue={draft}
                             />
                         ))}
                     </div>
@@ -933,6 +975,7 @@ function EditObjectModal({ title, itemMeta, initialData, onConfirm, onCancel, re
                                     value={draft[childKey]}
                                     onChange={(val) => handleFieldChange(childKey, val)}
                                     scopeSelfId={scopeSelfId}
+                                    formValue={draft}
                                 />
                             );
                         })}
@@ -1128,6 +1171,260 @@ function ToolMultiSelectModal({ title, options, selected, onConfirm, onCancel })
  * 动态选择字段 — 从 API 获取选项列表
  * uiType: 动态选项类型标识（如 roleSelect, channelSelect）
  */
+function VertexCredentialSelectField({ name, displayName, help, value, onChange }) {
+    const [credentials, setCredentials] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const [status, setStatus] = useState('');
+    const fileInputRef = useRef(null);
+
+    const loadCredentials = useCallback(async () => {
+        try {
+            const response = await fetch('/api/ai/vertex-credentials', {
+                headers: { Authorization: `Bearer ${getAuthToken()}` },
+            });
+            const payload = await response.json();
+            if (!response.ok || !payload.success) {
+                throw new Error(payload.error || '服务账号列表加载失败');
+            }
+            setCredentials(Array.isArray(payload.data) ? payload.data : []);
+        } catch (loadError) {
+            setError(loadError.message || '服务账号列表加载失败');
+        }
+    }, []);
+
+    useEffect(() => {
+        void loadCredentials();
+    }, [loadCredentials]);
+
+    const handleFileChange = async (event) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file) return;
+        setError('');
+        setStatus('');
+        if (file.size > 64 * 1024) {
+            setError('服务账号 JSON 不能超过 64 KB');
+            return;
+        }
+
+        let credential;
+        try {
+            credential = JSON.parse(await file.text());
+        } catch {
+            setError('文件不是有效的 JSON');
+            return;
+        }
+
+        setLoading(true);
+        setStatus('正在校验凭据和 Vertex 权限…');
+        try {
+            const response = await fetch('/api/ai/vertex-credentials', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${getAuthToken()}`,
+                },
+                body: JSON.stringify({ credential }),
+            });
+            const payload = await response.json();
+            if (!response.ok || !payload.success) {
+                throw new Error(payload.error || '服务账号校验失败');
+            }
+            onChange(payload.data.reference);
+            setStatus(`验证通过：${payload.data.projectId} / ${payload.data.clientEmail}`);
+            await loadCredentials();
+        } catch (uploadError) {
+            setStatus('');
+            setError(uploadError.message || '服务账号导入失败');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const currentExists = credentials.some((item) => item.reference === value);
+    return (
+        <div className="field-group">
+            <label className="field-label">
+                {displayName}
+                <span className="field-type-badge">{name}</span>
+            </label>
+            {help && <div className="field-help">{help}</div>}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <select
+                    className="field-input"
+                    value={value ?? ''}
+                    disabled={loading}
+                    onChange={(event) => onChange(event.target.value)}
+                >
+                    <option value="">请选择服务账号</option>
+                    {value && !currentExists && <option value={value}>{value}（未找到文件）</option>}
+                    {credentials.map((credential) => (
+                        <option
+                            key={credential.reference}
+                            value={credential.reference}
+                            disabled={credential.validation === 'invalid'}
+                        >
+                            {credential.projectId && credential.clientEmail
+                                ? `${credential.projectId} / ${credential.clientEmail}`
+                                : `${credential.reference}（无效）`}
+                        </option>
+                    ))}
+                </select>
+                <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    disabled={loading}
+                    onClick={() => fileInputRef.current?.click()}
+                >
+                    {loading ? '校验中' : '导入 JSON'}
+                </button>
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".json,application/json"
+                    hidden
+                    onChange={handleFileChange}
+                />
+            </div>
+            {status && <div className="field-help" style={{ color: 'var(--success)' }}>{status}</div>}
+            {error && <div className="field-help" style={{ color: 'var(--warning)' }}>{error}</div>}
+        </div>
+    );
+}
+
+function ModelSelectField({ name, displayName, help, value, onChange, providerId, scopeSelfId = null }) {
+    const [models, setModels] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const [cached, setCached] = useState(false);
+    const requestIdRef = useRef(0);
+
+    const loadModels = useCallback(async (force = false) => {
+        const requestId = ++requestIdRef.current;
+        if (!providerId) {
+            setModels([]);
+            setError('');
+            setCached(false);
+            return;
+        }
+
+        setLoading(true);
+        setError('');
+        try {
+            const query = `/api/ai/models?providerId=${encodeURIComponent(providerId)}${force ? '&refresh=1' : ''}`;
+            const response = await fetch(buildScopedUrl(query, scopeSelfId), {
+                headers: { Authorization: `Bearer ${getAuthToken()}` },
+            });
+            const payload = await response.json();
+            if (!response.ok || !payload.success) {
+                throw new Error(payload.error || '模型列表加载失败');
+            }
+            if (requestId !== requestIdRef.current) return;
+            setModels(Array.isArray(payload.data?.models) ? payload.data.models : []);
+            setCached(payload.data?.cached === true);
+        } catch (fetchError) {
+            if (requestId !== requestIdRef.current) return;
+            setModels([]);
+            setCached(false);
+            setError(fetchError.message || '模型列表加载失败');
+        } finally {
+            if (requestId === requestIdRef.current) setLoading(false);
+        }
+    }, [providerId, scopeSelfId]);
+
+    useEffect(() => {
+        setModels([]);
+        setCached(false);
+        loadModels(false);
+    }, [loadModels]);
+
+    const currentModelAvailable = !value || models.includes(value);
+
+    return (
+        <div className="field-group">
+            <label className="field-label">
+                {displayName}
+                <span className="field-type-badge">{name}</span>
+                {providerId && models.length > 0 && (
+                    <span className="field-type-badge">{models.length} 个 · {cached ? '缓存' : '远程'}</span>
+                )}
+            </label>
+            {help && <div className="field-help">{help}</div>}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <select
+                    className="field-input"
+                    value={value ?? ''}
+                    disabled={!providerId || loading}
+                    onChange={(event) => onChange(event.target.value)}
+                >
+                    <option value="">
+                        {!providerId ? '请先选择供应商' : loading ? '正在加载模型…' : '请选择模型'}
+                    </option>
+                    {value && !currentModelAvailable && (
+                        <option value={value} disabled>{value}（当前列表中不可用）</option>
+                    )}
+                    {models.map(model => <option key={model} value={model}>{model}</option>)}
+                </select>
+                <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    disabled={!providerId || loading}
+                    onClick={() => loadModels(true)}
+                    title="绕过缓存并重新拉取模型列表"
+                >
+                    {loading ? '加载中' : '刷新'}
+                </button>
+            </div>
+            {error && (
+                <div className="field-help" style={{ color: 'var(--warning)' }}>
+                    {error}；请检查供应商配置或点击刷新重试。
+                </div>
+            )}
+        </div>
+    );
+}
+
+function ProviderCredentialsField({
+    name,
+    displayName,
+    help,
+    value,
+    onChange,
+    itemMeta,
+    providerDraft,
+    scopeSelfId = null,
+}) {
+    const usesVertex = providerDraft?.protocol === 'gemini' && providerDraft?.vertex === true;
+    const visibleChildren = Object.fromEntries(
+        Object.entries(itemMeta.children || {}).filter(([field]) =>
+            usesVertex ? field !== 'apiKey' : field !== 'serviceAccountRef'
+        )
+    );
+    const visibleItemMeta = { ...itemMeta, children: visibleChildren };
+    const handleChange = useCallback((items) => {
+        onChange(items.map((item) => usesVertex
+            ? { ...item, apiKey: '' }
+            : { ...item, serviceAccountRef: '' }
+        ));
+    }, [onChange, usesVertex]);
+
+    return (
+        <ObjectArrayField
+            name={name}
+            displayName={usesVertex ? 'Vertex 服务账号凭据' : displayName}
+            help={usesVertex
+                ? '导入服务账号 JSON 后保存引用；私钥不会写入普通配置。'
+                : help}
+            value={value}
+            onChange={handleChange}
+            itemMeta={visibleItemMeta}
+            nameField="id"
+            scopeSelfId={scopeSelfId}
+        />
+    );
+}
+
 function DynamicSelectField({ name, displayName, help, value, onChange, uiType, scopeSelfId = null }) {
     const [options, setOptions] = useState([]);
     const [configLabel, setConfigLabel] = useState('');

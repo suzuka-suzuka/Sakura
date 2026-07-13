@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { clearAuthState, readAuthToken, storeAuthState, touchAuthToken } from '../utils/authStorage';
+import { normalizeAccountSelfId, resolvePluginScopeSelfId } from '../utils/accountScope';
 
 const API_BASE = '';
 const PLUGIN_SELF_ID_STORAGE_KEY = 'sakura_plugin_self_id';
@@ -7,8 +8,7 @@ const DEFAULT_SCOPE_KEY = '__default__';
 const BOT_ACCOUNTS_REFRESH_INTERVAL_MS = 3000;
 
 function normalizeSelfId(value) {
-    const num = Number(value);
-    return Number.isFinite(num) ? num : null;
+    return normalizeAccountSelfId(value);
 }
 
 function scopeKeyOf(selfId) {
@@ -36,9 +36,7 @@ export function useConfig() {
     const [pluginConfigs, setPluginConfigs] = useState({});
     const [botAccounts, setBotAccounts] = useState([]);
     const [configuredAccountIds, setConfiguredAccountIds] = useState([]);
-    const [selectedPluginSelfId, setSelectedPluginSelfIdState] = useState(() =>
-        normalizeSelfId(localStorage.getItem(PLUGIN_SELF_ID_STORAGE_KEY))
-    );
+    const [selectedPluginSelfId, setSelectedPluginSelfIdState] = useState(null);
 
     const [accountSchema, setAccountSchema] = useState(null);
     const [accountConfigs, setAccountConfigs] = useState({});
@@ -264,25 +262,16 @@ export function useConfig() {
             setConfiguredAccountIds(nextConfiguredIds);
 
             const storedSelfId = normalizeSelfId(localStorage.getItem(PLUGIN_SELF_ID_STORAGE_KEY));
-            const currentSelfId = normalizeSelfId(selectedPluginSelfId);
-            const preferredSelfId = currentSelfId ?? storedSelfId;
-            const hasPreferred = preferredSelfId != null
-                && accounts.some((account) => Number(account.self_id) === preferredSelfId);
-
-            const soleAccountId = normalizeSelfId(accounts[0]?.self_id);
-            const hasSingleScopedConfig = accounts.length === 1
-                && soleAccountId != null
-                && nextConfiguredIds.includes(soleAccountId);
-
-            const nextSelfId = accounts.length > 1
-                ? (hasPreferred ? preferredSelfId : normalizeSelfId(accounts[0]?.self_id))
-                : (hasSingleScopedConfig ? soleAccountId : null);
+            const nextSelfId = resolvePluginScopeSelfId(accounts, storedSelfId);
 
             setSelectedPluginSelfId(nextSelfId);
         } catch (error) {
             console.error('Failed to fetch bot info:', error);
+            setBotAccounts([]);
+            setConfiguredAccountIds([]);
+            setSelectedPluginSelfId(null);
         }
-    }, [headers, logout, selectedPluginSelfId, setSelectedPluginSelfId]);
+    }, [headers, logout, setSelectedPluginSelfId]);
 
     const fetchPlugins = useCallback(async () => {
         try {

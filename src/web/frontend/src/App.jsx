@@ -6,6 +6,7 @@ import LoginPage from './components/LoginPage';
 import ConfigForm from './components/ConfigForm';
 import PluginConfigPanel from './components/PluginConfigPanel';
 import SystemMonitor from './components/SystemMonitor';
+import { resolvePluginScopeSelfId } from './utils/accountScope';
 
 const DEFAULT_SCOPE_KEY = '__default__';
 
@@ -36,6 +37,11 @@ function App() {
     accountConfigs,
     saveAccountConfig,
   } = useConfig();
+
+  const effectivePluginSelfId = resolvePluginScopeSelfId(
+    botAccounts,
+    selectedPluginSelfId,
+  );
 
   const [toasts, setToasts] = useState([]);
   const [activeSection, setActiveSection] = useState('monitor');
@@ -88,17 +94,17 @@ function App() {
   }, [saveConfig, addToast]);
 
   const handleAccountSave = useCallback(async (newConfig) => {
-    const result = await saveAccountConfig(selectedPluginSelfId, newConfig);
+    const result = await saveAccountConfig(effectivePluginSelfId, newConfig);
     if (result.success) {
       addToast('账号配置保存成功', 'success');
     } else {
       const message = result.errors?.map((item) => item.message).join(', ') || '保存失败';
       addToast(message, 'error');
     }
-  }, [saveAccountConfig, addToast, selectedPluginSelfId]);
+  }, [saveAccountConfig, addToast, effectivePluginSelfId]);
 
   const handlePluginSave = useCallback(async (pluginName, moduleName, data) => {
-    const result = await savePluginConfig(pluginName, moduleName, data, selectedPluginSelfId);
+    const result = await savePluginConfig(pluginName, moduleName, data, effectivePluginSelfId);
     if (result.success) {
       addToast('保存成功', 'success');
     } else {
@@ -106,7 +112,7 @@ function App() {
       addToast(message, 'error');
     }
     return result;
-  }, [savePluginConfig, addToast, selectedPluginSelfId]);
+  }, [savePluginConfig, addToast, effectivePluginSelfId]);
 
   const pluginNames = Object.keys(plugins || {});
 
@@ -221,15 +227,11 @@ function App() {
 
   const showAccountTopbar = botAccounts.length > 1 && (isPluginSection || isAccountSection);
 
-  const currentPluginScopeKey = selectedPluginSelfId == null
+  const currentPluginScopeKey = effectivePluginSelfId == null
     ? DEFAULT_SCOPE_KEY
-    : String(selectedPluginSelfId);
+    : String(effectivePluginSelfId);
   const currentPluginConfigs = pluginConfigs[activeSection]?.[currentPluginScopeKey] || {};
   const currentAccountConfig = accountConfigs[currentPluginScopeKey] ?? null;
-  const selectedBotAccount = botAccounts.find(
-    (account) => Number(account.self_id) === Number(selectedPluginSelfId)
-  ) || null;
-  const canEditCurrentScope = selectedPluginSelfId == null || selectedBotAccount != null;
 
   const handleSectionChange = useCallback((key) => {
     setActiveSection(key);
@@ -302,7 +304,7 @@ function App() {
               {botAccounts.map((account) => (
                 <button
                   key={account.self_id}
-                  className={`account-tab ${Number(account.self_id) === Number(selectedPluginSelfId) ? 'active' : ''}`}
+                  className={`account-tab ${Number(account.self_id) === Number(effectivePluginSelfId) ? 'active' : ''}`}
                   onClick={() => setSelectedPluginSelfId(account.self_id)}
                 >
                   <img
@@ -381,7 +383,7 @@ function App() {
                   onSave={handleAccountSave}
                   saving={saving}
                   activeTab={accountTab}
-                  scopeSelfId={selectedPluginSelfId}
+                  scopeSelfId={effectivePluginSelfId}
                 />
               ) : (
                 <div className="loading-container" style={{ minHeight: 120 }}>
@@ -390,13 +392,7 @@ function App() {
               )
             )}
 
-            {isPluginSection && !canEditCurrentScope && (
-              <div className="empty-state">
-                当前账号不在线，暂时无法编辑该账号作用域的配置。
-              </div>
-            )}
-
-            {isPluginSection && currentTab && canEditCurrentScope && (
+            {isPluginSection && currentTab && (
               <PluginConfigPanel
                 pluginName={activeSection}
                 modules={currentTab.modules || []}
@@ -404,7 +400,7 @@ function App() {
                 configs={currentPluginConfigs}
                 saving={saving}
                 onSave={handlePluginSave}
-                scopeSelfId={selectedPluginSelfId}
+                scopeSelfId={effectivePluginSelfId}
               />
             )}
           </div>

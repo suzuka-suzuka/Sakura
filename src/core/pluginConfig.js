@@ -4,7 +4,8 @@ import yaml from 'js-yaml';
 import chokidar from 'chokidar';
 import { fileURLToPath } from 'url';
 import { logger } from '../utils/logger.js';
-import { getCurrentBotSelfId } from '../api/client.js';
+import { getBots, getCurrentBotSelfId } from '../api/client.js';
+import { resolveRuntimePluginSelfId } from './pluginScope.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_CONFIG_DIR = path.join(__dirname, '../../config');
@@ -164,12 +165,11 @@ class PluginConfigManager {
     }
 
     _resolveSelfId(options = {}) {
-        if (options && Object.prototype.hasOwnProperty.call(options, 'selfId')) {
-            const id = normalizeSelfId(options.selfId);
-            return id || null; // 0 视为无效
-        }
-        const id = getCurrentBotSelfId();
-        return id || null; // 0 视为无效，bot 未就绪时不写账号目录
+        const requestedSelfId = options && Object.prototype.hasOwnProperty.call(options, 'selfId')
+            ? options.selfId
+            : getCurrentBotSelfId();
+        const onlineSelfIds = getBots().map((currentBot) => currentBot.self_id);
+        return resolveRuntimePluginSelfId(onlineSelfIds, requestedSelfId);
     }
 
     _getPluginDir(pluginName) {
@@ -318,6 +318,7 @@ class PluginConfigManager {
         let max = null;
         let fixed = false;
         let nameField = null;
+        let optionLabels = null;
 
         if (description) {
             const parts = description.split('|');
@@ -338,6 +339,14 @@ class PluginConfigManager {
                         fixed = true;
                     } else if (directive.startsWith('nameField:')) {
                         nameField = directive.slice(10);
+                    } else if (directive.startsWith('optionLabels:')) {
+                        optionLabels = Object.fromEntries(
+                            directive
+                                .slice('optionLabels:'.length)
+                                .split(',')
+                                .map((entry) => entry.split('=').map((part) => part.trim()))
+                                .filter(([value, displayLabel]) => value && displayLabel)
+                        );
                     } else {
                         uiType = directive;
                     }
@@ -381,7 +390,16 @@ class PluginConfigManager {
             const values = entriesRaw
                 ? Object.values(entriesRaw)
                 : (inner._zod?.def?.values || []);
-            return { type: 'enum', description: displayName, label, help, options: values, default: defaultValue, ...(uiType && { uiType }) };
+            return {
+                type: 'enum',
+                description: displayName,
+                label,
+                help,
+                options: values,
+                default: defaultValue,
+                ...(optionLabels && { optionLabels }),
+                ...(uiType && { uiType }),
+            };
         }
 
         if (typeName === 'union') {
@@ -429,6 +447,15 @@ class PluginConfigManager {
             if (!parsed) return;
 
             const { moduleName, selfId, scopeKey } = parsed;
+            if (
+                selfId != null &&
+                resolveRuntimePluginSelfId(
+                    getBots().map((currentBot) => currentBot.self_id),
+                    selfId
+                ) == null
+            ) {
+                return;
+            }
             const schema = this.schemas[pluginName]?.[moduleName];
             if (!schema) return;
 
