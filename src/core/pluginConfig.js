@@ -5,7 +5,7 @@ import chokidar from 'chokidar';
 import { fileURLToPath } from 'url';
 import { logger } from '../utils/logger.js';
 import { getBots, getCurrentBotSelfId } from '../api/client.js';
-import { resolveRuntimePluginSelfId } from './pluginScope.js';
+import { resolveRuntimeConfigSelfId } from './pluginScope.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_CONFIG_DIR = path.join(__dirname, '../../config');
@@ -169,7 +169,7 @@ class PluginConfigManager {
             ? options.selfId
             : getCurrentBotSelfId();
         const onlineSelfIds = getBots().map((currentBot) => currentBot.self_id);
-        return resolveRuntimePluginSelfId(onlineSelfIds, requestedSelfId);
+        return resolveRuntimeConfigSelfId(onlineSelfIds, requestedSelfId);
     }
 
     _getPluginDir(pluginName) {
@@ -449,7 +449,7 @@ class PluginConfigManager {
             const { moduleName, selfId, scopeKey } = parsed;
             if (
                 selfId != null &&
-                resolveRuntimePluginSelfId(
+                resolveRuntimeConfigSelfId(
                     getBots().map((currentBot) => currentBot.self_id),
                     selfId
                 ) == null

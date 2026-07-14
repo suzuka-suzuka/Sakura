@@ -2,8 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import yaml from 'js-yaml';
 import { fileURLToPath } from 'url';
+import { getBots } from '../api/client.js';
 import { logger } from '../utils/logger.js';
 import { AccountConfigSchema, getDefaultAccountConfig, schemaToMeta } from './configSchema.js';
+import { resolveRuntimeConfigSelfId } from './pluginScope.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ACCOUNT_CONFIG_DIR = path.join(__dirname, '../../config/account');
@@ -52,6 +54,19 @@ function normalizeAccountConfigShape(rawData) {
 class AccountConfigManager {
     constructor() {
         this._configCache = new Map();
+    }
+
+    resolveRuntimeSelfId(selfId) {
+        const onlineSelfIds = getBots().map((currentBot) => currentBot.self_id);
+        return resolveRuntimeConfigSelfId(onlineSelfIds, selfId);
+    }
+
+    getRuntimeConfig(selfId) {
+        return this.getConfig(this.resolveRuntimeSelfId(selfId));
+    }
+
+    setRuntimeConfig(selfId, data) {
+        return this.setConfig(this.resolveRuntimeSelfId(selfId), data);
     }
 
     getConfig(selfId) {

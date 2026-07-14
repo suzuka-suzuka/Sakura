@@ -222,7 +222,7 @@ class Config {
     getForSelf(selfId, key) {
         const scopedConfig = {
             ...this.config,
-            ...accountConfig.getConfig(selfId),
+            ...accountConfig.getRuntimeConfig(selfId),
         };
         if (key) {
             return lodash.get(scopedConfig, key);

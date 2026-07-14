@@ -4,7 +4,7 @@ function normalizeSelfIds(values) {
         .filter((value) => Number.isFinite(value) && value > 0))];
 }
 
-export function resolveRuntimePluginSelfId(onlineSelfIds, requestedSelfId) {
+export function resolveRuntimeConfigSelfId(onlineSelfIds, requestedSelfId) {
     const onlineIds = normalizeSelfIds(onlineSelfIds);
     if (onlineIds.length <= 1) return null;
 

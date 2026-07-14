@@ -13,6 +13,10 @@ function saveScopedPermissionConfig(selfId, nextConfig) {
   return accountConfig.setConfig(selfId, nextConfig);
 }
 
+function resolvePermissionScope(selfId) {
+  return accountConfig.resolveRuntimeSelfId(selfId);
+}
+
 function buildTempBlockKey(selfId, targetId) {
   const scope = selfId ? String(selfId) : "global";
   return `${TEMP_BLOCK_PREFIX}:${scope}:${targetId}`;
@@ -20,26 +24,18 @@ function buildTempBlockKey(selfId, targetId) {
 
 function parseTempBlockKey(key) {
   const parts = String(key || "").split(":");
-  if (parts[0] !== TEMP_BLOCK_PREFIX) {
+  if (parts.length !== 3 || parts[0] !== TEMP_BLOCK_PREFIX) {
     return null;
   }
 
-  if (parts.length === 2) {
-    const userId = Number(parts[1]);
-    return Number.isFinite(userId) ? { selfId: null, userId } : null;
+  const selfId = parts[1] === "global" ? null : Number(parts[1]);
+  const userId = Number(parts[2]);
+  const invalidSelfId = selfId != null && (!Number.isFinite(selfId) || selfId <= 0);
+  if (!Number.isFinite(userId) || invalidSelfId) {
+    return null;
   }
 
-  if (parts.length === 3) {
-    const selfId = parts[1] === "global" ? null : Number(parts[1]);
-    const userId = Number(parts[2]);
-    if (!Number.isFinite(userId)) return null;
-    return {
-      selfId: Number.isFinite(selfId) ? selfId : null,
-      userId,
-    };
-  }
-
-  return null;
+  return { selfId, userId };
 }
 
 async function removeTempBlockKeys(targetId, selfId = null) {
@@ -70,17 +66,7 @@ function updateScopedList(selfId, key, updater) {
   };
 }
 
-async function removeUserFromBlacklist(targetId, selfId = null) {
-  if (selfId == null) {
-    const accountIds = accountConfig.listConfiguredSelfIds();
-    for (const accountId of accountIds) {
-      updateScopedList(accountId, "blackUsers", (blackUsers) =>
-        blackUsers.filter((id) => id !== targetId)
-      );
-    }
-    return;
-  }
-
+function removeUserFromBlacklist(targetId, selfId = null) {
   updateScopedList(selfId, "blackUsers", (blackUsers) =>
     blackUsers.filter((id) => id !== targetId)
   );
@@ -143,7 +129,8 @@ export async function blockUser(targetId, duration = 0, selfId = null) {
       return { success: false, message: "缺少账号作用域，无法写入账号黑名单" };
     }
 
-    const currentConfig = getScopedPermissionConfig(selfId);
+    const scopeSelfId = resolvePermissionScope(selfId);
+    const currentConfig = getScopedPermissionConfig(scopeSelfId);
     const blackUsers = (currentConfig.blackUsers || []).map(Number);
 
     if (blackUsers.includes(targetId)) {
@@ -154,7 +141,7 @@ export async function blockUser(targetId, duration = 0, selfId = null) {
       try {
         const redis = getRedis();
         await redis.setex(
-          buildTempBlockKey(selfId, targetId),
+          buildTempBlockKey(scopeSelfId, targetId),
           duration,
           Date.now().toString()
         );
@@ -164,14 +151,14 @@ export async function blockUser(targetId, duration = 0, selfId = null) {
       }
     }
 
-    const saveResult = saveScopedPermissionConfig(selfId, {
+    const saveResult = saveScopedPermissionConfig(scopeSelfId, {
       ...currentConfig,
       blackUsers: [...blackUsers, targetId],
     });
 
     if (!saveResult.success) {
       if (duration > 0) {
-        await removeTempBlockKeys(targetId, selfId);
+        await removeTempBlockKeys(targetId, scopeSelfId);
       }
       return { success: false, message: "保存配置文件失败" };
     }
@@ -199,14 +186,15 @@ export async function unblockUser(targetId, selfId = null) {
       return { success: false, message: "缺少账号作用域，无法写入账号黑名单" };
     }
 
-    const currentConfig = getScopedPermissionConfig(selfId);
+    const scopeSelfId = resolvePermissionScope(selfId);
+    const currentConfig = getScopedPermissionConfig(scopeSelfId);
     const blackUsers = (currentConfig.blackUsers || []).map(Number);
 
     if (!blackUsers.includes(targetId)) {
       return { success: false, message: `${targetId} 不在黑名单中` };
     }
 
-    const saveResult = saveScopedPermissionConfig(selfId, {
+    const saveResult = saveScopedPermissionConfig(scopeSelfId, {
       ...currentConfig,
       blackUsers: blackUsers.filter((id) => id !== targetId),
     });
@@ -215,7 +203,7 @@ export async function unblockUser(targetId, selfId = null) {
       return { success: false, message: "保存配置文件失败" };
     }
 
-    await removeTempBlockKeys(targetId, selfId);
+    await removeTempBlockKeys(targetId, scopeSelfId);
     return { success: true, message: `已将 ${targetId} 移出黑名单` };
   } catch (error) {
     logger.error(`[Permission] unblock user failed: ${error.message}`);
@@ -246,9 +234,9 @@ export class Permission extends plugin {
     }
   }
 
-  async autoUnblock(userId, selfId = null) {
+  autoUnblock(userId, selfId = null) {
     try {
-      await removeUserFromBlacklist(userId, selfId);
+      removeUserFromBlacklist(userId, selfId);
     } catch (error) {
       logger.error(`[Permission] auto unblock failed: ${error.message}`);
     }
@@ -269,7 +257,8 @@ export class Permission extends plugin {
       return false;
     }
 
-    const currentConfig = getScopedPermissionConfig(e.self_id);
+    const scopeSelfId = resolvePermissionScope(e.self_id);
+    const currentConfig = getScopedPermissionConfig(scopeSelfId);
     const whiteUsers = (currentConfig.whiteUsers || []).map(Number);
 
     if (isAdd && whiteUsers.includes(targetId)) {
@@ -282,7 +271,7 @@ export class Permission extends plugin {
       return;
     }
 
-    const result = saveScopedPermissionConfig(e.self_id, {
+    const result = saveScopedPermissionConfig(scopeSelfId, {
       ...currentConfig,
       whiteUsers: isAdd
         ? [...whiteUsers, targetId]
@@ -321,7 +310,8 @@ export class Permission extends plugin {
         return false;
       }
 
-      const currentConfig = getScopedPermissionConfig(e.self_id);
+      const scopeSelfId = resolvePermissionScope(e.self_id);
+      const currentConfig = getScopedPermissionConfig(scopeSelfId);
       const whiteGroups = (currentConfig.whiteGroups || []).map(Number);
 
       if (isAdd && whiteGroups.includes(targetGroupId)) {
@@ -334,7 +324,7 @@ export class Permission extends plugin {
         return;
       }
 
-      const result = saveScopedPermissionConfig(e.self_id, {
+      const result = saveScopedPermissionConfig(scopeSelfId, {
         ...currentConfig,
         whiteGroups: isAdd
           ? [...whiteGroups, targetGroupId]

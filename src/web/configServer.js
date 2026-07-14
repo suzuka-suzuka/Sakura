@@ -792,7 +792,7 @@ async function handleApi(req, res) {
     if (pathname === '/api/account-config' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
         const selfId = parseSelfIdParam(url);
-        sendJson(res, { success: true, data: accountConfig.getConfig(selfId) });
+        sendJson(res, { success: true, data: accountConfig.getRuntimeConfig(selfId) });
         return true;
     }
 
@@ -800,7 +800,7 @@ async function handleApi(req, res) {
         if (!requireAuth(req, res)) return true;
         const selfId = parseSelfIdParam(url);
         const body = await parseBody(req);
-        const result = accountConfig.setConfig(selfId, body.data || body);
+        const result = accountConfig.setRuntimeConfig(selfId, body.data || body);
         if (result.success) {
             sendJson(res, { success: true, message: '保存成功' });
         } else {
