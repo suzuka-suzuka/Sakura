@@ -1032,25 +1032,52 @@ async function handleApi(req, res) {
         if (action === 'config' && moduleName && req.method === 'POST') {
             const body = await parseBody(req);
             const isProvidersConfig = pluginName === 'sakura-plugin' && moduleName === 'Providers';
+            const isImageChannelsConfig = pluginName === 'sakura-plugin' && moduleName === 'ImageChannels';
+            const isVideoChannelsConfig = pluginName === 'sakura-plugin' && moduleName === 'CliProxyMedia';
             const proposedConfig = body.data ?? body;
-            if (isProvidersConfig) {
-                const missingReferences = (proposedConfig?.providers || []).flatMap((provider, providerIndex) =>
-                    provider?.protocol === 'gemini' && provider?.vertex === true
-                        ? (provider.credentials || [])
-                            .map((credential, credentialIndex) => ({
-                                reference: credential?.serviceAccountRef,
-                                path: ['providers', providerIndex, 'credentials', credentialIndex, 'serviceAccountRef'],
-                            }))
-                            .filter((item) => item.reference && !getManagedVertexCredentialPath(item.reference))
-                        : []
-                );
+            if (isProvidersConfig || isImageChannelsConfig || isVideoChannelsConfig) {
+                const providerReferences = isProvidersConfig
+                    ? (proposedConfig?.providers || []).flatMap((provider, providerIndex) =>
+                        provider?.protocol === 'gemini' && provider?.vertex === true
+                            ? (provider.credentials || [])
+                                .map((credential, credentialIndex) => ({
+                                    reference: credential?.serviceAccountRef,
+                                    path: ['providers', providerIndex, 'credentials', credentialIndex, 'serviceAccountRef'],
+                                }))
+                                .filter((item) => item.reference && !getManagedVertexCredentialPath(item.reference))
+                            : []
+                    )
+                    : [];
+                const imageChannelReferences = isImageChannelsConfig
+                    ? (proposedConfig?.vertex || [])
+                        .map((channel, channelIndex) => ({
+                            reference: channel?.serviceAccountRef,
+                            path: ['vertex', channelIndex, 'serviceAccountRef'],
+                        }))
+                        .filter((item) => !item.reference || !getManagedVertexCredentialPath(item.reference))
+                    : [];
+                const videoChannelReferences = isVideoChannelsConfig
+                    ? (proposedConfig?.gemini || [])
+                        .map((channel, channelIndex) => ({
+                            reference: channel?.serviceAccountRef,
+                            path: ['gemini', channelIndex, 'serviceAccountRef'],
+                        }))
+                        .filter((item) => !item.reference || !getManagedVertexCredentialPath(item.reference))
+                    : [];
+                const missingReferences = [
+                    ...providerReferences,
+                    ...imageChannelReferences,
+                    ...videoChannelReferences,
+                ];
                 if (missingReferences.length > 0) {
                     sendJson(res, {
                         success: false,
-                        error: 'Vertex 服务账号文件不存在',
+                        error: 'Vertex 服务账号配置无效',
                         errors: missingReferences.map((item) => ({
                             path: item.path,
-                            message: `未找到服务账号：${item.reference}`,
+                            message: item.reference
+                                ? `未找到服务账号：${item.reference}`
+                                : '请选择已验证的服务账号',
                         })),
                     }, 422);
                     return true;

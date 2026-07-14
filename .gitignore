@@ -35,3 +35,6 @@ plugins/*
 .env.*.local
 .claude/settings.local.json
 CLAUDE.md
+
+# Local-only tests
+test/
