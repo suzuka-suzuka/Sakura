@@ -15,6 +15,5 @@ export function resolveRuntimeConfigSelfId(onlineSelfIds, requestedSelfId) {
 }
 
 export function getCronPluginScopeIds(onlineSelfIds) {
-    const onlineIds = normalizeSelfIds(onlineSelfIds);
-    return onlineIds.length > 1 ? onlineIds : [];
+    return normalizeSelfIds(onlineSelfIds);
 }

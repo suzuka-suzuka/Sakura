@@ -58,7 +58,7 @@ function buildCronScopeIds() {
   return getCronPluginScopeIds(onlineIds);
 }
 
-async function runCronInScope(instance, handler, selfId = null) {
+async function runCronInScope(instance, handler, selfId = null, fireDate = new Date()) {
   if (!canRunBotScopedTask(selfId, getBot)) {
     logger.debug(
       `[${instance.name}] 跳过离线账号 ${selfId} 的定时任务: ${handler.methodName}`
@@ -68,7 +68,7 @@ async function runCronInScope(instance, handler, selfId = null) {
 
   const run = async () => {
     instance.e = null;
-    await instance[handler.methodName].call(instance);
+    await instance[handler.methodName].call(instance, fireDate);
   };
 
   if (selfId == null) {
@@ -265,7 +265,7 @@ export class PluginLoader {
               handler.isExecuting = false;
               const job = schedule.scheduleJob(
                 handler.cronExpression,
-                async () => {
+                async (fireDate) => {
                   if (handler.isExecuting) {
                     logger.warn(`[${instance.name}] 定时任务 ${handler.methodName} 仍在执行中，跳过本次触发`);
                     return;
@@ -279,10 +279,10 @@ export class PluginLoader {
                     }
                     const scopeIds = pluginName ? buildCronScopeIds() : [];
                     if (scopeIds.length === 0) {
-                      await runCronInScope(instance, handler, null);
+                      await runCronInScope(instance, handler, null, fireDate);
                     } else {
                       for (const selfId of scopeIds) {
-                        await runCronInScope(instance, handler, selfId);
+                        await runCronInScope(instance, handler, selfId, fireDate);
                       }
                     }
                   } catch (e) {
