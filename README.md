@@ -29,7 +29,7 @@ cd Sakura
 pnpm install
 ```
 
-本仓库使用 pnpm workspace，`plugins/*` 下的插件依赖会一起安装。
+本仓库使用 pnpm workspace，根项目、`plugins/*` 下的插件和 Web 前端依赖会一起安装，并统一由根目录 `pnpm-lock.yaml` 锁定版本。
 
 如果没有 pnpm：
 
@@ -127,6 +127,18 @@ http://localhost:3457
 ```
 
 端口以 `config/config.yaml` 中的 `web.port` 为准。
+
+### Web 前端开发
+
+前端源码位于 `src/web/frontend`，由根目录 workspace 统一管理：
+
+```bash
+pnpm web:dev
+pnpm web:lint
+pnpm web:build
+```
+
+`pnpm web:build` 会把生产资源输出到 `src/web/public`，后端直接提供该目录中的静态文件。
 
 ## OneBot 客户端对接
 
@@ -230,8 +242,11 @@ handler = Command(/^#demo$/, {
 Sakura/
   app.js                     # 父进程和 Redis 自动启动入口
   src/                       # 框架核心、WebSocket、插件加载器、配置面板服务
+    web/frontend/            # React + Vite 前端源码
+    web/public/              # Web 前端生产构建产物
   config/                    # 框架、账号、插件配置
   plugins/                   # 插件目录
+    sakura-plugin/           # 随主仓库发布的官方综合功能插件
   data/                      # Redis 数据、运行数据等
   logs/                      # 运行日志
   temp/                      # 临时文件

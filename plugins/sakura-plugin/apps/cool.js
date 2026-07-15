@@ -1,0 +1,101 @@
+import lodash from 'lodash';
+import Setting from '../lib/setting.js';
+
+const _lastMsgTime = {};
+const _pluginGlobalStartTime = Math.floor(Date.now() / 1000);
+
+export class cool extends plugin {
+    constructor() {
+        super({
+            name: 'cool',
+            priority: 35,
+        });
+    }
+
+    get appconfig() {
+        return Setting.getConfig("cool");
+    }
+
+    updateLastTime = OnEvent("message.group", async (e) => {
+        const groupId = e.group_id;
+        const config = this.appconfig;
+
+        if ((config?.Groups ?? []).includes(groupId)) {
+            _lastMsgTime[groupId] = Math.floor(Date.now() / 1000);
+        }
+        return false;
+    });
+
+    coolTask = Cron('*/20 * * * *', async () => {
+        const currentTime = Math.floor(Date.now() / 1000);
+        const config = this.appconfig;
+
+        if (!config) {
+            return;
+        }
+
+        const Groups = config.Groups ?? [];
+
+        if (Groups.length === 0) {
+            return;
+        }
+
+        if (!bot) return;
+
+        for (const groupId of Groups) {
+            const lastTime = _lastMsgTime[groupId] || _pluginGlobalStartTime;
+
+            const minInterval = (config.randomIntervalMin || 30) * 60;
+            const maxInterval = (config.randomIntervalMax || 60) * 60;
+            const effectiveMinInterval = Math.min(minInterval, maxInterval);
+            const effectiveMaxInterval = Math.max(minInterval, maxInterval);
+            const randomInterval = lodash.random(effectiveMinInterval, effectiveMaxInterval);
+
+            const coldThreshold = lastTime + randomInterval;
+
+            if (currentTime >= coldThreshold) {
+                logger.info(`检测到群 ${groupId} 已变冷，准备获取并发送图片...`);
+
+                let imageUrl = null;
+                try {
+                    const apiUrl = 'https://yande.re/post.json?tags=loli+-rating:e+-nipples&limit=500';
+                    const response = await fetch(apiUrl);
+                    if (response.ok) {
+                        const posts = await response.json();
+                        if (Array.isArray(posts) && posts.length > 0) {
+                            const post = lodash.sample(posts);
+                            imageUrl = post.file_url;
+                        }
+                    } else {
+                        logger.error(`[cool] yande.re API request failed: ${response.status}`);
+                    }
+                } catch (err) {
+                    logger.error(`[cool] 获取图片链接失败: ${err}`);
+                }
+
+                if (imageUrl) {
+                    try {
+                        await bot.pickGroup(groupId).sendMsg(segment.image(imageUrl));
+                        _lastMsgTime[groupId] = Math.floor(Date.now() / 1000);
+                    } catch (error) {
+                        logger.error(`发送图片到群 ${groupId} 失败: ${error}`);
+                        try {
+                            const response = await fetch('https://international.v1.hitokoto.cn/');
+                            const data = await response.json();
+                            const hitokotoText = data.hitokoto;
+                            await bot.pickGroup(groupId).sendMsg(hitokotoText);
+                        } catch (fallbackError) {
+                            logger.error(`获取一言也失败了: ${fallbackError}`);
+                            await bot.pickGroup(groupId).sendMsg('喵');
+                        } finally {
+                            _lastMsgTime[groupId] = Math.floor(Date.now() / 1000);
+                        }
+                    }
+                } else {
+                    logger.warn(`未能获取群 ${groupId} 的图片数据，API可能无响应或没有返回图片。`);
+                    _lastMsgTime[groupId] = Math.floor(Date.now() / 1000);
+                }
+            }
+        }
+    });
+}

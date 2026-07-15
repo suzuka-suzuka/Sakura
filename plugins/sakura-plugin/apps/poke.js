@@ -1,0 +1,656 @@
+import path from "path";
+import { pluginresources } from "../lib/path.js";
+import { yandeimage } from "../lib/ImageUtils/ImageUtils.js";
+import Setting from "../lib/setting.js";
+import _ from "lodash";
+import { getAI } from "../lib/AIUtils/getAI.js";
+import common from "../../../src/utils/common.js";
+import { imageEmbeddingManager } from "../lib/AIUtils/ImageEmbedding.js";
+
+export class poke extends plugin {
+  constructor() {
+    super({
+      name: "戳一戳",
+      priority: 1135,
+    });
+  }
+
+  get appconfig() {
+    return Setting.getConfig("poke");
+  }
+
+  get botname() {
+    return Setting.getConfig("bot").botname;
+  }
+
+  getScopedKey(selfId, ...parts) {
+    return ["Mz:poke", selfId || "default", ...parts].join(":");
+  }
+
+  async checkCD(key, duration) {
+    const exists = await redis.get(key);
+    if (exists) return true;
+    await redis.set(key, "1", "EX", duration);
+    return false;
+  }
+
+  async setIgnore(userId, duration, selfId = null) {
+    await redis.set(
+      this.getScopedKey(selfId, "ignore", userId),
+      "1",
+      "EX",
+      Math.round(duration / 1000)
+    );
+  }
+
+  async checkIgnore(userId, selfId = null) {
+    return await redis.get(this.getScopedKey(selfId, "ignore", userId));
+  }
+
+  async setShouldReply(userId, duration, selfId = null) {
+    await redis.set(
+      this.getScopedKey(selfId, "shouldReply", userId),
+      "1",
+      "EX",
+      Math.round(duration / 1000)
+    );
+  }
+
+  async checkShouldReply(userId, selfId = null) {
+    return await redis.get(this.getScopedKey(selfId, "shouldReply", userId));
+  }
+
+  async setIgnorePoke(groupId, duration, selfId = null) {
+    await redis.set(
+      this.getScopedKey(selfId, "ignorePoke", groupId),
+      "1",
+      "EX",
+      Math.round(duration / 1000)
+    );
+  }
+
+  async checkIgnorePoke(groupId, selfId = null) {
+    return await redis.get(this.getScopedKey(selfId, "ignorePoke", groupId));
+  }
+
+  sendImage(file) {
+    return segment.image(file, 1);
+  }
+
+  getPokeImagePath(filename) {
+    return path.join(pluginresources, "poke", filename);
+  }
+
+  async checkAndMute(e, duration) {
+    const bot = await e.getInfo(e.self_id);
+    const member = await e.getInfo(e.user_id);
+
+    if (bot.role !== "admin" && bot.role !== "owner") {
+      return false;
+    }
+
+    if (member.role === "admin" || member.role === "owner") {
+      return false;
+    }
+
+    await e.ban(duration, e.user_id);
+    return true;
+  }
+
+  async getAIReply(e, promptText) {
+    const personas = this.appconfig.personas;
+    let systemInstruction = "";
+
+    if (personas && personas.length > 0) {
+      const personaName = _.sample(personas);
+
+      const rolesConfig = Setting.getConfig("roles");
+      const roles = rolesConfig?.roles || [];
+      const role = roles.find((r) => r.name === personaName);
+
+      if (role && role.prompt) {
+        systemInstruction = role.prompt;
+      }
+    } else {
+      logger.warn(
+        "[戳一戳] 人设配置文件中未找到或其为空，将使用无设定的默认回复。"
+      );
+    }
+
+    const queryParts = [{ text: promptText }];
+    const route = Setting.getConfig("AI").appsRoute;
+    try {
+      const result = await getAI(
+        route,
+        e,
+        queryParts,
+        systemInstruction,
+        false,
+        false,
+        []
+      );
+      if (!result.text || result.text.trim() === "") {
+        logger.warn("[戳一戳] AI 返回空回复");
+        return false;
+      }
+      return result.text;
+    } catch (error) {
+      logger.error(`[戳一戳] AI 调用失败: ${error}`);
+      return false;
+    }
+  }
+
+  poke_function = OnEvent("notice.notify.poke", async (e) => {
+    if (!e.group_id) {
+      return false;
+    }
+    const rawConfig = this.appconfig;
+    if (!rawConfig) {
+      logger.error("[戳一戳] 获取配置失败");
+      return false;
+    }
+
+    // 使用克隆避免直接修改 pluginConfigManager 中存储的配置对象
+    const pokeConfig = structuredClone(rawConfig);
+
+    const replyKeys = [
+      "masterReplies",
+      "genericTextReplies",
+      "pokeBackTextReplies",
+      "countRepliesGroup",
+      "countRepliesUser",
+    ];
+    for (const key of replyKeys) {
+      if (typeof pokeConfig[key] === "string") {
+        pokeConfig[key] = pokeConfig[key]
+          .split("\n")
+          .filter((line) => line.trim() !== "");
+      }
+    }
+
+    if (!pokeConfig.enable) {
+      return false;
+    }
+
+    if (await this.checkIgnorePoke(e.group_id, e.self_id)) {
+      return false;
+    }
+
+    if (await this.checkIgnore(e.user_id, e.self_id)) {
+      return false;
+    }
+
+    if (await this.checkShouldReply(e.user_id, e.self_id)) {
+      await e.reply("姑且还是理你一下吧...");
+      await common.sleep(500);
+      await e.reply(this.sendImage(this.getPokeImagePath("5.gif")));
+      await redis.del(this.getScopedKey(e.self_id, "shouldReply", e.user_id));
+      return false;
+    }
+
+    const master = e.getMaster();
+    if (common.isMasterUser(e.target_id, master)) {
+      return await this.handlePokeMaster(e, pokeConfig);
+    }
+
+    if (e.target_id == e.self_id) {
+      return await this.handlePokeBot(e, pokeConfig);
+    }
+
+    return false;
+  });
+
+  async handlePokeMaster(e, pokeConfig) {
+    if (await this.checkCD(this.getScopedKey(e.self_id, "cd", "master", e.group_id), 60)) {
+      return false;
+    }
+
+    const retype = _.random(1, 2);
+    let success = false;
+
+    if (retype === 1) {
+      const msg = await this.getAIReply(e, "(其他人戳一下主人)");
+      if (msg !== false) {
+        const replyMsg = [segment.at(e.user_id), msg];
+        await e.reply(replyMsg);
+        success = true;
+      }
+    } else {
+      const bot = await e.getInfo(e.self_id);
+
+      if (bot && bot.role !== "member") {
+        const member = await e.getInfo(e.user_id);
+        const Name = member?.card || member?.nickname || member.user_id;
+
+        const queryParts = [
+          {
+            text: `请把"${Name}"这个名字变得更中二病一些，请只输出一个新名字。`,
+          },
+        ];
+        const route = Setting.getConfig("AI").appsRoute;
+        try {
+          const result = await getAI(
+            route,
+            e,
+            queryParts,
+            null,
+            false,
+            false,
+            []
+          );
+          if (result.text && result.text.trim() !== "") {
+            const newCard = result.text;
+            await e.card(newCard, e.user_id);
+            success = true;
+          } else {
+            logger.warn("[戳一戳] AI 返回空名字");
+          }
+        } catch (error) {
+          logger.error(`[戳一戳] 改名 AI 调用失败: ${error}`);
+        }
+      }
+    }
+
+    if (!success) {
+      const msg = _.sample(pokeConfig.masterReplies);
+      await e.reply(msg);
+    }
+
+    return false;
+  }
+
+  async handlePokeBot(e, pokeConfig) {
+    if (await this.checkCD(this.getScopedKey(e.self_id, "cd", "bot", e.group_id), 3)) {
+      return false;
+    }
+
+    let tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+    let time = tomorrow.toISOString().slice(0, 10) + " 00:00:00";
+    let exTime = Math.round(
+      (tomorrow.getTime() - Date.now()) / 1000
+    );
+
+    let count = await redis.get(this.getScopedKey(e.self_id, "count", e.group_id));
+    count = count ? parseInt(count) + 1 : 1;
+    await redis.set(this.getScopedKey(e.self_id, "count", e.group_id), count, "EX", exTime);
+
+    let usercount = await redis.get(this.getScopedKey(e.self_id, "count", e.group_id, e.user_id));
+    usercount = usercount ? parseInt(usercount) + 1 : 1;
+    await redis.set(
+      this.getScopedKey(e.self_id, "count", e.group_id, e.user_id),
+      usercount,
+      "EX",
+      exTime
+    );
+
+    let exTime_A = 20 * 60;
+
+    let counter = await redis.get(this.getScopedKey(e.self_id, "countA", e.group_id));
+    counter = counter ? parseInt(counter) + 1 : 1;
+    await redis.set(this.getScopedKey(e.self_id, "countA", e.group_id), counter, "EX", exTime_A);
+
+    switch (counter) {
+      case 1:
+        const type = _.random(1, 2);
+        if (type === 1) {
+          await e.reply(this.sendImage(this.getPokeImagePath("1.gif")));
+        } else {
+          await e.reply(this.sendImage(this.getPokeImagePath("2.gif")));
+        }
+        return false;
+      case 5:
+        await e.reply(this.sendImage(this.getPokeImagePath("3.gif")));
+        await common.sleep(500);
+        await this.checkAndMute(e, 60 * usercount);
+        await common.sleep(1000);
+        await e.reply("不~");
+        await common.sleep(1000);
+        await e.reply("准~");
+        await common.sleep(1000);
+        await e.reply("戳~！");
+        return false;
+
+      case 10:
+        await e.reply("你好烦呀,不想理你了!");
+        await common.sleep(500);
+        await e.reply(this.sendImage(this.getPokeImagePath("4.gif")));
+
+        const ignoreDuration = 60000 * usercount;
+        await this.setIgnore(e.user_id, ignoreDuration, e.self_id);
+        await this.setShouldReply(e.user_id, ignoreDuration + 600000, e.self_id);
+
+        return false;
+      case 15:
+        const types = _.random(1, 2);
+        if (types === 1) {
+          await e.reply(this.sendImage(this.getPokeImagePath("13.gif")));
+        } else {
+          await e.reply(this.sendImage(this.getPokeImagePath("14.gif")));
+        }
+        await common.sleep(500);
+        await this.checkAndMute(e, 60 * usercount);
+        await common.sleep(1000);
+        await e.reply("这是爱的惩罚口球哦~");
+        return false;
+      case 20:
+        const muteSuccess = await this.checkAndMute(e, 60 * usercount);
+        if (muteSuccess) {
+          await e.reply(`这就是欺负${this.botname}的下场!`);
+          await common.sleep(500);
+          await e.reply(this.sendImage(this.getPokeImagePath("6.gif")));
+        } else {
+          const bot = await e.getInfo(e.self_id);
+
+          if (bot && bot.role !== "member") {
+            const member = await e.getInfo();
+            const currentName =
+              member?.card || member?.nickname || member.user_id;
+
+            const queryParts = [
+              {
+                text: `请把"${currentName}"这个名字变得更笨、更傻、更蠢一些，要带有贬义和嘲讽意味，请只输出一个新名字。`,
+              },
+            ];
+            const route = Setting.getConfig("AI").appsRoute;
+            try {
+              const result = await getAI(
+                route,
+                e,
+                queryParts,
+                null,
+                false,
+                false,
+                []
+              );
+              if (result.text && result.text.trim() !== "") {
+                const newCard = result.text.trim();
+                await e.group.setCard(e.user_id, newCard);
+                await e.reply(`这就是欺负${this.botname}的下场！`);
+                await common.sleep(500);
+                await e.reply(this.sendImage(this.getPokeImagePath("6.gif")));
+              } else {
+                logger.warn("[戳一戳] AI 返回空名字，回退到文本回复");
+                await this.replyWithText(e, pokeConfig, count, usercount);
+              }
+            } catch (error) {
+              logger.error(
+                `[戳一戳] 改名 AI 调用失败: ${error}，回退到文本回复`
+              );
+              await this.replyWithText(e, pokeConfig, count, usercount);
+            }
+          } else {
+            await this.replyWithText(e, pokeConfig, count, usercount);
+          }
+        }
+
+        return false;
+
+      case 30:
+        await e.reply("被戳、戳晕了...");
+        await e.reply(this.sendImage(this.getPokeImagePath("7.gif")));
+        await this.setIgnorePoke(e.group_id, 600000, e.self_id);
+        return false;
+
+      case 31:
+        await e.reply("突然惊醒！");
+        await common.sleep(500);
+        await e.reply(this.sendImage(this.getPokeImagePath("8.gif")));
+        return false;
+
+      case 40:
+        await e.reply("被戳、戳坏掉了...");
+        await common.sleep(500);
+        await e.reply("可能再也不会醒来了...");
+        await common.sleep(500);
+        await e.reply(this.sendImage(this.getPokeImagePath("9.gif")));
+        return false;
+
+      case 41:
+      case 42:
+      case 43:
+      case 44:
+      case 45:
+      case 46:
+      case 47:
+      case 48:
+      case 49:
+      case 50:
+        return false;
+
+      case 51:
+        await e.reply("居然把我给戳醒了，接下来再戳会发生什么可不关我事哟~");
+        return false;
+
+      case 60:
+        await e.reply(`${this.botname}彻底被玩坏了...`);
+        await common.sleep(500);
+        await e.reply("可能永远都不会醒来了...");
+        await this.setIgnorePoke(e.group_id, 1200000, e.self_id);
+        return false;
+    }
+
+    const random = _.random(1, 100);
+
+    if (random <= 40) {
+      await this.replyWithText(e, pokeConfig, count, usercount);
+    } else if (random <= 70) {
+      await this.replyWithImage(e, pokeConfig, count, usercount);
+    } else if (random <= 80) {
+      await this.replyWithPokeBack(e, pokeConfig);
+    } else {
+      await this.replyWithSpecialEasterEgg(e);
+    }
+
+    return false;
+  }
+
+  async replyWithText(e, pokeConfig, count, usercount) {
+    const retype = _.random(1, 4);
+
+    if (retype === 1) {
+      const msg = _.sample(pokeConfig.genericTextReplies);
+      await e.reply(msg.replace(/_botname_/g, this.botname));
+    } else if (retype === 2) {
+      const promptText = e.isMaster ? "(主人戳你一下)" : "(其他人戳你一下)";
+      const msg = await this.getAIReply(e, promptText);
+      if (msg !== false) {
+        const replyMsg = [segment.at(e.user_id), msg];
+        await e.reply(replyMsg);
+      } else {
+        await e.reply(this.sendImage(this.getPokeImagePath("12.gif")));
+      }
+    } else if (retype === 3) {
+      try {
+        const response = await fetch("https://60s.viki.moe/v2/fabing");
+        const result = await response.json();
+
+        if (
+          result &&
+          result.code === 200 &&
+          result.data &&
+          result.data.saying
+        ) {
+          await e.reply(result.data.saying);
+        } else {
+          const msg = _.sample(pokeConfig.genericTextReplies);
+          await e.reply(msg.replace(/_botname_/g, this.botname));
+        }
+      } catch (error) {
+        logger.error("请求 API 时出错, 已回退:", error);
+        const msg = _.sample(pokeConfig.genericTextReplies);
+        await e.reply(msg.replace(/_botname_/g, this.botname));
+      }
+    } else {
+      const countType = _.random(1, 2);
+      if (countType === 1) {
+        const msg = _.sample(pokeConfig.countRepliesGroup);
+        await e.reply(
+          msg.replace("_num_", count).replace(/_botname_/g, this.botname)
+        );
+      } else {
+        const msg = _.sample(pokeConfig.countRepliesUser);
+        await e.reply(
+          msg.replace("_num_", usercount).replace(/_botname_/g, this.botname)
+        );
+      }
+    }
+  }
+
+  async replyWithImage(e, pokeConfig, count, usercount) {
+    try {
+      const allEmojis = imageEmbeddingManager.getAll();
+
+      if (allEmojis.length > 0) {
+        const randomEmoji = allEmojis[_.random(0, allEmojis.length - 1)];
+        if (randomEmoji && randomEmoji.localPath) {
+          await e.reply(this.sendImage(randomEmoji.localPath));
+          return;
+        }
+      }
+
+      await this.replyWithText(e, pokeConfig, count, usercount);
+    } catch (error) {
+      logger.error(`[戳一戳] 表情发送失败: ${error}`);
+      await this.replyWithText(e, pokeConfig, count, usercount);
+    }
+  }
+
+  async replyWithPokeBack(e, pokeConfig) {
+    const retype = _.random(1, 3);
+
+    switch (retype) {
+      case 1:
+        await e.reply("戳回去(=°ω°)ノ");
+        await common.sleep(500);
+        await e.poke(e.user_id);
+        setTimeout(() => {
+          const followUpReplies = [
+            `${this.botname}可不是好欺负的!`,
+            "哼(￢︿̫̿￢☆)",
+            "(ˉ▽￣～) 切~~",
+          ];
+          const msg = _.sample(followUpReplies);
+          e.reply(msg);
+        }, 500);
+        break;
+
+      case 2:
+        const msg_text = _.sample(pokeConfig.pokeBackTextReplies);
+        await e.reply(msg_text.replace(/_botname_/g, this.botname));
+        await common.sleep(500);
+        await e.poke(e.user_id);
+        break;
+
+      case 3:
+        await e.reply("呜呜呜……这样到处摸的话……");
+        await common.sleep(500);
+        await e.poke(e.user_id);
+        await common.sleep(500);
+        await e.reply("我也会把你摸回来的！");
+        break;
+    }
+  }
+
+  async replyWithSpecialEasterEgg(e) {
+    const retype = _.random(1, 11);
+
+    switch (retype) {
+      case 1:
+        await e.reply("救命啊，有变态>_<！！！");
+        await common.sleep(500);
+        await e.reply(this.sendImage(this.getPokeImagePath("10.gif")));
+        break;
+      case 2:
+        await e.reply("咳哈哈哈哈——！");
+        await common.sleep(500);
+        await e.reply(this.sendImage(this.getPokeImagePath("11.gif")));
+        await common.sleep(500);
+        await e.reply("别挠我痒痒了！");
+        await common.sleep(500);
+        await e.reply("好痒啊！");
+        break;
+      case 3:
+        await e.reply("就、就算那样戳我，也不会掉落什么哦……");
+        await common.sleep(500);
+        await e.reply(`${this.botname}又不是怪物！`);
+        break;
+      case 4:
+        await e.reply("这样几次挠我痒痒会很困扰的呢。");
+        await common.sleep(500);
+        await e.reply("你啊，意外地喜欢恶作剧吧？");
+        break;
+      case 5:
+        await e.reply("戳中宝藏啦！是一张涩图！");
+        const apiUrl =
+          "https://yande.re/post.json?tags=loli+-rating:e+-nipples&limit=500";
+        const imageUrl = await yandeimage(apiUrl);
+        if (imageUrl) {
+          const result = await e.reply(segment.image(imageUrl));
+          if (!result?.message_id) {
+            await e.reply("嘻嘻，骗你的，其实根本没有涩图~");
+          }
+        }
+        break;
+      case 6:
+        await e.reply("把嘴张开（抬起脚）");
+        const feet_apiUrl =
+          "https://yande.re/post.json?tags=feet+-rating:e+-nipples&limit=500";
+        const feet_imageUrl = await yandeimage(feet_apiUrl);
+        if (feet_imageUrl) {
+          const result = await e.reply(segment.image(feet_imageUrl));
+          if (!result?.message_id) {
+            await e.reply("你还真张嘴了啊（收起脚），想得美~");
+          }
+        }
+        break;
+      case 7:
+        await e.reply("在这里无意义地消耗着时间，这……");
+        await common.sleep(5000);
+        await e.reply("没、没有，我并没有讨厌……");
+        break;
+      case 8:
+        for (let i = 0; i < 10; i++) {
+          await e.poke(e.user_id);
+          await common.sleep(500);
+        }
+        await e.reply(`超级加倍！让你见识一下${this.botname}的厉害！`);
+        await common.sleep(1000);
+        break;
+      case 9:
+        await e.reply("嗯？什么？戳戳对方的游戏？");
+        await common.sleep(500);
+        await e.poke(e.user_id);
+        await common.sleep(500);
+        await e.poke(e.user_id);
+        await common.sleep(500);
+        await e.reply("我也不会输哦！");
+        await common.sleep(500);
+        await e.poke(e.user_id);
+        await common.sleep(500);
+        await e.poke(e.user_id);
+        await common.sleep(500);
+        await e.reply("喝！");
+        await common.sleep(500);
+        await e.poke(e.user_id);
+        await common.sleep(500);
+        await e.poke(e.user_id);
+        await common.sleep(500);
+        await e.reply("哈！");
+        await common.sleep(500);
+        await e.poke(e.user_id);
+        await common.sleep(500);
+        await e.poke(e.user_id);
+        break;
+      case 10:
+        await e.reply("觉得我不会反击就为所欲为……做好觉悟吧！");
+        await common.sleep(500);
+        for (let i = 0; i < 11; i++) {
+          await e.poke(e.user_id);
+          await common.sleep(500);
+        }
+        break;
+    }
+  }
+}

@@ -1,5 +1,6 @@
 packages:
   - plugins/*
+  - src/web/frontend
 
 onlyBuiltDependencies:
   - better-sqlite3

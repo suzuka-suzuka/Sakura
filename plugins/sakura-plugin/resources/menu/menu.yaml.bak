@@ -1,0 +1,19 @@
+title: ''
+subtitle: 小叶的专属菜单
+menu:
+  - category: AI功能
+    commands:
+      - name: 和小叶聊天
+        desc: 消息里只要包
+      - name: 新指令
+        desc: ''
+      - name: 新指令
+        desc: 可双击修改
+      - name: 新指令
+        desc: 可双击修改
+      - name: 新指令
+        desc: 可双击修改
+      - name: 新指令
+        desc: 可双击修改
+      - name: 新指令
+        desc: 可双击修改
