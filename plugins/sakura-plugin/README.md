@@ -303,9 +303,3 @@ cd Sakura
 git pull --ff-only
 pnpm install --frozen-lockfile
 ```
-
-也可以使用主人指令更新整个 Sakura 仓库：
-
-```text
-#更新
-```

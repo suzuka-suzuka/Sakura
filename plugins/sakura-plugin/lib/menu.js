@@ -175,7 +175,6 @@ export const menuGroups = [
       { name: "B站解析", command: "发送 B 站链接", desc: "自动解析 B 站视频信息。", trigger: "自动" },
       { name: "B站UID分析", command: "#查B站UID <uid>", desc: "查询指定 B 站 UID 的公开评论，渲染全量评论、AI成分总结和标签。", costCommand: charge("BiliUidAnalyzer.queryUid"), examples: ["#查B站UID 146086607"] },
       { name: "消息转发", command: "按配置自动转发", desc: "根据后台规则跨群转发消息。", trigger: "自动" },
-      { name: "更新插件", command: "#更新", desc: "执行插件更新。", permission: "主人" },
     ],
   },
   {
