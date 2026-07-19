@@ -1,4 +1,3 @@
-import { plugindata } from "../path.js";
 import Setting from "../setting.js";
 import InventoryManager from "./InventoryManager.js";
 import db from "../Database.js";
@@ -217,12 +216,65 @@ export default class FishingManager {
 
   damageRod(userId, rodId, damage) {
     userId = String(userId);
-    db.prepare(`
-        INSERT INTO rod_stats (group_id, user_id, rod_id, damage, mastery)
-        VALUES (?, ?, ?, ?, 0)
-        ON CONFLICT(group_id, user_id, rod_id)
-        DO UPDATE SET damage = damage + ?
-    `).run(this.groupId, userId, rodId, damage, damage);
+    const safeDamage = Number(damage);
+    const rodConfig = this.getRodConfig(rodId);
+    if (!rodConfig || !Number.isFinite(safeDamage) || safeDamage <= 0) {
+      return { applied: false, isBroken: false, currentControl: 0, maxControl: rodConfig?.control || 0 };
+    }
+
+    const transaction = db.transaction(() => {
+      const owned = db.prepare(`
+          SELECT count FROM inventory
+          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count > 0
+      `).get(this.groupId, userId, rodId);
+      if (!owned) {
+        return { applied: false, isBroken: false, currentControl: 0, maxControl: rodConfig.control };
+      }
+
+      const currentControl = this.getRodControl(userId, rodId);
+      const nextControl = Math.max(0, currentControl - safeDamage);
+      if (nextControl <= 0) {
+        db.prepare(`
+            UPDATE inventory
+            SET count = count - 1
+            WHERE group_id = ? AND user_id = ? AND item_id = ? AND count >= 1
+        `).run(this.groupId, userId, rodId);
+        db.prepare(`
+            DELETE FROM inventory
+            WHERE group_id = ? AND user_id = ? AND item_id = ? AND count <= 0
+        `).run(this.groupId, userId, rodId);
+        db.prepare(`
+            DELETE FROM rod_stats
+            WHERE group_id = ? AND user_id = ? AND rod_id = ?
+        `).run(this.groupId, userId, rodId);
+        db.prepare(`
+            UPDATE fishing_stats
+            SET rod = CASE WHEN rod = ? THEN NULL ELSE rod END
+            WHERE group_id = ? AND user_id = ?
+        `).run(rodId, this.groupId, userId);
+        return {
+          applied: true,
+          isBroken: true,
+          currentControl: 0,
+          maxControl: rodConfig.control,
+        };
+      }
+
+      db.prepare(`
+          INSERT INTO rod_stats (group_id, user_id, rod_id, damage, mastery)
+          VALUES (?, ?, ?, ?, 0)
+          ON CONFLICT(group_id, user_id, rod_id)
+          DO UPDATE SET damage = damage + ?
+      `).run(this.groupId, userId, rodId, safeDamage, safeDamage);
+      return {
+        applied: true,
+        isBroken: false,
+        currentControl: nextControl,
+        maxControl: rodConfig.control,
+      };
+    });
+
+    return transaction.immediate();
   }
 
   clearRodDamage(userId, rodId) {
@@ -397,6 +449,29 @@ export default class FishingManager {
       .run(this.groupId, userId);
   }
 
+  breakLine(userId, lineId) {
+    userId = String(userId);
+    const transaction = db.transaction(() => {
+      const removed = db.prepare(`
+          UPDATE inventory
+          SET count = count - 1
+          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count >= 1
+      `).run(this.groupId, userId, lineId);
+      if (removed.changes !== 1) return false;
+      db.prepare(`
+          DELETE FROM inventory
+          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count <= 0
+      `).run(this.groupId, userId, lineId);
+      db.prepare(`
+          UPDATE fishing_stats
+          SET line = CASE WHEN line = ? THEN NULL ELSE line END
+          WHERE group_id = ? AND user_id = ?
+      `).run(lineId, this.groupId, userId);
+      return true;
+    });
+    return transaction();
+  }
+
   getUserBaits(userId) {
     const inventoryManager = new InventoryManager(this.groupId, userId);
     return inventoryManager.getInventory();
@@ -436,30 +511,42 @@ export default class FishingManager {
   consumeBait(userId) {
     userId = String(userId);
     this._ensureUser(userId);
-    const userData = this.getUserData(userId);
-    const baitId = userData.bait;
+    const transaction = db.transaction(() => {
+      const baitId = db.prepare(`
+          SELECT bait FROM fishing_stats
+          WHERE group_id = ? AND user_id = ?
+      `).get(this.groupId, userId)?.bait;
+      if (!baitId) return false;
 
-    if (baitId) {
-      const inventoryManager = new InventoryManager(this.groupId, userId);
-      if (inventoryManager.getItemCount(baitId) > 0) {
-        inventoryManager.removeItem(baitId, 1);
+      const removed = db.prepare(`
+          UPDATE inventory
+          SET count = count - 1
+          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count >= 1
+      `).run(this.groupId, userId, baitId);
+      if (removed.changes !== 1) return false;
 
-        if (inventoryManager.getItemCount(baitId) <= 0) {
-          const inventory = inventoryManager.getInventory();
-          const allBaits = this.getAllBaits();
-          const availableBaits = allBaits
-            .filter(b => inventory[b.id] > 0)
-            .sort((a, b) => (a.price || 0) - (b.price || 0));
+      db.prepare(`
+          DELETE FROM inventory
+          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count <= 0
+      `).run(this.groupId, userId, baitId);
 
-          const nextBait = availableBaits.length > 0 ? availableBaits[0].id : null;
-
-          db.prepare('UPDATE fishing_stats SET bait = ? WHERE group_id = ? AND user_id = ?')
-            .run(nextBait, this.groupId, userId);
-        }
-        return true;
+      const remaining = db.prepare(`
+          SELECT count FROM inventory
+          WHERE group_id = ? AND user_id = ? AND item_id = ?
+      `).get(this.groupId, userId, baitId)?.count || 0;
+      if (remaining <= 0) {
+        const inventory = new InventoryManager(this.groupId, userId).getInventory();
+        const nextBait = this.getAllBaits()
+          .filter((bait) => inventory[bait.id] > 0)
+          .sort((a, b) => (a.price || 0) - (b.price || 0))[0]?.id || null;
+        db.prepare(`
+            UPDATE fishing_stats SET bait = ?
+            WHERE group_id = ? AND user_id = ?
+        `).run(nextBait, this.groupId, userId);
       }
-    }
-    return false;
+      return true;
+    });
+    return transaction.immediate();
   }
 
   recordCatch(userId, earnings, fishId, isSuccess = true) {
@@ -548,16 +635,35 @@ export default class FishingManager {
 
   deployTorpedo(userId) {
     userId = String(userId);
-    if (this.getUserTorpedoCount(userId) > 0) {
-      return { success: false, msg: "你在鱼塘中已有一个鱼雷了！" };
-    }
+    const transaction = db.transaction(() => {
+      const existing = db.prepare(`
+          SELECT 1 FROM pond_torpedoes
+          WHERE group_id = ? AND user_id = ?
+      `).get(this.groupId, userId);
+      if (existing) {
+        return { success: false, reason: "already_deployed", msg: "你在鱼塘中已有一个鱼雷了！" };
+      }
 
-    db.prepare(`
-        INSERT INTO pond_torpedoes (group_id, user_id, timestamp)
-        VALUES (?, ?, ?)
-    `).run(this.groupId, userId, Date.now());
+      const removed = db.prepare(`
+          UPDATE inventory
+          SET count = count - 1
+          WHERE group_id = ? AND user_id = ? AND item_id = 'torpedo' AND count >= 1
+      `).run(this.groupId, userId);
+      if (removed.changes !== 1) {
+        return { success: false, reason: "not_owned", msg: "你的背包里没有鱼雷！" };
+      }
+      db.prepare(`
+          DELETE FROM inventory
+          WHERE group_id = ? AND user_id = ? AND item_id = 'torpedo' AND count <= 0
+      `).run(this.groupId, userId);
+      db.prepare(`
+          INSERT INTO pond_torpedoes (group_id, user_id, timestamp)
+          VALUES (?, ?, ?)
+      `).run(this.groupId, userId, Date.now());
+      return { success: true, msg: "鱼雷投放成功！" };
+    });
 
-    return { success: true, msg: "鱼雷投放成功！" };
+    return transaction.immediate();
   }
 
   getAvailableTorpedoCount(excludeUserId) {
@@ -568,22 +674,18 @@ export default class FishingManager {
 
   triggerTorpedo(fisherId) {
     fisherId = String(fisherId);
-    // Select a random user (excluding fisherId)
-    // SQLite: ORDER BY RANDOM() LIMIT 1
     const row = db.prepare(`
-        SELECT user_id 
-        FROM pond_torpedoes 
-        WHERE group_id = ? AND user_id != ? 
-        ORDER BY RANDOM() 
-        LIMIT 1
-    `).get(this.groupId, fisherId);
-
-    if (row) {
-      db.prepare('DELETE FROM pond_torpedoes WHERE group_id = ? AND user_id = ?').run(this.groupId, row.user_id);
-      return row.user_id;
-    }
-
-    return null;
+        DELETE FROM pond_torpedoes
+        WHERE group_id = ? AND user_id = (
+          SELECT user_id
+          FROM pond_torpedoes
+          WHERE group_id = ? AND user_id != ?
+          ORDER BY RANDOM()
+          LIMIT 1
+        )
+        RETURNING user_id
+    `).get(this.groupId, this.groupId, fisherId);
+    return row?.user_id || null;
   }
 
   async setFishPriceBoost() {

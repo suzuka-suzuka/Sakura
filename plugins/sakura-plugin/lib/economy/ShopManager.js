@@ -123,7 +123,7 @@ class ShopManager {
     const itemId = this.getItemId(item);
 
     const transaction = db.transaction(() => {
-      const userId = economyManager._initUser(e);
+      const userId = economyManager.ensureUser(e);
       const currentCoins = economyManager.getUserData(userId).coins;
 
       if (currentCoins < totalPrice) {
@@ -176,7 +176,7 @@ class ShopManager {
       return { success: true };
     });
 
-    const result = transaction();
+    const result = transaction.immediate();
 
     if (!result.success) {
       return result;

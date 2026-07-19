@@ -45,6 +45,18 @@ class DB {
       CREATE INDEX IF NOT EXISTS idx_economy_transactions_user_time
       ON economy_transactions (group_id, user_id, created_at DESC);
 
+      CREATE TABLE IF NOT EXISTS economy_daily_claims (
+        group_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        claim_type TEXT NOT NULL,
+        claim_date TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (group_id, user_id, claim_type, claim_date)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_economy_daily_claims_created_at
+      ON economy_daily_claims (created_at);
+
       CREATE TABLE IF NOT EXISTS inventory (
         group_id TEXT NOT NULL,
         user_id TEXT NOT NULL,
@@ -64,6 +76,7 @@ class DB {
         torpedo_hits INTEGER DEFAULT 0,
         profession TEXT,
         profession_level INTEGER DEFAULT 0,
+        fishing_exp INTEGER DEFAULT 0,
         PRIMARY KEY (group_id, user_id)
       );
 
@@ -75,6 +88,19 @@ class DB {
         success_count INTEGER DEFAULT 0,
         PRIMARY KEY (group_id, user_id, fish_id)
       );
+
+      CREATE TABLE IF NOT EXISTS fishing_attempts (
+        session_id TEXT PRIMARY KEY,
+        group_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        fish_id TEXT,
+        success INTEGER NOT NULL DEFAULT 0,
+        earnings INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_fishing_attempts_created_at
+      ON fishing_attempts (created_at);
 
       CREATE TABLE IF NOT EXISTS rod_stats (
         group_id TEXT NOT NULL,
@@ -121,6 +147,15 @@ class DB {
         created_at INTEGER
       );
     `);
+    this.migrate();
+  }
+
+  // 老库补列：CREATE TABLE IF NOT EXISTS 不会给已存在的表加新列
+  migrate() {
+    const fishingStatsColumns = this.db.prepare('PRAGMA table_info(fishing_stats)').all();
+    if (!fishingStatsColumns.some((column) => column.name === 'fishing_exp')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_exp INTEGER DEFAULT 0');
+    }
   }
 
   prepare(sql) {

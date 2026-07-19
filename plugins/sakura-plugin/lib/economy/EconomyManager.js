@@ -21,6 +21,10 @@ export default class EconomyManager {
     return userId;
   }
 
+  ensureUser(e) {
+    return this._initUser(e);
+  }
+
   getUserData(userId) {
     if (!this.groupId) return { coins: 0, experience: 0, level: 1, bag_level: 1 };
 
@@ -123,34 +127,44 @@ export default class EconomyManager {
   }
 
   getTransactionAnalysis(e, { userId = null, since = 0, until = Date.now() } = {}) {
-    const rows = this.getTransactionsInRange(e, { userId, since, until });
-    const categories = new Map();
-    let income = 0;
-    let expense = 0;
-
-    for (const row of rows) {
-      if (row.amount > 0) income += row.amount;
-      if (row.amount < 0) expense += Math.abs(row.amount);
-
-      const category = row.note || row.type || "其他";
-      const current = categories.get(category) || { name: category, income: 0, expense: 0, count: 0 };
-      if (row.amount > 0) current.income += row.amount;
-      if (row.amount < 0) current.expense += Math.abs(row.amount);
-      current.count += 1;
-      categories.set(category, current);
+    if (!this.groupId) {
+      return { rows: [], income: 0, expense: 0, net: 0, count: 0, categories: [] };
     }
+    const targetUserId = String(userId || e.user_id);
+    const safeSince = Number(since) || 0;
+    const safeUntil = Number(until) || Date.now();
+    const summary = db.prepare(`
+        SELECT
+          COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS income,
+          COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 0) AS expense,
+          COUNT(*) AS count
+        FROM economy_transactions
+        WHERE group_id = ? AND user_id = ? AND created_at >= ? AND created_at < ?
+    `).get(this.groupId, targetUserId, safeSince, safeUntil);
 
-    const categoryList = [...categories.values()]
-      .map(item => ({ ...item, total: item.income + item.expense }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 8);
+    const categoryList = db.prepare(`
+        SELECT
+          COALESCE(NULLIF(note, ''), NULLIF(type, ''), '其他') AS name,
+          COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS income,
+          COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 0) AS expense,
+          COUNT(*) AS count,
+          SUM(ABS(amount)) AS total
+        FROM economy_transactions
+        WHERE group_id = ? AND user_id = ? AND created_at >= ? AND created_at < ?
+        GROUP BY COALESCE(NULLIF(note, ''), NULLIF(type, ''), '其他')
+        ORDER BY total DESC
+        LIMIT 8
+    `).all(this.groupId, targetUserId, safeSince, safeUntil);
+
+    const income = Number(summary.income) || 0;
+    const expense = Number(summary.expense) || 0;
 
     return {
-      rows,
+      rows: [],
       income,
       expense,
       net: income - expense,
-      count: rows.length,
+      count: Number(summary.count) || 0,
       categories: categoryList,
     };
   }
@@ -162,6 +176,15 @@ export default class EconomyManager {
         DELETE FROM economy_transactions
         WHERE created_at < ?
     `).run(expireBefore);
+    return result.changes || 0;
+  }
+
+  static cleanupDailyClaims(retentionDays = 30) {
+    const days = Math.max(1, Number(retentionDays) || 30);
+    const result = db.prepare(`
+        DELETE FROM economy_daily_claims
+        WHERE created_at < ?
+    `).run(Date.now() - days * 24 * 60 * 60 * 1000);
     return result.changes || 0;
   }
 
@@ -214,25 +237,26 @@ export default class EconomyManager {
 
     const userId = this._initUser(e);
 
-    this.getUserData(userId);
+    const transaction = db.transaction(() => {
+      const result = db.prepare(`
+          UPDATE economy
+          SET coins = coins + ?
+          WHERE group_id = ? AND user_id = ?
+      `).run(value, this.groupId, userId);
 
-    const result = db.prepare(`
-        UPDATE economy 
-        SET coins = coins + ?
-        WHERE group_id = ? AND user_id = ?
-    `).run(value, this.groupId, userId);
+      if (result.changes > 0 && recordOptions.record !== false) {
+        this.recordTransaction(e, {
+          type: recordOptions.type || "收入",
+          amount: value,
+          targetUserId: recordOptions.targetUserId,
+          note: recordOptions.note || "",
+          relatedId: recordOptions.relatedId,
+        });
+      }
+      return result.changes > 0;
+    });
 
-    if (result.changes > 0 && recordOptions.record !== false) {
-      this.recordTransaction(e, {
-        type: recordOptions.type || "收入",
-        amount: value,
-        targetUserId: recordOptions.targetUserId,
-        note: recordOptions.note || "",
-        relatedId: recordOptions.relatedId,
-      });
-    }
-
-    return result.changes > 0;
+    return transaction();
   }
 
   reduceCoins(e, amount, options = {}) {
@@ -243,26 +267,28 @@ export default class EconomyManager {
 
     const userId = this._initUser(e);
 
-    const currentData = this.getUserData(userId);
-    const actualDeducted = Math.min(value, currentData.coins);
+    const transaction = db.transaction(() => {
+      const currentData = this.getUserData(userId);
+      const actualDeducted = Math.min(value, currentData.coins);
+      const result = db.prepare(`
+          UPDATE economy
+          SET coins = MAX(0, coins - ?)
+          WHERE group_id = ? AND user_id = ?
+      `).run(value, this.groupId, userId);
 
-    const result = db.prepare(`
-        UPDATE economy 
-        SET coins = MAX(0, coins - ?)
-        WHERE group_id = ? AND user_id = ?
-    `).run(value, this.groupId, userId);
+      if (result.changes > 0 && actualDeducted > 0 && recordOptions.record !== false) {
+        this.recordTransaction(e, {
+          type: recordOptions.type || "支出",
+          amount: -actualDeducted,
+          targetUserId: recordOptions.targetUserId,
+          note: recordOptions.note || "",
+          relatedId: recordOptions.relatedId,
+        });
+      }
+      return result.changes > 0;
+    });
 
-    if (result.changes > 0 && actualDeducted > 0 && recordOptions.record !== false) {
-      this.recordTransaction(e, {
-        type: recordOptions.type || "支出",
-        amount: -actualDeducted,
-        targetUserId: recordOptions.targetUserId,
-        note: recordOptions.note || "",
-        relatedId: recordOptions.relatedId,
-      });
-    }
-
-    return result.changes > 0;
+    return transaction.immediate();
   }
 
   tryReduceCoins(e, amount, options = {}) {
@@ -273,25 +299,74 @@ export default class EconomyManager {
 
     const userId = this._initUser(e);
 
-    this.getUserData(userId);
+    const transaction = db.transaction(() => {
+      const result = db.prepare(`
+          UPDATE economy
+          SET coins = coins - ?
+          WHERE group_id = ? AND user_id = ? AND coins >= ?
+      `).run(value, this.groupId, userId, value);
 
-    const result = db.prepare(`
-        UPDATE economy
-        SET coins = coins - ?
-      WHERE group_id = ? AND user_id = ? AND coins >= ?
-    `).run(value, this.groupId, userId, value);
+      if (result.changes === 1 && recordOptions.record !== false) {
+        this.recordTransaction(e, {
+          type: recordOptions.type || "支出",
+          amount: -value,
+          targetUserId: recordOptions.targetUserId,
+          note: recordOptions.note || "",
+          relatedId: recordOptions.relatedId,
+        });
+      }
+      return result.changes === 1;
+    });
 
-    if (result.changes === 1 && recordOptions.record !== false) {
-      this.recordTransaction(e, {
-        type: recordOptions.type || "支出",
-        amount: -value,
-        targetUserId: recordOptions.targetUserId,
-        note: recordOptions.note || "",
-        relatedId: recordOptions.relatedId,
-      });
+    return transaction();
+  }
+
+  claimDailyCoins(
+    e,
+    { claimType, claimDate, amount, note = "每日领取", maxBalanceExclusive = null } = {},
+  ) {
+    if (!this.groupId || !claimType || !claimDate) {
+      return { success: false, reason: "invalid" };
     }
+    const value = this._normalizeCoinAmount(amount);
+    if (value == null) return { success: false, reason: "invalid" };
+    const userId = this._initUser(e);
 
-    return result.changes === 1;
+    const transaction = db.transaction(() => {
+      if (maxBalanceExclusive != null) {
+        const balance = this.getUserData(userId).coins;
+        if (balance >= Number(maxBalanceExclusive)) {
+          return { success: false, reason: "ineligible", balance };
+        }
+      }
+
+      const claim = db.prepare(`
+          INSERT OR IGNORE INTO economy_daily_claims
+          (group_id, user_id, claim_type, claim_date, created_at)
+          VALUES (?, ?, ?, ?, ?)
+      `).run(this.groupId, userId, claimType, claimDate, Date.now());
+
+      if (claim.changes !== 1) {
+        return { success: false, reason: "already_claimed" };
+      }
+
+      db.prepare(`
+          UPDATE economy
+          SET coins = coins + ?
+          WHERE group_id = ? AND user_id = ?
+      `).run(value, this.groupId, userId);
+
+      this.recordTransaction(e, {
+        type: "收入",
+        amount: value,
+        note,
+        relatedId: `${claimType}:${claimDate}`,
+      });
+
+      return { success: true, amount: value };
+    });
+
+    return transaction.immediate();
   }
 
   spendCoins(e, amount, creditEntries = [], options = {}) {
@@ -444,7 +519,16 @@ export default class EconomyManager {
             WHERE group_id = ? AND user_id = ? AND coins >= ? AND COALESCE(bag_level, 1) = ?
         `).run(cost, nextLevel, this.groupId, userId, cost, currentLevel);
 
-      return result.changes === 1;
+      if (result.changes !== 1) return false;
+
+      if (cost > 0) {
+        this.recordTransaction(e, {
+          type: "支出",
+          amount: -cost,
+          note: `升级背包至 ${nextLevel} 级`,
+        });
+      }
+      return true;
     });
 
     try {
@@ -452,11 +536,6 @@ export default class EconomyManager {
       if (!success) {
         return { success: false, msg: "金币不足或背包等级已变化，请重试" };
       }
-      this.recordTransaction(e, {
-        type: "支出",
-        amount: -cost,
-        note: `升级背包至 ${nextLevel} 级`,
-      });
       return {
         success: true,
         msg: `背包升级成功！当前等级: ${nextLevel}, 容量: ${config.levels[nextLevel].capacity}`,

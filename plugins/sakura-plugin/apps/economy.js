@@ -3,6 +3,18 @@ import EconomyImageGenerator from "../lib/economy/ImageGenerator.js";
 import ShopManager from "../lib/economy/ShopManager.js";
 import InventoryManager from "../lib/economy/InventoryManager.js";
 import FishingManager from "../lib/economy/FishingManager.js";
+import EconomyOperations from "../lib/economy/EconomyOperations.js";
+import {
+  acquireRedisLock,
+  deleteIfValue,
+  extendExistingTtl,
+} from "../lib/economy/redisAtomic.js";
+import {
+  getShanghaiDateKey,
+  getStartOfShanghaiDay,
+  getStartOfShanghaiWeek,
+  secondsUntilNextShanghaiDay,
+} from "../lib/economy/time.js";
 import _ from "lodash";
 import Setting from "../lib/setting.js";
 
@@ -32,20 +44,18 @@ export default class Economy extends plugin {
     if (deleted > 0) {
       logger.info(`[经济系统] 已清理 ${deleted} 条 7 天前的流水记录`);
     }
+    const deletedClaims = EconomyManager.cleanupDailyClaims(30);
+    if (deletedClaims > 0) {
+      logger.info(`[经济系统] 已清理 ${deletedClaims} 条过期每日领取记录`);
+    }
   });
 
   getStartOfToday() {
-    const date = new Date();
-    date.setHours(0, 0, 0, 0);
-    return date.getTime();
+    return getStartOfShanghaiDay();
   }
 
   getStartOfWeek() {
-    const date = new Date();
-    date.setHours(0, 0, 0, 0);
-    const day = date.getDay() || 7;
-    date.setDate(date.getDate() - day + 1);
-    return date.getTime();
+    return getStartOfShanghaiWeek();
   }
 
   formatTransactionTime(timestamp) {
@@ -67,6 +77,7 @@ export default class Economy extends plugin {
   }
 
   transactionLog = Command(/^#?(?:查)?流水(?:.*)$/i, async (e) => {
+    if (!this.checkWhitelist(e)) return false;
     const targetId = e.at && e.isMaster ? String(e.at) : String(e.user_id);
     const text = String(e.msg || "").replace(/\[CQ:at[^\]]+\]/g, "").trim();
     const pageMatch = text.match(/(?:第)?(\d+)(?:页)?\s*$/);
@@ -113,10 +124,12 @@ export default class Economy extends plugin {
   });
 
   todayTransactionAnalysis = Command(/^#?今日流水分析$/i, async (e) => {
+    if (!this.checkWhitelist(e)) return false;
     return await this.sendTransactionAnalysis(e, "today");
   });
 
   weekTransactionAnalysis = Command(/^#?本周流水分析$/i, async (e) => {
+    if (!this.checkWhitelist(e)) return false;
     return await this.sendTransactionAnalysis(e, "week");
   });
 
@@ -160,6 +173,7 @@ export default class Economy extends plugin {
   }
 
   addCoinsToOther = Command(/^\s*#?(添加|增加|给予)[樱桜]花币\s*(\d+)$/i, "master",  async (e) => {
+    if (!this.checkWhitelist(e)) return false;
 
     const targetId = e.at;
     if (!targetId) {
@@ -172,11 +186,15 @@ export default class Economy extends plugin {
     }
 
     const economyManager = new EconomyManager(e);
-    economyManager.addCoins(
+    const added = economyManager.addCoins(
       { user_id: targetId, group_id: e.group_id },
       amount,
       { type: "收入", note: "主人添加樱花币", targetUserId: e.user_id }
     );
+    if (!added) {
+      await e.reply("添加失败，金额或账户状态异常。", 10);
+      return true;
+    }
 
     let targetName = targetId;
     try {
@@ -204,10 +222,11 @@ export default class Economy extends plugin {
     }
 
     const cooldownKey = `sakura:economy:rob:cooldown:${e.group_id}:${e.user_id}`;
-    const ttl = await redis.ttl(cooldownKey);
-    if (ttl > 0) {
-      const newTtl = ttl + 300;
-      await redis.expire(cooldownKey, newTtl);
+    const cooldownToken = String(Date.now());
+    const cooldownAcquired = await acquireRedisLock(redis, cooldownKey, cooldownToken, 1800);
+    if (!cooldownAcquired) {
+      const extendedTtl = await extendExistingTtl(redis, cooldownKey, 300);
+      const newTtl = extendedTtl > 0 ? extendedTtl : 300;
       const remainingTime = Math.ceil(newTtl / 60);
       await e.reply(
         `精英巫女察觉到了你的躁动，加强了戒备...\n请等待 ${remainingTime} 分钟后再行动！`,
@@ -256,13 +275,6 @@ export default class Economy extends plugin {
         80,
         50 + levelDiff + Math.max(0, targetCoins - attackerCoins) / 20
       )
-    );
-
-    await redis.set(
-      cooldownKey,
-      String(Math.floor(Date.now() / 1000)),
-      "EX",
-      1800
     );
 
     const roll = _.random(1, 100);
@@ -391,14 +403,37 @@ export default class Economy extends plugin {
       return true;
     }
 
-    const counterData = JSON.parse(counterDataStr);
+    let counterData;
+    try {
+      counterData = JSON.parse(counterDataStr);
+    } catch (err) {
+      logger.warn(`[经济系统] 反击凭证损坏: ${err.message}`);
+      await deleteIfValue(redis, counterKey, counterDataStr);
+      await e.reply("反击凭证已经失效，请等待下一次机会。", 10);
+      return true;
+    }
 
-    if (counterData.attackerId != targetId) {
+    if (
+      !counterData ||
+      counterData.attackerId == null ||
+      !Number.isSafeInteger(Number(counterData.amount)) ||
+      Number(counterData.amount) < 0 ||
+      !Number.isFinite(Number(counterData.time))
+    ) {
+      await deleteIfValue(redis, counterKey, counterDataStr);
+      await e.reply("反击凭证已经失效，请等待下一次机会。", 10);
+      return true;
+    }
+
+    if (String(counterData.attackerId) !== String(targetId)) {
       await e.reply("找错人了！那个人是无辜的！", 10);
       return true;
     }
 
-    await redis.del(counterKey);
+    if (!await deleteIfValue(redis, counterKey, counterDataStr)) {
+      await e.reply("反击机会已经被使用或过期了！", 10);
+      return true;
+    }
 
     const economyManager = new EconomyManager(e);
     const attackerName = e.sender.card || e.sender.nickname || e.user_id;
@@ -411,10 +446,10 @@ export default class Economy extends plugin {
     } catch (err) {}
 
     const elapsedTime = (Date.now() - counterData.time) / 1000;
-    const successRate = Math.max(
-      0,
-      Math.round(100 - (elapsedTime / 120) * 100)
-    );
+    const successRate = Math.max(0, Math.min(
+      100,
+      Math.round(100 - (elapsedTime / 120) * 100),
+    ));
 
     const roll = _.random(1, 100);
     if (roll <= successRate) {
@@ -540,6 +575,7 @@ export default class Economy extends plugin {
   });
 
   myStatus = Command(/^#?((我|咱)的(信息|等级|资产))$/, async (e) => {
+    if (!this.checkWhitelist(e)) return false;
     const economyManager = new EconomyManager(e);
     const coins = economyManager.getCoins(e);
     const level = economyManager.getLevel(e);
@@ -593,12 +629,12 @@ export default class Economy extends plugin {
     const feePercent = _.random(0, 10);
     const totalFee = 10 + Math.round(amount * (feePercent / 100));
     
-    let actualTransfer = amount - totalFee;
-    let actualFee = totalFee;
+    const actualTransfer = amount - totalFee;
+    const actualFee = totalFee;
     
     if (totalFee >= amount) {
-      actualTransfer = 0;
-      actualFee = amount;
+      await e.reply("转账金额必须高于本次手续费，请增加金额后重试~", 10);
+      return true;
     }
 
     const creditEntries = [];
@@ -680,6 +716,12 @@ export default class Economy extends plugin {
     const item = shopManager.findShopItemByName(itemName) || shopManager.findShopItemById(itemName);
     if (!item || item.type !== 'equipment') return false;
 
+    const fishingSessionKey = `sakura:fishing:session:${e.group_id}:${e.user_id}`;
+    if (await redis.exists(fishingSessionKey)) {
+      await e.reply("钓鱼过程中不能出售装备，请先完成本次钓鱼。", 10);
+      return true;
+    }
+
     const itemId = item.id || itemName;
     if (inventoryManager.getItemCount(itemId) < 1) {
       await e.reply(`你没有【${item.name}】，无法出售~`, 10);
@@ -701,16 +743,18 @@ export default class Economy extends plugin {
       }
     }
 
-    if (!inventoryManager.removeItem(itemId, 1)) {
+    const result = new EconomyOperations(e).sellItem({
+      itemId,
+      price: sellPrice,
+      itemName: item.name,
+      equipmentSlot: item.handler === "fishing_rod"
+        ? "rod"
+        : item.handler === "fishing_line" ? "line" : null,
+    });
+    if (!result.success) {
       await e.reply("出售失败，请稍后再试~", 10);
       return true;
     }
-
-    if (rodConfig) {
-      fishingManager.clearEquippedRod(e.user_id, itemId);
-    }
-
-    new EconomyManager(e).addCoins(e, sellPrice, { type: "收入", note: `出售 ${item.name}` });
 
     await e.reply(
       `💰 成功出售【${item.name}】${durabilityMsg}！\n💵 获得 ${sellPrice} 樱花币`
@@ -741,17 +785,11 @@ export default class Economy extends plugin {
     }
 
     if (item.isRandomBait) {
-      const economyManager = new EconomyManager(e);
-      const capacity = economyManager.getBagCapacity(e);
-      const currentSize = inventoryManager.getCurrentSize();
-      const remainingSpace = capacity - currentSize;
-
-      if (remainingSpace < 2) {
-        await e.reply(`背包空间不足！需要至少2~`, 10);
+      const allBaits = fishingManager.getAllBaits();
+      if (allBaits.length === 0) {
+        await e.reply("鱼饵配置为空，暂时无法打开鱼饵包。", 10);
         return true;
       }
-
-      const allBaits = fishingManager.getAllBaits();
       const userBaits = fishingManager.getUserBaits(userId);
       
       let missingBaits = allBaits.filter(b => !userBaits[b.id] || userBaits[b.id] <= 0);
@@ -763,9 +801,11 @@ export default class Economy extends plugin {
         selectedBait = allBaits[_.random(0, allBaits.length - 1)];
       }
 
-      inventoryManager.removeItem(item.id, 1);
-      
-      await inventoryManager.addItem(selectedBait.id, 3);
+      const exchange = inventoryManager.exchangeItem(item.id, 1, selectedBait.id, 3);
+      if (!exchange.success) {
+        await e.reply(exchange.msg || "打开鱼饵包失败，请稍后再试~", 10);
+        return true;
+      }
       
       await e.reply([
         `🎁 打开了随机鱼饵包！\n`,
@@ -777,15 +817,19 @@ export default class Economy extends plugin {
 
     const buffKey = `sakura:fishing:buff:${item.id}:${groupId}:${userId}`;
     
-    const existingBuff = await redis.get(buffKey);
-    if (existingBuff) {
-      await redis.del(buffKey);
+    if (!inventoryManager.removeItem(item.id, 1)) {
+      await e.reply(`你没有【${itemName}】，无法使用~`, 10);
+      return true;
     }
-
-    inventoryManager.removeItem(item.id, 1);
-    
     const duration = item.duration || 3600;
-    await redis.set(buffKey, String(Date.now()), "EX", duration);
+    try {
+      await redis.set(buffKey, String(Date.now()), "EX", duration);
+    } catch (err) {
+      await inventoryManager.forceAddItem(item.id, 1);
+      logger.error(`[经济系统] 激活道具失败，已返还物品: ${err.stack || err}`);
+      await e.reply("道具激活失败，物品已经返还，请稍后重试。", 10);
+      return true;
+    }
     
     await e.reply(item.activation_message);
     return true;
@@ -812,21 +856,30 @@ export default class Economy extends plugin {
     }
 
     const economyManager = new EconomyManager(e);
-    const coins = economyManager.getCoins(e);
-
-    if (coins >= 100) {
-      return false;
+    const now = Date.now();
+    const claim = economyManager.claimDailyCoins(e, {
+      claimType: "revive_coin",
+      claimDate: getShanghaiDateKey(now),
+      amount: 100,
+      note: "领取复活币",
+      maxBalanceExclusive: 100,
+    });
+    if (!claim.success) {
+      if (claim.reason === "already_claimed") {
+        await e.reply("你今天已经领取过复活币了，请明天再来吧~", 10);
+      } else if (claim.reason === "ineligible") {
+        await e.reply("你的余额还很充足，暂时不需要复活币援助~", 10);
+      } else {
+        await e.reply("领取失败，请稍后再试~", 10);
+      }
+      return true;
     }
 
-    economyManager.addCoins(e, 100, { type: "收入", note: "领取复活币" });
-
-    const now = new Date();
-    const tomorrow = new Date(now);
-    tomorrow.setDate(now.getDate() + 1);
-    tomorrow.setHours(0, 0, 0, 0);
-    const ttl = Math.floor((tomorrow.getTime() - now.getTime()) / 1000);
-
-    await redis.set(key, "1", "EX", ttl);
+    try {
+      await redis.set(key, "1", "EX", secondsUntilNextShanghaiDay(now));
+    } catch (err) {
+      logger.warn(`[经济系统] 写入兼容领取标记失败: ${err.message}`);
+    }
 
     await e.reply("看你囊中羞涩，偷偷塞给了你 100 樱花币，希望能助你东山再起~");
     return true;
