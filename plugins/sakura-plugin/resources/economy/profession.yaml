@@ -16,12 +16,12 @@ professions:
     levels:
       1:
         title: "寻宝新手"
-        treasure_bonus: 10
-        description: "宝藏概率权重+10"
+        treasure_bonus: 4
+        description: "宝藏概率权重+4"
       2:
         title: "寻宝大师"
-        treasure_bonus: 20
-        description: "宝藏概率权重+20"
+        treasure_bonus: 8
+        description: "宝藏概率权重+8"
 
   fishing_master:
     name: "钓鱼大师"
@@ -31,12 +31,12 @@ professions:
     levels:
       1:
         title: "老练钓手"
-        mastery_multiplier: 0.5
-        description: "鱼线承重+0.5×熟练度"
+        mastery_multiplier: 0.4
+        description: "鱼线承重+0.4×熟练度"
       2:
         title: "垂钓宗师"
-        mastery_multiplier: 1.0
-        description: "鱼线承重+1.0×熟练度"
+        mastery_multiplier: 0.8
+        description: "鱼线承重+0.8×熟练度"
 
   merchant:
     name: "精明商人"
@@ -46,12 +46,12 @@ professions:
     levels:
       1:
         title: "小贩"
-        coin_bonus: 0.15
-        description: "金币收益+15%"
+        coin_bonus: 0.20
+        description: "金币收益+20%"
       2:
         title: "富商巨贾"
-        coin_bonus: 0.30
-        description: "金币收益+30%"
+        coin_bonus: 0.35
+        description: "金币收益+35%"
 
   abyss_hunter:
     name: "深渊猎手"
@@ -61,13 +61,13 @@ professions:
     levels:
       1:
         title: "猎魔新人"
-        nightmare_exp_bonus: 0.25
-        nightmare_penalty_reduction: 0.25
-        nightmare_line_save_chance: 0.25
-        description: "噩梦经验+25%，噩梦惩罚降低25%，25%概率保住鱼线"
+        nightmare_exp_bonus: 0.30
+        nightmare_penalty_reduction: 0.30
+        nightmare_line_save_chance: 0.30
+        description: "噩梦经验+30%，噩梦惩罚降低30%，30%概率保住鱼线"
       2:
         title: "深渊克星"
-        nightmare_exp_bonus: 0.50
-        nightmare_penalty_reduction: 0.50
-        nightmare_line_save_chance: 0.50
-        description: "噩梦经验+50%，噩梦惩罚降低50%，50%概率保住鱼线"
+        nightmare_exp_bonus: 0.60
+        nightmare_penalty_reduction: 0.60
+        nightmare_line_save_chance: 0.60
+        description: "噩梦经验+60%，噩梦惩罚降低60%，60%概率保住鱼线"

@@ -5,8 +5,9 @@ export const RARITY_CONFIG = Object.freeze({
   "稀有": Object.freeze({ color: "🔵", level: 3, exp: 10 }),
   "史诗": Object.freeze({ color: "🟣", level: 4, exp: 20 }),
   "传说": Object.freeze({ color: "🟠", level: 5, exp: 35 }),
-  "宝藏": Object.freeze({ color: "👑", level: 6, exp: 50 }),
-  "噩梦": Object.freeze({ color: "💀", level: 7, exp: 40 }),
+  // 宝箱本体已经是钱，经验压到传说之下；噩梦经验略高补偿惩罚
+  "宝藏": Object.freeze({ color: "👑", level: 6, exp: 28 }),
+  "噩梦": Object.freeze({ color: "💀", level: 7, exp: 32 }),
 });
 
 export const WEATHER_CONFIG = Object.freeze({
@@ -33,10 +34,10 @@ export const DEFAULT_FISHING_LOCATION = "pond";
 export const BOSS_BAIT_ID = "bait_boss";
 export const BOSS_ATTACK_INTERVAL_MS = 5000;
 export const BOSS_PLAYER_ATTACK_COOLDOWN_MS = 5000;
-export const BOSS_FIGHT_TIMEOUT_MS = 120 * 1000;
-export const BOSS_MIN_DIFFICULTY = 230;
-export const BOSS_MIN_HP = 180;
-export const BOSS_MIN_ATTACK = 10;
+export const BOSS_FIGHT_TIMEOUT_MS = 150 * 1000;
+export const BOSS_MIN_DIFFICULTY = 200;
+export const BOSS_MIN_HP = 90;
+export const BOSS_MIN_ATTACK = 8;
 export const BOSS_MECHANIC_TYPES = Object.freeze([
   "stamina_drain",
   "steal_coins",
@@ -73,6 +74,15 @@ export function getFishingLocationConfig(locationId) {
 
 export function isBossFish(fish) {
   return fish?.is_boss === true;
+}
+
+// 首领战限时可按 Boss 单独配置（fight_timeout_seconds），未配置时用全局默认。
+// 深渊系 Boss 用短窗口制造“输出竞速”压力。
+export function getBossFightTimeoutMs(fish) {
+  const seconds = Number(fish?.fight_timeout_seconds);
+  return Number.isFinite(seconds) && seconds >= 30
+    ? Math.floor(seconds * 1000)
+    : BOSS_FIGHT_TIMEOUT_MS;
 }
 
 export function selectBossFromData(
@@ -195,13 +205,15 @@ export function getWeatherByTime(timestamp = Date.now()) {
 }
 
 const ALL_RARITIES = Object.freeze(["垃圾", "普通", "精品", "稀有", "史诗", "传说", "宝藏", "噩梦"]);
+// 宝藏/噩梦权重随饵料品质递增：低档饵开箱率低（杜绝低价饵蹲高级钓点刷宝），
+// 高档饵稳步提升，寻宝鱼饵(q6)是高开箱高噩梦的赌狗专精
 const QUALITY_WEIGHTS = Object.freeze({
-  1: [["垃圾", "普通", "精品", "宝藏", "噩梦"], [39, 50, 1, 5, 5]],
-  2: [["垃圾", "普通", "精品", "稀有", "宝藏", "噩梦"], [19, 20, 50, 1, 5, 5]],
-  3: [["垃圾", "普通", "精品", "稀有", "史诗", "宝藏", "噩梦"], [9, 10, 20, 50, 1, 5, 5]],
-  4: [ALL_RARITIES, [4, 5, 10, 20, 50, 1, 5, 5]],
-  5: [ALL_RARITIES, [2, 3, 5, 10, 20, 50, 5, 5]],
-  6: [ALL_RARITIES, [1, 1, 3, 5, 10, 20, 50, 10]],
+  1: [["垃圾", "普通", "精品", "宝藏", "噩梦"], [34, 58, 5, 1, 2]],
+  2: [["垃圾", "普通", "精品", "稀有", "宝藏", "噩梦"], [17, 24, 50, 4, 2, 3]],
+  3: [["垃圾", "普通", "精品", "稀有", "史诗", "宝藏", "噩梦"], [7, 12, 21, 50, 3, 3, 4]],
+  4: [ALL_RARITIES, [3, 6, 11, 20, 50, 1, 4, 5]],
+  5: [ALL_RARITIES, [2, 3, 5, 10, 21, 49, 5, 5]],
+  6: [ALL_RARITIES, [1, 2, 4, 7, 12, 22, 40, 12]],
 });
 
 const FISHING_LEVEL_EXP_BASE = 20;
@@ -690,6 +702,12 @@ export function validateLegacyFishData(fishData) {
         errors.push(`${label}: 首领攻击力低于传说级下限`);
       }
       if (
+        fish.fight_timeout_seconds != null &&
+        (!Number.isFinite(fish.fight_timeout_seconds) || fish.fight_timeout_seconds < 30)
+      ) {
+        errors.push(`${label}: 首领战限时无效（须为不小于 30 的秒数）`);
+      }
+      if (
         !mechanic ||
         typeof mechanic !== "object" ||
         Array.isArray(mechanic) ||
@@ -723,7 +741,8 @@ export function validateLegacyFishData(fishData) {
     } else if (
       fish?.hp != null ||
       fish?.attack != null ||
-      fish?.boss_mechanic != null
+      fish?.boss_mechanic != null ||
+      fish?.fight_timeout_seconds != null
     ) {
       errors.push(`${label}: 非首领渔获不能配置首领战斗数值`);
     }

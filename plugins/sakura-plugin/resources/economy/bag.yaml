@@ -35,3 +35,12 @@ levels:
   12:
     capacity: 100
     cost: 100000
+  13:
+    capacity: 110
+    cost: 150000
+  14:
+    capacity: 120
+    cost: 220000
+  15:
+    capacity: 130
+    cost: 300000

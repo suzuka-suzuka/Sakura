@@ -57,6 +57,14 @@ class DB {
       CREATE INDEX IF NOT EXISTS idx_economy_daily_claims_created_at
       ON economy_daily_claims (created_at);
 
+      CREATE TABLE IF NOT EXISTS economy_one_time_claims (
+        group_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        claim_type TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (group_id, user_id, claim_type)
+      );
+
       CREATE TABLE IF NOT EXISTS inventory (
         group_id TEXT NOT NULL,
         user_id TEXT NOT NULL,

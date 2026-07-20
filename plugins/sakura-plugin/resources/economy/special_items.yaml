@@ -89,7 +89,7 @@ categories:
         name: 时之沙
         type: consumable
         instant_effect: restore_stamina
-        amount: 20
+        amount: 40
         description: 从时间尽头收集的流沙。使用后钓鱼体力完全恢复。
 
       - id: item_toolkit_repair

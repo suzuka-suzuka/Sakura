@@ -11,6 +11,10 @@
 #     random_line  随机一种尚未拥有的鱼线；全部拥有时，其权重自动并入普通樱花币
 #     curse        开箱事故：噩梦诅咒 +layers 层，同时给 coins 慰问金
 # 每张表总权重为 100，其中首领鱼饵固定占 5；random_bait 会排除首领鱼饵。
+#
+# 期望值设计（不含首领鱼饵折算）：
+#   pond ~160 → river ~250 → lake ~460(高方差) → coast ~750 → abyss ~690(带诅咒风险)
+#   → mystic ~1100，与该钓点对应档位的鱼饵成本保持 2.5~3 倍关系
 
 chests:
   chest_pond:
@@ -24,9 +28,9 @@ chests:
         type: item
         item_id: bait_boss
         count: 1
-      - weight: 25
+      - weight: 15
         type: random_bait
-        count: 3
+        count: 2
       - weight: 15
         type: item
         item_id: bait_shrimp
@@ -35,10 +39,16 @@ chests:
         type: item
         item_id: item_snack_petal
         count: 1
-      - weight: 8
+      - weight: 10
         type: item
         item_id: item_charm_lucky
         count: 1
+      - weight: 8
+        type: coins
+        min: 150
+        max: 350
+        name: 花瓣零钱袋
+        description: 沉在箱底的零钱袋，硬币上还沾着几片樱花瓣。
       - weight: 2
         type: item
         item_id: item_sign_koi
@@ -55,27 +65,27 @@ chests:
         type: item
         item_id: bait_boss
         count: 1
-      - weight: 20
+      - weight: 18
         type: item
         item_id: bait_premium
         count: 5
       - weight: 10
         type: random_line
-      - weight: 18
+      - weight: 17
         type: item
         item_id: item_toolkit_repair
         count: 1
       - weight: 15
         type: coins
         min: 300
-        max: 600
+        max: 700
         name: 鎏金鱼子酱
         description: 鎏金鲟的鱼子酱，河湾商队眼里的硬通货。
-      - weight: 10
+      - weight: 12
         type: item
         item_id: item_card_double_coin
         count: 1
-      - weight: 2
+      - weight: 3
         type: item
         item_id: item_charm_river
         count: 1
@@ -83,7 +93,7 @@ chests:
   chest_lake:
     # 🌫️ 雾隐湖 · 赌局箱（高方差：大量哑弹 + 小概率大奖）
     loot:
-      - weight: 30
+      - weight: 35
         type: coins
         min: 10
         max: 30
@@ -93,30 +103,30 @@ chests:
         type: item
         item_id: bait_boss
         count: 1
-      - weight: 25
+      - weight: 20
         type: coins
-        min: 300
-        max: 800
+        min: 250
+        max: 600
       - weight: 15
         type: item
         item_id: bait_magic
         count: 3
       - weight: 8
         type: coins
-        min: 600
-        max: 1500
+        min: 500
+        max: 1200
         name: 青铜古镜
         description: 湖底捞起的古镜，擦去水锈还照得出人影。
       - weight: 7
         type: coins
-        min: 600
-        max: 1500
+        min: 500
+        max: 1200
         name: 沉船怀表
         description: 早已停摆的怀表，收藏家愿意出个好价钱。
       - weight: 7
         type: coins
-        min: 2500
-        max: 4000
+        min: 2000
+        max: 3200
         name: 湖神的馈赠
         description: 雾散的一瞬，箱底铺满了闪闪发光的金币。
       - weight: 3
@@ -129,19 +139,19 @@ chests:
     loot:
       - weight: 25
         type: coins
-        min: 500
-        max: 1200
+        min: 400
+        max: 900
       - weight: 5
         type: item
         item_id: bait_boss
         count: 1
       - weight: 20
         type: coins
-        min: 666
-        max: 666
+        min: 600
+        max: 600
         name: 珍珠
         description: 圆润饱满的珍珠，光泽迷人。
-      - weight: 15
+      - weight: 14
         type: item
         item_id: item_card_double_coin
         count: 1
@@ -151,24 +161,24 @@ chests:
         count: 3
       - weight: 10
         type: coins
-        min: 1000
-        max: 1800
+        min: 800
+        max: 1500
         name: 金色珊瑚
         description: 被落日余晖染成金色的珊瑚，是抢手的装饰珍品。
       - weight: 8
         type: coins
-        min: 2000
-        max: 2000
+        min: 1500
+        max: 1500
         name: 黑珍珠
         description: 深海孕育的稀世黑珍珠，可遇不可求。
-      - weight: 3
+      - weight: 4
         type: coins
-        min: 2000
-        max: 3000
+        min: 1500
+        max: 2500
       - weight: 2
         type: coins
-        min: 5000
-        max: 5000
+        min: 3800
+        max: 3800
         name: 沉船金锭
         description: 沉船宝库里的金锭，分量十足，闪瞎眼睛。
 
@@ -177,35 +187,35 @@ chests:
     loot:
       - weight: 20
         type: coins
-        min: 800
-        max: 2000
+        min: 700
+        max: 1700
       - weight: 5
         type: item
         item_id: bait_boss
         count: 1
-      - weight: 18
+      - weight: 17
         type: item
         item_id: item_holy_water
         count: 1
-      - weight: 15
+      - weight: 14
         type: item
         item_id: bait_treasure
         count: 2
       - weight: 12
         type: coins
-        min: 1500
-        max: 2500
+        min: 1200
+        max: 2200
         name: 深海龙涎香
         description: 深渊巨兽的分泌物凝成的奇香，价值连城。
       - weight: 10
         type: item
         item_id: torpedo
         count: 2
-      - weight: 10
+      - weight: 9
         type: item
         item_id: item_bait_monster
         count: 1
-      - weight: 7
+      - weight: 8
         type: curse
         layers: 1
         coins: 300
@@ -213,22 +223,28 @@ chests:
         type: item
         item_id: item_scale_leviathan
         count: 1
+      - weight: 2
+        type: coins
+        min: 3000
+        max: 4500
+        name: 渊底金脉碎块
+        description: 从海沟岩壁上凿下来的天然金块，沉得压手。
 
   chest_mystic:
     # ✨ 星辉秘境 · 终局箱（顶级 buff 与绝版收藏）
     loot:
       - weight: 20
         type: coins
-        min: 1500
-        max: 3000
+        min: 1000
+        max: 2200
       - weight: 5
         type: item
         item_id: bait_boss
         count: 1
-      - weight: 18
+      - weight: 16
         type: coins
-        min: 2000
-        max: 3000
+        min: 1400
+        max: 2400
         name: 星尘
         description: 星光落进水里凝成的粉末，在夜里也熠熠生辉。
       - weight: 12
@@ -247,17 +263,17 @@ chests:
         type: item
         item_id: bait_divine
         count: 5
-      - weight: 7
+      - weight: 8
         type: item
         item_id: bait_treasure
         count: 2
       - weight: 7
         type: coins
-        min: 5000
-        max: 5000
+        min: 3600
+        max: 3600
         name: 星河碎片
         description: 一小片凝固的星河，握在手心能听见星星的声音。
-      - weight: 3
+      - weight: 4
         type: item
         item_id: item_bottle_wish
         count: 1

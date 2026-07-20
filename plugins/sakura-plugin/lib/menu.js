@@ -120,6 +120,7 @@ export const menuGroups = [
       { name: "出售", command: "#出售 <物品>", desc: "出售背包物品。" },
       { name: "使用物品", command: "#使用 <物品>", desc: "使用背包中的特殊物品。", costNote: "消耗物品" },
       { name: "领取复活币", command: "#领取复活币", desc: "余额低于当级援助额时，每日领取随钓鱼等级增长的复活币。" },
+      { name: "钓鱼新人礼包", command: "#领取钓鱼新人礼包", desc: "每个群内玩家限领一次；发放基础钓具和鱼饵，剩余空间不足5格时折现。" },
       { name: "金币排行", command: "#金币排行", desc: "查看樱花币排行榜。" },
       { name: "等级排行", command: "#等级排行", desc: "查看等级或经验排行榜。" },
     ],

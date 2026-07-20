@@ -1,1 +1,0 @@
-# 当前无缺失图片；以 fish.json 中的 id 与 img/<id>.png 交叉校验为准。

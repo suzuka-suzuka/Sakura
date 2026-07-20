@@ -367,6 +367,57 @@ export default class Economy extends plugin {
     return true;
   });
 
+  fishingNewbieGift = Command(/^#?领取钓鱼新人礼包$/, async (e) => {
+    if (!this.checkWhitelist(e)) return false;
+
+    let result;
+    try {
+      result = new EconomyOperations(e).claimFishingNewbieGift();
+    } catch (err) {
+      logger.error(`[钓鱼新人礼包] 领取失败: ${err.stack || err}`);
+      await e.reply("新人礼包领取失败，请稍后再试~", 10);
+      return true;
+    }
+
+    if (!result.success) {
+      if (result.reason === "already_claimed") {
+        await e.reply("🎁 你已经在本群领取过钓鱼新人礼包了，不能重复领取~", 10);
+      } else {
+        await e.reply("新人礼包配置异常，请联系管理员。", 10);
+      }
+      return true;
+    }
+
+    const skippedMsg = result.skippedItems.length > 0
+      ? `\nℹ️ 已拥有${result.skippedItems.map(({ item }) => `【${item.name}】`).join("、")}，未重复发放或折现。`
+      : "";
+
+    if (result.mode === "coins") {
+      await e.reply(
+        `🎁 钓鱼新人礼包领取成功！\n` +
+        `🎒 背包剩余 ${result.freeCapacity} 格，不足 5 格，可发放的礼包物品已按商店价折现。\n` +
+        `💰 获得 ${result.coinAmount} 樱花币` +
+        skippedMsg,
+      );
+      return true;
+    }
+
+    const shopManager = new ShopManager();
+    for (const { item } of result.grantedItems) {
+      await shopManager.applyPurchaseSideEffects(e, item);
+    }
+    const rewards = result.grantedItems
+      .map(({ item, count }) => `【${item.name}】×${count}`)
+      .join("、");
+    await e.reply(
+      `🎁 钓鱼新人礼包领取成功！\n` +
+      `🎒 获得：${rewards}` +
+      skippedMsg +
+      "\n🎣 对应装备栏为空时已自动装备。",
+    );
+    return true;
+  });
+
   myStatus = Command(/^#?((我|咱)的(信息|等级|资产))$/, async (e) => {
     if (!this.checkWhitelist(e)) return false;
     const economyManager = new EconomyManager(e);

@@ -20,7 +20,6 @@ import {
 import {
   BOSS_ATTACK_INTERVAL_MS,
   BOSS_BAIT_ID,
-  BOSS_FIGHT_TIMEOUT_MS,
   FISH_FIGHT_STATE,
   FISHING_BENEFIT_DURATION_SECONDS,
   FISHING_COOLDOWN_SECONDS,
@@ -31,6 +30,7 @@ import {
   calculateLegacyFishPrice,
   createProgressBar,
   getBossAttackCooldownRemaining,
+  getBossFightTimeoutMs,
   getFishFightStateChangeDelay,
   getFishFightStateConfig,
   getFishingLocationConfig,
@@ -496,7 +496,7 @@ export default class Fishing extends plugin {
     state.fishStateChangedAt = Date.now();
 
     if (state.totalTimer) clearTimeout(state.totalTimer);
-    const timeoutMs = boss ? BOSS_FIGHT_TIMEOUT_MS : 60 * 1000;
+    const timeoutMs = boss ? getBossFightTimeoutMs(state.fish) : 60 * 1000;
     state.totalTimer = setTimeout(() => {
       void this.handleFishingTimeout(e, stateKey, state.id, {
         expectedPhase: FISHING_PHASE.fighting,
@@ -527,7 +527,7 @@ export default class Fishing extends plugin {
         `📝 指令：\n  「拉」拉近距离并增加张力\n  「溜」降低张力但会拉远距离\n  「攻」攻击首领（5秒冷却）\n`,
         `🏆 必须同时把首领生命与距离降到 0；首领每5秒反击一次！\n`,
         `🧵 首领造成的鱼线损伤会永久保留，耐久归零立即断线！\n`,
-        `⚠️ 限时 ${Math.floor(BOSS_FIGHT_TIMEOUT_MS / 1000)} 秒，当前为单人挑战。`,
+        `⚠️ 限时 ${Math.floor(timeoutMs / 1000)} 秒，当前为单人挑战。`,
       ]);
       this.scheduleBossAttack(e, stateKey, state.id);
     } else {
@@ -1197,7 +1197,7 @@ export default class Fishing extends plugin {
       const updatedControl = fishingManager.getRodControl(userId, rodConfig.id) + rodMastery;
       const fishStateLabel = formatFishFightState(state.fishState);
       const bossFight = isBossFish(fish);
-      const contextSeconds = bossFight ? Math.ceil(BOSS_FIGHT_TIMEOUT_MS / 1000) + 5 : 65;
+      const contextSeconds = bossFight ? Math.ceil(getBossFightTimeoutMs(fish) / 1000) + 5 : 65;
 
       if (action === FISHING_ACTION.attack) {
         if (!bossFight) {
@@ -1259,7 +1259,8 @@ export default class Fishing extends plugin {
       if (action === FISHING_ACTION.pull) {
         state.fightingRounds++;
 
-        const pullPower = Math.max(8, Math.floor(updatedControl / 7));
+        // 除数 6：保证碳素级控制力在首领战里也有正向距离收益，Boss 门槛不至于全卡在拉力上
+        const pullPower = Math.max(8, Math.floor(updatedControl / 6));
         const fishResist = Math.max(3, Math.floor(fishDifficulty / 20));
         const effects = applyFishFightStateModifiers({
           stateId: state.fishState,
