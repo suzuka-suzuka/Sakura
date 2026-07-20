@@ -1971,14 +1971,8 @@ export default class Fishing extends plugin {
       const lockMark = fishingLevel < config.unlockLevel
         ? ` 🔒 Lv.${config.unlockLevel} 解锁`
         : "";
-      const boss = fishData.find((fish) => (
-        isBossFish(fish) && fish.locations?.includes(id)
-      ));
       return `${config.emoji}【${config.name}】${currentMark}${lockMark}\n` +
-        `   ${config.description}` +
-        (boss
-          ? `\n   👑 首领：${boss.name}（难度 ${boss.difficulty}｜生命 ${boss.hp}｜攻击 ${boss.attack}）`
-          : "");
+        `   ${config.description}`;
     });
 
     await e.reply(
@@ -2029,15 +2023,9 @@ export default class Fishing extends plugin {
     }
 
     fishingManager.setFishingLocation(e.user_id, locationId);
-    const localBoss = fishData.find((fish) => (
-      isBossFish(fish) && fish.locations?.includes(locationId)
-    ));
     await e.reply(
       `🚶 收拾好装备，来到了${locationConfig.emoji}【${locationConfig.name}】\n` +
       `${locationConfig.description}\n` +
-      (localBoss
-        ? `👑 此地首领：【${localBoss.name}】（难度 ${localBoss.difficulty}｜生命 ${localBoss.hp}｜攻击 ${localBoss.attack}）\n`
-        : "") +
       `🎣 发送「钓鱼」开始垂钓吧~`
     );
     return true;
