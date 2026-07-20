@@ -1,6 +1,15 @@
 import Setting from "../setting.js";
 import InventoryManager from "./InventoryManager.js";
 import db from "../Database.js";
+import {
+  calculateFishingStamina,
+  FISHING_STAMINA_COST,
+  FISHING_STAMINA_MAX,
+  FISHING_STAMINA_RECOVERY_MS,
+  getFishingLevelByExp,
+  getNightmareCurseDisplay,
+  NIGHTMARE_CURSE_HIDDEN_LAYERS,
+} from "../fishing/rules.js";
 
 export default class FishingManager {
   constructor(groupId) {
@@ -15,7 +24,19 @@ export default class FishingManager {
 
   static getUnlockRequirements() {
     const yaml = FishingManager.getProfessionYaml();
-    return yaml.unlock_requirements || { level_1: 60, level_2: 120 };
+    const requirements = yaml.unlock_requirements || {};
+    const chooseLevel = Number(requirements.choose_fishing_level);
+    const advanceLevel = Number(requirements.advance_fishing_level);
+    const safeChooseLevel = Number.isFinite(chooseLevel) && chooseLevel > 0
+      ? Math.floor(chooseLevel)
+      : 8;
+    const safeAdvanceLevel = Number.isFinite(advanceLevel) && advanceLevel >= safeChooseLevel
+      ? Math.floor(advanceLevel)
+      : Math.max(12, safeChooseLevel);
+    return {
+      choose_fishing_level: safeChooseLevel,
+      advance_fishing_level: safeAdvanceLevel,
+    };
   }
 
   static getProfessionConfig(professionId) {
@@ -38,9 +59,10 @@ export default class FishingManager {
     const row = db.prepare('SELECT 1 FROM fishing_stats WHERE group_id = ? AND user_id = ?').get(this.groupId, userId);
     if (!row) {
       db.prepare(`
-              INSERT INTO fishing_stats (group_id, user_id, total_catch, total_earnings, torpedo_hits, profession, profession_level)
-              VALUES (?, ?, 0, 0, 0, NULL, 0)
-          `).run(this.groupId, userId);
+              INSERT INTO fishing_stats
+              (group_id, user_id, total_catch, total_earnings, torpedo_hits, profession, profession_level, fishing_stamina, fishing_stamina_updated_at)
+              VALUES (?, ?, 0, 0, 0, NULL, 0, ?, 0)
+          `).run(this.groupId, userId, FISHING_STAMINA_MAX);
     }
   }
 
@@ -70,16 +92,125 @@ export default class FishingManager {
     };
   }
 
+  getUserFishingLevel(userId) {
+    const userData = this.getUserData(userId);
+    return getFishingLevelByExp(userData.fishing_exp || 0);
+  }
+
+  _readFishingStamina(userId, now) {
+    const row = db.prepare(`
+        SELECT fishing_stamina, fishing_stamina_updated_at
+        FROM fishing_stats
+        WHERE group_id = ? AND user_id = ?
+    `).get(this.groupId, userId);
+    return calculateFishingStamina(
+      row?.fishing_stamina,
+      row?.fishing_stamina_updated_at,
+      now,
+    );
+  }
+
+  _writeFishingStamina(userId, stamina, updatedAt) {
+    db.prepare(`
+        UPDATE fishing_stats
+        SET fishing_stamina = ?, fishing_stamina_updated_at = ?
+        WHERE group_id = ? AND user_id = ?
+    `).run(stamina, updatedAt, this.groupId, userId);
+  }
+
+  _formatFishingStaminaStatus(snapshot) {
+    return {
+      current: snapshot.stamina,
+      max: FISHING_STAMINA_MAX,
+      cost: FISHING_STAMINA_COST,
+      canFish: snapshot.stamina >= FISHING_STAMINA_COST,
+      recovered: snapshot.recovered || 0,
+      nextRecoveryMs: snapshot.nextRecoveryMs || 0,
+      nextRecoveryMinutes: snapshot.nextRecoveryMs > 0
+        ? Math.max(1, Math.ceil(snapshot.nextRecoveryMs / 60000))
+        : 0,
+    };
+  }
+
+  getFishingStaminaStatus(userId, now = Date.now()) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    const transaction = db.transaction(() => {
+      const snapshot = this._readFishingStamina(userId, now);
+      this._writeFishingStamina(userId, snapshot.stamina, snapshot.updatedAt);
+      return this._formatFishingStaminaStatus(snapshot);
+    });
+    return transaction.immediate();
+  }
+
+  consumeFishingStamina(userId, now = Date.now()) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    const transaction = db.transaction(() => {
+      const snapshot = this._readFishingStamina(userId, now);
+      if (snapshot.stamina < FISHING_STAMINA_COST) {
+        this._writeFishingStamina(userId, snapshot.stamina, snapshot.updatedAt);
+        return {
+          success: false,
+          ...this._formatFishingStaminaStatus(snapshot),
+        };
+      }
+
+      const remaining = snapshot.stamina - FISHING_STAMINA_COST;
+      this._writeFishingStamina(userId, remaining, snapshot.updatedAt);
+      return {
+        success: true,
+        ...this._formatFishingStaminaStatus({
+          ...snapshot,
+          stamina: remaining,
+          recovered: 0,
+          nextRecoveryMs: remaining < FISHING_STAMINA_MAX
+            ? (snapshot.nextRecoveryMs || FISHING_STAMINA_RECOVERY_MS)
+            : 0,
+        }),
+      };
+    });
+    return transaction.immediate();
+  }
+
+  restoreFishingStamina(userId, amount = FISHING_STAMINA_COST, now = Date.now()) {
+    userId = String(userId);
+    const safeAmount = Math.max(0, Math.floor(Number(amount) || 0));
+    this._ensureUser(userId);
+    const transaction = db.transaction(() => {
+      const snapshot = this._readFishingStamina(userId, now);
+      const restored = Math.min(FISHING_STAMINA_MAX, snapshot.stamina + safeAmount);
+      const numericNow = Number(now);
+      const safeNow = Number.isFinite(numericNow) && numericNow >= 0
+        ? Math.floor(numericNow)
+        : Date.now();
+      const updatedAt = restored >= FISHING_STAMINA_MAX ? safeNow : snapshot.updatedAt;
+      this._writeFishingStamina(userId, restored, updatedAt);
+      return this._formatFishingStaminaStatus({
+        ...snapshot,
+        stamina: restored,
+        updatedAt,
+        recovered: restored - snapshot.stamina,
+        nextRecoveryMs: restored < FISHING_STAMINA_MAX
+          ? (snapshot.nextRecoveryMs || FISHING_STAMINA_RECOVERY_MS)
+          : 0,
+      });
+    });
+    return transaction.immediate();
+  }
+
   canChooseProfession(userId) {
     const userData = this.getUserData(userId);
     const requirements = FishingManager.getUnlockRequirements();
-    return userData.total_catch >= requirements.level_1 && !userData.profession;
+    const fishingLevel = getFishingLevelByExp(userData.fishing_exp || 0);
+    return fishingLevel >= requirements.choose_fishing_level && !userData.profession;
   }
 
   canAdvanceProfession(userId) {
     const userData = this.getUserData(userId);
     const requirements = FishingManager.getUnlockRequirements();
-    return userData.total_catch >= requirements.level_2 &&
+    const fishingLevel = getFishingLevelByExp(userData.fishing_exp || 0);
+    return fishingLevel >= requirements.advance_fishing_level &&
       userData.profession &&
       userData.profession_level === 1;
   }
@@ -88,13 +219,17 @@ export default class FishingManager {
     userId = String(userId);
     const userData = this.getUserData(userId);
     const requirements = FishingManager.getUnlockRequirements();
+    const fishingLevel = getFishingLevelByExp(userData.fishing_exp || 0);
 
     if (userData.profession) {
       return { success: false, msg: "你已经有职业了，无法再选择其他职业！" };
     }
 
-    if (userData.total_catch < requirements.level_1) {
-      return { success: false, msg: `钓鱼次数不足！需要${requirements.level_1}次，当前${userData.total_catch}次` };
+    if (fishingLevel < requirements.choose_fishing_level) {
+      return {
+        success: false,
+        msg: `钓鱼等级不足！需要 Lv.${requirements.choose_fishing_level}，当前 Lv.${fishingLevel}`,
+      };
     }
 
     const professionConfig = FishingManager.getProfessionConfig(professionId);
@@ -119,6 +254,7 @@ export default class FishingManager {
     userId = String(userId);
     const userData = this.getUserData(userId);
     const requirements = FishingManager.getUnlockRequirements();
+    const fishingLevel = getFishingLevelByExp(userData.fishing_exp || 0);
 
     if (!userData.profession) {
       return { success: false, msg: "你还没有职业，请先选择一个职业！" };
@@ -128,8 +264,11 @@ export default class FishingManager {
       return { success: false, msg: "你的职业已经达到最高等级！" };
     }
 
-    if (userData.total_catch < requirements.level_2) {
-      return { success: false, msg: `钓鱼次数不足！进阶需要${requirements.level_2}次，当前${userData.total_catch}次` };
+    if (fishingLevel < requirements.advance_fishing_level) {
+      return {
+        success: false,
+        msg: `钓鱼等级不足！进阶需要 Lv.${requirements.advance_fishing_level}，当前 Lv.${fishingLevel}`,
+      };
     }
 
     const professionConfig = FishingManager.getProfessionConfig(userData.profession);
@@ -186,12 +325,99 @@ export default class FishingManager {
     return 1 + bonus;
   }
 
+  getNightmareProfessionEffects(userId) {
+    const defaults = {
+      active: false,
+      expMultiplier: 1,
+      penaltyReduction: 0,
+      penaltyMultiplier: 1,
+      lineSaveChance: 0,
+    };
+    const userData = this.getUserData(userId);
+    if (userData.profession !== 'abyss_hunter' || userData.profession_level <= 0) {
+      return defaults;
+    }
+
+    const config = FishingManager.getProfessionConfig('abyss_hunter');
+    const levelConfig = config?.levels?.[userData.profession_level];
+    if (!levelConfig) return defaults;
+
+    const expBonus = Math.max(0, Number(levelConfig.nightmare_exp_bonus) || 0);
+    const penaltyReduction = Math.max(0, Math.min(
+      1,
+      Number(levelConfig.nightmare_penalty_reduction) || 0,
+    ));
+    const lineSaveChance = Math.max(0, Math.min(
+      1,
+      Number(levelConfig.nightmare_line_save_chance) || 0,
+    ));
+    return {
+      active: true,
+      expMultiplier: 1 + expBonus,
+      penaltyReduction,
+      penaltyMultiplier: 1 - penaltyReduction,
+      lineSaveChance,
+    };
+  }
+
+  getNightmareCurseLayers(userId) {
+    const userData = this.getUserData(userId);
+    return Math.max(0, Math.floor(Number(userData.nightmare_curse_layers) || 0));
+  }
+
+  addNightmareCurseLayers(userId, layers) {
+    userId = String(userId);
+    const safeLayers = Math.max(0, Math.floor(Number(layers) || 0));
+    this._ensureUser(userId);
+    if (safeLayers <= 0) return this.getNightmareCurseLayers(userId);
+
+    const row = db.prepare(`
+        UPDATE fishing_stats
+        SET nightmare_curse_layers = COALESCE(nightmare_curse_layers, 0) + ?,
+            nightmare_curse_prank_revealed = CASE
+              WHEN COALESCE(nightmare_curse_layers, 0) <= 0 THEN 0
+              ELSE COALESCE(nightmare_curse_prank_revealed, 0)
+            END
+        WHERE group_id = ? AND user_id = ?
+        RETURNING nightmare_curse_layers, nightmare_curse_prank_revealed
+    `).get(safeLayers, this.groupId, userId);
+    return Math.max(0, Number(row?.nightmare_curse_layers) || 0);
+  }
+
+  consumeNightmareCurseLayer(userId) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    const row = db.prepare(`
+        UPDATE fishing_stats
+        SET nightmare_curse_layers = COALESCE(nightmare_curse_layers, 0) - 1,
+            nightmare_curse_prank_revealed = CASE
+              WHEN COALESCE(nightmare_curse_layers, 0) - 1 <= 0 THEN 0
+              WHEN COALESCE(nightmare_curse_prank_revealed, 0) > 0 THEN 1
+              WHEN COALESCE(nightmare_curse_layers, 0) - 1 <= ? THEN 1
+              ELSE 0
+            END
+        WHERE group_id = ? AND user_id = ? AND COALESCE(nightmare_curse_layers, 0) > 0
+        RETURNING nightmare_curse_layers, nightmare_curse_prank_revealed
+    `).get(NIGHTMARE_CURSE_HIDDEN_LAYERS, this.groupId, userId);
+    return {
+      consumed: Boolean(row),
+      remaining: Math.max(0, Number(row?.nightmare_curse_layers) || 0),
+      prankRevealed: Boolean(row?.nightmare_curse_prank_revealed),
+    };
+  }
+
+  getNightmareCurseStatus(userId) {
+    const userData = this.getUserData(userId);
+    return getNightmareCurseDisplay(
+      userData.nightmare_curse_layers,
+      userData.nightmare_curse_prank_revealed,
+    );
+  }
+
   getRodControl(userId, rodId) {
     const rodConfig = this.getRodConfig(rodId);
     if (!rodConfig) return 0;
-
-    const damage = this.getRodStats(userId, rodId).damage || 0;
-    return Math.max(0, rodConfig.control - damage);
+    return Math.max(0, Number(rodConfig.control) || 0);
   }
 
   getRodStats(userId, rodId) {
@@ -203,14 +429,19 @@ export default class FishingManager {
 
   getRodDurabilityInfo(userId, rodId) {
     const rodConfig = this.getRodConfig(rodId);
-    if (!rodConfig) return { damage: 0, currentControl: 0, maxControl: 0 };
+    if (!rodConfig) return { damage: 0, currentDurability: 0, maxDurability: 0 };
 
     const damage = this.getRodStats(userId, rodId).damage || 0;
+    // 兼容尚未配置 durability 的自定义鱼竿，默认沿用旧版 control 数值。
+    const configuredDurability = Number(rodConfig.durability);
+    const maxDurability = Number.isFinite(configuredDurability) && configuredDurability > 0
+      ? configuredDurability
+      : Math.max(0, Number(rodConfig.control) || 0);
 
     return {
       damage,
-      currentControl: Math.max(0, rodConfig.control - damage),
-      maxControl: rodConfig.control
+      currentDurability: Math.max(0, maxDurability - damage),
+      maxDurability,
     };
   }
 
@@ -218,8 +449,16 @@ export default class FishingManager {
     userId = String(userId);
     const safeDamage = Number(damage);
     const rodConfig = this.getRodConfig(rodId);
+    const durabilityInfo = rodConfig
+      ? this.getRodDurabilityInfo(userId, rodId)
+      : { currentDurability: 0, maxDurability: 0 };
     if (!rodConfig || !Number.isFinite(safeDamage) || safeDamage <= 0) {
-      return { applied: false, isBroken: false, currentControl: 0, maxControl: rodConfig?.control || 0 };
+      return {
+        applied: false,
+        isBroken: false,
+        currentDurability: durabilityInfo.currentDurability,
+        maxDurability: durabilityInfo.maxDurability,
+      };
     }
 
     const transaction = db.transaction(() => {
@@ -228,12 +467,17 @@ export default class FishingManager {
           WHERE group_id = ? AND user_id = ? AND item_id = ? AND count > 0
       `).get(this.groupId, userId, rodId);
       if (!owned) {
-        return { applied: false, isBroken: false, currentControl: 0, maxControl: rodConfig.control };
+        return {
+          applied: false,
+          isBroken: false,
+          currentDurability: 0,
+          maxDurability: durabilityInfo.maxDurability,
+        };
       }
 
-      const currentControl = this.getRodControl(userId, rodId);
-      const nextControl = Math.max(0, currentControl - safeDamage);
-      if (nextControl <= 0) {
+      const currentDurability = this.getRodDurabilityInfo(userId, rodId).currentDurability;
+      const nextDurability = Math.max(0, currentDurability - safeDamage);
+      if (nextDurability <= 0) {
         db.prepare(`
             UPDATE inventory
             SET count = count - 1
@@ -255,8 +499,8 @@ export default class FishingManager {
         return {
           applied: true,
           isBroken: true,
-          currentControl: 0,
-          maxControl: rodConfig.control,
+          currentDurability: 0,
+          maxDurability: durabilityInfo.maxDurability,
         };
       }
 
@@ -269,8 +513,8 @@ export default class FishingManager {
       return {
         applied: true,
         isBroken: false,
-        currentControl: nextControl,
-        maxControl: rodConfig.control,
+        currentDurability: nextDurability,
+        maxDurability: durabilityInfo.maxDurability,
       };
     });
 
@@ -613,7 +857,24 @@ export default class FishingManager {
     return shopConfig?.categories?.torpedoes?.items?.find(t => t.id === 'torpedo');
   }
 
+  getTorpedoDurationSeconds() {
+    const configuredDuration = Number(this.getTorpedoConfig()?.duration);
+    return Number.isFinite(configuredDuration) && configuredDuration > 0
+      ? Math.floor(configuredDuration)
+      : 24 * 60 * 60;
+  }
+
+  cleanupExpiredTorpedoes(now = Date.now()) {
+    const expiresBefore = Number(now) - this.getTorpedoDurationSeconds() * 1000;
+    const result = db.prepare(`
+        DELETE FROM pond_torpedoes
+        WHERE group_id = ? AND (timestamp IS NULL OR timestamp <= ?)
+    `).run(this.groupId, expiresBefore);
+    return result.changes || 0;
+  }
+
   getPondTorpedoes() {
+    this.cleanupExpiredTorpedoes();
     const rows = db.prepare('SELECT user_id, timestamp FROM pond_torpedoes WHERE group_id = ?').all(this.groupId);
     const result = {};
     for (const row of rows) {
@@ -624,11 +885,25 @@ export default class FishingManager {
 
   getUserTorpedoCount(userId) {
     userId = String(userId);
+    this.cleanupExpiredTorpedoes();
     const row = db.prepare('SELECT 1 FROM pond_torpedoes WHERE group_id = ? AND user_id = ?').get(this.groupId, userId);
     return row ? 1 : 0;
   }
 
+  getUserTorpedoRemainingMinutes(userId) {
+    userId = String(userId);
+    this.cleanupExpiredTorpedoes();
+    const row = db.prepare(`
+        SELECT timestamp FROM pond_torpedoes
+        WHERE group_id = ? AND user_id = ?
+    `).get(this.groupId, userId);
+    if (!row) return 0;
+    const expiresAt = Number(row.timestamp) + this.getTorpedoDurationSeconds() * 1000;
+    return Math.max(0, Math.ceil((expiresAt - Date.now()) / 60000));
+  }
+
   getTotalTorpedoCount() {
+    this.cleanupExpiredTorpedoes();
     const row = db.prepare('SELECT COUNT(*) as count FROM pond_torpedoes WHERE group_id = ?').get(this.groupId);
     return row ? row.count : 0;
   }
@@ -636,6 +911,7 @@ export default class FishingManager {
   deployTorpedo(userId) {
     userId = String(userId);
     const transaction = db.transaction(() => {
+      this.cleanupExpiredTorpedoes();
       const existing = db.prepare(`
           SELECT 1 FROM pond_torpedoes
           WHERE group_id = ? AND user_id = ?
@@ -668,12 +944,14 @@ export default class FishingManager {
 
   getAvailableTorpedoCount(excludeUserId) {
     excludeUserId = String(excludeUserId);
+    this.cleanupExpiredTorpedoes();
     const row = db.prepare('SELECT COUNT(*) as count FROM pond_torpedoes WHERE group_id = ? AND user_id != ?').get(this.groupId, excludeUserId);
     return row ? row.count : 0;
   }
 
   triggerTorpedo(fisherId) {
     fisherId = String(fisherId);
+    this.cleanupExpiredTorpedoes();
     const row = db.prepare(`
         DELETE FROM pond_torpedoes
         WHERE group_id = ? AND user_id = (

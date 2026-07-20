@@ -5,16 +5,6 @@ const DELETE_IF_VALUE_SCRIPT = `
   return 0
 `;
 
-const EXTEND_TTL_SCRIPT = `
-  local ttl = redis.call("TTL", KEYS[1])
-  if ttl > 0 then
-    local nextTtl = ttl + tonumber(ARGV[1])
-    redis.call("EXPIRE", KEYS[1], nextTtl)
-    return nextTtl
-  end
-  return ttl
-`;
-
 const COMPLETE_FISHING_ATTEMPT_SCRIPT = `
   redis.call("SET", KEYS[1], ARGV[1], "EX", tonumber(ARGV[2]))
   local count = redis.call("INCR", KEYS[2])
@@ -35,10 +25,6 @@ export async function releaseRedisLock(client, key, token) {
 
 export async function deleteIfValue(client, key, expectedValue) {
   return Number(await client.eval(DELETE_IF_VALUE_SCRIPT, 1, key, expectedValue)) === 1;
-}
-
-export async function extendExistingTtl(client, key, extraSeconds) {
-  return Number(await client.eval(EXTEND_TTL_SCRIPT, 1, key, String(extraSeconds)));
 }
 
 export async function completeFishingAttempt(

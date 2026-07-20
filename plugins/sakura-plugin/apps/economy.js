@@ -5,16 +5,16 @@ import InventoryManager from "../lib/economy/InventoryManager.js";
 import FishingManager from "../lib/economy/FishingManager.js";
 import EconomyOperations from "../lib/economy/EconomyOperations.js";
 import {
-  acquireRedisLock,
-  deleteIfValue,
-  extendExistingTtl,
-} from "../lib/economy/redisAtomic.js";
-import {
   getShanghaiDateKey,
   getStartOfShanghaiDay,
   getStartOfShanghaiWeek,
   secondsUntilNextShanghaiDay,
 } from "../lib/economy/time.js";
+import {
+  canUseTransfer,
+  getReviveCoinPolicy,
+  TRANSFER_UNLOCK_FISHING_LEVEL,
+} from "../lib/economy/rules.js";
 import _ from "lodash";
 import Setting from "../lib/setting.js";
 
@@ -210,280 +210,6 @@ export default class Economy extends plugin {
     return true;
   });
 
-  rob = Command(/^\s*#?(打劫|抢[劫夺钱])\s*$/i, async (e) => {
-    if (!this.checkWhitelist(e)) return false;
-    const targetId = e.at;
-    if (!targetId) {
-      return false;
-    }
-
-    if (targetId == e.user_id) {
-      return false;
-    }
-
-    const cooldownKey = `sakura:economy:rob:cooldown:${e.group_id}:${e.user_id}`;
-    const cooldownToken = String(Date.now());
-    const cooldownAcquired = await acquireRedisLock(redis, cooldownKey, cooldownToken, 1800);
-    if (!cooldownAcquired) {
-      const extendedTtl = await extendExistingTtl(redis, cooldownKey, 300);
-      const newTtl = extendedTtl > 0 ? extendedTtl : 300;
-      const remainingTime = Math.ceil(newTtl / 60);
-      await e.reply(
-        `精英巫女察觉到了你的躁动，加强了戒备...\n请等待 ${remainingTime} 分钟后再行动！`,
-        10
-      );
-      return true;
-    }
-
-    const economyManager = new EconomyManager(e);
-    const targetCoins = economyManager.getCoins({
-      user_id: targetId,
-      group_id: e.group_id,
-    });
-    const attackerCoins = economyManager.getCoins(e);
-
-    if (Math.abs(attackerCoins - targetCoins) > 1000) {
-      await this.handleRobberyPenalty(
-        e,
-        economyManager,
-        cooldownKey,
-        attackerCoins,
-        "由于双方贫富差距过大，"
-      );
-      return true;
-    }
-
-    let attackerLevel = 1;
-    let targetLevel = 1;
-    try {
-      const attackerInfo = await e.getInfo();
-      attackerLevel = Number(attackerInfo?.level) || 1;
-    } catch (err) {
-      logger.warn(`获取攻击者群等级失败: ${err}`);
-    }
-    try {
-      const targetInfo = await e.getInfo(targetId);
-      targetLevel = Number(targetInfo?.level) || 1;
-    } catch (err) {
-      logger.warn(`获取目标群等级失败: ${err}`);
-    }
-
-    const levelDiff = attackerLevel - targetLevel;
-    const successRate = Math.max(
-      20,
-      Math.min(
-        80,
-        50 + levelDiff + Math.max(0, targetCoins - attackerCoins) / 20
-      )
-    );
-
-    const roll = _.random(1, 100);
-    const attackerName = e.sender.card || e.sender.nickname || e.user_id;
-    let targetName = targetId;
-    try {
-      const info = await e.getInfo(targetId);
-      if (info) {
-        targetName = info.card || info.nickname || targetId;
-      }
-    } catch (err) {}
-
-    if (roll <= successRate) {
-      const robPercent = _.random(1, 20);
-      const robAmount = Math.round((targetCoins * robPercent) / 100);
-
-      if (robAmount > 0) {
-        const transferSuccess = economyManager.transferCoins(
-          { user_id: targetId, group_id: e.group_id },
-          e,
-          robAmount,
-          { type: "打劫损失", creditType: "打劫收入", note: "打劫" }
-        );
-
-        if (!transferSuccess) {
-          await e.reply(`抢夺失败！${targetName} 的樱花币已经不够了~`, 10);
-          return true;
-        }
-      }
-
-      const counterKey = `sakura:economy:rob:counter:${e.group_id}:${targetId}`;
-      const counterData = JSON.stringify({
-        attackerId: e.user_id,
-        amount: robAmount,
-        time: Date.now(),
-      });
-      await redis.set(counterKey, counterData, "EX", 120);
-
-      await e.reply(
-        `🌸 抢夺成功！\n${attackerName} 从 ${targetName} 那里抢走了 ${robAmount} 樱花币！`
-      );
-    } else {
-      await this.handleRobberyPenalty(
-        e,
-        economyManager,
-        cooldownKey,
-        attackerCoins,
-        ""
-      );
-    }
-
-    return true;
-  });
-
-  async handleRobberyPenalty(
-    e,
-    economyManager,
-    cooldownKey,
-    attackerCoins,
-    reasonPrefix
-  ) {
-    const attackerName = e.sender.card || e.sender.nickname || e.user_id;
-
-    if (attackerCoins < 50) {
-      const jailHours = 50 - attackerCoins;
-      const jailSeconds = jailHours * 60 * 60;
-
-      if (attackerCoins > 0) {
-        economyManager.transferCoins(
-          e,
-          { user_id: e.self_id, group_id: e.group_id },
-          attackerCoins,
-          { type: "罚款支出", creditType: "罚款收入", note: "打劫失败罚款" }
-        );
-      }
-
-      await redis.set(
-        cooldownKey,
-        String(Math.floor(Date.now() / 1000)),
-        "EX",
-        jailSeconds
-      );
-
-      await e.reply(
-        `🚨 抢夺失败！\n${reasonPrefix}${attackerName} 被神使当场抓获！\n由于付不起罚款，被直接打入地牢！\n监禁 ${jailHours} 小时`
-      );
-      return;
-    }
-
-    const penalty = 50;
-    economyManager.transferCoins(
-      e,
-      { user_id: e.self_id, group_id: e.group_id },
-      penalty,
-      { type: "罚款支出", creditType: "罚款收入", note: "打劫失败罚款" }
-    );
-
-    await redis.set(
-      cooldownKey,
-      String(Math.floor(Date.now() / 1000)),
-      "EX",
-      1800
-    );
-
-    await e.reply(
-      `🚨 抢夺失败！\n${reasonPrefix}${attackerName} 被神使当场抓获！\n受到神罚，失去 ${penalty} 樱花币！`
-    );
-  }
-
-  counter = Command(/^\s*#?(反击|复仇|神罚)\s*$/i, async (e) => {
-    if (!this.checkWhitelist(e)) return false;
-    const targetId = e.at;
-    if (!targetId) {
-      return false;
-    }
-
-    if (targetId == e.user_id) {
-      return false;
-    }
-
-    const counterKey = `sakura:economy:rob:counter:${e.group_id}:${e.user_id}`;
-    const counterDataStr = await redis.get(counterKey);
-
-    if (!counterDataStr) {
-      await e.reply("找不到反击目标，或者对方已经逃回神社了！", 10);
-      return true;
-    }
-
-    let counterData;
-    try {
-      counterData = JSON.parse(counterDataStr);
-    } catch (err) {
-      logger.warn(`[经济系统] 反击凭证损坏: ${err.message}`);
-      await deleteIfValue(redis, counterKey, counterDataStr);
-      await e.reply("反击凭证已经失效，请等待下一次机会。", 10);
-      return true;
-    }
-
-    if (
-      !counterData ||
-      counterData.attackerId == null ||
-      !Number.isSafeInteger(Number(counterData.amount)) ||
-      Number(counterData.amount) < 0 ||
-      !Number.isFinite(Number(counterData.time))
-    ) {
-      await deleteIfValue(redis, counterKey, counterDataStr);
-      await e.reply("反击凭证已经失效，请等待下一次机会。", 10);
-      return true;
-    }
-
-    if (String(counterData.attackerId) !== String(targetId)) {
-      await e.reply("找错人了！那个人是无辜的！", 10);
-      return true;
-    }
-
-    if (!await deleteIfValue(redis, counterKey, counterDataStr)) {
-      await e.reply("反击机会已经被使用或过期了！", 10);
-      return true;
-    }
-
-    const economyManager = new EconomyManager(e);
-    const attackerName = e.sender.card || e.sender.nickname || e.user_id;
-    let targetName = targetId;
-    try {
-      const info = await e.getInfo(targetId);
-      if (info) {
-        targetName = info.card || info.nickname || targetId;
-      }
-    } catch (err) {}
-
-    const elapsedTime = (Date.now() - counterData.time) / 1000;
-    const successRate = Math.max(0, Math.min(
-      100,
-      Math.round(100 - (elapsedTime / 120) * 100),
-    ));
-
-    const roll = _.random(1, 100);
-    if (roll <= successRate) {
-      const counterAmount = Math.round(counterData.amount * 1.5);
-      const targetCoins = economyManager.getCoins({
-        user_id: targetId,
-        group_id: e.group_id,
-      });
-      const actualAmount = Math.min(counterAmount, targetCoins);
-
-      if (actualAmount > 0) {
-        const transferSuccess = economyManager.transferCoins(
-          { user_id: targetId, group_id: e.group_id },
-          e,
-          actualAmount,
-          { type: "反击损失", creditType: "反击收入", note: "打劫反击" }
-        );
-
-        if (!transferSuccess) {
-          await e.reply(`反击失败！${targetName} 的樱花币已经不够了~`, 10);
-          return true;
-        }
-      }
-
-      await e.reply(
-        `⚔️ 反击成功！\n${attackerName} 用岩浆烫伤了 ${targetName}！\n夺回并获得了 ${actualAmount} 樱花币！`
-      );
-    } else {
-      await e.reply(`💨 反击失败！\n${targetName} 早就跑得比Miko还快了...`);
-    }
-
-    return true;
-  });
-
   shopList = Command(/^#?(商店|商城|樱神社商店|神社商店)$/, async (e) => {
     if (!this.checkWhitelist(e)) return false;
     const shopManager = new ShopManager();
@@ -540,9 +266,11 @@ export default class Economy extends plugin {
         let rodInfo = "";
         if (itemId.startsWith("rod_")) {
           const durabilityInfo = fishingManager.getRodDurabilityInfo(e.user_id, itemId);
-          if (durabilityInfo.maxControl > 0) {
-            const durabilityPercent = Math.round((durabilityInfo.currentControl / durabilityInfo.maxControl) * 100);
-            rodInfo = ` 耐久: ${durabilityPercent}%`;
+          if (durabilityInfo.maxDurability > 0) {
+            const durabilityPercent = Math.round(
+              (durabilityInfo.currentDurability / durabilityInfo.maxDurability) * 100,
+            );
+            rodInfo = ` 控制:${item.control} 耐久:${durabilityInfo.currentDurability}/${durabilityInfo.maxDurability} (${durabilityPercent}%)`;
           }
         }
 
@@ -578,16 +306,12 @@ export default class Economy extends plugin {
     if (!this.checkWhitelist(e)) return false;
     const economyManager = new EconomyManager(e);
     const coins = economyManager.getCoins(e);
-    const level = economyManager.getLevel(e);
-    const experience = economyManager.getExperience(e);
 
     const userData = {
       userId: e.user_id,
       nickname: e.sender.card || e.sender.nickname || e.user_id,
       avatarUrl: `https://q1.qlogo.cn/g?b=qq&nk=${e.user_id}&s=640`,
       coins,
-      level,
-      experience,
     };
 
     try {
@@ -616,6 +340,16 @@ export default class Economy extends plugin {
 
     if (amount <= 0) {
       return false;
+    }
+
+    const fishingManager = new FishingManager(e.group_id);
+    const fishingLevel = fishingManager.getUserFishingLevel(e.user_id);
+    if (!canUseTransfer(fishingLevel)) {
+      await e.reply(
+        `转账功能将在钓鱼 Lv.${TRANSFER_UNLOCK_FISHING_LEVEL} 开放，你当前为 Lv.${fishingLevel}。`,
+        10,
+      );
+      return true;
     }
 
     const economyManager = new EconomyManager(e);
@@ -736,8 +470,8 @@ export default class Economy extends plugin {
 
     if (rodConfig) {
       const durabilityInfo = fishingManager.getRodDurabilityInfo(e.user_id, itemId);
-      if (durabilityInfo.maxControl > 0) {
-        const ratio = durabilityInfo.currentControl / durabilityInfo.maxControl;
+      if (durabilityInfo.maxDurability > 0) {
+        const ratio = durabilityInfo.currentDurability / durabilityInfo.maxDurability;
         sellPrice = Math.floor(sellPrice * ratio);
         durabilityMsg = `(耐久:${Math.floor(ratio * 100)}%)`;
       }
@@ -838,15 +572,6 @@ export default class Economy extends plugin {
   reviveCoin = Command(/^#?领取复活币$/, async (e) => {
     if (!this.checkWhitelist(e)) return false;
 
-    const fishingKey = `sakura:economy:daily_fishing_count:${e.group_id}:${e.user_id}`;
-    const fishingCount = await redis.get(fishingKey);
-
-    if (!fishingCount || parseInt(fishingCount) < 3) {
-      const count = fishingCount ? parseInt(fishingCount) : 0;
-      await e.reply(`你今天钓了 ${count} 条鱼，还需再钓 ${3 - count} 条才能领取复活币~`, 10);
-      return true;
-    }
-
     const key = `sakura:economy:daily_revive:${e.group_id}:${e.user_id}`;
     const hasReceived = await redis.get(key);
 
@@ -856,19 +581,24 @@ export default class Economy extends plugin {
     }
 
     const economyManager = new EconomyManager(e);
+    const fishingManager = new FishingManager(e.group_id);
+    const policy = getReviveCoinPolicy(fishingManager.getUserFishingLevel(e.user_id));
     const now = Date.now();
     const claim = economyManager.claimDailyCoins(e, {
       claimType: "revive_coin",
       claimDate: getShanghaiDateKey(now),
-      amount: 100,
+      amount: policy.amount,
       note: "领取复活币",
-      maxBalanceExclusive: 100,
+      maxBalanceExclusive: policy.maxBalanceExclusive,
     });
     if (!claim.success) {
       if (claim.reason === "already_claimed") {
         await e.reply("你今天已经领取过复活币了，请明天再来吧~", 10);
       } else if (claim.reason === "ineligible") {
-        await e.reply("你的余额还很充足，暂时不需要复活币援助~", 10);
+        await e.reply(
+          `你当前钓鱼 Lv.${policy.fishingLevel}，余额低于 ${policy.maxBalanceExclusive} 樱花币时才能领取 ${policy.amount} 樱花币援助~`,
+          10,
+        );
       } else {
         await e.reply("领取失败，请稍后再试~", 10);
       }
@@ -881,7 +611,9 @@ export default class Economy extends plugin {
       logger.warn(`[经济系统] 写入兼容领取标记失败: ${err.message}`);
     }
 
-    await e.reply("看你囊中羞涩，偷偷塞给了你 100 樱花币，希望能助你东山再起~");
+    await e.reply(
+      `看你囊中羞涩，按钓鱼 Lv.${policy.fishingLevel} 的援助标准，偷偷塞给了你 ${policy.amount} 樱花币，希望能助你东山再起~`,
+    );
     return true;
   });
 

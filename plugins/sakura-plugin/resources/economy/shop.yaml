@@ -9,6 +9,7 @@ categories:
         price: 50
         type: equipment
         control: 30
+        durability: 30
         description: 随处可见的普通竹竿，适合新手练习，只能钓小鱼。
 
       - id: rod_fiberglass
@@ -16,6 +17,7 @@ categories:
         price: 400
         type: equipment
         control: 60
+        durability: 60
         description: 轻便耐用的玻璃纤维鱼竿，控制力有所提升。
 
       - id: rod_carbon
@@ -23,6 +25,7 @@ categories:
         price: 1100
         type: equipment
         control: 100
+        durability: 100
         description: 轻盈强韧的碳素纤维打造，能应对大多数普通鱼类。
 
       - id: rod_titanium
@@ -30,6 +33,7 @@ categories:
         price: 2600
         type: equipment
         control: 150
+        durability: 150
         description: 泛着冷光的钛合金鱼竿，即使是凶猛的大鱼也能驾驭。
 
       - id: rod_legendary
@@ -37,6 +41,7 @@ categories:
         price: 5000
         type: equipment
         control: 200
+        durability: 200
         description: 传说中的神器，拥有最强控制力，能征服任何鱼类！
 
   lines:
@@ -135,5 +140,6 @@ categories:
         name: 鱼雷
         price: 200
         type: consumable
-        description: 一种恶作剧道具，投放到鱼塘后可能被其他钓鱼者钓到。
+        duration: 86400
+        description: 一种恶作剧道具，投放后可能被其他钓鱼者钓到，24小时未触发会自动失效。
 

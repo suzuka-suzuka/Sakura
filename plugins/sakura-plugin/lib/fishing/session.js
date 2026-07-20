@@ -94,7 +94,7 @@ export class FishingSessionStore {
     const session = this.sessions.get(normalizedKey);
     if (!session || (sessionId && session.id !== sessionId)) return null;
 
-    for (const timerName of ["waitingTimer", "totalTimer", "confirmTimer"]) {
+    for (const timerName of ["waitingTimer", "totalTimer", "confirmTimer", "fishStateTimer"]) {
       if (session[timerName]) this.clearTimer(session[timerName]);
       session[timerName] = null;
     }

@@ -137,78 +137,69 @@ export default class EconomyImageGenerator {
   }
 
   async generateStatusImage(data) {
-    const canvas = createCanvas(this.width, 400)
+    const height = 320
+    const canvas = createCanvas(this.width, height)
     const ctx = canvas.getContext("2d")
 
-    this.drawSakuraBackground(ctx, this.width, 400)
+    this.drawSakuraBackground(ctx, this.width, height)
 
-    ctx.fillStyle = "rgba(255, 255, 255, 0.85)"
+    ctx.fillStyle = "rgba(255, 255, 255, 0.9)"
     ctx.shadowColor = "rgba(255, 105, 180, 0.2)"
     ctx.shadowBlur = 15
-    this.drawRoundedRect(ctx, 20, 20, this.width - 40, 360, 20)
+    this.drawRoundedRect(ctx, 20, 20, this.width - 40, height - 40, 20)
     ctx.fill()
     ctx.shadowBlur = 0
 
-    await this.drawAvatar(ctx, data.avatarUrl, 50, 50, 100)
+    const avatarX = 55
+    const avatarY = 85
+    const avatarSize = 150
+    await this.drawAvatar(ctx, data.avatarUrl, avatarX, avatarY, avatarSize)
+
+    ctx.strokeStyle = "rgba(255, 105, 180, 0.55)"
+    ctx.lineWidth = 5
+    ctx.beginPath()
+    ctx.arc(
+      avatarX + avatarSize / 2,
+      avatarY + avatarSize / 2,
+      avatarSize / 2 + 4,
+      0,
+      Math.PI * 2,
+    )
+    ctx.stroke()
+
+    const contentX = 250
+    const contentWidth = this.width - contentX - 70
 
     ctx.fillStyle = "#FF69B4"
-    ctx.font = 'bold 28px ZhuZiAYuan, "MotoyaMaru", "Noto Color Emoji", "Noto Sans SC", sans-serif'
-    const nicknameLines = this.wrapText(ctx, data.nickname, this.width - 200)
-    if (nicknameLines.length === 1) {
-      ctx.fillText(nicknameLines[0], 170, 85)
-    } else {
-      ctx.fillText(nicknameLines[0], 170, 70)
-      ctx.font = '24px ZhuZiAYuan, "MotoyaMaru", "Noto Color Emoji", "Noto Sans SC", sans-serif'
-      ctx.fillText(nicknameLines[1], 170, 100)
-    }
+    ctx.font = 'bold 30px ZhuZiAYuan, "MotoyaMaru", "Noto Color Emoji", "Noto Sans SC", sans-serif'
+    ctx.fillText(this.truncateText(ctx, data.nickname, contentWidth), contentX, 92)
 
     ctx.fillStyle = "#999999"
     ctx.font = '20px ZhuZiAYuan, "MotoyaMaru", "Noto Color Emoji", "Noto Sans SC", sans-serif'
-    ctx.fillText(`ID: ${data.userId}`, 170, 130)
+    ctx.fillText(`ID: ${data.userId}`, contentX, 128)
 
-    ctx.strokeStyle = "#EEEEEE"
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.moveTo(50, 180)
-    ctx.lineTo(this.width - 50, 180)
-    ctx.stroke()
-
-    const drawStat = (label, value, x, y, color) => {
-        ctx.fillStyle = "#666666"
-        ctx.font = '24px ZhuZiAYuan, "MotoyaMaru", "Noto Color Emoji", "Noto Sans SC", sans-serif'
-        ctx.fillText(label, x, y)
-        
-        ctx.fillStyle = color
-        ctx.font = 'bold 30px ZhuZiAYuan, "MotoyaMaru", "Noto Color Emoji", "Noto Sans SC", sans-serif'
-        ctx.fillText(value, x, y + 45)
-    }
-
-    drawStat("当前等级", `Lv.${data.level}`, 50, 240, "#FF69B4")
-    drawStat("樱花币", `${data.coins}`, 300, 240, "#FF1493")
-    drawStat("当前经验", `${data.experience}`, 550, 240, "#FFB3D9")
-
-    const expBarY = 320
-    const expBarWidth = this.width - 100
-    const expBarHeight = 20
-    
-    const currentLevelExp = 100 * Math.pow(data.level - 1, 2)
-    const nextLevelExp = 100 * Math.pow(data.level, 2)
-    const levelTotalExp = nextLevelExp - currentLevelExp
-    const currentExpInLevel = data.experience - currentLevelExp
-    const progress = Math.min(1, Math.max(0, currentExpInLevel / levelTotalExp))
-
-    ctx.fillStyle = "#FFE4F3"
-    this.drawRoundedRect(ctx, 50, expBarY, expBarWidth, expBarHeight, 10)
+    const balanceY = 158
+    const balanceHeight = 92
+    ctx.fillStyle = "rgba(255, 228, 243, 0.78)"
+    this.drawRoundedRect(ctx, contentX, balanceY, contentWidth, balanceHeight, 18)
     ctx.fill()
 
-    ctx.fillStyle = "#FF69B4"
-    this.drawRoundedRect(ctx, 50, expBarY, expBarWidth * progress, expBarHeight, 10)
-    ctx.fill()
+    ctx.fillStyle = "#A85A7D"
+    ctx.font = '22px ZhuZiAYuan, "MotoyaMaru", "Noto Color Emoji", "Noto Sans SC", sans-serif'
+    ctx.fillText("樱花币余额", contentX + 24, balanceY + 55)
 
-    ctx.fillStyle = "#999999"
-    ctx.font = '18px ZhuZiAYuan, "MotoyaMaru", "Noto Color Emoji", "Noto Sans SC", sans-serif'
+    const numericCoins = Number(data.coins)
+    const balanceText = Number.isFinite(numericCoins)
+      ? Math.trunc(numericCoins).toLocaleString("zh-CN")
+      : String(data.coins ?? 0)
+    let balanceFontSize = 44
     ctx.textAlign = "right"
-    ctx.fillText(`${currentExpInLevel} / ${levelTotalExp}`, this.width - 50, expBarY - 10)
+    do {
+      ctx.font = `bold ${balanceFontSize}px ZhuZiAYuan, "MotoyaMaru", "Noto Color Emoji", "Noto Sans SC", sans-serif`
+      balanceFontSize -= 2
+    } while (balanceFontSize >= 26 && ctx.measureText(balanceText).width > contentWidth - 190)
+    ctx.fillStyle = "#FF1493"
+    ctx.fillText(balanceText, contentX + contentWidth - 24, balanceY + 62)
     ctx.textAlign = "left"
 
     return canvas.toBuffer("image/png")

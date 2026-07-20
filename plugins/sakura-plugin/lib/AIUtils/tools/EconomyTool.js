@@ -1,6 +1,19 @@
 import { AbstractTool } from "./AbstractTool.js";
+import { randomUUID } from "node:crypto";
 import EconomyManager from "../../economy/EconomyManager.js";
 import EconomyImageGenerator from "../../economy/ImageGenerator.js";
+import FishingManager from "../../economy/FishingManager.js";
+import {
+  acquireRedisLock,
+  releaseRedisLock,
+} from "../../economy/redisAtomic.js";
+import {
+  AI_TRANSFER_GROUP_COOLDOWN_SECONDS,
+  AI_TRANSFER_MAX_BALANCE_PERCENT,
+  canUseTransfer,
+  getNonMasterAiTransferLimit,
+  TRANSFER_UNLOCK_FISHING_LEVEL,
+} from "../../economy/rules.js";
 
 export class EconomyTool extends AbstractTool {
   name = "Economy";
@@ -17,7 +30,7 @@ export class EconomyTool extends AbstractTool {
       },
       amount: {
         type: "number",
-        description: "转账的樱花币数量，仅transfer操作时需要",
+        description: "转账的樱花币数量，仅transfer操作时需要；非主人单次最多为AI当前余额的20%",
       },
     },
     required: ["action"],
@@ -78,6 +91,11 @@ export class EconomyTool extends AbstractTool {
       }
 
       if (action === "transfer") {
+        const fishingLevel = new FishingManager(e.group_id).getUserFishingLevel(e.user_id);
+        if (!canUseTransfer(fishingLevel)) {
+          return `转账功能将在钓鱼 Lv.${TRANSFER_UNLOCK_FISHING_LEVEL} 开放，你当前为 Lv.${fishingLevel}。`;
+        }
+
         if (!targetQQ || !/^\d{5,11}$/.test(targetQQ)) {
           return `参数错误：请提供正确的QQ号。`;
         }
@@ -152,8 +170,12 @@ export class EconomyTool extends AbstractTool {
           return `转账成功！已向 ${receiverNickname}(${targetQQ}) 转账 ${actualAmount} 樱花币。`;
         }
 
-        // 非主人转账：固定20%成功概率，且转账金额不能超过余额的20%
-        if (Math.random() > 0.2 || transferAmount > botCoins * 0.2) {
+        const maxTransferAmount = getNonMasterAiTransferLimit(botCoins);
+        if (transferAmount > maxTransferAmount) {
+          return `转账失败：非主人单次最多只能转 AI 当前余额的 ${AI_TRANSFER_MAX_BALANCE_PERCENT}%，本次最多可转 ${maxTransferAmount} 樱花币。`;
+        }
+
+        const rejectAsScammer = async () => {
           const targetE = { user_id: e.user_id, group_id: e.group_id };
           const targetCoins = economyManager.getCoins(targetE);
           const fineAmount = Math.min(50, targetCoins);
@@ -176,13 +198,37 @@ export class EconomyTool extends AbstractTool {
           }
 
           return `警告：${targetNickname}(${e.user_id}) 是骗子！他企图骗取你 ${transferAmount} 樱花币！已对该骗子罚款 ${fineAmount} 樱花币。立即停止转账，不要再尝试。`;
+        };
+
+        // 非主人转账维持 50% 成功率；随机失败与群冷却均按骗子处理。
+        if (Math.random() > 0.5) {
+          return await rejectAsScammer();
         }
 
-        const transferSuccess = economyManager.transferCoins(
-          botE,
-          { user_id: targetQQ, group_id: e.group_id },
-          transferAmount
+        const cooldownKey = `sakura:economy:ai_transfer:cooldown:${e.self_id}:${e.group_id}`;
+        const cooldownToken = randomUUID();
+        const cooldownAcquired = await acquireRedisLock(
+          redis,
+          cooldownKey,
+          cooldownToken,
+          AI_TRANSFER_GROUP_COOLDOWN_SECONDS,
         );
+        if (!cooldownAcquired) {
+          return await rejectAsScammer();
+        }
+
+        let transferSuccess = false;
+        try {
+          transferSuccess = economyManager.transferCoins(
+            botE,
+            { user_id: targetQQ, group_id: e.group_id },
+            transferAmount,
+          );
+        } finally {
+          if (!transferSuccess) {
+            await releaseRedisLock(redis, cooldownKey, cooldownToken);
+          }
+        }
 
         if (!transferSuccess) {
           return `转账失败：余额不足。`;

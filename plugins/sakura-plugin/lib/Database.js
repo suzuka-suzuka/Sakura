@@ -77,6 +77,10 @@ class DB {
         profession TEXT,
         profession_level INTEGER DEFAULT 0,
         fishing_exp INTEGER DEFAULT 0,
+        fishing_stamina INTEGER DEFAULT 20,
+        fishing_stamina_updated_at INTEGER DEFAULT 0,
+        nightmare_curse_layers INTEGER DEFAULT 0,
+        nightmare_curse_prank_revealed INTEGER DEFAULT 0,
         PRIMARY KEY (group_id, user_id)
       );
 
@@ -155,6 +159,18 @@ class DB {
     const fishingStatsColumns = this.db.prepare('PRAGMA table_info(fishing_stats)').all();
     if (!fishingStatsColumns.some((column) => column.name === 'fishing_exp')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_exp INTEGER DEFAULT 0');
+    }
+    if (!fishingStatsColumns.some((column) => column.name === 'fishing_stamina')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_stamina INTEGER DEFAULT 20');
+    }
+    if (!fishingStatsColumns.some((column) => column.name === 'fishing_stamina_updated_at')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_stamina_updated_at INTEGER DEFAULT 0');
+    }
+    if (!fishingStatsColumns.some((column) => column.name === 'nightmare_curse_layers')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN nightmare_curse_layers INTEGER DEFAULT 0');
+    }
+    if (!fishingStatsColumns.some((column) => column.name === 'nightmare_curse_prank_revealed')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN nightmare_curse_prank_revealed INTEGER DEFAULT 0');
     }
   }
 

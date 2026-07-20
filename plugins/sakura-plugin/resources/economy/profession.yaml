@@ -1,11 +1,11 @@
 # 钓鱼职业配置
-# 解锁条件: 钓鱼次数 >= 60 可选择1级职业
-# 进阶条件: 钓鱼次数 >= 120 可进阶到2级
+# 解锁条件: 钓鱼等级 >= 8 可选择1级职业
+# 进阶条件: 钓鱼等级 >= 12 可进阶到2级
 # 注意: 每人只能选择一个职业，选择后不可更换
 
 unlock_requirements:
-  level_1: 60    # 解锁1级职业所需钓鱼次数
-  level_2: 120   # 进阶2级职业所需钓鱼次数
+  choose_fishing_level: 8     # 选择1级职业所需钓鱼等级
+  advance_fishing_level: 12   # 进阶2级职业所需钓鱼等级
 
 professions:
   treasure_hunter:
@@ -52,3 +52,22 @@ professions:
         title: "富商巨贾"
         coin_bonus: 0.30
         description: "金币收益+30%"
+
+  abyss_hunter:
+    name: "深渊猎手"
+    icon: "🗡️"
+    description: "减轻噩梦惩罚，并从噩梦渔获中获得更多经验"
+    effect_type: "nightmare_specialist"
+    levels:
+      1:
+        title: "猎魔新人"
+        nightmare_exp_bonus: 0.25
+        nightmare_penalty_reduction: 0.25
+        nightmare_line_save_chance: 0.25
+        description: "噩梦经验+25%，噩梦惩罚降低25%，25%概率保住鱼线"
+      2:
+        title: "深渊克星"
+        nightmare_exp_bonus: 0.50
+        nightmare_penalty_reduction: 0.50
+        nightmare_line_save_chance: 0.50
+        description: "噩梦经验+50%，噩梦惩罚降低50%，50%概率保住鱼线"

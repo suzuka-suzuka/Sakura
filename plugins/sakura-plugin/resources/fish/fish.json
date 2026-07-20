@@ -233,11 +233,12 @@
     "id": "fish_catfish",
     "name": "鲶鱼",
     "rarity": "普通",
-    "description": "长着长长的胡须，皮肤光滑无鳞，喜欢浑浊的水域。",
+    "description": "长着长长的胡须，皮肤光滑无鳞，喜欢雨后浑浊的水域。",
     "base_price": 15,
     "difficulty": 38,
     "weight": [2.0, 5.5],
-    "active_hours": [[18, 24], [0, 6]]
+    "active_hours": [[18, 24], [0, 6]],
+    "weather": ["雨"]
   },
   {
     "id": "fish_loach",
@@ -293,11 +294,12 @@
     "id": "fish_smelt",
     "name": "胡瓜鱼",
     "rarity": "普通",
-    "description": "身体散发着类似黄瓜的清香。",
+    "description": "身体散发着类似黄瓜的清香。只有降雪的寒冷水域才能钓到。",
     "base_price": 12,
     "difficulty": 28,
     "weight": [0.1, 0.5],
-    "active_hours": [[0, 24]]
+    "active_hours": [[0, 24]],
+    "weather": ["雪"]
   },
   {
     "id": "fish_herring",
@@ -423,11 +425,12 @@
     "id": "fish_salmon",
     "name": "鲑鱼",
     "rarity": "精品",
-    "description": "为了繁衍后代会逆流而上的坚毅鱼类。",
+    "description": "逆流而上的坚毅鱼类，常趁雨水上涨时启程。",
     "base_price": 45,
     "difficulty": 68,
     "weight": [4.0, 20.0],
-    "active_hours": [[5, 19]]
+    "active_hours": [[5, 19]],
+    "weather": ["雨"]
   },
   {
     "id": "fish_pike",
@@ -533,11 +536,12 @@
     "id": "fish_flying_fish",
     "name": "飞鱼",
     "rarity": "精品",
-    "description": "胸鳍极其发达，能够滑翔出水面。",
+    "description": "胸鳍极其发达，能够滑翔出水面。只在晴朗的天空下起飞。",
     "base_price": 36,
     "difficulty": 54,
     "weight": [0.5, 3.0],
-    "active_hours": [[8, 16]]
+    "active_hours": [[8, 16]],
+    "weather": ["晴"]
   },
   {
     "id": "fish_snakehead",
@@ -573,11 +577,12 @@
     "id": "fish_halibut",
     "name": "大比目鱼",
     "rarity": "精品",
-    "description": "比目鱼中的巨无霸，力量很大。",
+    "description": "比目鱼中的巨无霸，力量很大。寒潮降雪时会游入近岸觅食。",
     "base_price": 60,
     "difficulty": 75,
     "weight": [12.0, 22.0],
-    "active_hours": [[0, 24]]
+    "active_hours": [[0, 24]],
+    "weather": ["雪"]
   },
   {
     "id": "fish_cobia",
@@ -593,11 +598,12 @@
     "id": "fish_monkfish",
     "name": "安康鱼",
     "rarity": "精品",
-    "description": "长相狰狞，深海底栖，头顶有发光器。",
+    "description": "长相狰狞的深海鱼，雾夜里以头顶发光器引路。",
     "base_price": 55,
     "difficulty": 64,
     "weight": [4.0, 20.0],
-    "active_hours": [[18, 24], [0, 6]]
+    "active_hours": [[18, 24], [0, 6]],
+    "weather": ["雾"]
   },
   {
     "id": "fish_parrotfish",
@@ -723,11 +729,12 @@
     "id": "fish_oarfish",
     "name": "皇带鱼",
     "rarity": "稀有",
-    "description": "身体极长，背鳍红色，传说中的地震鱼。",
+    "description": "身形极长、背鳍鲜红，只在雷暴中现身浅水。",
     "base_price": 135,
     "difficulty": 108,
     "weight": [25.0, 58.0],
-    "active_hours": [[0, 24]]
+    "active_hours": [[0, 24]],
+    "weather": ["雷暴"]
   },
   {
     "id": "fish_hammerhead",
@@ -753,11 +760,12 @@
     "id": "fish_electric_eel",
     "name": "电鳗",
     "rarity": "稀有",
-    "description": "能释放高压电流，靠近它非常危险。",
+    "description": "能释放高压电流，雷暴天会兴奋地浮出水面。",
     "base_price": 110,
     "difficulty": 118,
     "weight": [8.0, 40.0],
-    "active_hours": [[0, 24]]
+    "active_hours": [[0, 24]],
+    "weather": ["雷暴"]
   },
   {
     "id": "fish_giant_trevally",
@@ -793,41 +801,45 @@
     "id": "fish_wels_catfish",
     "name": "欧鲶",
     "rarity": "稀有",
-    "description": "欧洲淡水霸主，大嘴能吞下一切。",
+    "description": "欧洲淡水霸主，常趁暴雨搅浑水域时捕猎。",
     "base_price": 108,
     "difficulty": 118,
     "weight": [35.0, 60.0],
-    "active_hours": [[18, 24], [0, 6]]
+    "active_hours": [[18, 24], [0, 6]],
+    "weather": ["雨"]
   },
   {
     "id": "fantasy_glass_fish",
     "name": "琉璃隐鱼",
     "rarity": "稀有",
-    "description": "身体完全透明如玻璃，只有骨骼隐约发出蓝光。",
+    "description": "通体透明、骨泛蓝光，只在雾中显露轮廓。",
     "base_price": 145,
     "difficulty": 98,
     "weight": [3.0, 15.0],
-    "active_hours": [[0, 24]]
+    "active_hours": [[0, 24]],
+    "weather": ["雾"]
   },
   {
     "id": "fantasy_magma_guppy",
     "name": "熔岩孔雀鱼",
     "rarity": "稀有",
-    "description": "生活在极热水域，鳞片如同燃烧的余烬。",
+    "description": "鳞片如燃烧的余烬，只在烈日下浮出极热水域。",
     "base_price": 138,
     "difficulty": 105,
     "weight": [0.8, 5.0],
-    "active_hours": [[0, 24]]
+    "active_hours": [[0, 24]],
+    "weather": ["晴"]
   },
   {
     "id": "fantasy_leaf_skate",
     "name": "枯叶鳐",
     "rarity": "稀有",
-    "description": "完美伪装成一片巨大的枯叶，在水中随波逐流。",
+    "description": "形似巨大枯叶，常借多云的昏暗天色随波潜行。",
     "base_price": 125,
     "difficulty": 95,
     "weight": [10.0, 35.0],
-    "active_hours": [[0, 24]]
+    "active_hours": [[0, 24]],
+    "weather": ["多云"]
   },
   {
     "id": "fantasy_clockwork_trout",
@@ -843,11 +855,12 @@
     "id": "fantasy_ink_phantom",
     "name": "墨影幽灵",
     "rarity": "稀有",
-    "description": "身体由黑色烟雾构成，在水中忽聚忽散。",
+    "description": "身体由黑烟构成，只在浓雾中忽聚忽散。",
     "base_price": 148,
     "difficulty": 112,
     "weight": [0.2, 3.0],
-    "active_hours": [[18, 24], [0, 5]]
+    "active_hours": [[18, 24], [0, 5]],
+    "weather": ["雾"]
   },
   {
     "id": "fish_great_white",
@@ -903,11 +916,12 @@
     "id": "fantasy_crystal_turtle",
     "name": "晶簇巨龟",
     "rarity": "史诗",
-    "description": "背甲由璀璨的水晶簇构成，非常沉重。",
+    "description": "背负沉重水晶簇，飘雪时会共鸣发光并上浮。",
     "base_price": 270,
     "difficulty": 158,
     "weight": [85.0, 118.0],
-    "active_hours": [[0, 24]]
+    "active_hours": [[0, 24]],
+    "weather": ["雪"]
   },
   {
     "id": "fantasy_void_ray",
@@ -933,21 +947,23 @@
     "id": "fantasy_thunder_shark",
     "name": "雷霆鲨",
     "rarity": "史诗",
-    "description": "背鳍总是伴随着微型的雷云，游动时发出轰鸣。",
+    "description": "背鳍伴有微型雷云，只随雷暴现身。",
     "base_price": 260,
     "difficulty": 175,
     "weight": [60.0, 115.0],
-    "active_hours": [[0, 24]]
+    "active_hours": [[0, 24]],
+    "weather": ["雷暴"]
   },
   {
     "id": "fantasy_golden_dragonfish",
     "name": "金鳞龙鱼",
     "rarity": "史诗",
-    "description": "通体纯金，胡须极长，隐约有化龙之势。",
+    "description": "通体纯金、长须如龙，只在晴日现身。",
     "base_price": 280,
     "difficulty": 170,
     "weight": [15.0, 60.0],
-    "active_hours": [[0, 24]]
+    "active_hours": [[0, 24]],
+    "weather": ["晴"]
   },
   {
     "id": "fantasy_leviathan_spawn",
@@ -973,21 +989,23 @@
     "id": "fantasy_kraken_tentacle",
     "name": "克拉肯之触",
     "rarity": "传说",
-    "description": "虽然只是一条巨大的触手，但它拥有独立的意识和怪力。",
+    "description": "拥有独立意识和怪力的巨型触手，只在雷暴中苏醒。",
     "base_price": 350,
     "difficulty": 212,
     "weight": [150.0, 230.0],
-    "active_hours": [[0, 24]]
+    "active_hours": [[0, 24]],
+    "weather": ["雷暴"]
   },
   {
     "id": "fantasy_phoenix_koi",
     "name": "浴火锦鲤",
     "rarity": "传说",
-    "description": "在水中燃烧的神奇鱼类，水温会因它而沸腾。",
+    "description": "能令水温沸腾的燃烧之鱼，只在晴日正午苏醒。",
     "base_price": 400,
     "difficulty": 218,
     "weight": [20.0, 80.0],
-    "active_hours": [[10, 14]]
+    "active_hours": [[10, 14]],
+    "weather": ["晴"]
   },
   {
     "id": "fantasy_abyssal_whale",

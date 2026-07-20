@@ -1,5 +1,8 @@
 import db from "../Database.js";
-import { getFishingLevelByExp } from "./rules.js";
+import {
+  FISHING_STAMINA_MAX,
+  getFishingLevelByExp,
+} from "./rules.js";
 
 function normalizeNonNegativeInteger(value) {
   const number = Number(value);
@@ -28,9 +31,9 @@ export default class FishingSettlementService {
     `).run(this.groupId, this.userId);
     db.prepare(`
         INSERT OR IGNORE INTO fishing_stats
-        (group_id, user_id, total_catch, total_earnings, torpedo_hits, profession, profession_level)
-        VALUES (?, ?, 0, 0, 0, NULL, 0)
-    `).run(this.groupId, this.userId);
+        (group_id, user_id, total_catch, total_earnings, torpedo_hits, profession, profession_level, fishing_stamina, fishing_stamina_updated_at)
+        VALUES (?, ?, 0, 0, 0, NULL, 0, ?, 0)
+    `).run(this.groupId, this.userId, FISHING_STAMINA_MAX);
   }
 
   _claimSession({ sessionId, fishId, success, earnings }) {
