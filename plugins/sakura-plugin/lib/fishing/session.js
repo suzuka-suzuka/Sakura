@@ -14,6 +14,7 @@ export const FISHING_ACTION = Object.freeze({
   startTug: "start_tug",
   pull: "pull",
   loosen: "loosen",
+  attack: "attack",
 });
 
 export function parseFishingAction(phase, message) {
@@ -31,6 +32,7 @@ export function parseFishingAction(phase, message) {
   if (phase === FISHING_PHASE.fighting) {
     if (/^拉$/.test(msg)) return FISHING_ACTION.pull;
     if (/^溜$/.test(msg)) return FISHING_ACTION.loosen;
+    if (/^攻$/.test(msg)) return FISHING_ACTION.attack;
   }
   return null;
 }
@@ -94,7 +96,13 @@ export class FishingSessionStore {
     const session = this.sessions.get(normalizedKey);
     if (!session || (sessionId && session.id !== sessionId)) return null;
 
-    for (const timerName of ["waitingTimer", "totalTimer", "confirmTimer", "fishStateTimer"]) {
+    for (const timerName of [
+      "waitingTimer",
+      "totalTimer",
+      "confirmTimer",
+      "fishStateTimer",
+      "bossAttackTimer",
+    ]) {
       if (session[timerName]) this.clearTimer(session[timerName]);
       session[timerName] = null;
     }

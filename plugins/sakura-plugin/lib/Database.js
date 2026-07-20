@@ -77,10 +77,15 @@ class DB {
         profession TEXT,
         profession_level INTEGER DEFAULT 0,
         fishing_exp INTEGER DEFAULT 0,
-        fishing_stamina INTEGER DEFAULT 20,
+        fishing_stamina INTEGER DEFAULT 10,
         fishing_stamina_updated_at INTEGER DEFAULT 0,
         nightmare_curse_layers INTEGER DEFAULT 0,
         nightmare_curse_prank_revealed INTEGER DEFAULT 0,
+        bride_thread_layers INTEGER DEFAULT 0,
+        lost_soul INTEGER DEFAULT 0,
+        ghost_debt INTEGER DEFAULT 0,
+        deep_pressure_layers INTEGER DEFAULT 0,
+        location TEXT,
         PRIMARY KEY (group_id, user_id)
       );
 
@@ -90,6 +95,7 @@ class DB {
         fish_id TEXT NOT NULL,
         count INTEGER DEFAULT 0,
         success_count INTEGER DEFAULT 0,
+        max_weight REAL DEFAULT 0,
         PRIMARY KEY (group_id, user_id, fish_id)
       );
 
@@ -113,6 +119,14 @@ class DB {
         damage INTEGER DEFAULT 0,
         mastery INTEGER DEFAULT 0,
         PRIMARY KEY (group_id, user_id, rod_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS line_stats (
+        group_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        line_id TEXT NOT NULL,
+        damage INTEGER DEFAULT 0,
+        PRIMARY KEY (group_id, user_id, line_id)
       );
 
       CREATE TABLE IF NOT EXISTS pond_torpedoes (
@@ -161,7 +175,7 @@ class DB {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_exp INTEGER DEFAULT 0');
     }
     if (!fishingStatsColumns.some((column) => column.name === 'fishing_stamina')) {
-      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_stamina INTEGER DEFAULT 20');
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_stamina INTEGER DEFAULT 10');
     }
     if (!fishingStatsColumns.some((column) => column.name === 'fishing_stamina_updated_at')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_stamina_updated_at INTEGER DEFAULT 0');
@@ -171,6 +185,27 @@ class DB {
     }
     if (!fishingStatsColumns.some((column) => column.name === 'nightmare_curse_prank_revealed')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN nightmare_curse_prank_revealed INTEGER DEFAULT 0');
+    }
+    if (!fishingStatsColumns.some((column) => column.name === 'bride_thread_layers')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN bride_thread_layers INTEGER DEFAULT 0');
+    }
+    if (!fishingStatsColumns.some((column) => column.name === 'lost_soul')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN lost_soul INTEGER DEFAULT 0');
+    }
+    if (!fishingStatsColumns.some((column) => column.name === 'ghost_debt')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN ghost_debt INTEGER DEFAULT 0');
+    }
+    if (!fishingStatsColumns.some((column) => column.name === 'deep_pressure_layers')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN deep_pressure_layers INTEGER DEFAULT 0');
+    }
+
+    const fishingCountsColumns = this.db.prepare('PRAGMA table_info(fishing_counts)').all();
+    if (!fishingCountsColumns.some((column) => column.name === 'max_weight')) {
+      this.db.exec('ALTER TABLE fishing_counts ADD COLUMN max_weight REAL DEFAULT 0');
+    }
+
+    if (!fishingStatsColumns.some((column) => column.name === 'location')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN location TEXT');
     }
   }
 

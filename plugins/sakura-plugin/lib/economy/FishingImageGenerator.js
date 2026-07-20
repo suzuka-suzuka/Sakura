@@ -4,10 +4,41 @@ import path from "node:path"
 import fs from "node:fs"
 import { pluginresources } from "../path.js"
 
+const FISH_DEX_COLUMNS = 5
+
+function groupFishDexSectionsByRarity(sections) {
+  return (Array.isArray(sections) ? sections : [])
+    .filter((section) => Array.isArray(section?.entries) && section.entries.length > 0)
+    .map((section) => [{ ...section, entries: [...section.entries] }])
+}
+
+// 稀有度对应的卡片底色与分区强调色
+const RARITY_CELL_COLORS = {
+  "垃圾": 'rgba(150, 150, 150, 0.6)',
+  "普通": 'rgba(255, 255, 255, 0.6)',
+  "精品": 'rgba(200, 255, 200, 0.6)',
+  "稀有": 'rgba(200, 220, 255, 0.6)',
+  "史诗": 'rgba(230, 200, 255, 0.6)',
+  "传说": 'rgba(255, 220, 180, 0.6)',
+  "宝藏": 'rgba(255, 215, 0, 0.6)',
+  "噩梦": 'rgba(220, 20, 60, 0.6)'
+}
+
+const RARITY_ACCENT_COLORS = {
+  "垃圾": '#9E9E9E',
+  "普通": '#B0BEC5',
+  "精品": '#66BB6A',
+  "稀有": '#42A5F5',
+  "史诗": '#AB47BC',
+  "传说": '#FF9800',
+  "宝藏": '#FFB300',
+  "噩梦": '#E53935'
+}
+
 export default class FishingImageGenerator extends EconomyImageGenerator {
   constructor() {
     super()
-    this.fontFamily = 'ZhuZiAYuan, "MotoyaMaru", "Noto Color Emoji", "Noto Sans SC", sans-serif'
+    this.fontFamily = 'ZhuZiAYuan, "MotoyaMaru", "Noto Color Emoji", "Segoe UI Emoji", "Noto Sans SC", sans-serif'
     this.fishImgPath = path.join(pluginresources, "fish", "img")
   }
 
@@ -47,76 +78,211 @@ export default class FishingImageGenerator extends EconomyImageGenerator {
     }
   }
 
-  async generateFishingRecord(userData, history, targetName, targetId) {
-    const columns = 2
-    const padding = 20
-    const itemHeight = 100
-    const headerHeight = 220  // 移除鱼雷统计后减少高度
+  // 剪影：离屏画布 source-in，借助鱼图透明通道生成纯色轮廓
+  async drawFishSilhouette(ctx, fishId, x, y, size) {
+    const imagePath = path.join(this.fishImgPath, `${fishId}.png`)
+    try {
+      if (fs.existsSync(imagePath)) {
+        const image = await loadImage(imagePath)
+        const off = createCanvas(size, size)
+        const offCtx = off.getContext('2d')
+        offCtx.drawImage(image, 0, 0, size, size)
+        offCtx.globalCompositeOperation = 'source-in'
+        offCtx.fillStyle = 'rgba(74, 68, 88, 0.92)'
+        offCtx.fillRect(0, 0, size, size)
+        ctx.drawImage(off, x, y)
+        return
+      }
+    } catch (err) { }
+    // 图片缺失时退回鱼形占位
+    ctx.fillStyle = 'rgba(74, 68, 88, 0.35)'
+    this.drawRoundedRect(ctx, x, y, size, size, 10)
+    ctx.fill()
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'
+    ctx.font = `bold 40px ${this.fontFamily}`
+    ctx.textAlign = 'center'
+    ctx.fillText('🐟', x + size / 2, y + size / 2 + 14)
+    ctx.textAlign = 'left'
+  }
 
+  async generateFishDexPages(data) {
+    const pageSections = groupFishDexSectionsByRarity(data.sections)
+    const pages = pageSections.length > 0 ? pageSections : [[]]
+    const images = []
+
+    for (let index = 0; index < pages.length; index++) {
+      images.push(await this.generateFishDex({
+        ...data,
+        sections: pages[index],
+        pageIndex: index + 1,
+        pageCount: pages.length,
+      }))
+    }
+
+    return images
+  }
+
+  // 三态图鉴：已收录彩图 / 目击剪影 / 未发现问号；locationLabel 存在时表示按钓点筛选视图
+  async generateFishDex({
+    targetName,
+    targetId,
+    userData,
+    sections,
+    collected,
+    sighted,
+    total,
+    locationLabel = null,
+    pageIndex = null,
+    pageCount = null,
+  }) {
     const width = 800
-    const itemWidth = (width - (columns + 1) * padding) / columns
+    const padding = 20
+    const columns = FISH_DEX_COLUMNS
+    const cellGap = 12
+    const cellWidth = (width - padding * 2 - cellGap * (columns - 1)) / columns
+    const cellHeight = 180
+    const sectionTitleHeight = 56
+    const headerHeight = 240
 
-    const rows = Math.ceil(history.length / columns)
-    const height = Math.max(500, headerHeight + rows * (itemHeight + padding) + padding)
+    let contentHeight = 0
+    for (const section of sections) {
+      const rows = Math.ceil(section.entries.length / columns)
+      contentHeight += sectionTitleHeight + rows * (cellHeight + cellGap)
+    }
+    const height = headerHeight + contentHeight + padding
 
     const canvas = createCanvas(width, height)
     const ctx = canvas.getContext('2d')
 
     this.drawSakuraBackground(ctx, width, height)
 
-    // Draw Header
-    // Avatar
+    // Header
     const avatarUrl = `https://q1.qlogo.cn/g?b=qq&nk=${targetId}&s=640`
     await this.drawAvatar(ctx, avatarUrl, 40, 40, 140)
 
-    // Info
     ctx.fillStyle = '#5D4037'
     ctx.font = `bold 40px ${this.fontFamily}`
-    ctx.fillText(`${targetName} 的钓鱼记录`, 200, 80)
+    const title = `${targetName} 的钓鱼图鉴`
+    const hasPageLabel = pageCount > 1 && pageIndex > 0
+    if (hasPageLabel) {
+      ctx.fillText(this.truncateText(ctx, title, width - 330), 200, 88)
+      ctx.fillStyle = '#AD6A85'
+      ctx.font = `bold 22px ${this.fontFamily}`
+      ctx.textAlign = 'right'
+      ctx.fillText(`第 ${pageIndex}/${pageCount} 页`, width - padding, 86)
+      ctx.textAlign = 'left'
+    } else {
+      ctx.fillText(title, 200, 88)
+    }
 
-    ctx.font = `28px ${this.fontFamily}`
-    ctx.fillText(`🎣 总钓鱼次数：${userData.total_catch || 0} 次`, 200, 125)
-    ctx.fillText(`💰 总收益：${userData.total_earnings || 0} 樱花币`, 200, 160)
-    ctx.fillText(`💥 被炸次数：${userData.torpedo_hits || 0} 次`, 200, 195)
+    ctx.fillStyle = '#5D4037'
+    ctx.font = `26px ${this.fontFamily}`
+    const locationSuffix = locationLabel ? ` · 📍${locationLabel}` : ""
+    ctx.fillText(`📖 已收录 ${collected}/${total} · 👀 目击 ${sighted}${locationSuffix}`, 200, 130)
 
-    // Draw History
-    const startY = headerHeight
+    const barX = 200
+    const barY = 146
+    const barWidth = width - barX - padding * 2
+    const barHeight = 16
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.75)'
+    this.drawRoundedRect(ctx, barX, barY, barWidth, barHeight, 8)
+    ctx.fill()
+    if (total > 0 && collected > 0) {
+      const ratio = Math.min(1, collected / total)
+      ctx.fillStyle = '#FF80AB'
+      this.drawRoundedRect(ctx, barX, barY, Math.max(barHeight, Math.round(barWidth * ratio)), barHeight, 8)
+      ctx.fill()
+    }
 
-    for (let i = 0; i < history.length; i++) {
-      const item = history[i]
-      const col = i % columns
-      const row = Math.floor(i / columns)
+    ctx.fillStyle = '#795548'
+    ctx.font = `22px ${this.fontFamily}`
+    ctx.fillText(
+      `🎣 总钓鱼 ${userData.total_catch || 0} 次 · 💰 总收益 ${userData.total_earnings || 0} · 💥 被炸 ${userData.torpedo_hits || 0} 次`,
+      200,
+      205
+    )
 
-      const x = padding + col * (itemWidth + padding)
-      const y = startY + row * (itemHeight + padding)
-
-      // Item Background - 根据稀有度调整背景色
-      const rarityColors = {
-        "垃圾": 'rgba(150, 150, 150, 0.6)',
-        "普通": 'rgba(255, 255, 255, 0.6)',
-        "精品": 'rgba(200, 255, 200, 0.6)',
-        "稀有": 'rgba(200, 220, 255, 0.6)',
-        "史诗": 'rgba(230, 200, 255, 0.6)',
-        "传说": 'rgba(255, 220, 180, 0.6)',
-        "宝藏": 'rgba(255, 215, 0, 0.6)',
-        "噩梦": 'rgba(220, 20, 60, 0.6)'
-      }
-      ctx.fillStyle = rarityColors[item.rarity] || 'rgba(255, 255, 255, 0.6)'
-      this.drawRoundedRect(ctx, x, y, itemWidth, itemHeight, 15)
+    let cursorY = headerHeight
+    for (const section of sections) {
+      // 分区标题：稀有度色块 + 名称 + 收集进度
+      const accent = RARITY_ACCENT_COLORS[section.rarity] || '#9E9E9E'
+      ctx.fillStyle = accent
+      this.drawRoundedRect(ctx, padding, cursorY + 12, 10, 30, 5)
       ctx.fill()
 
-      // 绘制鱼的图片
-      await this.drawFishImage(ctx, item.fishId, x + 10, y + 10, 80)
-
-      // Fish Info
       ctx.fillStyle = '#5D4037'
-      ctx.font = `bold 24px ${this.fontFamily}`
-      const name = item.name || item.fishId
-      ctx.fillText(this.truncateText(ctx, String(name), itemWidth - 100), x + 100, y + 45)
+      ctx.font = `bold 28px ${this.fontFamily}`
+      ctx.fillText(section.rarity, padding + 24, cursorY + 38)
+      const titleWidth = ctx.measureText(section.rarity).width
 
-      ctx.font = `20px ${this.fontFamily}`
-      ctx.fillStyle = '#795548'
-      ctx.fillText(`钓到: ${item.count} 次`, x + 100, y + 80)
+      ctx.fillStyle = accent
+      ctx.font = `bold 22px ${this.fontFamily}`
+      ctx.fillText(`${section.collected}/${section.total}`, padding + 24 + titleWidth + 14, cursorY + 37)
+
+      cursorY += sectionTitleHeight
+
+      for (let i = 0; i < section.entries.length; i++) {
+        const entry = section.entries[i]
+        const col = i % columns
+        const row = Math.floor(i / columns)
+        const x = padding + col * (cellWidth + cellGap)
+        const y = cursorY + row * (cellHeight + cellGap)
+
+        if (entry.status === 'collected') {
+          ctx.fillStyle = RARITY_CELL_COLORS[entry.rarity] || 'rgba(255, 255, 255, 0.6)'
+        } else if (entry.status === 'sighted') {
+          ctx.fillStyle = 'rgba(176, 176, 186, 0.45)'
+        } else {
+          ctx.fillStyle = 'rgba(158, 158, 168, 0.3)'
+        }
+        this.drawRoundedRect(ctx, x, y, cellWidth, cellHeight, 12)
+        ctx.fill()
+
+        const imgSize = 96
+        const imgX = x + (cellWidth - imgSize) / 2
+        const imgY = y + 10
+
+        if (entry.status === 'collected') {
+          await this.drawFishImage(ctx, entry.fishId, imgX, imgY, imgSize)
+        } else if (entry.status === 'sighted') {
+          await this.drawFishSilhouette(ctx, entry.fishId, imgX, imgY, imgSize)
+        } else {
+          ctx.fillStyle = 'rgba(93, 64, 55, 0.12)'
+          this.drawRoundedRect(ctx, imgX, imgY, imgSize, imgSize, 10)
+          ctx.fill()
+          ctx.fillStyle = 'rgba(93, 64, 55, 0.5)'
+          ctx.font = `bold 46px ${this.fontFamily}`
+          ctx.textAlign = 'center'
+          ctx.fillText('?', imgX + imgSize / 2, imgY + imgSize / 2 + 16)
+          ctx.textAlign = 'left'
+        }
+
+        ctx.textAlign = 'center'
+        const centerX = x + cellWidth / 2
+        if (entry.status === 'unknown') {
+          ctx.fillStyle = 'rgba(93, 64, 55, 0.55)'
+          ctx.font = `bold 20px ${this.fontFamily}`
+          ctx.fillText('？？？', centerX, y + 132)
+        } else {
+          ctx.fillStyle = '#5D4037'
+          ctx.font = `bold 19px ${this.fontFamily}`
+          ctx.fillText(this.truncateText(ctx, String(entry.name), cellWidth - 12), centerX, y + 132)
+
+          ctx.fillStyle = '#795548'
+          ctx.font = `16px ${this.fontFamily}`
+          if (entry.status === 'collected') {
+            ctx.fillText(`捕获 ×${entry.successCount}`, centerX, y + 155)
+            if (entry.maxWeight > 0) {
+              ctx.fillText(`最大 ${Math.round(entry.maxWeight * 100) / 100}`, centerX, y + 174)
+            }
+          } else {
+            ctx.fillText(`逃走 ${entry.escapeCount} 次`, centerX, y + 155)
+          }
+        }
+        ctx.textAlign = 'left'
+      }
+
+      cursorY += Math.ceil(section.entries.length / columns) * (cellHeight + cellGap)
     }
 
     return canvas.toBuffer('image/png')

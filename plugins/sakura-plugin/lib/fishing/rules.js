@@ -18,6 +18,163 @@ export const WEATHER_CONFIG = Object.freeze({
   "雪": Object.freeze({ emoji: "❄️", weight: 5 }),
 });
 
+// 钓点只筛物种池（fish.json 的 locations 字段），不影响稀有度权重；
+// 未填 locations 的鱼视为全钓点通用。unlockLevel 为钓鱼等级解锁门槛
+export const FISHING_LOCATIONS = Object.freeze({
+  pond: Object.freeze({ name: "樱花池塘", emoji: "🌸", unlockLevel: 1, description: "飘着花瓣的新手鱼塘，波光里透着家的味道。" }),
+  river: Object.freeze({ name: "青柳河湾", emoji: "🍃", unlockLevel: 3, description: "垂柳掩映的湍急河湾，洄游鱼的必经之路。" }),
+  lake: Object.freeze({ name: "雾隐湖", emoji: "🌫️", unlockLevel: 5, description: "常年被浓雾笼罩的幽静湖泊，湖底似乎藏着古老的东西。" }),
+  coast: Object.freeze({ name: "落日海岸", emoji: "🌅", unlockLevel: 8, description: "夕阳染红的浅海海岸，浪花里翻涌着热带的气息。" }),
+  abyss: Object.freeze({ name: "深渊海沟", emoji: "🌀", unlockLevel: 12, description: "阳光到不了的深海裂谷，巨物与怪鱼的领域。" }),
+  mystic: Object.freeze({ name: "星辉秘境", emoji: "✨", unlockLevel: 16, description: "现实之外的幻想水域，星光落进水里就活了过来。" }),
+});
+
+export const DEFAULT_FISHING_LOCATION = "pond";
+export const BOSS_BAIT_ID = "bait_boss";
+export const BOSS_ATTACK_INTERVAL_MS = 5000;
+export const BOSS_PLAYER_ATTACK_COOLDOWN_MS = 5000;
+export const BOSS_FIGHT_TIMEOUT_MS = 120 * 1000;
+export const BOSS_MIN_DIFFICULTY = 230;
+export const BOSS_MIN_HP = 180;
+export const BOSS_MIN_ATTACK = 10;
+export const BOSS_MECHANIC_TYPES = Object.freeze([
+  "stamina_drain",
+  "steal_coins",
+  "tension_surge",
+  "line_rend",
+  "rod_crush",
+  "regenerate",
+]);
+export const LOCAL_NIGHTMARE_CHANCE = 0.5;
+export const NIGHTMARE_EFFECT_TYPES = Object.freeze([
+  "rod_damage",
+  "steal_coins_flat",
+  "steal_coins_percent",
+  "curse",
+  "bride_thread",
+  "steal_bait",
+  "lost_soul",
+  "ghost_debt",
+  "deep_pressure",
+  "devour_buff",
+]);
+export const LOCAL_NIGHTMARE_EFFECT_BY_LOCATION = Object.freeze({
+  pond: "bride_thread",
+  river: "steal_bait",
+  lake: "lost_soul",
+  coast: "ghost_debt",
+  abyss: "deep_pressure",
+  mystic: "devour_buff",
+});
+
+export function getFishingLocationConfig(locationId) {
+  return FISHING_LOCATIONS[locationId] || null;
+}
+
+export function isBossFish(fish) {
+  return fish?.is_boss === true;
+}
+
+export function selectBossFromData(
+  fishData,
+  { location = DEFAULT_FISHING_LOCATION, random = Math.random } = {},
+) {
+  const candidates = Array.isArray(fishData)
+    ? fishData.filter((fish) => (
+      isBossFish(fish) &&
+      Array.isArray(fish.locations) &&
+      fish.locations.includes(location)
+    ))
+    : [];
+  if (candidates.length === 0) {
+    throw new Error(`当前钓点没有可挑战的首领`);
+  }
+
+  const selected = candidates[0];
+  const [minWeight, maxWeight] = selected.weight;
+  const weightRoll = Math.max(0, Math.min(1, Number(random()) || 0));
+  const actualWeight = Math.round(
+    (minWeight + (maxWeight - minWeight) * weightRoll) * 100,
+  ) / 100;
+  return { ...selected, actualWeight, isBoss: true };
+}
+
+export function calculateBossLineDurability(lineCapacity) {
+  const capacity = Math.max(0, Number(lineCapacity) || 0);
+  return Math.max(20, Math.round(20 + capacity * 0.5));
+}
+
+export function rollBossPlayerDamage(effectiveControl, random = Math.random) {
+  const control = Math.max(0, Number(effectiveControl) || 0);
+  const roll = Math.max(0, Math.min(0.999999999999, Number(random()) || 0));
+  return Math.max(6, Math.floor(control / 10) + 5 + Math.floor(roll * 5));
+}
+
+export function getBossAttackCooldownRemaining(
+  lastAttackAt,
+  now = Date.now(),
+  cooldownMs = BOSS_PLAYER_ATTACK_COOLDOWN_MS,
+) {
+  const last = Math.max(0, Number(lastAttackAt) || 0);
+  const current = Math.max(0, Number(now) || 0);
+  const cooldown = Math.max(0, Number(cooldownMs) || 0);
+  if (last <= 0) return 0;
+  return Math.max(0, Math.ceil(cooldown - (current - last)));
+}
+
+export function resolveBossAttack(boss, random = Math.random) {
+  const attack = Math.max(1, Math.floor(Number(boss?.attack) || 1));
+  const mechanic = boss?.boss_mechanic || {};
+  const baseGearDamage = Math.max(1, Math.ceil(attack / 2));
+  const result = {
+    lineDamage: baseGearDamage,
+    rodDamage: baseGearDamage,
+    distanceGain: Math.max(1, Math.floor(attack / 4)),
+    staminaDrain: 0,
+    coinSteal: 0,
+    tensionGain: 0,
+    heal: 0,
+  };
+
+  switch (mechanic.type) {
+    case "stamina_drain":
+      result.staminaDrain = Math.max(1, Math.floor(Number(mechanic.amount) || 1));
+      break;
+    case "steal_coins": {
+      const min = Math.max(1, Math.floor(Number(mechanic.min) || 1));
+      const max = Math.max(min, Math.floor(Number(mechanic.max) || min));
+      const roll = Math.max(0, Math.min(0.999999999999, Number(random()) || 0));
+      result.coinSteal = min + Math.floor(roll * (max - min + 1));
+      break;
+    }
+    case "tension_surge":
+      result.tensionGain = Math.max(1, Math.floor(Number(mechanic.amount) || 1));
+      break;
+    case "line_rend":
+      result.lineDamage = Math.max(
+        1,
+        Math.round(baseGearDamage * Math.max(1, Number(mechanic.multiplier) || 1)),
+      );
+      break;
+    case "rod_crush":
+      result.rodDamage = Math.max(
+        1,
+        Math.round(baseGearDamage * Math.max(1, Number(mechanic.multiplier) || 1)),
+      );
+      break;
+    case "regenerate":
+      result.heal = Math.max(1, Math.floor(Number(mechanic.amount) || 1));
+      break;
+    default:
+      break;
+  }
+  return result;
+}
+
+export function normalizeFishingLocation(locationId) {
+  return FISHING_LOCATIONS[locationId] ? locationId : DEFAULT_FISHING_LOCATION;
+}
+
 const WEATHER_ROTATION_MS = 60 * 60 * 1000;
 
 // 32 位整数混淆散列，把小时序号映射为 [0, 1) 的确定值
@@ -50,9 +207,69 @@ const QUALITY_WEIGHTS = Object.freeze({
 const FISHING_LEVEL_EXP_BASE = 20;
 const PERFECT_CATCH_WINDOW_MS = 5000;
 export const NIGHTMARE_CURSE_HIDDEN_LAYERS = 2;
-export const FISHING_STAMINA_MAX = 20;
+export const FISHING_COOLDOWN_SECONDS = 6 * 60;
+export const FISHING_BENEFIT_DURATION_SECONDS = 30 * 60;
+export const FISHING_BITE_WAIT_MAX_SECONDS = 120;
+export const FISHING_BITE_WAIT_REDUCTION_PER_LEVEL_SECONDS = 2;
+export const FISHING_STAMINA_BASE = 10;
+export const FISHING_STAMINA_PER_LEVEL = 1;
+// 保留旧导出名作为 1 级/新玩家的初始体力上限。
+export const FISHING_STAMINA_MAX = FISHING_STAMINA_BASE;
 export const FISHING_STAMINA_COST = 1;
 export const FISHING_STAMINA_RECOVERY_MS = 30 * 60 * 1000;
+
+export function getFishingBiteWaitMaxMs(level) {
+  const safeLevel = Math.max(1, Math.floor(Number(level) || 1));
+  return Math.max(
+    0,
+    FISHING_BITE_WAIT_MAX_SECONDS - (
+      (safeLevel - 1) * FISHING_BITE_WAIT_REDUCTION_PER_LEVEL_SECONDS
+    ),
+  ) * 1000;
+}
+
+export function rollFishingBiteWaitMs(level, random = Math.random) {
+  const maxWaitMs = getFishingBiteWaitMaxMs(level);
+  if (maxWaitMs === 0) return 0;
+  const roll = Math.max(0, Math.min(1, Number(random()) || 0));
+  return Math.min(maxWaitMs, Math.floor(roll * (maxWaitMs + 1)));
+}
+
+export function getFishingStaminaMax(level) {
+  const safeLevel = Math.max(1, Math.floor(Number(level) || 1));
+  return FISHING_STAMINA_BASE + (safeLevel - 1) * FISHING_STAMINA_PER_LEVEL;
+}
+
+export function getFishingStaminaCost(deepPressureLayers = 0) {
+  return FISHING_STAMINA_COST + (Math.max(0, Math.floor(Number(deepPressureLayers) || 0)) > 0 ? 1 : 0);
+}
+
+export function getLostSoulRewardMultiplier(penaltyReduction = 0) {
+  const reduction = Math.max(0, Math.min(1, Number(penaltyReduction) || 0));
+  return 1 - 0.5 * (1 - reduction);
+}
+
+export function resolveNightmareRarityAfflictions(curseLayers = 0, brideThreadLayers = 0) {
+  const curseActive = Math.max(0, Math.floor(Number(curseLayers) || 0)) > 0;
+  const brideThreadAvailable = Math.max(0, Math.floor(Number(brideThreadLayers) || 0)) > 0;
+  return {
+    consumeCurse: curseActive,
+    consumeBrideThread: !curseActive && brideThreadAvailable,
+    brideThreadPaused: curseActive && brideThreadAvailable,
+  };
+}
+
+export function calculateGhostDebtPayment(earnings, debt) {
+  const safeEarnings = Math.max(0, Math.floor(Number(earnings) || 0));
+  const safeDebt = Math.max(0, Math.floor(Number(debt) || 0));
+  const debtPaid = Math.min(safeEarnings, safeDebt);
+  return {
+    grossEarnings: safeEarnings,
+    earnings: safeEarnings - debtPaid,
+    debtPaid,
+    remainingDebt: safeDebt - debtPaid,
+  };
+}
 
 export const FISH_FIGHT_STATE = Object.freeze({
   calm: "calm",
@@ -87,15 +304,24 @@ export const FISH_FIGHT_STATE_CONFIG = Object.freeze({
 export const FISH_FIGHT_STATE_CHANGE_MIN_MS = 8000;
 export const FISH_FIGHT_STATE_CHANGE_MAX_MS = 12000;
 
-export function calculateFishingStamina(currentStamina, updatedAt, now = Date.now()) {
+export function calculateFishingStamina(
+  currentStamina,
+  updatedAt,
+  now = Date.now(),
+  maxStamina = FISHING_STAMINA_MAX,
+) {
   const numericNow = Number(now);
   const safeNow = Number.isFinite(numericNow) && numericNow >= 0
     ? Math.floor(numericNow)
     : Date.now();
+  const numericMax = Number(maxStamina);
+  const safeMax = Number.isFinite(numericMax) && numericMax >= 0
+    ? Math.floor(numericMax)
+    : FISHING_STAMINA_MAX;
   const numericStamina = Number(currentStamina);
   const safeCurrent = Number.isFinite(numericStamina)
-    ? Math.max(0, Math.min(FISHING_STAMINA_MAX, Math.floor(numericStamina)))
-    : FISHING_STAMINA_MAX;
+    ? Math.max(0, Math.min(safeMax, Math.floor(numericStamina)))
+    : safeMax;
   const numericUpdatedAt = Number(updatedAt);
 
   if (!Number.isFinite(numericUpdatedAt) || numericUpdatedAt <= 0 || numericUpdatedAt > safeNow) {
@@ -103,13 +329,13 @@ export function calculateFishingStamina(currentStamina, updatedAt, now = Date.no
       stamina: safeCurrent,
       updatedAt: safeNow,
       recovered: 0,
-      nextRecoveryMs: safeCurrent < FISHING_STAMINA_MAX ? FISHING_STAMINA_RECOVERY_MS : 0,
+      nextRecoveryMs: safeCurrent < safeMax ? FISHING_STAMINA_RECOVERY_MS : 0,
     };
   }
 
-  if (safeCurrent >= FISHING_STAMINA_MAX) {
+  if (safeCurrent >= safeMax) {
     return {
-      stamina: FISHING_STAMINA_MAX,
+      stamina: safeMax,
       updatedAt: safeNow,
       recovered: 0,
       nextRecoveryMs: 0,
@@ -118,10 +344,10 @@ export function calculateFishingStamina(currentStamina, updatedAt, now = Date.no
 
   const elapsed = Math.max(0, safeNow - Math.floor(numericUpdatedAt));
   const recoverable = Math.floor(elapsed / FISHING_STAMINA_RECOVERY_MS);
-  const stamina = Math.min(FISHING_STAMINA_MAX, safeCurrent + recoverable);
+  const stamina = Math.min(safeMax, safeCurrent + recoverable);
   const recovered = stamina - safeCurrent;
 
-  if (stamina >= FISHING_STAMINA_MAX) {
+  if (stamina >= safeMax) {
     return {
       stamina,
       updatedAt: safeNow,
@@ -267,7 +493,13 @@ export function isPerfectCatch({
   return equipmentOverpowersFish || Boolean(hasAssist);
 }
 
-function getRarityPoolByBaitQuality(quality, hasDebuff = false, treasureBonus = 0) {
+function getRarityPoolByBaitQuality(
+  quality,
+  hasDebuff = false,
+  treasureBonus = 0,
+  nightmareBonus = 0,
+  brideThreadActive = false,
+) {
   const [configuredPool, configuredWeights] = QUALITY_WEIGHTS[quality] || QUALITY_WEIGHTS[1];
   const pool = [...configuredPool];
   const weights = [...configuredWeights];
@@ -276,6 +508,14 @@ function getRarityPoolByBaitQuality(quality, hasDebuff = false, treasureBonus = 
 
   if (treasureIndex >= 0 && Number(treasureBonus) > 0) {
     weights[treasureIndex] += Number(treasureBonus);
+  }
+  if (nightmareIndex >= 0 && Number(nightmareBonus) > 0) {
+    weights[nightmareIndex] += Number(nightmareBonus);
+  }
+  if (brideThreadActive && treasureIndex >= 0 && nightmareIndex >= 0) {
+    const transferredWeight = weights[treasureIndex] / 2;
+    weights[treasureIndex] -= transferredWeight;
+    weights[nightmareIndex] += transferredWeight;
   }
   if (hasDebuff && treasureIndex >= 0 && nightmareIndex >= 0) {
     weights[nightmareIndex] += weights[treasureIndex];
@@ -310,31 +550,83 @@ function isFishActiveInWeather(fish, weatherName) {
   return fish.weather.includes(weatherName);
 }
 
+function isFishAtLocation(fish, locationId) {
+  if (!locationId || !Array.isArray(fish?.locations) || fish.locations.length === 0) return true;
+  return fish.locations.includes(locationId);
+}
+
+function selectFishCandidate(candidates, rarity, location, random) {
+  let candidatePool = candidates;
+
+  if (rarity === "噩梦") {
+    const localNightmares = candidates.filter((fish) => (
+      Array.isArray(fish?.locations) && fish.locations.includes(location)
+    ));
+    const otherNightmares = candidates.filter((fish) => (
+      !Array.isArray(fish?.locations) || fish.locations.length === 0
+    ));
+
+    // 当前钓点怪谈与通用噩梦各占整个噩梦池的一半；任一侧为空时退回现有候选池。
+    if (localNightmares.length > 0 && otherNightmares.length > 0) {
+      const roll = Math.max(0, Math.min(0.999999999999, Number(random()) || 0));
+      candidatePool = roll < LOCAL_NIGHTMARE_CHANCE ? localNightmares : otherNightmares;
+    }
+  }
+
+  const index = Math.min(
+    candidatePool.length - 1,
+    Math.floor(Math.max(0, Number(random()) || 0) * candidatePool.length),
+  );
+  return candidatePool[index];
+}
+
 export function selectFishFromData(
   fishData,
   {
     baitQuality = 1,
     hasDebuff = false,
     treasureBonus = 0,
+    nightmareBonus = 0,
+    brideThreadActive = false,
+    forceRarity = null,
     hour = new Date().getHours(),
     weather = getWeatherByTime().name,
+    location = DEFAULT_FISHING_LOCATION,
     random = Math.random,
   } = {},
 ) {
-  const { pool, weights } = getRarityPoolByBaitQuality(baitQuality, hasDebuff, treasureBonus);
-  const rarity = selectRarityByWeight(pool, weights, random);
+  const { pool, weights } = getRarityPoolByBaitQuality(
+    baitQuality,
+    hasDebuff,
+    treasureBonus,
+    nightmareBonus,
+    brideThreadActive,
+  );
+  // 星愿瓶等道具可强制指定本次稀有度，跳过权重摇取
+  const rarity = forceRarity && RARITY_CONFIG[forceRarity]
+    ? forceRarity
+    : selectRarityByWeight(pool, weights, random);
   let candidates = fishData.filter((fish) => (
-    fish.rarity === rarity && isFishActiveAtHour(fish, hour) && isFishActiveInWeather(fish, weather)
+    !isBossFish(fish) &&
+    fish.rarity === rarity &&
+    isFishAtLocation(fish, location) &&
+    isFishActiveAtHour(fish, hour) &&
+    isFishActiveInWeather(fish, weather)
   ));
   if (candidates.length === 0) {
-    // 天气把该稀有度过滤空时退回无天气池，保证钓鱼永远有产出
-    candidates = fishData.filter((fish) => fish.rarity === rarity && isFishActiveAtHour(fish, hour));
+    // 天气把该稀有度过滤空时退回无天气池，保证钓鱼永远有产出；
+    // 钓点约束不参与兜底，避免限定鱼漏到其他钓点
+    candidates = fishData.filter((fish) => (
+      !isBossFish(fish) &&
+      fish.rarity === rarity &&
+      isFishAtLocation(fish, location) &&
+      isFishActiveAtHour(fish, hour)
+    ));
   }
   if (candidates.length === 0) {
     throw new Error(`当前时段没有可用的“${rarity}”渔获`);
   }
-  const index = Math.min(candidates.length - 1, Math.floor(Math.max(0, Number(random()) || 0) * candidates.length));
-  const selected = candidates[index];
+  const selected = selectFishCandidate(candidates, rarity, location, random);
   const [minWeight, maxWeight] = selected.weight;
   const weightRoll = Math.max(0, Math.min(1, Number(random()) || 0));
   const actualWeight = Math.round((minWeight + (maxWeight - minWeight) * weightRoll) * 100) / 100;
@@ -379,6 +671,62 @@ export function validateLegacyFishData(fishData) {
     if (!Number.isFinite(fish?.difficulty) || fish.difficulty < 0) {
       errors.push(`${label}: 难度无效`);
     }
+    if (isBossFish(fish)) {
+      const mechanic = fish.boss_mechanic;
+      if ((RARITY_CONFIG[fish.rarity]?.level ?? -1) < RARITY_CONFIG["传说"].level) {
+        errors.push(`${label}: 首领稀有度至少须为传说`);
+      }
+      if (Number.isFinite(fish.difficulty) && fish.difficulty < BOSS_MIN_DIFFICULTY) {
+        errors.push(`${label}: 首领难度低于传说级下限`);
+      }
+      if (!Number.isFinite(fish.hp) || fish.hp <= 0) {
+        errors.push(`${label}: 首领生命值无效`);
+      } else if (fish.hp < BOSS_MIN_HP) {
+        errors.push(`${label}: 首领生命值低于传说级下限`);
+      }
+      if (!Number.isFinite(fish.attack) || fish.attack <= 0) {
+        errors.push(`${label}: 首领攻击力无效`);
+      } else if (fish.attack < BOSS_MIN_ATTACK) {
+        errors.push(`${label}: 首领攻击力低于传说级下限`);
+      }
+      if (
+        !mechanic ||
+        typeof mechanic !== "object" ||
+        Array.isArray(mechanic) ||
+        !BOSS_MECHANIC_TYPES.includes(mechanic.type) ||
+        typeof mechanic.name !== "string" ||
+        !mechanic.name.trim() ||
+        typeof mechanic.description !== "string" ||
+        !mechanic.description.trim()
+      ) {
+        errors.push(`${label}: 首领机制缺失或类型无效`);
+      } else if (
+        ["stamina_drain", "tension_surge", "regenerate"].includes(mechanic.type) &&
+        (!Number.isFinite(mechanic.amount) || mechanic.amount <= 0)
+      ) {
+        errors.push(`${label}: 首领机制数值无效`);
+      } else if (
+        mechanic.type === "steal_coins" && (
+          !Number.isFinite(mechanic.min) ||
+          !Number.isFinite(mechanic.max) ||
+          mechanic.min <= 0 ||
+          mechanic.max < mechanic.min
+        )
+      ) {
+        errors.push(`${label}: 首领偷钱区间无效`);
+      } else if (
+        ["line_rend", "rod_crush"].includes(mechanic.type) &&
+        (!Number.isFinite(mechanic.multiplier) || mechanic.multiplier < 1)
+      ) {
+        errors.push(`${label}: 首领伤害倍率无效`);
+      }
+    } else if (
+      fish?.hp != null ||
+      fish?.attack != null ||
+      fish?.boss_mechanic != null
+    ) {
+      errors.push(`${label}: 非首领渔获不能配置首领战斗数值`);
+    }
     if (
       fish?.active_hours != null && (
         !Array.isArray(fish.active_hours) ||
@@ -399,6 +747,80 @@ export function validateLegacyFishData(fishData) {
       )
     ) {
       errors.push(`${label}: 天气限定无效`);
+    }
+    if (fish?.locations != null) {
+      if (
+        !Array.isArray(fish.locations) ||
+        fish.locations.length < 1 ||
+        fish.locations.length > 2 ||
+        fish.locations.some((locationId) => !FISHING_LOCATIONS[locationId]) ||
+        new Set(fish.locations).size !== fish.locations.length
+      ) {
+        errors.push(`${label}: 钓点限定无效（须为 1~2 个不重复的有效钓点）`);
+      }
+    }
+    if (fish?.rarity === "噩梦") {
+      const effect = fish?.nightmare_effect;
+      if (
+        !effect ||
+        typeof effect !== "object" ||
+        Array.isArray(effect) ||
+        !NIGHTMARE_EFFECT_TYPES.includes(effect.type)
+      ) {
+        errors.push(`${label}: 噩梦机制缺失或类型无效`);
+      }
+    } else if (fish?.nightmare_effect != null) {
+      errors.push(`${label}: 非噩梦渔获不能配置噩梦机制`);
+    }
+  }
+
+  // 结构错误会让后续全量覆盖校验产生大量衍生报错，先返回最直接的配置问题。
+  if (errors.length > 0) return errors;
+
+  for (const [locationId, locationConfig] of Object.entries(FISHING_LOCATIONS)) {
+    const localNightmares = fishData.filter((fish) => (
+      fish?.rarity === "噩梦" &&
+      Array.isArray(fish.locations) &&
+      fish.locations.includes(locationId)
+    ));
+    if (localNightmares.length !== 1 || localNightmares[0].locations.length !== 1) {
+      errors.push(`${locationConfig.name}: 须配置且只配置一个单钓点专属噩梦`);
+    } else if (localNightmares[0].nightmare_effect.type !== LOCAL_NIGHTMARE_EFFECT_BY_LOCATION[locationId]) {
+      errors.push(`${locationConfig.name}: 专属噩梦机制配置错误`);
+    }
+
+    const localBosses = fishData.filter((fish) => (
+      isBossFish(fish) &&
+      Array.isArray(fish.locations) &&
+      fish.locations.includes(locationId)
+    ));
+    if (localBosses.length !== 1 || localBosses[0].locations.length !== 1) {
+      errors.push(`${locationConfig.name}: 须配置且只配置一个单钓点首领`);
+    }
+  }
+
+  const configuredBosses = fishData.filter(isBossFish);
+  if (
+    configuredBosses.length === Object.keys(FISHING_LOCATIONS).length &&
+    new Set(configuredBosses.map((fish) => fish.boss_mechanic.type)).size !== configuredBosses.length
+  ) {
+    errors.push("各钓点首领须配置互不重复的特殊机制");
+  }
+
+  // 时段筛空没有兜底，必须保证任意钓点 × 稀有度 × 小时都有候选鱼
+  for (const locationId of Object.keys(FISHING_LOCATIONS)) {
+    for (const rarity of Object.keys(RARITY_CONFIG)) {
+      for (let hour = 0; hour < 24; hour += 1) {
+        const available = fishData.some((fish) => (
+          !isBossFish(fish) &&
+          fish?.rarity === rarity &&
+          isFishAtLocation(fish, locationId) &&
+          isFishActiveAtHour(fish, hour)
+        ));
+        if (!available) {
+          errors.push(`钓点覆盖缺口: ${FISHING_LOCATIONS[locationId].name} × ${rarity} × ${hour}时 无可用鱼`);
+        }
+      }
     }
   }
   return errors;

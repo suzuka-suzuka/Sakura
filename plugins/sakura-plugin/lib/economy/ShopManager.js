@@ -2,6 +2,7 @@ import Setting from "../setting.js";
 import db from "../Database.js";
 import InventoryManager from "./InventoryManager.js";
 import EconomyManager from "./EconomyManager.js";
+import { FISHING_BENEFIT_DURATION_SECONDS } from "../fishing/rules.js";
 
 class ShopManager {
   constructor() { }
@@ -247,23 +248,13 @@ class ShopManager {
   }
 
   getItemCount(groupId, userId, itemId) {
-    const row = db.prepare(`
-        SELECT count
-        FROM inventory
-        WHERE group_id = ? AND user_id = ? AND item_id = ?
-    `).get(String(groupId), String(userId), itemId);
-
-    return row ? row.count : 0;
+    const inventoryManager = new InventoryManager(groupId, userId);
+    return inventoryManager.getItemCount(itemId);
   }
 
   getInventorySize(groupId, userId) {
-    const row = db.prepare(`
-        SELECT SUM(count) as total
-        FROM inventory
-        WHERE group_id = ? AND user_id = ?
-    `).get(String(groupId), String(userId));
-
-    return row ? (row.total || 0) : 0;
+    const inventoryManager = new InventoryManager(groupId, userId);
+    return inventoryManager.getCurrentSize();
   }
 
   handleBuffPurchase(e, item) {
@@ -313,7 +304,7 @@ class ShopManager {
 
   activateBuff(groupId, userId, item) {
     const now = Date.now();
-    const expireTime = now + (item.duration || 3600) * 1000;
+    const expireTime = now + (item.duration || FISHING_BENEFIT_DURATION_SECONDS) * 1000;
 
     db.prepare(`
         INSERT INTO user_buffs (group_id, user_id, buff_id, name, effect, activated_at, expire_time)
@@ -366,7 +357,9 @@ class ShopManager {
 
       for (const item of category.items) {
         msg += `\n📦 ${item.name}\n`;
-        msg += `💰 价格：${item.price} 樱花币\n`;
+        msg += Number(item.price) > 0
+          ? `💰 价格：${item.price} 樱花币\n`
+          : `🔒 获取：非卖品\n`;
         if (item.type === "equipment") {
           msg += `🔧 类型：装备\n`;
         }

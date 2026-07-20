@@ -54,6 +54,7 @@ categories:
         price: 20
         type: equipment
         capacity: 5
+        durability: 30
         description: 最基础的尼龙鱼线，只能承受较小的拉力。
 
       - id: line_braided
@@ -61,6 +62,7 @@ categories:
         price: 50
         type: equipment
         capacity: 20
+        durability: 60
         description: 多股编织的耐用鱼线，承重相较普通鱼线有所提升。
 
       - id: line_fluorocarbon
@@ -68,6 +70,7 @@ categories:
         price: 90
         type: equipment
         capacity: 50
+        durability: 100
         description: 几乎隐形的碳氟材质鱼线，拥有不错的承重能力。
 
       - id: line_steel
@@ -75,6 +78,7 @@ categories:
         price: 140
         type: equipment
         capacity: 100
+        durability: 150
         description: 不锈钢打造的超强鱼线，坚固无比，能应对大部分体型巨大的鱼类。
 
       - id: line_mythril
@@ -82,6 +86,7 @@ categories:
         price: 200
         type: equipment
         capacity: 200
+        durability: 200
         description: 传说中的秘银材质，不仅承重能力极强，且几乎无法被扯断！
 
   baits:
@@ -130,6 +135,14 @@ categories:
         type: consumable
         quality: 6
         description: 特殊的寻宝鱼饵，据说使用它钓鱼宝藏宝藏会被吸引过来！
+
+      - id: bait_boss
+        name: 首领鱼饵
+        price: 0
+        type: consumable
+        quality: 1
+        boss_bait: true
+        description: 宝箱中偶尔出现的非卖品。在任意钓点使用，下一竿必定挑战该钓点的首领。
 
   torpedoes:
     name: "💣 鱼雷"

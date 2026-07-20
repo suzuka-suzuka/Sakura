@@ -1,22 +1,146 @@
 categories:
   special:
     name: "🎁 特殊物品"
-    description: "钓鱼获得的特殊宝藏物品"
+    description: "钓鱼与宝箱获得的特殊道具"
     handler: fishing_special
     items:
+      # ===== 持续 Buff 类（#使用 后写入限时 buff） =====
       - id: item_card_double_coin
         name: 双倍金币卡
+        icon: 💰
         type: buff
-        duration: 3600
-        activation_message: "✨ 双倍金币卡已激活！\n💰 接下来1小时内钓鱼可获得双倍收益！"
+        duration: 1800
+        description: 神奇的魔法卡片，使用后30分钟内钓鱼可获得双倍收益。
+        activation_message: "✨ 双倍金币卡已激活！\n💰 接下来30分钟内钓鱼可获得双倍收益！"
 
       - id: item_charm_lucky
         name: 好运护符
+        icon: 🍀
         type: buff
-        duration: 3600
-        activation_message: "🍀 好运护符已激活！\n🎣 接下来1小时内钓鱼必定上钩！"
+        duration: 1800
+        description: 受到祝福的护符，使用后30分钟内钓鱼必定上钩。
+        activation_message: "🍀 好运护符已激活！\n🎣 接下来30分钟内钓鱼必定上钩！"
 
-      - id: item_random_bait
-        name: 随机鱼饵包
+      - id: item_sign_koi
+        name: 锦鲤许愿签
+        icon: 🎏
+        type: buff
+        duration: 1800
+        description: 写着心愿的许愿签。使用后30分钟内，只要及时收竿就能达成完美收竿。
+        activation_message: "🎏 锦鲤许愿签生效！\n⚡ 接下来30分钟内，及时收竿即可完美收竿！"
+
+      - id: item_charm_river
+        name: 河神垂青
+        icon: 🌊
+        type: buff
+        duration: 1800
+        description: 河神大人的一缕青睐。使用后30分钟内，无论发生什么鱼线都不会断。
+        activation_message: "🌊 河神垂青！\n🧵 接下来30分钟内你的鱼线坚不可摧！"
+
+      - id: item_lamp_fog
+        name: 雾灯
+        icon: 🌫️
+        type: buff
+        duration: 1800
+        description: 雾隐湖的引路灯。使用后30分钟内你的个人天气固定为「雾」，可定向垂钓雾天限定鱼。
+        activation_message: "🌫️ 雾灯亮起！\n🎣 接下来30分钟内你的个人天气固定为「雾」！"
+
+      - id: item_bait_monster
+        name: 怪物诱饵
+        icon: 🩸
+        type: buff
+        duration: 1800
+        description: 散发着危险气息的血腥诱饵。使用后30分钟内噩梦渔获概率大幅上升，噩梦渔获经验翻倍。
+        activation_message: "🩸 怪物诱饵撒入水中！\n💀 接下来30分钟内噩梦出没概率大增，噩梦经验翻倍！"
+
+      - id: item_charm_starlight
+        name: 星光护符
+        icon: ✨
+        type: buff
+        duration: 1800
+        description: 凝聚星辉的护符，好运护符的上位品。使用后30分钟内钓鱼必定上钩。
+        activation_message: "✨ 星光护符已激活！\n🎣 接下来30分钟内钓鱼必定上钩！"
+
+      - id: item_card_star_double
+        name: 双倍星辉卡
+        icon: 🌟
+        type: buff
+        duration: 1800
+        description: 浸染星辉的魔法卡片。使用后30分钟内钓鱼金币与经验双倍。
+        activation_message: "🌟 双倍星辉卡已激活！\n💰 接下来30分钟内钓鱼金币、经验双双翻倍！"
+
+      - id: item_scale_leviathan
+        name: 利维坦的逆鳞
+        icon: 🐉
+        type: buff
+        duration: 1800
+        description: 拔下逆鳞者本应暴怒相向，但它选择庇护你。使用后30分钟内噩梦渔获不会造成任何惩罚。
+        activation_message: "🐉 利维坦的逆鳞开始震颤！\n🛡️ 接下来30分钟内噩梦无法伤害你！"
+
+      # ===== 即时生效类（#使用 后立即结算） =====
+      - id: item_snack_petal
+        name: 花瓣小鱼干
         type: consumable
-        isRandomBait: true
+        instant_effect: restore_stamina
+        amount: 3
+        description: 撒着樱花瓣的小鱼干，咬一口元气满满。使用后恢复3点钓鱼体力。
+
+      - id: item_sand_time
+        name: 时之沙
+        type: consumable
+        instant_effect: restore_stamina
+        amount: 20
+        description: 从时间尽头收集的流沙。使用后钓鱼体力完全恢复。
+
+      - id: item_toolkit_repair
+        name: 修理工具箱
+        type: consumable
+        instant_effect: repair_rod
+        description: 工匠打磨的养护工具。使用后完全修复当前装备鱼竿的耐久。
+
+      - id: item_holy_water
+        name: 净化圣水
+        type: consumable
+        instant_effect: clear_curse
+        description: 神社供奉的圣水。使用后洗净噩梦诅咒、冥婚红线与失魂状态。
+
+      - id: item_bottle_wish
+        name: 星愿瓶
+        type: consumable
+        instant_effect: star_wish
+        description: 封着一颗流星的琉璃瓶。使用后30分钟内的下一竿必定咬钩传说稀有度的鱼。
+
+  chests:
+    name: "🗝️ 钓点宝箱"
+    description: "各钓点专属的宝箱，发送「#开宝箱」开启"
+    handler: fishing_chest
+    items:
+      - id: chest_pond
+        name: 花瓣木箱
+        type: chest
+        description: 樱花池塘专属的新手补给箱，装着鱼饵、体力小食和零花钱。
+
+      - id: chest_river
+        name: 柳木匣
+        type: chest
+        description: 青柳河湾专属的养护箱，修理工具和高级鱼饵的主要来源。
+
+      - id: chest_lake
+        name: 沉雾古匣
+        type: chest
+        description: 雾隐湖专属的赌局箱，开出淤泥还是湖神的馈赠全凭运气。
+
+      - id: chest_coast
+        name: 舶来宝箱
+        type: chest
+        description: 落日海岸专属的财富箱，珍珠、珊瑚与大把樱花币。
+
+      - id: chest_abyss
+        name: 渊铁囚箱
+        type: chest
+        description: 深渊海沟专属的囚箱，封着净化圣水与稀世奇珍——偶尔也封着怨灵。
+
+      - id: chest_mystic
+        name: 星屑圣匣
+        type: chest
+        description: 星辉秘境专属的圣匣，顶级道具与绝版珍藏的唯一来源。

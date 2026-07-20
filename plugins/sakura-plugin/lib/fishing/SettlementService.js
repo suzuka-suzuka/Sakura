@@ -1,12 +1,20 @@
 import db from "../Database.js";
 import {
+  calculateGhostDebtPayment,
   FISHING_STAMINA_MAX,
   getFishingLevelByExp,
+  getFishingStaminaMax,
 } from "./rules.js";
 
 function normalizeNonNegativeInteger(value) {
   const number = Number(value);
   return Number.isSafeInteger(number) && number >= 0 ? number : null;
+}
+
+// 重量是图鉴附加信息，非法值按 0 处理而不阻断结算
+function normalizeWeight(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
 export default class FishingSettlementService {
@@ -53,7 +61,8 @@ export default class FishingSettlementService {
     return result.changes === 1;
   }
 
-  _recordCatch({ fishId, success, earnings, rodId, masteryGain, recordCatch }) {
+  _recordCatch({ fishId, success, earnings, rodId, masteryGain, recordCatch, weight }) {
+    let newlyRecorded = false;
     if (recordCatch) {
       db.prepare(`
           UPDATE fishing_stats
@@ -64,12 +73,31 @@ export default class FishingSettlementService {
 
       if (fishId) {
         const successIncrement = success ? 1 : 0;
+        // 图鉴口径：仅成功渔获刷新最大重量；新收录 = success_count 首次由 0 变正
+        const recordedWeight = success ? normalizeWeight(weight) : 0;
+        if (success) {
+          const previous = db.prepare(`
+              SELECT success_count FROM fishing_counts
+              WHERE group_id = ? AND user_id = ? AND fish_id = ?
+          `).get(this.groupId, this.userId, fishId);
+          newlyRecorded = !(previous?.success_count > 0);
+        }
         db.prepare(`
-            INSERT INTO fishing_counts (group_id, user_id, fish_id, count, success_count)
-            VALUES (?, ?, ?, 1, ?)
+            INSERT INTO fishing_counts (group_id, user_id, fish_id, count, success_count, max_weight)
+            VALUES (?, ?, ?, 1, ?, ?)
             ON CONFLICT(group_id, user_id, fish_id)
-            DO UPDATE SET count = count + 1, success_count = success_count + ?
-        `).run(this.groupId, this.userId, fishId, successIncrement, successIncrement);
+            DO UPDATE SET count = count + 1,
+                          success_count = success_count + ?,
+                          max_weight = MAX(COALESCE(max_weight, 0), ?)
+        `).run(
+          this.groupId,
+          this.userId,
+          fishId,
+          successIncrement,
+          recordedWeight,
+          successIncrement,
+          recordedWeight,
+        );
       }
     }
 
@@ -81,6 +109,7 @@ export default class FishingSettlementService {
           DO UPDATE SET mastery = mastery + ?
       `).run(this.groupId, this.userId, rodId, masteryGain, masteryGain);
     }
+    return newlyRecorded;
   }
 
   // 发放钓鱼经验并检测升级，仅在成功渔获时由结算方法调用
@@ -90,14 +119,25 @@ export default class FishingSettlementService {
         SELECT fishing_exp FROM fishing_stats WHERE group_id = ? AND user_id = ?
     `).get(this.groupId, this.userId)?.fishing_exp || 0;
     const after = before + expGain;
+    const fromLevel = getFishingLevelByExp(before);
+    const toLevel = getFishingLevelByExp(after);
+    if (toLevel > fromLevel) {
+      const staminaResetTo = getFishingStaminaMax(toLevel);
+      db.prepare(`
+          UPDATE fishing_stats
+          SET fishing_exp = ?,
+              fishing_stamina = ?,
+              fishing_stamina_updated_at = ?
+          WHERE group_id = ? AND user_id = ?
+      `).run(after, staminaResetTo, Date.now(), this.groupId, this.userId);
+      return { from: fromLevel, to: toLevel, staminaResetTo };
+    }
     db.prepare(`
         UPDATE fishing_stats
         SET fishing_exp = ?
         WHERE group_id = ? AND user_id = ?
     `).run(after, this.groupId, this.userId);
-    const fromLevel = getFishingLevelByExp(before);
-    const toLevel = getFishingLevelByExp(after);
-    return toLevel > fromLevel ? { from: fromLevel, to: toLevel } : null;
+    return null;
   }
 
   settleAttempt({
@@ -109,6 +149,7 @@ export default class FishingSettlementService {
     masteryGain = 0,
     recordCatch = success,
     expGain = 0,
+    weight = 0,
   }) {
     const safeEarnings = normalizeNonNegativeInteger(earnings);
     const safeMastery = normalizeNonNegativeInteger(masteryGain);
@@ -122,20 +163,21 @@ export default class FishingSettlementService {
       if (!this._claimSession({ sessionId, fishId, success, earnings: safeEarnings })) {
         return { success: false, reason: "duplicate" };
       }
-      this._recordCatch({
+      const newlyRecorded = this._recordCatch({
         fishId,
         success,
         earnings: safeEarnings,
         rodId,
         masteryGain: safeMastery,
         recordCatch: Boolean(recordCatch),
+        weight,
       });
       const levelUp = this._grantExp(safeExpGain);
-      return { success: true, levelUp };
+      return { success: true, levelUp, newlyRecorded };
     })();
   }
 
-  settleCoinCatch({ sessionId, fishId, earnings, rodId, note, expGain = 0 }) {
+  settleCoinCatch({ sessionId, fishId, earnings, rodId, note, expGain = 0, weight = 0 }) {
     const safeEarnings = normalizeNonNegativeInteger(earnings);
     const safeExpGain = normalizeNonNegativeInteger(expGain);
     if (!sessionId || safeEarnings == null || safeExpGain == null) {
@@ -144,16 +186,34 @@ export default class FishingSettlementService {
 
     return db.transaction(() => {
       this._ensureRows();
-      if (!this._claimSession({ sessionId, fishId, success: true, earnings: safeEarnings })) {
+      const ghostDebt = db.prepare(`
+          SELECT ghost_debt FROM fishing_stats
+          WHERE group_id = ? AND user_id = ?
+      `).get(this.groupId, this.userId)?.ghost_debt || 0;
+      const debtResult = calculateGhostDebtPayment(safeEarnings, ghostDebt);
+      if (!this._claimSession({
+        sessionId,
+        fishId,
+        success: true,
+        earnings: debtResult.earnings,
+      })) {
         return { success: false, reason: "duplicate" };
       }
 
-      if (safeEarnings > 0) {
+      if (debtResult.debtPaid > 0) {
+        db.prepare(`
+            UPDATE fishing_stats
+            SET ghost_debt = ?
+            WHERE group_id = ? AND user_id = ?
+        `).run(debtResult.remainingDebt, this.groupId, this.userId);
+      }
+
+      if (debtResult.earnings > 0) {
         db.prepare(`
             UPDATE economy
             SET coins = coins + ?
             WHERE group_id = ? AND user_id = ?
-        `).run(safeEarnings, this.groupId, this.userId);
+        `).run(debtResult.earnings, this.groupId, this.userId);
         const balance = db.prepare(`
             SELECT coins FROM economy WHERE group_id = ? AND user_id = ?
         `).get(this.groupId, this.userId).coins;
@@ -164,7 +224,7 @@ export default class FishingSettlementService {
         `).run(
           this.groupId,
           this.userId,
-          safeEarnings,
+          debtResult.earnings,
           balance,
           note || `钓鱼出售 ${fishId || "渔获"}`,
           String(sessionId),
@@ -172,20 +232,21 @@ export default class FishingSettlementService {
         );
       }
 
-      this._recordCatch({
+      const newlyRecorded = this._recordCatch({
         fishId,
         success: true,
-        earnings: safeEarnings,
+        earnings: debtResult.earnings,
         rodId,
         masteryGain: 1,
         recordCatch: true,
+        weight,
       });
       const levelUp = this._grantExp(safeExpGain);
-      return { success: true, earnings: safeEarnings, levelUp };
+      return { success: true, ...debtResult, levelUp, newlyRecorded };
     })();
   }
 
-  settleInventoryCatch({ sessionId, fishId, rodId, capacity, expGain = 0 }) {
+  settleInventoryCatch({ sessionId, fishId, rodId, capacity, expGain = 0, weight = 0 }) {
     const safeCapacity = normalizeNonNegativeInteger(capacity);
     const safeExpGain = normalizeNonNegativeInteger(expGain);
     if (!sessionId || !fishId || safeCapacity == null || safeExpGain == null) {
@@ -212,16 +273,17 @@ export default class FishingSettlementService {
         `).run(this.groupId, this.userId, fishId);
       }
 
-      this._recordCatch({
+      const newlyRecorded = this._recordCatch({
         fishId,
         success: true,
         earnings: 0,
         rodId,
         masteryGain: 1,
         recordCatch: true,
+        weight,
       });
       const levelUp = this._grantExp(safeExpGain);
-      return { success: true, added, levelUp };
+      return { success: true, added, levelUp, newlyRecorded };
     })();
   }
 }

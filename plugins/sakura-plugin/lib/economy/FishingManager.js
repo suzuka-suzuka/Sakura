@@ -2,13 +2,19 @@ import Setting from "../setting.js";
 import InventoryManager from "./InventoryManager.js";
 import db from "../Database.js";
 import {
+  calculateBossLineDurability,
   calculateFishingStamina,
+  FISHING_BENEFIT_DURATION_SECONDS,
+  FISHING_LOCATIONS,
   FISHING_STAMINA_COST,
   FISHING_STAMINA_MAX,
   FISHING_STAMINA_RECOVERY_MS,
+  getFishingStaminaCost,
   getFishingLevelByExp,
+  getFishingStaminaMax,
   getNightmareCurseDisplay,
   NIGHTMARE_CURSE_HIDDEN_LAYERS,
+  normalizeFishingLocation,
 } from "../fishing/rules.js";
 
 export default class FishingManager {
@@ -97,17 +103,39 @@ export default class FishingManager {
     return getFishingLevelByExp(userData.fishing_exp || 0);
   }
 
+  getFishingLocation(userId) {
+    const userData = this.getUserData(userId);
+    return normalizeFishingLocation(userData.location);
+  }
+
+  setFishingLocation(userId, locationId) {
+    userId = String(userId);
+    if (!FISHING_LOCATIONS[locationId]) return false;
+    this._ensureUser(userId);
+    db.prepare('UPDATE fishing_stats SET location = ? WHERE group_id = ? AND user_id = ?')
+      .run(locationId, this.groupId, userId);
+    return true;
+  }
+
   _readFishingStamina(userId, now) {
     const row = db.prepare(`
-        SELECT fishing_stamina, fishing_stamina_updated_at
+        SELECT fishing_exp, fishing_stamina, fishing_stamina_updated_at, deep_pressure_layers
         FROM fishing_stats
         WHERE group_id = ? AND user_id = ?
     `).get(this.groupId, userId);
-    return calculateFishingStamina(
+    const fishingLevel = getFishingLevelByExp(row?.fishing_exp || 0);
+    const maxStamina = getFishingStaminaMax(fishingLevel);
+    const snapshot = calculateFishingStamina(
       row?.fishing_stamina,
       row?.fishing_stamina_updated_at,
       now,
+      maxStamina,
     );
+    return {
+      ...snapshot,
+      max: maxStamina,
+      deepPressureLayers: Math.max(0, Math.floor(Number(row?.deep_pressure_layers) || 0)),
+    };
   }
 
   _writeFishingStamina(userId, stamina, updatedAt) {
@@ -119,11 +147,13 @@ export default class FishingManager {
   }
 
   _formatFishingStaminaStatus(snapshot) {
+    const cost = getFishingStaminaCost(snapshot.deepPressureLayers);
     return {
       current: snapshot.stamina,
-      max: FISHING_STAMINA_MAX,
-      cost: FISHING_STAMINA_COST,
-      canFish: snapshot.stamina >= FISHING_STAMINA_COST,
+      max: snapshot.max,
+      cost,
+      canFish: snapshot.stamina >= cost,
+      deepPressureLayers: Math.max(0, Math.floor(Number(snapshot.deepPressureLayers) || 0)),
       recovered: snapshot.recovered || 0,
       nextRecoveryMs: snapshot.nextRecoveryMs || 0,
       nextRecoveryMinutes: snapshot.nextRecoveryMs > 0
@@ -148,7 +178,8 @@ export default class FishingManager {
     this._ensureUser(userId);
     const transaction = db.transaction(() => {
       const snapshot = this._readFishingStamina(userId, now);
-      if (snapshot.stamina < FISHING_STAMINA_COST) {
+      const cost = getFishingStaminaCost(snapshot.deepPressureLayers);
+      if (snapshot.stamina < cost) {
         this._writeFishingStamina(userId, snapshot.stamina, snapshot.updatedAt);
         return {
           success: false,
@@ -156,18 +187,59 @@ export default class FishingManager {
         };
       }
 
-      const remaining = snapshot.stamina - FISHING_STAMINA_COST;
+      const remaining = snapshot.stamina - cost;
+      const deepPressureConsumed = snapshot.deepPressureLayers > 0;
+      const remainingDeepPressure = deepPressureConsumed
+        ? snapshot.deepPressureLayers - 1
+        : 0;
       this._writeFishingStamina(userId, remaining, snapshot.updatedAt);
+      if (deepPressureConsumed) {
+        db.prepare(`
+            UPDATE fishing_stats
+            SET deep_pressure_layers = MAX(0, COALESCE(deep_pressure_layers, 0) - 1)
+            WHERE group_id = ? AND user_id = ?
+        `).run(this.groupId, userId);
+      }
+      const formatted = this._formatFishingStaminaStatus({
+        ...snapshot,
+        stamina: remaining,
+        deepPressureLayers: remainingDeepPressure,
+        recovered: 0,
+        nextRecoveryMs: remaining < snapshot.max
+          ? (snapshot.nextRecoveryMs || FISHING_STAMINA_RECOVERY_MS)
+          : 0,
+      });
       return {
         success: true,
+        ...formatted,
+        cost,
+        nextCost: formatted.cost,
+        deepPressureConsumed,
+      };
+    });
+    return transaction.immediate();
+  }
+
+  drainFishingStamina(userId, amount, now = Date.now()) {
+    userId = String(userId);
+    const safeAmount = Math.max(0, Math.floor(Number(amount) || 0));
+    this._ensureUser(userId);
+    const transaction = db.transaction(() => {
+      const snapshot = this._readFishingStamina(userId, now);
+      const drained = Math.min(snapshot.stamina, safeAmount);
+      const remaining = snapshot.stamina - drained;
+      this._writeFishingStamina(userId, remaining, snapshot.updatedAt);
+      return {
         ...this._formatFishingStaminaStatus({
           ...snapshot,
           stamina: remaining,
           recovered: 0,
-          nextRecoveryMs: remaining < FISHING_STAMINA_MAX
+          nextRecoveryMs: remaining < snapshot.max
             ? (snapshot.nextRecoveryMs || FISHING_STAMINA_RECOVERY_MS)
             : 0,
         }),
+        drained,
+        exhausted: remaining <= 0,
       };
     });
     return transaction.immediate();
@@ -179,19 +251,19 @@ export default class FishingManager {
     this._ensureUser(userId);
     const transaction = db.transaction(() => {
       const snapshot = this._readFishingStamina(userId, now);
-      const restored = Math.min(FISHING_STAMINA_MAX, snapshot.stamina + safeAmount);
+      const restored = Math.min(snapshot.max, snapshot.stamina + safeAmount);
       const numericNow = Number(now);
       const safeNow = Number.isFinite(numericNow) && numericNow >= 0
         ? Math.floor(numericNow)
         : Date.now();
-      const updatedAt = restored >= FISHING_STAMINA_MAX ? safeNow : snapshot.updatedAt;
+      const updatedAt = restored >= snapshot.max ? safeNow : snapshot.updatedAt;
       this._writeFishingStamina(userId, restored, updatedAt);
       return this._formatFishingStaminaStatus({
         ...snapshot,
         stamina: restored,
         updatedAt,
         recovered: restored - snapshot.stamina,
-        nextRecoveryMs: restored < FISHING_STAMINA_MAX
+        nextRecoveryMs: restored < snapshot.max
           ? (snapshot.nextRecoveryMs || FISHING_STAMINA_RECOVERY_MS)
           : 0,
       });
@@ -360,6 +432,138 @@ export default class FishingManager {
     };
   }
 
+  getNightmareStatus(userId) {
+    const userData = this.getUserData(userId);
+    return {
+      curse: getNightmareCurseDisplay(
+        userData.nightmare_curse_layers,
+        userData.nightmare_curse_prank_revealed,
+      ),
+      brideThreadLayers: Math.max(0, Math.floor(Number(userData.bride_thread_layers) || 0)),
+      lostSoul: Boolean(userData.lost_soul),
+      ghostDebt: Math.max(0, Math.floor(Number(userData.ghost_debt) || 0)),
+      deepPressureLayers: Math.max(0, Math.floor(Number(userData.deep_pressure_layers) || 0)),
+    };
+  }
+
+  addBrideThreadLayers(userId, layers, maxLayers = 8) {
+    userId = String(userId);
+    const safeLayers = Math.max(0, Math.floor(Number(layers) || 0));
+    const safeMax = Math.max(1, Math.floor(Number(maxLayers) || 8));
+    this._ensureUser(userId);
+    const before = this.getNightmareStatus(userId).brideThreadLayers;
+    if (safeLayers <= 0 || before >= safeMax) {
+      return { added: 0, total: Math.min(before, safeMax) };
+    }
+    const row = db.prepare(`
+        UPDATE fishing_stats
+        SET bride_thread_layers = MIN(?, COALESCE(bride_thread_layers, 0) + ?)
+        WHERE group_id = ? AND user_id = ?
+        RETURNING bride_thread_layers
+    `).get(safeMax, safeLayers, this.groupId, userId);
+    const total = Math.max(0, Number(row?.bride_thread_layers) || 0);
+    return { added: Math.max(0, total - before), total };
+  }
+
+  consumeBrideThreadLayer(userId) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    const row = db.prepare(`
+        UPDATE fishing_stats
+        SET bride_thread_layers = COALESCE(bride_thread_layers, 0) - 1
+        WHERE group_id = ? AND user_id = ? AND COALESCE(bride_thread_layers, 0) > 0
+        RETURNING bride_thread_layers
+    `).get(this.groupId, userId);
+    return {
+      consumed: Boolean(row),
+      remaining: Math.max(0, Number(row?.bride_thread_layers) || 0),
+    };
+  }
+
+  applyLostSoul(userId) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    db.prepare(`
+        UPDATE fishing_stats SET lost_soul = 1
+        WHERE group_id = ? AND user_id = ?
+    `).run(this.groupId, userId);
+    return true;
+  }
+
+  clearLostSoul(userId) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    const result = db.prepare(`
+        UPDATE fishing_stats SET lost_soul = 0
+        WHERE group_id = ? AND user_id = ? AND COALESCE(lost_soul, 0) > 0
+    `).run(this.groupId, userId);
+    return result.changes === 1;
+  }
+
+  moveToRandomUnlockedLocation(userId, excludedLocationId, random = Math.random) {
+    const fishingLevel = this.getUserFishingLevel(userId);
+    const candidates = Object.entries(FISHING_LOCATIONS).filter(([locationId, config]) => (
+      locationId !== excludedLocationId && fishingLevel >= config.unlockLevel
+    ));
+    if (candidates.length === 0) return null;
+    const roll = Math.max(0, Math.min(0.999999999999, Number(random()) || 0));
+    const [locationId, config] = candidates[Math.floor(roll * candidates.length)];
+    this.setFishingLocation(userId, locationId);
+    return { id: locationId, ...config };
+  }
+
+  addGhostDebt(userId, amount, maxDebt = 360) {
+    userId = String(userId);
+    const safeAmount = Math.max(0, Math.floor(Number(amount) || 0));
+    const safeMax = Math.max(1, Math.floor(Number(maxDebt) || 360));
+    this._ensureUser(userId);
+    const before = this.getNightmareStatus(userId).ghostDebt;
+    if (safeAmount <= 0 || before >= safeMax) {
+      return { added: 0, total: Math.min(before, safeMax) };
+    }
+    const row = db.prepare(`
+        UPDATE fishing_stats
+        SET ghost_debt = MIN(?, COALESCE(ghost_debt, 0) + ?)
+        WHERE group_id = ? AND user_id = ?
+        RETURNING ghost_debt
+    `).get(safeMax, safeAmount, this.groupId, userId);
+    const total = Math.max(0, Number(row?.ghost_debt) || 0);
+    return { added: Math.max(0, total - before), total };
+  }
+
+  addDeepPressureLayers(userId, layers, maxLayers = 8) {
+    userId = String(userId);
+    const safeLayers = Math.max(0, Math.floor(Number(layers) || 0));
+    const safeMax = Math.max(1, Math.floor(Number(maxLayers) || 8));
+    this._ensureUser(userId);
+    const before = this.getNightmareStatus(userId).deepPressureLayers;
+    if (safeLayers <= 0 || before >= safeMax) {
+      return { added: 0, total: Math.min(before, safeMax) };
+    }
+    const row = db.prepare(`
+        UPDATE fishing_stats
+        SET deep_pressure_layers = MIN(?, COALESCE(deep_pressure_layers, 0) + ?)
+        WHERE group_id = ? AND user_id = ?
+        RETURNING deep_pressure_layers
+    `).get(safeMax, safeLayers, this.groupId, userId);
+    const total = Math.max(0, Number(row?.deep_pressure_layers) || 0);
+    return { added: Math.max(0, total - before), total };
+  }
+
+  restoreDeepPressureLayer(userId) {
+    return this.addDeepPressureLayers(userId, 1, 8);
+  }
+
+  getCleansableNightmareAfflictions(userId) {
+    const status = this.getNightmareStatus(userId);
+    return {
+      curseLayers: status.curse.actualLayers,
+      brideThreadLayers: status.brideThreadLayers,
+      lostSoul: status.lostSoul,
+      total: status.curse.actualLayers + status.brideThreadLayers + (status.lostSoul ? 1 : 0),
+    };
+  }
+
   getNightmareCurseLayers(userId) {
     const userData = this.getUserData(userId);
     return Math.max(0, Math.floor(Number(userData.nightmare_curse_layers) || 0));
@@ -412,6 +616,26 @@ export default class FishingManager {
       userData.nightmare_curse_layers,
       userData.nightmare_curse_prank_revealed,
     );
+  }
+
+  // 净化圣水清除诅咒、冥婚红线和失魂；债务与深压不属于可净化状态。
+  clearNightmareCurse(userId) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    const transaction = db.transaction(() => {
+      const status = this.getCleansableNightmareAfflictions(userId);
+      if (status.total <= 0) return { cleared: 0, ...status };
+      db.prepare(`
+          UPDATE fishing_stats
+          SET nightmare_curse_layers = 0,
+              nightmare_curse_prank_revealed = 0,
+              bride_thread_layers = 0,
+              lost_soul = 0
+          WHERE group_id = ? AND user_id = ?
+      `).run(this.groupId, userId);
+      return { cleared: status.total, ...status };
+    });
+    return transaction.immediate();
   }
 
   getRodControl(userId, rodId) {
@@ -479,13 +703,8 @@ export default class FishingManager {
       const nextDurability = Math.max(0, currentDurability - safeDamage);
       if (nextDurability <= 0) {
         db.prepare(`
-            UPDATE inventory
-            SET count = count - 1
-            WHERE group_id = ? AND user_id = ? AND item_id = ? AND count >= 1
-        `).run(this.groupId, userId, rodId);
-        db.prepare(`
             DELETE FROM inventory
-            WHERE group_id = ? AND user_id = ? AND item_id = ? AND count <= 0
+            WHERE group_id = ? AND user_id = ? AND item_id = ? AND count > 0
         `).run(this.groupId, userId, rodId);
         db.prepare(`
             DELETE FROM rod_stats
@@ -528,6 +747,132 @@ export default class FishingManager {
         SET damage = 0
         WHERE group_id = ? AND user_id = ? AND rod_id = ?
     `).run(this.groupId, userId, rodId);
+  }
+
+  getLineStats(userId, lineId) {
+    userId = String(userId);
+    const row = db.prepare(`
+        SELECT damage FROM line_stats
+        WHERE group_id = ? AND user_id = ? AND line_id = ?
+    `).get(this.groupId, userId, lineId);
+    return row || { damage: 0 };
+  }
+
+  getLineDurabilityInfo(userId, lineId) {
+    const lineConfig = this.getLineConfig(lineId);
+    if (!lineConfig) return { damage: 0, currentDurability: 0, maxDurability: 0 };
+
+    const damage = Math.max(0, Number(this.getLineStats(userId, lineId).damage) || 0);
+    const configuredDurability = Number(lineConfig.durability);
+    const maxDurability = Number.isFinite(configuredDurability) && configuredDurability > 0
+      ? configuredDurability
+      : calculateBossLineDurability(lineConfig.capacity);
+
+    return {
+      damage,
+      currentDurability: Math.max(0, maxDurability - damage),
+      maxDurability,
+    };
+  }
+
+  damageLine(userId, lineId, damage, { protectFromBreak = false } = {}) {
+    userId = String(userId);
+    const safeDamage = Number(damage);
+    const lineConfig = this.getLineConfig(lineId);
+    const durabilityInfo = lineConfig
+      ? this.getLineDurabilityInfo(userId, lineId)
+      : { currentDurability: 0, maxDurability: 0 };
+    if (!lineConfig || !Number.isFinite(safeDamage) || safeDamage <= 0) {
+      return {
+        applied: false,
+        isBroken: false,
+        breakPrevented: false,
+        currentDurability: durabilityInfo.currentDurability,
+        maxDurability: durabilityInfo.maxDurability,
+      };
+    }
+
+    const transaction = db.transaction(() => {
+      const owned = db.prepare(`
+          SELECT count FROM inventory
+          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count > 0
+      `).get(this.groupId, userId, lineId);
+      if (!owned) {
+        return {
+          applied: false,
+          isBroken: false,
+          breakPrevented: false,
+          currentDurability: 0,
+          maxDurability: durabilityInfo.maxDurability,
+        };
+      }
+
+      const current = this.getLineDurabilityInfo(userId, lineId);
+      const nextDurability = Math.max(0, current.currentDurability - safeDamage);
+      if (nextDurability <= 0 && protectFromBreak) {
+        const protectedDamage = Math.max(0, current.maxDurability - 1);
+        db.prepare(`
+            INSERT INTO line_stats (group_id, user_id, line_id, damage)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(group_id, user_id, line_id)
+            DO UPDATE SET damage = excluded.damage
+        `).run(this.groupId, userId, lineId, protectedDamage);
+        return {
+          applied: true,
+          isBroken: false,
+          breakPrevented: true,
+          currentDurability: 1,
+          maxDurability: current.maxDurability,
+        };
+      }
+
+      if (nextDurability <= 0) {
+        db.prepare(`
+            DELETE FROM inventory
+            WHERE group_id = ? AND user_id = ? AND item_id = ? AND count > 0
+        `).run(this.groupId, userId, lineId);
+        db.prepare(`
+            DELETE FROM line_stats
+            WHERE group_id = ? AND user_id = ? AND line_id = ?
+        `).run(this.groupId, userId, lineId);
+        db.prepare(`
+            UPDATE fishing_stats
+            SET line = CASE WHEN line = ? THEN NULL ELSE line END
+            WHERE group_id = ? AND user_id = ?
+        `).run(lineId, this.groupId, userId);
+        return {
+          applied: true,
+          isBroken: true,
+          breakPrevented: false,
+          currentDurability: 0,
+          maxDurability: current.maxDurability,
+        };
+      }
+
+      db.prepare(`
+          INSERT INTO line_stats (group_id, user_id, line_id, damage)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(group_id, user_id, line_id)
+          DO UPDATE SET damage = damage + ?
+      `).run(this.groupId, userId, lineId, safeDamage, safeDamage);
+      return {
+        applied: true,
+        isBroken: false,
+        breakPrevented: false,
+        currentDurability: nextDurability,
+        maxDurability: current.maxDurability,
+      };
+    });
+
+    return transaction.immediate();
+  }
+
+  clearLineDamage(userId, lineId) {
+    userId = String(userId);
+    db.prepare(`
+        DELETE FROM line_stats
+        WHERE group_id = ? AND user_id = ? AND line_id = ?
+    `).run(this.groupId, userId, lineId);
   }
 
   getRodMastery(userId, rodId) {
@@ -683,6 +1028,13 @@ export default class FishingManager {
       this.clearEquippedLine(userId);
       return null;
     }
+    if (
+      userData.line &&
+      this.getLineDurabilityInfo(userId, userData.line).currentDurability <= 0
+    ) {
+      this.breakLine(userId, userData.line);
+      return null;
+    }
     return userData.line;
   }
 
@@ -697,14 +1049,13 @@ export default class FishingManager {
     userId = String(userId);
     const transaction = db.transaction(() => {
       const removed = db.prepare(`
-          UPDATE inventory
-          SET count = count - 1
-          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count >= 1
+          DELETE FROM inventory
+          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count > 0
       `).run(this.groupId, userId, lineId);
       if (removed.changes !== 1) return false;
       db.prepare(`
-          DELETE FROM inventory
-          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count <= 0
+          DELETE FROM line_stats
+          WHERE group_id = ? AND user_id = ? AND line_id = ?
       `).run(this.groupId, userId, lineId);
       db.prepare(`
           UPDATE fishing_stats
@@ -780,15 +1131,58 @@ export default class FishingManager {
       `).get(this.groupId, userId, baitId)?.count || 0;
       if (remaining <= 0) {
         const inventory = new InventoryManager(this.groupId, userId).getInventory();
-        const nextBait = this.getAllBaits()
-          .filter((bait) => inventory[bait.id] > 0)
+        const availableBaits = this.getAllBaits()
+          .filter((bait) => inventory[bait.id] > 0);
+        const nextBait = availableBaits
+          .filter((bait) => !bait.boss_bait)
           .sort((a, b) => (a.price || 0) - (b.price || 0))[0]?.id || null;
         db.prepare(`
             UPDATE fishing_stats SET bait = ?
             WHERE group_id = ? AND user_id = ?
-        `).run(nextBait, this.groupId, userId);
+        `).run(nextBait || availableBaits[0]?.id || null, this.groupId, userId);
       }
       return true;
+    });
+    return transaction.immediate();
+  }
+
+  stealBait(userId, baitId) {
+    userId = String(userId);
+    if (!baitId) return { stolen: false, remaining: 0 };
+    this._ensureUser(userId);
+    const transaction = db.transaction(() => {
+      const removed = db.prepare(`
+          UPDATE inventory
+          SET count = count - 1
+          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count >= 1
+      `).run(this.groupId, userId, baitId);
+      if (removed.changes !== 1) return { stolen: false, remaining: 0 };
+
+      db.prepare(`
+          DELETE FROM inventory
+          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count <= 0
+      `).run(this.groupId, userId, baitId);
+      const remaining = db.prepare(`
+          SELECT count FROM inventory
+          WHERE group_id = ? AND user_id = ? AND item_id = ?
+      `).get(this.groupId, userId, baitId)?.count || 0;
+
+      const equippedBait = db.prepare(`
+          SELECT bait FROM fishing_stats WHERE group_id = ? AND user_id = ?
+      `).get(this.groupId, userId)?.bait;
+      if (equippedBait === baitId && remaining <= 0) {
+        const inventory = new InventoryManager(this.groupId, userId).getInventory();
+        const availableBaits = this.getAllBaits()
+          .filter((bait) => inventory[bait.id] > 0);
+        const nextBait = availableBaits
+          .filter((bait) => !bait.boss_bait)
+          .sort((a, b) => (a.price || 0) - (b.price || 0))[0]?.id || null;
+        db.prepare(`
+            UPDATE fishing_stats SET bait = ?
+            WHERE group_id = ? AND user_id = ?
+        `).run(nextBait || availableBaits[0]?.id || null, this.groupId, userId);
+      }
+      return { stolen: true, remaining };
     });
     return transaction.immediate();
   }
@@ -830,7 +1224,7 @@ export default class FishingManager {
   getUserCatchHistory(userId) {
     userId = String(userId);
     const rows = db.prepare(`
-        SELECT fish_id as fishId, count, success_count as successCount
+        SELECT fish_id as fishId, count, success_count as successCount, max_weight as maxWeight
         FROM fishing_counts
         WHERE group_id = ? AND user_id = ?
         ORDER BY success_count DESC
@@ -968,8 +1362,7 @@ export default class FishingManager {
 
   async setFishPriceBoost() {
     const key = `sakura:fishing:torpedo_explosion:${this.groupId}`;
-    const oneHour = 60 * 60;
-    await redis.set(key, String(Date.now()), "EX", oneHour);
+    await redis.set(key, String(Date.now()), "EX", FISHING_BENEFIT_DURATION_SECONDS);
   }
 
   async isFishPriceBoostActive() {

@@ -18,11 +18,16 @@ export default class EconomyOperations {
 
     this.economyManager.ensureUser(this.e);
     const transaction = db.transaction(() => {
-      const removed = db.prepare(`
-          UPDATE inventory
-          SET count = count - 1
-          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count >= 1
-      `).run(this.groupId, this.userId, itemId);
+      const removed = safeEquipmentSlot
+        ? db.prepare(`
+            DELETE FROM inventory
+            WHERE group_id = ? AND user_id = ? AND item_id = ? AND count > 0
+        `).run(this.groupId, this.userId, itemId)
+        : db.prepare(`
+            UPDATE inventory
+            SET count = count - 1
+            WHERE group_id = ? AND user_id = ? AND item_id = ? AND count >= 1
+        `).run(this.groupId, this.userId, itemId);
       if (removed.changes !== 1) {
         return { success: false, reason: "not_owned" };
       }
@@ -42,6 +47,11 @@ export default class EconomyOperations {
           db.prepare(`
               DELETE FROM rod_stats
               WHERE group_id = ? AND user_id = ? AND rod_id = ?
+          `).run(this.groupId, this.userId, itemId);
+        } else if (safeEquipmentSlot === "line") {
+          db.prepare(`
+              DELETE FROM line_stats
+              WHERE group_id = ? AND user_id = ? AND line_id = ?
           `).run(this.groupId, this.userId, itemId);
         }
         db.prepare(`

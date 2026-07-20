@@ -6,8 +6,19 @@
     "description": "一只被遗弃很久的皮靴，里面塞满了淤泥。",
     "base_price": 0,
     "difficulty": 28,
-    "weight": [1.0, 3.5],
-    "active_hours": [[0, 24]]
+    "weight": [
+      1,
+      3.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
   },
   {
     "id": "trash_can",
@@ -16,8 +27,16 @@
     "description": "虽然已经生锈，但依稀能辨认出是某种碳酸饮料。",
     "base_price": 1,
     "difficulty": 25,
-    "weight": [0.1, 0.5],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.1,
+      0.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "trash_seaweed",
@@ -26,8 +45,19 @@
     "description": "一大团黏糊糊的绿色植物，散发着腥味。",
     "base_price": 1,
     "difficulty": 30,
-    "weight": [0.5, 3.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.5,
+      3
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
   },
   {
     "id": "trash_driftwood",
@@ -36,8 +66,19 @@
     "description": "一块沉重的木头，表面已经被水流冲刷得非常光滑。",
     "base_price": 2,
     "difficulty": 32,
-    "weight": [2.5, 4.5],
-    "active_hours": [[0, 24]]
+    "weight": [
+      2.5,
+      4.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
   },
   {
     "id": "trash_tire",
@@ -46,8 +87,19 @@
     "description": "不知道是谁把它扔进水里的，非常沉重，毫无价值。",
     "base_price": 0,
     "difficulty": 33,
-    "weight": [3.0, 5.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      3,
+      5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
   },
   {
     "id": "trash_bone",
@@ -56,8 +108,23 @@
     "description": "看起来像是某种大型哺乳动物的骨骼碎片，有点吓人。",
     "base_price": 3,
     "difficulty": 26,
-    "weight": [0.8, 2.5],
-    "active_hours": [[18, 24], [0, 6]]
+    "weight": [
+      0.8,
+      2.5
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "lake"
+    ]
   },
   {
     "id": "trash_plastic_bag",
@@ -66,8 +133,16 @@
     "description": "水中常见的污染物，如果不仔细看会以为是水母。",
     "base_price": 0,
     "difficulty": 27,
-    "weight": [0.1, 0.4],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.1,
+      0.4
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "trash_newspaper",
@@ -76,8 +151,20 @@
     "description": "上面的文字已经模糊不清，只能隐约看到几十年前的日期。",
     "base_price": 0,
     "difficulty": 24,
-    "weight": [0.1, 0.3],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.1,
+      0.3
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "pond",
+      "river"
+    ]
   },
   {
     "id": "trash_broken_glasses",
@@ -86,8 +173,19 @@
     "description": "镜片已经碎了一半，镜框也歪曲变形了。",
     "base_price": 1,
     "difficulty": 25,
-    "weight": [0.1, 0.2],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.1,
+      0.2
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
   },
   {
     "id": "trash_rusty_anchor",
@@ -96,8 +194,19 @@
     "description": "极其沉重的废铁，虽然是垃圾，但卖给废品站或许能值点钱。",
     "base_price": 15,
     "difficulty": 35,
-    "weight": [4.0, 5.2],
-    "active_hours": [[0, 24]]
+    "weight": [
+      4,
+      5.2
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_crucian_carp",
@@ -106,8 +215,16 @@
     "description": "淡水水域中最常见的鱼类之一，生命力顽强。",
     "base_price": 8,
     "difficulty": 28,
-    "weight": [0.3, 1.5],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.3,
+      1.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_carp",
@@ -116,8 +233,19 @@
     "description": "体型较宽，鳞片较大，喜欢在水底拱泥觅食。",
     "base_price": 10,
     "difficulty": 35,
-    "weight": [1.5, 5.0],
-    "active_hours": [[6, 18]]
+    "weight": [
+      1.5,
+      5
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
   },
   {
     "id": "fish_grass_carp",
@@ -126,8 +254,19 @@
     "description": "身体修长，游动迅速，以水草为食。",
     "base_price": 12,
     "difficulty": 38,
-    "weight": [2.0, 5.5],
-    "active_hours": [[5, 19]]
+    "weight": [
+      2,
+      5.5
+    ],
+    "active_hours": [
+      [
+        5,
+        19
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
   },
   {
     "id": "fish_bluegill",
@@ -136,8 +275,19 @@
     "description": "体色鲜艳的小型鱼类，虽然好看但属于外来入侵物种。",
     "base_price": 6,
     "difficulty": 30,
-    "weight": [0.2, 1.0],
-    "active_hours": [[8, 16]]
+    "weight": [
+      0.2,
+      1
+    ],
+    "active_hours": [
+      [
+        8,
+        16
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
   },
   {
     "id": "fish_chub",
@@ -146,8 +296,19 @@
     "description": "性情急躁，受到惊吓时会跃出水面。",
     "base_price": 9,
     "difficulty": 33,
-    "weight": [1.0, 4.0],
-    "active_hours": [[6, 18]]
+    "weight": [
+      1,
+      4
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
   },
   {
     "id": "fish_goby",
@@ -156,8 +317,16 @@
     "description": "趴在水底石头上的小鱼，呆头呆脑的。",
     "base_price": 5,
     "difficulty": 26,
-    "weight": [0.05, 0.3],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.05,
+      0.3
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_minnow",
@@ -166,8 +335,16 @@
     "description": "成群结队游动的小银鱼，通常作为其他大鱼的饵料。",
     "base_price": 5,
     "difficulty": 25,
-    "weight": [0.05, 0.2],
-    "active_hours": [[6, 18]]
+    "weight": [
+      0.05,
+      0.2
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ]
   },
   {
     "id": "fish_perch",
@@ -176,8 +353,23 @@
     "description": "背部有锋利的刺鳍，肉质非常鲜美。",
     "base_price": 15,
     "difficulty": 34,
-    "weight": [0.5, 3.0],
-    "active_hours": [[5, 10], [16, 20]]
+    "weight": [
+      0.5,
+      3
+    ],
+    "active_hours": [
+      [
+        5,
+        10
+      ],
+      [
+        16,
+        20
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
   },
   {
     "id": "fish_mackerel",
@@ -186,8 +378,19 @@
     "description": "背部有青黑色的纹路，游速很快。",
     "base_price": 14,
     "difficulty": 36,
-    "weight": [0.5, 2.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.5,
+      2
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
   },
   {
     "id": "fish_sardine",
@@ -196,8 +399,16 @@
     "description": "总是成千上万地聚集在一起，非常脆弱。",
     "base_price": 5,
     "difficulty": 25,
-    "weight": [0.1, 0.4],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.1,
+      0.4
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_anchovy",
@@ -206,8 +417,19 @@
     "description": "细长的小鱼，银白色的腹部在水中闪闪发光。",
     "base_price": 6,
     "difficulty": 26,
-    "weight": [0.05, 0.3],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.05,
+      0.3
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
   },
   {
     "id": "fish_horse_mackerel",
@@ -216,8 +438,19 @@
     "description": "侧线上有明显的棱鳞，是常见的食用鱼。",
     "base_price": 10,
     "difficulty": 32,
-    "weight": [0.3, 1.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.3,
+      1
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
   },
   {
     "id": "fish_flatfish",
@@ -226,8 +459,19 @@
     "description": "两只眼睛长在同一侧，喜欢把自己埋在沙子里。",
     "base_price": 18,
     "difficulty": 40,
-    "weight": [1.0, 4.5],
-    "active_hours": [[0, 24]]
+    "weight": [
+      1,
+      4.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_catfish",
@@ -236,9 +480,26 @@
     "description": "长着长长的胡须，皮肤光滑无鳞，喜欢雨后浑浊的水域。",
     "base_price": 15,
     "difficulty": 38,
-    "weight": [2.0, 5.5],
-    "active_hours": [[18, 24], [0, 6]],
-    "weather": ["雨"]
+    "weight": [
+      2,
+      5.5
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "weather": [
+      "雨"
+    ],
+    "locations": [
+      "lake"
+    ]
   },
   {
     "id": "fish_loach",
@@ -247,8 +508,16 @@
     "description": "滑溜溜的，非常难以抓住。",
     "base_price": 7,
     "difficulty": 28,
-    "weight": [0.05, 0.3],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.05,
+      0.3
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_crawfish",
@@ -257,8 +526,19 @@
     "description": "挥舞着两只钳子，虽然不是鱼，但也是水产之一。",
     "base_price": 10,
     "difficulty": 30,
-    "weight": [0.1, 0.5],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.1,
+      0.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
   },
   {
     "id": "fish_tilapia",
@@ -267,8 +547,19 @@
     "description": "适应力极强，背鳍上有硬刺。",
     "base_price": 9,
     "difficulty": 33,
-    "weight": [0.5, 2.5],
-    "active_hours": [[8, 18]]
+    "weight": [
+      0.5,
+      2.5
+    ],
+    "active_hours": [
+      [
+        8,
+        18
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
   },
   {
     "id": "fish_dace",
@@ -277,8 +568,19 @@
     "description": "喜欢生活在水流湍急的溪流中。",
     "base_price": 11,
     "difficulty": 35,
-    "weight": [0.3, 1.5],
-    "active_hours": [[6, 18]]
+    "weight": [
+      0.3,
+      1.5
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
   },
   {
     "id": "fish_sculpin",
@@ -287,8 +589,16 @@
     "description": "头部很大且扁平，样子有点丑陋。",
     "base_price": 8,
     "difficulty": 30,
-    "weight": [0.2, 0.8],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.2,
+      0.8
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_smelt",
@@ -297,9 +607,22 @@
     "description": "身体散发着类似黄瓜的清香。只有降雪的寒冷水域才能钓到。",
     "base_price": 12,
     "difficulty": 28,
-    "weight": [0.1, 0.5],
-    "active_hours": [[0, 24]],
-    "weather": ["雪"]
+    "weight": [
+      0.1,
+      0.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "weather": [
+      "雪"
+    ],
+    "locations": [
+      "lake"
+    ]
   },
   {
     "id": "fish_herring",
@@ -308,8 +631,16 @@
     "description": "银色的鱼群像是一道流动的墙壁。",
     "base_price": 8,
     "difficulty": 28,
-    "weight": [0.2, 0.8],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.2,
+      0.8
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_pollock",
@@ -318,8 +649,19 @@
     "description": "深海中常见的经济鱼类。",
     "base_price": 13,
     "difficulty": 35,
-    "weight": [0.5, 3.5],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.5,
+      3.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_mullet",
@@ -328,8 +670,19 @@
     "description": "喜欢在河口和近海游弋，经常跃出水面。",
     "base_price": 12,
     "difficulty": 36,
-    "weight": [0.8, 3.5],
-    "active_hours": [[6, 18]]
+    "weight": [
+      0.8,
+      3.5
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
   },
   {
     "id": "fish_cod",
@@ -338,8 +691,19 @@
     "description": "下巴上有一根明显的触须，肉质雪白。",
     "base_price": 20,
     "difficulty": 40,
-    "weight": [2.0, 5.5],
-    "active_hours": [[0, 24]]
+    "weight": [
+      2,
+      5.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_haddock",
@@ -348,8 +712,19 @@
     "description": "体侧有一条黑色的侧线，胸鳍上方有黑斑。",
     "base_price": 18,
     "difficulty": 38,
-    "weight": [1.0, 4.5],
-    "active_hours": [[0, 24]]
+    "weight": [
+      1,
+      4.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_whiting",
@@ -358,8 +733,19 @@
     "description": "一种小型鳕鱼，通常在沙质海底活动。",
     "base_price": 10,
     "difficulty": 30,
-    "weight": [0.3, 1.5],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.3,
+      1.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
   },
   {
     "id": "fish_bleak",
@@ -368,8 +754,19 @@
     "description": "在水面附近活动的小型银色鱼类。",
     "base_price": 5,
     "difficulty": 26,
-    "weight": [0.05, 0.2],
-    "active_hours": [[6, 18]]
+    "weight": [
+      0.05,
+      0.2
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
   },
   {
     "id": "fish_roach",
@@ -378,8 +775,16 @@
     "description": "眼睛是红色的，鳍也是红色的。",
     "base_price": 7,
     "difficulty": 28,
-    "weight": [0.2, 1.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.2,
+      1
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_bream",
@@ -388,8 +793,19 @@
     "description": "身体侧扁且高，呈菱形。",
     "base_price": 15,
     "difficulty": 33,
-    "weight": [1.0, 4.5],
-    "active_hours": [[0, 24]]
+    "weight": [
+      1,
+      4.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
   },
   {
     "id": "fish_tench",
@@ -398,8 +814,23 @@
     "description": "鳞片非常细小，体表覆盖着厚厚的粘液。",
     "base_price": 16,
     "difficulty": 38,
-    "weight": [1.5, 5.0],
-    "active_hours": [[18, 24], [0, 6]]
+    "weight": [
+      1.5,
+      5
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "lake"
+    ]
   },
   {
     "id": "fish_rainbow_trout",
@@ -408,8 +839,19 @@
     "description": "体侧有一条美丽的彩虹色纵带，对水质要求很高。",
     "base_price": 35,
     "difficulty": 58,
-    "weight": [3.0, 18.0],
-    "active_hours": [[6, 18]]
+    "weight": [
+      3,
+      18
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
   },
   {
     "id": "fish_black_bass",
@@ -418,8 +860,23 @@
     "description": "凶猛的掠食者，上钩后会剧烈挣扎并洗鳃。",
     "base_price": 40,
     "difficulty": 65,
-    "weight": [2.0, 16.0],
-    "active_hours": [[5, 9], [17, 21]]
+    "weight": [
+      2,
+      16
+    ],
+    "active_hours": [
+      [
+        5,
+        9
+      ],
+      [
+        17,
+        21
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
   },
   {
     "id": "fish_salmon",
@@ -428,9 +885,22 @@
     "description": "逆流而上的坚毅鱼类，常趁雨水上涨时启程。",
     "base_price": 45,
     "difficulty": 68,
-    "weight": [4.0, 20.0],
-    "active_hours": [[5, 19]],
-    "weather": ["雨"]
+    "weight": [
+      4,
+      20
+    ],
+    "active_hours": [
+      [
+        5,
+        19
+      ]
+    ],
+    "weather": [
+      "雨"
+    ],
+    "locations": [
+      "river"
+    ]
   },
   {
     "id": "fish_pike",
@@ -439,8 +909,19 @@
     "description": "水下的伏击者，牙齿极其锋利，性格凶暴。",
     "base_price": 42,
     "difficulty": 70,
-    "weight": [5.0, 22.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      5,
+      22
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "lake"
+    ]
   },
   {
     "id": "fish_eel",
@@ -449,8 +930,23 @@
     "description": "身体像蛇一样长，力量惊人，会缠绕鱼线。",
     "base_price": 50,
     "difficulty": 55,
-    "weight": [1.5, 12.0],
-    "active_hours": [[18, 24], [0, 5]]
+    "weight": [
+      1.5,
+      12
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        5
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
   },
   {
     "id": "fish_clownfish",
@@ -459,8 +955,19 @@
     "description": "橘色和白色相间的条纹，喜欢在海葵附近活动。",
     "base_price": 30,
     "difficulty": 50,
-    "weight": [0.1, 0.5],
-    "active_hours": [[6, 18]]
+    "weight": [
+      0.1,
+      0.5
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
   },
   {
     "id": "fish_puffer",
@@ -469,8 +976,16 @@
     "description": "受到威胁时会吸水膨胀成一个刺球。",
     "base_price": 38,
     "difficulty": 52,
-    "weight": [0.8, 5.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.8,
+      5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_squid",
@@ -479,8 +994,23 @@
     "description": "虽然不是鱼，但会喷出墨汁干扰视线。",
     "base_price": 32,
     "difficulty": 48,
-    "weight": [0.8, 8.0],
-    "active_hours": [[18, 24], [0, 6]]
+    "weight": [
+      0.8,
+      8
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_octopus",
@@ -489,8 +1019,23 @@
     "description": "拥有八条灵活的腕足，吸附力极强。",
     "base_price": 35,
     "difficulty": 60,
-    "weight": [1.5, 18.0],
-    "active_hours": [[18, 24], [0, 6]]
+    "weight": [
+      1.5,
+      18
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_red_snapper",
@@ -499,8 +1044,16 @@
     "description": "通体红色，被视为吉祥的象征。",
     "base_price": 55,
     "difficulty": 58,
-    "weight": [2.0, 15.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      2,
+      15
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_barracuda",
@@ -509,8 +1062,16 @@
     "description": "像鱼雷一样迅猛，满嘴獠牙，极具攻击性。",
     "base_price": 48,
     "difficulty": 72,
-    "weight": [4.0, 20.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      4,
+      20
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_stingray",
@@ -519,8 +1080,23 @@
     "description": "扁平的身体像风筝，尾部有剧毒的刺。",
     "base_price": 52,
     "difficulty": 66,
-    "weight": [6.0, 22.0],
-    "active_hours": [[18, 24], [0, 6]]
+    "weight": [
+      6,
+      22
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_seahorse",
@@ -529,8 +1105,19 @@
     "description": "垂直游泳的奇特生物，尾巴可以卷住物体。",
     "base_price": 45,
     "difficulty": 45,
-    "weight": [0.05, 0.3],
-    "active_hours": [[6, 18]]
+    "weight": [
+      0.05,
+      0.3
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
   },
   {
     "id": "fish_flying_fish",
@@ -539,9 +1126,22 @@
     "description": "胸鳍极其发达，能够滑翔出水面。只在晴朗的天空下起飞。",
     "base_price": 36,
     "difficulty": 54,
-    "weight": [0.5, 3.0],
-    "active_hours": [[8, 16]],
-    "weather": ["晴"]
+    "weight": [
+      0.5,
+      3
+    ],
+    "active_hours": [
+      [
+        8,
+        16
+      ]
+    ],
+    "weather": [
+      "晴"
+    ],
+    "locations": [
+      "coast"
+    ]
   },
   {
     "id": "fish_snakehead",
@@ -550,8 +1150,16 @@
     "description": "凶猛的肉食性鱼类，护崽时攻击性倍增。",
     "base_price": 40,
     "difficulty": 70,
-    "weight": [3.0, 18.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      3,
+      18
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_zander",
@@ -560,8 +1168,23 @@
     "description": "眼睛具有反光层，能在弱光下看清猎物。",
     "base_price": 44,
     "difficulty": 62,
-    "weight": [3.0, 20.0],
-    "active_hours": [[19, 24], [0, 5]]
+    "weight": [
+      3,
+      20
+    ],
+    "active_hours": [
+      [
+        19,
+        24
+      ],
+      [
+        0,
+        5
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
   },
   {
     "id": "fish_grayling",
@@ -570,8 +1193,19 @@
     "description": "拥有巨大的且色彩斑斓的背鳍。",
     "base_price": 50,
     "difficulty": 55,
-    "weight": [0.8, 5.0],
-    "active_hours": [[6, 18]]
+    "weight": [
+      0.8,
+      5
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
   },
   {
     "id": "fish_halibut",
@@ -580,9 +1214,22 @@
     "description": "比目鱼中的巨无霸，力量很大。寒潮降雪时会游入近岸觅食。",
     "base_price": 60,
     "difficulty": 75,
-    "weight": [12.0, 22.0],
-    "active_hours": [[0, 24]],
-    "weather": ["雪"]
+    "weight": [
+      12,
+      22
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "weather": [
+      "雪"
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_cobia",
@@ -591,8 +1238,20 @@
     "description": "体型像鲨鱼，力量极大，耐力持久。",
     "base_price": 58,
     "difficulty": 78,
-    "weight": [8.0, 22.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      8,
+      22
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "coast",
+      "abyss"
+    ]
   },
   {
     "id": "fish_monkfish",
@@ -601,9 +1260,26 @@
     "description": "长相狰狞的深海鱼，雾夜里以头顶发光器引路。",
     "base_price": 55,
     "difficulty": 64,
-    "weight": [4.0, 20.0],
-    "active_hours": [[18, 24], [0, 6]],
-    "weather": ["雾"]
+    "weight": [
+      4,
+      20
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "weather": [
+      "雾"
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_parrotfish",
@@ -612,8 +1288,19 @@
     "description": "牙齿愈合成鹦鹉嘴状，身体色彩艳丽。",
     "base_price": 46,
     "difficulty": 52,
-    "weight": [1.5, 12.0],
-    "active_hours": [[6, 18]]
+    "weight": [
+      1.5,
+      12
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
   },
   {
     "id": "fish_lionfish",
@@ -622,8 +1309,19 @@
     "description": "鳍棘有毒，游动时像一只开屏的孔雀。",
     "base_price": 65,
     "difficulty": 58,
-    "weight": [0.8, 5.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.8,
+      5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
   },
   {
     "id": "fish_moray_eel",
@@ -632,8 +1330,23 @@
     "description": "藏在岩缝中，牙齿向内弯曲，一旦咬住绝不松口。",
     "base_price": 62,
     "difficulty": 72,
-    "weight": [3.0, 18.0],
-    "active_hours": [[18, 24], [0, 6]]
+    "weight": [
+      3,
+      18
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_boxfish",
@@ -642,8 +1355,16 @@
     "description": "身体像个硬盒子，游起来笨拙可爱。",
     "base_price": 40,
     "difficulty": 48,
-    "weight": [0.3, 2.5],
-    "active_hours": [[0, 24]]
+    "weight": [
+      0.3,
+      2.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_triggerfish",
@@ -652,8 +1373,16 @@
     "description": "背鳍有锁定机制，牙齿非常坚硬。",
     "base_price": 48,
     "difficulty": 56,
-    "weight": [1.5, 10.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      1.5,
+      10
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_tuna",
@@ -662,8 +1391,19 @@
     "description": "海洋中的鱼雷，游速极快，肉质顶级。",
     "base_price": 120,
     "difficulty": 108,
-    "weight": [30.0, 55.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      30,
+      55
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_swordfish",
@@ -672,8 +1412,23 @@
     "description": "上颌延长如剑，发怒时甚至会攻击船只。",
     "base_price": 110,
     "difficulty": 115,
-    "weight": [35.0, 60.0],
-    "active_hours": [[18, 24], [0, 6]]
+    "weight": [
+      35,
+      60
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_mahi_mahi",
@@ -682,8 +1437,19 @@
     "description": "色彩绚丽，在水中呈现金绿色，出水后颜色迅速暗淡。",
     "base_price": 95,
     "difficulty": 105,
-    "weight": [8.0, 45.0],
-    "active_hours": [[6, 18]]
+    "weight": [
+      8,
+      45
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
   },
   {
     "id": "fish_sturgeon",
@@ -692,8 +1458,16 @@
     "description": "活化石鱼类，体表有五行硬鳞，体型巨大。",
     "base_price": 130,
     "difficulty": 118,
-    "weight": [30.0, 60.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      30,
+      60
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_arapaima",
@@ -702,8 +1476,19 @@
     "description": "淡水中的巨怪，鳞片坚硬如盔甲，力大无穷。",
     "base_price": 125,
     "difficulty": 120,
-    "weight": [35.0, 60.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      35,
+      60
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
   },
   {
     "id": "fish_alligator_gar",
@@ -712,8 +1497,16 @@
     "description": "长着像鳄鱼一样的嘴，牙齿锋利，鳞片坚硬。",
     "base_price": 105,
     "difficulty": 112,
-    "weight": [25.0, 55.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      25,
+      55
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_coelacanth",
@@ -722,8 +1515,23 @@
     "description": "被认为已经灭绝了亿万年的深海活化石。",
     "base_price": 140,
     "difficulty": 100,
-    "weight": [30.0, 55.0],
-    "active_hours": [[20, 24], [0, 4]]
+    "weight": [
+      30,
+      55
+    ],
+    "active_hours": [
+      [
+        20,
+        24
+      ],
+      [
+        0,
+        4
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_oarfish",
@@ -732,9 +1540,22 @@
     "description": "身形极长、背鳍鲜红，只在雷暴中现身浅水。",
     "base_price": 135,
     "difficulty": 108,
-    "weight": [25.0, 58.0],
-    "active_hours": [[0, 24]],
-    "weather": ["雷暴"]
+    "weight": [
+      25,
+      58
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "weather": [
+      "雷暴"
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_hammerhead",
@@ -743,8 +1564,19 @@
     "description": "头部呈锤状，视野360度，极其敏锐的猎手。",
     "base_price": 115,
     "difficulty": 115,
-    "weight": [40.0, 60.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      40,
+      60
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_napoleon_wrasse",
@@ -753,8 +1585,19 @@
     "description": "体型巨大，额头突起，色彩纹路非常复杂。",
     "base_price": 128,
     "difficulty": 110,
-    "weight": [25.0, 55.0],
-    "active_hours": [[6, 18]]
+    "weight": [
+      25,
+      55
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
   },
   {
     "id": "fish_electric_eel",
@@ -763,9 +1606,22 @@
     "description": "能释放高压电流，雷暴天会兴奋地浮出水面。",
     "base_price": 110,
     "difficulty": 118,
-    "weight": [8.0, 40.0],
-    "active_hours": [[0, 24]],
-    "weather": ["雷暴"]
+    "weight": [
+      8,
+      40
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "weather": [
+      "雷暴"
+    ],
+    "locations": [
+      "river"
+    ]
   },
   {
     "id": "fish_giant_trevally",
@@ -774,8 +1630,19 @@
     "description": "珊瑚礁的霸主，冲击力极强，甚至能捕食飞鸟。",
     "base_price": 118,
     "difficulty": 120,
-    "weight": [20.0, 55.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      20,
+      55
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
   },
   {
     "id": "fish_sawfish",
@@ -784,8 +1651,16 @@
     "description": "吻部延长呈锯齿状，挥动起来是致命的武器。",
     "base_price": 122,
     "difficulty": 115,
-    "weight": [30.0, 60.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      30,
+      60
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_tiger_fish",
@@ -794,8 +1669,16 @@
     "description": "牙齿像匕首一样交错，性格极其凶暴。",
     "base_price": 112,
     "difficulty": 115,
-    "weight": [15.0, 50.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      15,
+      50
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_wels_catfish",
@@ -804,9 +1687,26 @@
     "description": "欧洲淡水霸主，常趁暴雨搅浑水域时捕猎。",
     "base_price": 108,
     "difficulty": 118,
-    "weight": [35.0, 60.0],
-    "active_hours": [[18, 24], [0, 6]],
-    "weather": ["雨"]
+    "weight": [
+      35,
+      60
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "weather": [
+      "雨"
+    ],
+    "locations": [
+      "river"
+    ]
   },
   {
     "id": "fantasy_glass_fish",
@@ -815,9 +1715,22 @@
     "description": "通体透明、骨泛蓝光，只在雾中显露轮廓。",
     "base_price": 145,
     "difficulty": 98,
-    "weight": [3.0, 15.0],
-    "active_hours": [[0, 24]],
-    "weather": ["雾"]
+    "weight": [
+      3,
+      15
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "weather": [
+      "雾"
+    ],
+    "locations": [
+      "mystic"
+    ]
   },
   {
     "id": "fantasy_magma_guppy",
@@ -826,9 +1739,22 @@
     "description": "鳞片如燃烧的余烬，只在烈日下浮出极热水域。",
     "base_price": 138,
     "difficulty": 105,
-    "weight": [0.8, 5.0],
-    "active_hours": [[0, 24]],
-    "weather": ["晴"]
+    "weight": [
+      0.8,
+      5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "weather": [
+      "晴"
+    ],
+    "locations": [
+      "mystic"
+    ]
   },
   {
     "id": "fantasy_leaf_skate",
@@ -837,9 +1763,22 @@
     "description": "形似巨大枯叶，常借多云的昏暗天色随波潜行。",
     "base_price": 125,
     "difficulty": 95,
-    "weight": [10.0, 35.0],
-    "active_hours": [[0, 24]],
-    "weather": ["多云"]
+    "weight": [
+      10,
+      35
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "weather": [
+      "多云"
+    ],
+    "locations": [
+      "mystic"
+    ]
   },
   {
     "id": "fantasy_clockwork_trout",
@@ -848,8 +1787,19 @@
     "description": "游动时发出滴答声，仿佛体内有机械装置。",
     "base_price": 150,
     "difficulty": 105,
-    "weight": [5.0, 25.0],
-    "active_hours": [[6, 18]]
+    "weight": [
+      5,
+      25
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
   },
   {
     "id": "fantasy_ink_phantom",
@@ -858,9 +1808,26 @@
     "description": "身体由黑烟构成，只在浓雾中忽聚忽散。",
     "base_price": 148,
     "difficulty": 112,
-    "weight": [0.2, 3.0],
-    "active_hours": [[18, 24], [0, 5]],
-    "weather": ["雾"]
+    "weight": [
+      0.2,
+      3
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        5
+      ]
+    ],
+    "weather": [
+      "雾"
+    ],
+    "locations": [
+      "mystic"
+    ]
   },
   {
     "id": "fish_great_white",
@@ -869,8 +1836,19 @@
     "description": "海洋顶级掠食者，拥有令人绝望的咬合力和体型。",
     "base_price": 240,
     "difficulty": 165,
-    "weight": [70.0, 115.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      70,
+      115
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_giant_squid",
@@ -879,8 +1857,23 @@
     "description": "深海梦魇，触手上长满钩爪，眼球大如篮球。",
     "base_price": 230,
     "difficulty": 160,
-    "weight": [60.0, 110.0],
-    "active_hours": [[20, 24], [0, 4]]
+    "weight": [
+      60,
+      110
+    ],
+    "active_hours": [
+      [
+        20,
+        24
+      ],
+      [
+        0,
+        4
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fish_manta_ray",
@@ -889,8 +1882,16 @@
     "description": "巨大的双翼在海中滑翔，如同一张巨大的飞毯。",
     "base_price": 220,
     "difficulty": 175,
-    "weight": [80.0, 120.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      80,
+      120
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_blue_marlin",
@@ -899,8 +1900,16 @@
     "description": "海钓者的终极梦想之一，力量、速度与美的完美结合。",
     "base_price": 250,
     "difficulty": 172,
-    "weight": [70.0, 115.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      70,
+      115
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fish_moonfish",
@@ -909,8 +1918,23 @@
     "description": "圆盘状的身体呈现鲜红与银色，是唯一一种温血鱼类。",
     "base_price": 210,
     "difficulty": 162,
-    "weight": [50.0, 95.0],
-    "active_hours": [[18, 24], [0, 6]]
+    "weight": [
+      50,
+      95
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
   },
   {
     "id": "fantasy_crystal_turtle",
@@ -919,9 +1943,22 @@
     "description": "背负沉重水晶簇，飘雪时会共鸣发光并上浮。",
     "base_price": 270,
     "difficulty": 158,
-    "weight": [85.0, 118.0],
-    "active_hours": [[0, 24]],
-    "weather": ["雪"]
+    "weight": [
+      85,
+      118
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "weather": [
+      "雪"
+    ],
+    "locations": [
+      "lake"
+    ]
   },
   {
     "id": "fantasy_void_ray",
@@ -930,8 +1967,23 @@
     "description": "仿佛游动在星空中，身体映照着宇宙的星辰。",
     "base_price": 265,
     "difficulty": 178,
-    "weight": [30.0, 80.0],
-    "active_hours": [[22, 24], [0, 3]]
+    "weight": [
+      30,
+      80
+    ],
+    "active_hours": [
+      [
+        22,
+        24
+      ],
+      [
+        0,
+        3
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
   },
   {
     "id": "fantasy_siren_tear",
@@ -940,8 +1992,23 @@
     "description": "一种散发着悲伤光芒的小鱼，据说会引诱渔人迷失。",
     "base_price": 275,
     "difficulty": 175,
-    "weight": [1.5, 10.0],
-    "active_hours": [[23, 24], [0, 2]]
+    "weight": [
+      1.5,
+      10
+    ],
+    "active_hours": [
+      [
+        23,
+        24
+      ],
+      [
+        0,
+        2
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
   },
   {
     "id": "fantasy_thunder_shark",
@@ -950,9 +2017,23 @@
     "description": "背鳍伴有微型雷云，只随雷暴现身。",
     "base_price": 260,
     "difficulty": 175,
-    "weight": [60.0, 115.0],
-    "active_hours": [[0, 24]],
-    "weather": ["雷暴"]
+    "weight": [
+      60,
+      115
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "weather": [
+      "雷暴"
+    ],
+    "locations": [
+      "abyss",
+      "mystic"
+    ]
   },
   {
     "id": "fantasy_golden_dragonfish",
@@ -961,9 +2042,23 @@
     "description": "通体纯金、长须如龙，只在晴日现身。",
     "base_price": 280,
     "difficulty": 170,
-    "weight": [15.0, 60.0],
-    "active_hours": [[0, 24]],
-    "weather": ["晴"]
+    "weight": [
+      15,
+      60
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "weather": [
+      "晴"
+    ],
+    "locations": [
+      "lake",
+      "mystic"
+    ]
   },
   {
     "id": "fantasy_leviathan_spawn",
@@ -972,8 +2067,16 @@
     "description": "远古海怪的幼体，虽然还小，但力量已经足以在大海掀起波澜。",
     "base_price": 380,
     "difficulty": 218,
-    "weight": [160.0, 240.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      160,
+      240
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "fantasy_star_eater",
@@ -982,8 +2085,23 @@
     "description": "大嘴里仿佛有一个黑洞，吞噬一切光线，极其沉重。",
     "base_price": 390,
     "difficulty": 225,
-    "weight": [170.0, 248.0],
-    "active_hours": [[22, 24], [0, 4]]
+    "weight": [
+      170,
+      248
+    ],
+    "active_hours": [
+      [
+        22,
+        24
+      ],
+      [
+        0,
+        4
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
   },
   {
     "id": "fantasy_kraken_tentacle",
@@ -992,9 +2110,22 @@
     "description": "拥有独立意识和怪力的巨型触手，只在雷暴中苏醒。",
     "base_price": 350,
     "difficulty": 212,
-    "weight": [150.0, 230.0],
-    "active_hours": [[0, 24]],
-    "weather": ["雷暴"]
+    "weight": [
+      150,
+      230
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "weather": [
+      "雷暴"
+    ],
+    "locations": [
+      "abyss"
+    ]
   },
   {
     "id": "fantasy_phoenix_koi",
@@ -1003,9 +2134,22 @@
     "description": "能令水温沸腾的燃烧之鱼，只在晴日正午苏醒。",
     "base_price": 400,
     "difficulty": 218,
-    "weight": [20.0, 80.0],
-    "active_hours": [[10, 14]],
-    "weather": ["晴"]
+    "weight": [
+      20,
+      80
+    ],
+    "active_hours": [
+      [
+        10,
+        14
+      ]
+    ],
+    "weather": [
+      "晴"
+    ],
+    "locations": [
+      "pond"
+    ]
   },
   {
     "id": "fantasy_abyssal_whale",
@@ -1014,59 +2158,142 @@
     "description": "来自最深海沟的孤独歌者，身体承载着深海的高压。",
     "base_price": 375,
     "difficulty": 228,
-    "weight": [180.0, 250.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      180,
+      250
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
-    "id": "item_card_double_coin",
-    "name": "双倍金币卡",
+    "id": "chest_pond",
+    "name": "花瓣木箱",
     "rarity": "宝藏",
-    "description": "神奇的魔法卡片，使用后1小时内钓鱼可获得双倍收益。",
+    "description": "缠着樱花枝的小木箱，随波轻轻摇晃，里面装着新手钓客的小惊喜。",
     "base_price": 0,
-    "difficulty": 85,
-    "weight": [0.1, 0.1],
-    "active_hours": [[0, 24]]
+    "difficulty": 40,
+    "weight": [
+      2,
+      4
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
   },
   {
-    "id": "item_rod_repair",
-    "name": "焕然祝福",
+    "id": "chest_river",
+    "name": "柳木匣",
     "rarity": "宝藏",
-    "description": "一道神秘的魔法，钓上来的瞬间，让你的鱼竿焕然一新。",
+    "description": "柳木打造的严实匣子，随沉船落入河湾，里面多是渔具与养护用品。",
     "base_price": 0,
-    "difficulty": 70,
-    "weight": [0.1, 0.1],
-    "active_hours": [[0, 24]],
-    "instantEffect": "repairRod"
+    "difficulty": 50,
+    "weight": [
+      4,
+      8
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
   },
   {
-    "id": "item_charm_lucky",
-    "name": "好运护符",
+    "id": "chest_lake",
+    "name": "沉雾古匣",
     "rarity": "宝藏",
-    "description": "受到祝福的护符，使用后1小时内钓鱼必定能钓上鱼。",
-    "base_price": 0,
-    "difficulty": 80,
-    "weight": [0.2, 0.2],
-    "active_hours": [[0, 24]]
-  },
-  {
-    "id": "item_random_bait",
-    "name": "随机鱼饵包",
-    "rarity": "宝藏",
-    "description": "一包神秘的鱼饵，使用后可开出一种随机鱼饵。",
+    "description": "被浓雾浸透的古旧木匣，打开前谁也说不准里面是淤泥还是奇珍。",
     "base_price": 0,
     "difficulty": 60,
-    "weight": [0.5, 1.0],
-    "active_hours": [[0, 24]]
+    "weight": [
+      6,
+      12
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "lake"
+    ]
   },
   {
-    "id": "item_treasure_pearl",
-    "name": "珍珠",
+    "id": "chest_coast",
+    "name": "舶来宝箱",
     "rarity": "宝藏",
-    "description": "圆润饱满的珍珠，光泽迷人。",
-    "base_price": 666,
-    "difficulty": 55,
-    "weight": [0.1, 0.2],
-    "active_hours": [[0, 24]]
+    "description": "从沉没商船漂来的鎏金宝箱，缝隙里都透着金光。",
+    "base_price": 0,
+    "difficulty": 70,
+    "weight": [
+      10,
+      18
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
+  },
+  {
+    "id": "chest_abyss",
+    "name": "渊铁囚箱",
+    "rarity": "宝藏",
+    "description": "深渊铁铸成的囚箱，锁链上刻满封印符文——里面锁着财富，也可能锁着别的东西。",
+    "base_price": 0,
+    "difficulty": 85,
+    "weight": [
+      15,
+      30
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
+  },
+  {
+    "id": "chest_mystic",
+    "name": "星屑圣匣",
+    "rarity": "宝藏",
+    "description": "凝固的星光织成的圣匣，只在幻想水域现身，装着秘境最珍贵的馈赠。",
+    "base_price": 0,
+    "difficulty": 95,
+    "weight": [
+      20,
+      40
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
   },
   {
     "id": "monster_mimic",
@@ -1075,8 +2302,20 @@
     "description": "伪装成宝箱的怪物！",
     "base_price": 0,
     "difficulty": 130,
-    "weight": [30.0, 70.0],
-    "active_hours": [[0, 24]]
+    "nightmare_effect": {
+      "type": "rod_damage",
+      "amount": 20
+    },
+    "weight": [
+      30,
+      70
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "nightmare_bone_shark",
@@ -1085,8 +2324,20 @@
     "description": "只剩下骨架的鲨鱼，锋利的骨刺会严重损坏你的鱼竿！",
     "base_price": 0,
     "difficulty": 140,
-    "weight": [50.0, 90.0],
-    "active_hours": [[0, 24]]
+    "nightmare_effect": {
+      "type": "rod_damage",
+      "amount": 20
+    },
+    "weight": [
+      50,
+      90
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "nightmare_thief_murloc",
@@ -1095,8 +2346,22 @@
     "description": "狡猾的鱼人，它不会上钩，反而会趁机偷走你的一些樱花币！",
     "base_price": 0,
     "difficulty": 110,
-    "weight": [15.0, 45.0],
-    "active_hours": [[0, 24]]
+    "nightmare_effect": {
+      "type": "steal_coins_flat",
+      "min": 1,
+      "max": 200,
+      "fallback_rod_damage": 20
+    },
+    "weight": [
+      15,
+      45
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "nightmare_void_devourer",
@@ -1105,8 +2370,22 @@
     "description": "来自虚空的恐怖生物，它的出现意味着财富的大量流失...",
     "base_price": 0,
     "difficulty": 150,
-    "weight": [8.0, 25.0],
-    "active_hours": [[0, 24]]
+    "nightmare_effect": {
+      "type": "steal_coins_percent",
+      "min_percent": 1,
+      "max_percent": 20,
+      "fallback_rod_damage": 20
+    },
+    "weight": [
+      8,
+      25
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
   },
   {
     "id": "nightmare_cursed_skull",
@@ -1115,7 +2394,2602 @@
     "description": "散发着不祥气息的骷髅头，接触它会让你厄运缠身！",
     "base_price": 0,
     "difficulty": 100,
-    "weight": [3.0, 12.0],
-    "active_hours": [[0, 24]]
+    "nightmare_effect": {
+      "type": "curse",
+      "layers": 5
+    },
+    "weight": [
+      3,
+      12
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
+  },
+  {
+    "id": "nightmare_pond_drowned_bride",
+    "name": "池底花嫁",
+    "rarity": "噩梦",
+    "description": "樱花池塘的怪谈。她披着被水草缠住的白无垢，会用冥婚红线将宝藏的气息引向噩梦。",
+    "base_price": 0,
+    "difficulty": 105,
+    "nightmare_effect": {
+      "type": "bride_thread",
+      "layers": 4,
+      "max_layers": 8
+    },
+    "weight": [
+      18,
+      36
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
+  },
+  {
+    "id": "nightmare_river_water_monkey",
+    "name": "柳下水猴",
+    "rarity": "噩梦",
+    "description": "青柳河湾的怪谈。雨夜若听见柳根下有人学你说话，低头时它已经顺走了钩边的鱼饵。",
+    "base_price": 0,
+    "difficulty": 115,
+    "nightmare_effect": {
+      "type": "steal_bait",
+      "fallback_rod_damage": 10
+    },
+    "weight": [
+      24,
+      48
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
+  },
+  {
+    "id": "nightmare_lake_corpse_fisher",
+    "name": "雾中捞尸人",
+    "rarity": "噩梦",
+    "description": "雾隐湖的怪谈。没有脸的老渔夫会把人的倒影留在湖底，再将失魂者抛到陌生水岸。",
+    "base_price": 0,
+    "difficulty": 125,
+    "nightmare_effect": {
+      "type": "lost_soul"
+    },
+    "weight": [
+      35,
+      70
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "nightmare_coast_ghost_ship",
+    "name": "暮潮幽灵船",
+    "rarity": "噩梦",
+    "description": "落日海岸的怪谈。无灯旧船追着最后一线夕阳靠岸，并向每个目击者寄出无法拒付的亡者船票。",
+    "base_price": 0,
+    "difficulty": 135,
+    "nightmare_effect": {
+      "type": "ghost_debt",
+      "amount": 120,
+      "max_debt": 360
+    },
+    "weight": [
+      80,
+      180
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
+  },
+  {
+    "id": "nightmare_abyss_diving_bell",
+    "name": "叩舱潜水钟",
+    "rarity": "噩梦",
+    "description": "深渊海沟的怪谈。锈死的潜水钟每响一次，深海重压便会缠住此后数次抛竿。",
+    "base_price": 0,
+    "difficulty": 150,
+    "nightmare_effect": {
+      "type": "deep_pressure",
+      "layers": 4,
+      "max_layers": 8
+    },
+    "weight": [
+      140,
+      320
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
+  },
+  {
+    "id": "nightmare_mystic_star_eater",
+    "name": "食星之影",
+    "rarity": "噩梦",
+    "description": "星辉秘境的怪谈。它游过的地方星光会一颗颗熄灭，连护符与祝福的光芒也会被吞进腹中。",
+    "base_price": 0,
+    "difficulty": 145,
+    "nightmare_effect": {
+      "type": "devour_buff",
+      "duration_seconds": 1800
+    },
+    "weight": [
+      6,
+      22
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
+  },
+  {
+    "id": "trash_fishing_net",
+    "name": "破洞的渔网",
+    "rarity": "垃圾",
+    "description": "不知道哪位同行丢失的渔网，破得连小鱼都拦不住。",
+    "base_price": 2,
+    "difficulty": 29,
+    "weight": [
+      0.5,
+      2.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
+  },
+  {
+    "id": "trash_old_oar",
+    "name": "断裂的船桨",
+    "rarity": "垃圾",
+    "description": "半截船桨，另一半大概还在某位船夫的手里。",
+    "base_price": 3,
+    "difficulty": 31,
+    "weight": [
+      1.5,
+      3.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "trash_ship_wheel",
+    "name": "腐朽的舵轮",
+    "rarity": "垃圾",
+    "description": "不知沉睡了多少年的舵轮，握把处还留着深深的抓痕。",
+    "base_price": 8,
+    "difficulty": 34,
+    "weight": [
+      3,
+      5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
+  },
+  {
+    "id": "trash_star_shard",
+    "name": "黯淡的星尘碎片",
+    "rarity": "垃圾",
+    "description": "失去光芒的星星碎片，捏在手里只剩一点微温。",
+    "base_price": 5,
+    "difficulty": 26,
+    "weight": [
+      0.1,
+      0.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
+  },
+  {
+    "id": "trash_broken_wand",
+    "name": "折断的法杖",
+    "rarity": "垃圾",
+    "description": "断口处偶尔冒出一两个火花，吓人一跳。",
+    "base_price": 6,
+    "difficulty": 28,
+    "weight": [
+      0.5,
+      1.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
+  },
+  {
+    "id": "trash_umbrella",
+    "name": "开花的雨伞",
+    "rarity": "垃圾",
+    "description": "被风吹翻过无数次的伞，伞骨支棱着像朵铁艺花。",
+    "base_price": 1,
+    "difficulty": 28,
+    "weight": [
+      0.5,
+      2
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "pond",
+      "lake"
+    ]
+  },
+  {
+    "id": "trash_message_bottle",
+    "name": "空空的漂流瓶",
+    "rarity": "垃圾",
+    "description": "瓶里的信纸泡烂了，只能辨认出一句「救……」，希望没事。",
+    "base_price": 4,
+    "difficulty": 25,
+    "weight": [
+      0.2,
+      0.8
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "river",
+      "coast"
+    ]
+  },
+  {
+    "id": "trash_fog_lantern",
+    "name": "熄灭的雾灯",
+    "rarity": "垃圾",
+    "description": "灯芯早已熄灭，可雾气总绕着它打转。",
+    "base_price": 5,
+    "difficulty": 30,
+    "weight": [
+      0.8,
+      2.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "lake",
+      "mystic"
+    ]
+  },
+  {
+    "id": "trash_diving_helmet",
+    "name": "进水的潜水头盔",
+    "rarity": "垃圾",
+    "description": "老式铜制潜水头盔，倒过来能当花盆。",
+    "base_price": 10,
+    "difficulty": 34,
+    "weight": [
+      2.5,
+      4.8
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "coast",
+      "abyss"
+    ]
+  },
+  {
+    "id": "trash_rune_slate",
+    "name": "磨损的符文石板",
+    "rarity": "垃圾",
+    "description": "刻着看不懂的符号，学者说是古文，骗子说是菜单。",
+    "base_price": 12,
+    "difficulty": 33,
+    "weight": [
+      2,
+      4.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "abyss",
+      "mystic"
+    ]
+  },
+  {
+    "id": "fish_gray_koi",
+    "name": "灰锦鲤",
+    "rarity": "普通",
+    "description": "还没变红的锦鲤，据说心怀梦想的它总有一天会发光。",
+    "base_price": 9,
+    "difficulty": 30,
+    "weight": [
+      0.5,
+      2.5
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
+  },
+  {
+    "id": "fish_paradise_fish",
+    "name": "叉尾斗鱼",
+    "rarity": "普通",
+    "description": "尾巴像把小剪刀，脾气比样子大得多。",
+    "base_price": 8,
+    "difficulty": 29,
+    "weight": [
+      0.05,
+      0.3
+    ],
+    "active_hours": [
+      [
+        8,
+        16
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
+  },
+  {
+    "id": "fish_apple_snail",
+    "name": "福寿螺",
+    "rarity": "普通",
+    "description": "繁殖力惊人的外来户，钓上来算是为民除害。",
+    "base_price": 5,
+    "difficulty": 25,
+    "weight": [
+      0.1,
+      0.6
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
+  },
+  {
+    "id": "fish_topmouth_gudgeon",
+    "name": "麦穗鱼",
+    "rarity": "普通",
+    "description": "小得像颗麦穗，闹窝小能手，气得钓鱼佬直跺脚。",
+    "base_price": 5,
+    "difficulty": 26,
+    "weight": [
+      0.05,
+      0.2
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
+  },
+  {
+    "id": "fish_yellow_catfish",
+    "name": "黄颡鱼",
+    "rarity": "普通",
+    "description": "背鳍带刺的小黄鱼，抓它请务必小心手指。",
+    "base_price": 12,
+    "difficulty": 34,
+    "weight": [
+      0.2,
+      1.2
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
+  },
+  {
+    "id": "fish_river_shrimp",
+    "name": "河虾",
+    "rarity": "普通",
+    "description": "透明的小家伙，在钩子上蹦跶得像在跳舞。",
+    "base_price": 6,
+    "difficulty": 25,
+    "weight": [
+      0.05,
+      0.3
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
+  },
+  {
+    "id": "fish_whitefish",
+    "name": "高白鲑",
+    "rarity": "普通",
+    "description": "银白细鳞的冷水鱼，湖水越冷它越精神。",
+    "base_price": 14,
+    "difficulty": 34,
+    "weight": [
+      0.8,
+      3
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_icefish",
+    "name": "银鱼",
+    "rarity": "普通",
+    "description": "通体透明如冰，一出水就要化在阳光里似的。",
+    "base_price": 10,
+    "difficulty": 26,
+    "weight": [
+      0.05,
+      0.2
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_lake_trout",
+    "name": "湖鳟",
+    "rarity": "普通",
+    "description": "湖泊深处的常客，喜欢在晨光里巡游。",
+    "base_price": 16,
+    "difficulty": 38,
+    "weight": [
+      1.5,
+      5
+    ],
+    "active_hours": [
+      [
+        5,
+        19
+      ]
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_burbot",
+    "name": "江鳕",
+    "rarity": "普通",
+    "description": "淡水里唯一的鳕鱼，长着一副没睡醒的脸。",
+    "base_price": 15,
+    "difficulty": 36,
+    "weight": [
+      1,
+      4
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_freshwater_clam",
+    "name": "河蚌",
+    "rarity": "普通",
+    "description": "紧闭的贝壳，撬开也许有珍珠，也许只有一口湖水。",
+    "base_price": 8,
+    "difficulty": 28,
+    "weight": [
+      0.3,
+      1.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_sea_bass",
+    "name": "海鲈鱼",
+    "rarity": "普通",
+    "description": "海岸线的巡逻兵，浪头一起就开饭。",
+    "base_price": 16,
+    "difficulty": 36,
+    "weight": [
+      1,
+      4.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
+  },
+  {
+    "id": "fish_hermit_crab",
+    "name": "寄居蟹",
+    "rarity": "普通",
+    "description": "背着别人的壳到处跑，租房一族的精神图腾。",
+    "base_price": 7,
+    "difficulty": 27,
+    "weight": [
+      0.1,
+      0.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
+  },
+  {
+    "id": "fish_silver_pomfret",
+    "name": "银鲳",
+    "rarity": "普通",
+    "description": "扁得像枚银币，在阳光下闪闪发亮。",
+    "base_price": 14,
+    "difficulty": 33,
+    "weight": [
+      0.3,
+      1.5
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
+  },
+  {
+    "id": "fish_lanternfish",
+    "name": "灯笼鱼",
+    "rarity": "普通",
+    "description": "自带小夜灯的深海居民，省电模式常年开启。",
+    "base_price": 12,
+    "difficulty": 30,
+    "weight": [
+      0.05,
+      0.3
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
+  },
+  {
+    "id": "fish_grenadier",
+    "name": "鼠尾鳕",
+    "rarity": "普通",
+    "description": "尾巴细长如鼠尾，深海泥地里的老实人。",
+    "base_price": 15,
+    "difficulty": 36,
+    "weight": [
+      0.8,
+      3.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
+  },
+  {
+    "id": "fish_hatchetfish",
+    "name": "银斧鱼",
+    "rarity": "普通",
+    "description": "薄得像片斧刃，肚皮上的光点是它的隐身衣。",
+    "base_price": 13,
+    "difficulty": 31,
+    "weight": [
+      0.05,
+      0.3
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
+  },
+  {
+    "id": "fish_cusk_eel",
+    "name": "鼬鳚",
+    "rarity": "普通",
+    "description": "住在深不见底的海沟，见到阳光反而会害羞。",
+    "base_price": 16,
+    "difficulty": 37,
+    "weight": [
+      0.5,
+      2.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "abyss"
+    ]
+  },
+  {
+    "id": "fantasy_bubble_sprite",
+    "name": "泡泡精",
+    "rarity": "普通",
+    "description": "一串会咯咯笑的泡泡，戳破一个另一个笑得更响。",
+    "base_price": 10,
+    "difficulty": 28,
+    "weight": [
+      0.05,
+      0.3
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
+  },
+  {
+    "id": "fantasy_glow_tadpole",
+    "name": "微光蝌蚪",
+    "rarity": "普通",
+    "description": "尾巴拖着一缕星光，长大后会变成什么谁也不知道。",
+    "base_price": 8,
+    "difficulty": 26,
+    "weight": [
+      0.05,
+      0.2
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
+  },
+  {
+    "id": "fantasy_petal_fish",
+    "name": "花瓣鱼",
+    "rarity": "普通",
+    "description": "像一片粉色花瓣在水里游，落英时节会成群结队。",
+    "base_price": 12,
+    "difficulty": 30,
+    "weight": [
+      0.1,
+      0.6
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
+  },
+  {
+    "id": "fantasy_moon_minnow",
+    "name": "月光鲦",
+    "rarity": "普通",
+    "description": "月亮升起时才现身的小鱼，鳞片里存着借来的月光。",
+    "base_price": 11,
+    "difficulty": 29,
+    "weight": [
+      0.05,
+      0.3
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
+  },
+  {
+    "id": "fantasy_candle_jelly",
+    "name": "烛光水母",
+    "rarity": "普通",
+    "description": "伞盖里点着一簇不会熄灭的小火苗，风一吹晃晃悠悠。",
+    "base_price": 13,
+    "difficulty": 31,
+    "weight": [
+      0.2,
+      1
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
+  },
+  {
+    "id": "fantasy_paper_fish",
+    "name": "纸鹤鱼",
+    "rarity": "普通",
+    "description": "折痕分明像张会游泳的纸，淋湿了也不会散架。",
+    "base_price": 12,
+    "difficulty": 30,
+    "weight": [
+      0.1,
+      0.5
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
+  },
+  {
+    "id": "fantasy_mist_wisp",
+    "name": "雾中游丝",
+    "rarity": "普通",
+    "description": "一缕成了精的雾气，钓上来的瞬间会在指间凉一下。",
+    "base_price": 10,
+    "difficulty": 27,
+    "weight": [
+      0.1,
+      0.4
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "weather": [
+      "雾"
+    ],
+    "locations": [
+      "mystic"
+    ]
+  },
+  {
+    "id": "fantasy_starlet",
+    "name": "小星鱼",
+    "rarity": "普通",
+    "description": "五角星形状的小家伙，掉进水里的星星大概就是它。",
+    "base_price": 14,
+    "difficulty": 32,
+    "weight": [
+      0.1,
+      0.6
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
+  },
+  {
+    "id": "fish_rice_eel",
+    "name": "黄鳝",
+    "rarity": "普通",
+    "description": "滑不留手的夜行者，稻田与河湾的双栖住户。",
+    "base_price": 13,
+    "difficulty": 33,
+    "weight": [
+      0.3,
+      1.8
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "pond",
+      "river"
+    ]
+  },
+  {
+    "id": "fish_medaka",
+    "name": "青鳉",
+    "rarity": "普通",
+    "description": "指甲盖大的小鱼，成群游过像一阵青色的雨。",
+    "base_price": 5,
+    "difficulty": 24,
+    "weight": [
+      0.05,
+      0.15
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "pond",
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_sweetfish",
+    "name": "香鱼",
+    "rarity": "普通",
+    "description": "身上带着西瓜般的清香，逆流而上是它一生的执念。",
+    "base_price": 15,
+    "difficulty": 34,
+    "weight": [
+      0.2,
+      1
+    ],
+    "active_hours": [
+      [
+        5,
+        19
+      ]
+    ],
+    "locations": [
+      "river",
+      "coast"
+    ]
+  },
+  {
+    "id": "fish_ribbonfish",
+    "name": "带鱼",
+    "rarity": "普通",
+    "description": "银光闪闪的长条，站着游泳的怪家伙。",
+    "base_price": 16,
+    "difficulty": 36,
+    "weight": [
+      0.8,
+      3.5
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "coast",
+      "abyss"
+    ]
+  },
+  {
+    "id": "fish_nishiki_koi",
+    "name": "三色锦鲤",
+    "rarity": "精品",
+    "description": "红白黑三色分明，转发这条锦鲤好运连连。",
+    "base_price": 50,
+    "difficulty": 55,
+    "weight": [
+      2,
+      12
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
+  },
+  {
+    "id": "fish_golden_crucian",
+    "name": "金鲫",
+    "rarity": "精品",
+    "description": "阳光下通体金黄，是鲫鱼家族里最靓的仔。",
+    "base_price": 45,
+    "difficulty": 52,
+    "weight": [
+      1,
+      8
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
+  },
+  {
+    "id": "fish_bighead_carp",
+    "name": "胖头鱼",
+    "rarity": "精品",
+    "description": "脑袋占了身体三分之一，据说炖汤特别鲜。",
+    "base_price": 38,
+    "difficulty": 60,
+    "weight": [
+      5,
+      20
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
+  },
+  {
+    "id": "fish_softshell_turtle",
+    "name": "老甲鱼",
+    "rarity": "精品",
+    "description": "咬住就不撒口的倔脾气，人称水中王八……不，中华鳖。",
+    "base_price": 55,
+    "difficulty": 65,
+    "weight": [
+      1.5,
+      10
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
+  },
+  {
+    "id": "fish_mandarin_fish",
+    "name": "鳜鱼",
+    "rarity": "精品",
+    "description": "西塞山前白鹭飞，桃花流水鳜鱼肥。",
+    "base_price": 52,
+    "difficulty": 62,
+    "weight": [
+      1.5,
+      10
+    ],
+    "active_hours": [
+      [
+        5,
+        9
+      ],
+      [
+        17,
+        21
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
+  },
+  {
+    "id": "fish_hucho_salmon",
+    "name": "哲罗鲑",
+    "rarity": "精品",
+    "description": "北方河流的猛将，传说大的能拖走一头小鹿。",
+    "base_price": 58,
+    "difficulty": 72,
+    "weight": [
+      5,
+      22
+    ],
+    "active_hours": [
+      [
+        5,
+        19
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
+  },
+  {
+    "id": "fish_giant_gourami",
+    "name": "巨型丝足鱼",
+    "rarity": "精品",
+    "description": "两根长长的腹鳍像触角，慢悠悠地在湖里踱步。",
+    "base_price": 42,
+    "difficulty": 58,
+    "weight": [
+      3,
+      15
+    ],
+    "active_hours": [
+      [
+        8,
+        18
+      ]
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_paddlefish",
+    "name": "匙吻鲟",
+    "rarity": "精品",
+    "description": "长着鸭嘴般的吻部，滤食时像在用勺子喝汤。",
+    "base_price": 52,
+    "difficulty": 64,
+    "weight": [
+      4,
+      18
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_arctic_char",
+    "name": "北极红点鲑",
+    "rarity": "精品",
+    "description": "雪落时分最活跃，腹部的红色像雪地里的一团火。",
+    "base_price": 54,
+    "difficulty": 62,
+    "weight": [
+      2,
+      12
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "weather": [
+      "雪"
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_ghost_carp",
+    "name": "幽灵鲤",
+    "rarity": "精品",
+    "description": "苍白如纸的鲤鱼，雾夜里一闪而过，像个善意的谣言。",
+    "base_price": 48,
+    "difficulty": 60,
+    "weight": [
+      3,
+      16
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "weather": [
+      "雾"
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_crystal_shrimp",
+    "name": "水晶虾",
+    "rarity": "精品",
+    "description": "通体剔透的小虾，养虾人愿意为它一掷千金。",
+    "base_price": 40,
+    "difficulty": 48,
+    "weight": [
+      0.05,
+      0.3
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_lobster",
+    "name": "波士顿龙虾",
+    "rarity": "精品",
+    "description": "钳子比脑子发达，被夹到的钓鱼佬都说疼。",
+    "base_price": 58,
+    "difficulty": 66,
+    "weight": [
+      1.5,
+      8
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
+  },
+  {
+    "id": "fantasy_prism_jelly",
+    "name": "棱镜水母",
+    "rarity": "精品",
+    "description": "光线穿过伞盖会折射出一道小彩虹，雨后限定同款。",
+    "base_price": 55,
+    "difficulty": 58,
+    "weight": [
+      0.5,
+      4
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
+  },
+  {
+    "id": "fantasy_chime_fish",
+    "name": "风铃鱼",
+    "rarity": "精品",
+    "description": "尾鳍摆动会发出风铃般的声响，一群游过就是一场演奏会。",
+    "base_price": 50,
+    "difficulty": 54,
+    "weight": [
+      0.3,
+      2.5
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
+  },
+  {
+    "id": "fantasy_origami_ray",
+    "name": "折纸鳐",
+    "rarity": "精品",
+    "description": "边缘的折痕整整齐齐，像被哪位巨人随手折出来的作品。",
+    "base_price": 48,
+    "difficulty": 56,
+    "weight": [
+      1,
+      8
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
+  },
+  {
+    "id": "fantasy_tea_spirit",
+    "name": "茶汤精灵",
+    "rarity": "精品",
+    "description": "泡在水里的时候，周围会散发出淡淡的茶香。",
+    "base_price": 52,
+    "difficulty": 50,
+    "weight": [
+      0.2,
+      1.5
+    ],
+    "active_hours": [
+      [
+        8,
+        16
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
+  },
+  {
+    "id": "fantasy_ember_koi",
+    "name": "余烬锦鲤",
+    "rarity": "精品",
+    "description": "鳞片像烧到一半的炭火，夜里游过会留下一道暖光。",
+    "base_price": 56,
+    "difficulty": 62,
+    "weight": [
+      2,
+      12
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
+  },
+  {
+    "id": "fantasy_dream_eel",
+    "name": "梦境鳗",
+    "rarity": "精品",
+    "description": "只在梦最深的时辰出没，钓到它的人当晚都会做个好梦。",
+    "base_price": 58,
+    "difficulty": 64,
+    "weight": [
+      1.5,
+      10
+    ],
+    "active_hours": [
+      [
+        22,
+        24
+      ],
+      [
+        0,
+        4
+      ]
+    ],
+    "locations": [
+      "mystic"
+    ]
+  },
+  {
+    "id": "fish_topmouth_culter",
+    "name": "翘嘴鲌",
+    "rarity": "精品",
+    "description": "嘴巴上翘一脸傲气，捕食时水面炸出一朵水花。",
+    "base_price": 46,
+    "difficulty": 60,
+    "weight": [
+      2,
+      12
+    ],
+    "active_hours": [
+      [
+        5,
+        19
+      ]
+    ],
+    "locations": [
+      "pond",
+      "river"
+    ]
+  },
+  {
+    "id": "fish_needlefish",
+    "name": "针鱼",
+    "rarity": "精品",
+    "description": "细长如针，游起来像一支离弦的银箭。",
+    "base_price": 40,
+    "difficulty": 52,
+    "weight": [
+      0.3,
+      2
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "pond",
+      "river"
+    ]
+  },
+  {
+    "id": "fish_albino_catfish",
+    "name": "白化鲶鱼",
+    "rarity": "精品",
+    "description": "通体雪白的夜行者，在暗处白得发亮。",
+    "base_price": 48,
+    "difficulty": 62,
+    "weight": [
+      3,
+      16
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "pond",
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_barramundi",
+    "name": "尖吻鲈",
+    "rarity": "精品",
+    "description": "在咸水淡水间来去自如，河海两栖的自由人。",
+    "base_price": 54,
+    "difficulty": 64,
+    "weight": [
+      3,
+      18
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "river",
+      "coast"
+    ]
+  },
+  {
+    "id": "fantasy_moonlight_carp",
+    "name": "月光鲤",
+    "rarity": "精品",
+    "description": "月圆之夜鳞片会泛起银光，湖面像撒了一层碎银。",
+    "base_price": 56,
+    "difficulty": 60,
+    "weight": [
+      3,
+      15
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "lake",
+      "mystic"
+    ]
+  },
+  {
+    "id": "fish_yellowtail",
+    "name": "鰤鱼",
+    "rarity": "精品",
+    "description": "洄游路上的健将，刺身爱好者的心头好。",
+    "base_price": 56,
+    "difficulty": 68,
+    "weight": [
+      4,
+      18
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "coast",
+      "abyss"
+    ]
+  },
+  {
+    "id": "fantasy_void_shrimp",
+    "name": "虚空虾",
+    "rarity": "精品",
+    "description": "身体一半透明一半虚无，煮熟了会变成什么颜色是个谜。",
+    "base_price": 54,
+    "difficulty": 58,
+    "weight": [
+      0.3,
+      2.5
+    ],
+    "active_hours": [
+      [
+        20,
+        24
+      ],
+      [
+        0,
+        4
+      ]
+    ],
+    "locations": [
+      "abyss",
+      "mystic"
+    ]
+  },
+  {
+    "id": "fish_golden_koi",
+    "name": "黄金锦鲤",
+    "rarity": "稀有",
+    "description": "全身金光灿灿，晒着太阳才肯露面的祥瑞本瑞。",
+    "base_price": 135,
+    "difficulty": 100,
+    "weight": [
+      5,
+      25
+    ],
+    "active_hours": [
+      [
+        8,
+        16
+      ]
+    ],
+    "weather": [
+      "晴"
+    ],
+    "locations": [
+      "pond"
+    ]
+  },
+  {
+    "id": "fish_giant_salamander",
+    "name": "大鲵",
+    "rarity": "稀有",
+    "description": "叫声像婴儿啼哭的娃娃鱼，拍照留念后请务必放生。",
+    "base_price": 128,
+    "difficulty": 110,
+    "weight": [
+      8,
+      40
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
+  },
+  {
+    "id": "fish_albino_softshell",
+    "name": "白玉鳖",
+    "rarity": "稀有",
+    "description": "通体如白玉雕成的老鳖，传说已经修行了百年。",
+    "base_price": 120,
+    "difficulty": 105,
+    "weight": [
+      5,
+      30
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
+  },
+  {
+    "id": "fish_dragon_eye_goldfish",
+    "name": "龙睛金鱼王",
+    "rarity": "稀有",
+    "description": "眼睛鼓得像两盏灯笼，金鱼界的显眼包之王。",
+    "base_price": 115,
+    "difficulty": 98,
+    "weight": [
+      2,
+      15
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
+  },
+  {
+    "id": "fish_crimson_crayfish",
+    "name": "绯红龙虾王",
+    "rarity": "稀有",
+    "description": "小龙虾中的霸主，据说麻辣味的它能称霸一整桌宵夜。",
+    "base_price": 118,
+    "difficulty": 108,
+    "weight": [
+      3,
+      20
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
+  },
+  {
+    "id": "fish_giant_stingray",
+    "name": "湄公河巨魟",
+    "rarity": "稀有",
+    "description": "淡水里的巨型飞毯，尾刺的威名让老渔夫都发怵。",
+    "base_price": 140,
+    "difficulty": 118,
+    "weight": [
+      35,
+      60
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
+  },
+  {
+    "id": "fish_chinese_paddlefish",
+    "name": "白鲟",
+    "rarity": "稀有",
+    "description": "长江里的活化石，能再见到它是钓鱼佬最大的浪漫。",
+    "base_price": 145,
+    "difficulty": 115,
+    "weight": [
+      30,
+      55
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
+  },
+  {
+    "id": "fish_monster_pike",
+    "name": "湖怪巨狗鱼",
+    "rarity": "稀有",
+    "description": "被目击过无数次的「湖怪」，其实是条活得太久的狗鱼。",
+    "base_price": 130,
+    "difficulty": 115,
+    "weight": [
+      30,
+      55
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_ancient_gar",
+    "name": "古雀鳝",
+    "rarity": "稀有",
+    "description": "披着菱形硬鳞的活化石，一亿年没换过造型。",
+    "base_price": 125,
+    "difficulty": 112,
+    "weight": [
+      25,
+      50
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_beluga_sturgeon",
+    "name": "欧洲鳇",
+    "rarity": "稀有",
+    "description": "淡水鱼类的体型天花板，鱼子酱爱好者眼中的金矿。",
+    "base_price": 142,
+    "difficulty": 118,
+    "weight": [
+      35,
+      60
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_snow_trout",
+    "name": "雪鳟",
+    "rarity": "稀有",
+    "description": "落雪时才上浮的银白鳟鱼，鳞片冷得像冰。",
+    "base_price": 122,
+    "difficulty": 105,
+    "weight": [
+      10,
+      40
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "weather": [
+      "雪"
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_mirror_carp_king",
+    "name": "镜鲤王",
+    "rarity": "稀有",
+    "description": "鳞片大得像一面面小镜子，雾中反光时如同幻影。",
+    "base_price": 126,
+    "difficulty": 108,
+    "weight": [
+      15,
+      45
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "weather": [
+      "雾"
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_sailfish",
+    "name": "旗鱼",
+    "rarity": "稀有",
+    "description": "海中第一飞毛腿，背鳍张开就是一面得意的旗。",
+    "base_price": 132,
+    "difficulty": 118,
+    "weight": [
+      25,
+      55
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
+  },
+  {
+    "id": "fish_giant_grouper",
+    "name": "龙趸石斑",
+    "rarity": "稀有",
+    "description": "礁石后的大嗓门房东，一口能吞下整只龙虾。",
+    "base_price": 136,
+    "difficulty": 116,
+    "weight": [
+      30,
+      58
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
+  },
+  {
+    "id": "fish_king_eel",
+    "name": "鳗王",
+    "rarity": "稀有",
+    "description": "活了不知多少年的巨鳗，滑溜得像个老江湖。",
+    "base_price": 118,
+    "difficulty": 112,
+    "weight": [
+      10,
+      42
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "pond",
+      "river"
+    ]
+  },
+  {
+    "id": "fish_ghost_koi",
+    "name": "幽灵锦鲤",
+    "rarity": "稀有",
+    "description": "雾夜水面一闪而过的白影，老人说见到它要许愿。",
+    "base_price": 124,
+    "difficulty": 106,
+    "weight": [
+      8,
+      35
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "weather": [
+      "雾"
+    ],
+    "locations": [
+      "pond",
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_king_salmon",
+    "name": "帝王鲑",
+    "rarity": "稀有",
+    "description": "雨季溯流而上的王者，每一跃都像加冕。",
+    "base_price": 134,
+    "difficulty": 114,
+    "weight": [
+      20,
+      50
+    ],
+    "active_hours": [
+      [
+        5,
+        19
+      ]
+    ],
+    "weather": [
+      "雨"
+    ],
+    "locations": [
+      "river",
+      "coast"
+    ]
+  },
+  {
+    "id": "fantasy_rune_turtle",
+    "name": "符文龟",
+    "rarity": "稀有",
+    "description": "背甲上的符文会缓缓发光，驮着一整套看不懂的学问。",
+    "base_price": 138,
+    "difficulty": 108,
+    "weight": [
+      20,
+      50
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "lake",
+      "mystic"
+    ]
+  },
+  {
+    "id": "fish_megamouth_shark",
+    "name": "巨口鲨",
+    "rarity": "稀有",
+    "description": "张开巨口滤食的深海隐士，被人类目击的次数屈指可数。",
+    "base_price": 140,
+    "difficulty": 115,
+    "weight": [
+      35,
+      60
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "coast",
+      "abyss"
+    ]
+  },
+  {
+    "id": "fantasy_abyss_lantern",
+    "name": "深渊提灯鱼",
+    "rarity": "稀有",
+    "description": "头顶的灯笼里装的不是光，是一小片会发亮的星空。",
+    "base_price": 144,
+    "difficulty": 112,
+    "weight": [
+      5,
+      30
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "abyss",
+      "mystic"
+    ]
+  },
+  {
+    "id": "fish_dragon_gate_carp",
+    "name": "化龙鲤",
+    "rarity": "史诗",
+    "description": "正在跃龙门的鲤鱼，雨天的水花是它的进度条。",
+    "base_price": 268,
+    "difficulty": 168,
+    "weight": [
+      40,
+      90
+    ],
+    "active_hours": [
+      [
+        5,
+        9
+      ]
+    ],
+    "weather": [
+      "雨"
+    ],
+    "locations": [
+      "pond"
+    ]
+  },
+  {
+    "id": "fish_ancient_softshell",
+    "name": "百年玄鳖",
+    "rarity": "史诗",
+    "description": "池塘真正的主人，甲壳上的纹路记着一百年的水温。",
+    "base_price": 255,
+    "difficulty": 162,
+    "weight": [
+      60,
+      110
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "pond"
+    ]
+  },
+  {
+    "id": "fish_river_god_catfish",
+    "name": "河神巨鲶",
+    "rarity": "史诗",
+    "description": "雨夜河水暴涨时现身，老一辈都管它叫「河神」。",
+    "base_price": 258,
+    "difficulty": 170,
+    "weight": [
+      70,
+      115
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "weather": [
+      "雨"
+    ],
+    "locations": [
+      "river"
+    ]
+  },
+  {
+    "id": "fish_gilded_sturgeon",
+    "name": "鎏金鲟",
+    "rarity": "史诗",
+    "description": "鳞甲泛着鎏金光泽，游过的河段连水都变得贵气。",
+    "base_price": 262,
+    "difficulty": 165,
+    "weight": [
+      65,
+      110
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "river"
+    ]
+  },
+  {
+    "id": "fish_mist_plesiosaur",
+    "name": "雾湖蛇颈龙",
+    "rarity": "史诗",
+    "description": "雾最浓时湖心露出的长脖子，照片拍出来永远是糊的。",
+    "base_price": 270,
+    "difficulty": 172,
+    "weight": [
+      75,
+      118
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "weather": [
+      "雾"
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_giant_sunfish",
+    "name": "巨型翻车鱼",
+    "rarity": "史诗",
+    "description": "躺平晒太阳的巨型圆盘，摆烂界的精神领袖。",
+    "base_price": 245,
+    "difficulty": 160,
+    "weight": [
+      80,
+      120
+    ],
+    "active_hours": [
+      [
+        6,
+        18
+      ]
+    ],
+    "locations": [
+      "coast"
+    ]
+  },
+  {
+    "id": "fish_platinum_arowana",
+    "name": "白金龙鱼",
+    "rarity": "史诗",
+    "description": "通体白金色的龙鱼，风水学认证的镇宅之宝。",
+    "base_price": 266,
+    "difficulty": 168,
+    "weight": [
+      30,
+      80
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "pond",
+      "river"
+    ]
+  },
+  {
+    "id": "fish_moon_turtle_king",
+    "name": "月影龟王",
+    "rarity": "史诗",
+    "description": "月夜浮出水面换气，背甲上映着一整片月色。",
+    "base_price": 258,
+    "difficulty": 164,
+    "weight": [
+      70,
+      115
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "locations": [
+      "pond",
+      "lake"
+    ]
+  },
+  {
+    "id": "fish_tidal_marlin",
+    "name": "潮汐枪鱼",
+    "rarity": "史诗",
+    "description": "追着潮水冲刺的长枪，入海口是它的赛道。",
+    "base_price": 256,
+    "difficulty": 170,
+    "weight": [
+      65,
+      110
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "locations": [
+      "river",
+      "coast"
+    ]
+  },
+  {
+    "id": "fish_shadow_whale_shark",
+    "name": "幽影鲸鲨",
+    "rarity": "史诗",
+    "description": "深夜贴着海面滑行的巨大阴影，温柔得不像它的体型。",
+    "base_price": 272,
+    "difficulty": 174,
+    "weight": [
+      85,
+      120
+    ],
+    "active_hours": [
+      [
+        20,
+        24
+      ],
+      [
+        0,
+        4
+      ]
+    ],
+    "locations": [
+      "coast",
+      "abyss"
+    ]
+  },
+  {
+    "id": "fantasy_river_dragon",
+    "name": "江河龙王",
+    "rarity": "传说",
+    "description": "暴雨倾盆时逆流而上的龙影，河道为它让路。",
+    "base_price": 385,
+    "difficulty": 220,
+    "weight": [
+      150,
+      235
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ],
+    "weather": [
+      "雨"
+    ],
+    "locations": [
+      "river"
+    ]
+  },
+  {
+    "id": "fantasy_mist_kirin",
+    "name": "雾隐麒麟",
+    "rarity": "传说",
+    "description": "雾夜踏水而行的麒麟，蹄印落处涟漪成环。",
+    "base_price": 395,
+    "difficulty": 222,
+    "weight": [
+      120,
+      200
+    ],
+    "active_hours": [
+      [
+        18,
+        24
+      ],
+      [
+        0,
+        6
+      ]
+    ],
+    "weather": [
+      "雾"
+    ],
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "fantasy_sunset_whale",
+    "name": "落日金鲸",
+    "rarity": "传说",
+    "description": "驮着落日游过海平线的金色巨鲸，晚霞是它的尾迹。",
+    "base_price": 388,
+    "difficulty": 224,
+    "weight": [
+      170,
+      245
+    ],
+    "active_hours": [
+      [
+        16,
+        20
+      ]
+    ],
+    "weather": [
+      "晴"
+    ],
+    "locations": [
+      "coast"
+    ]
+  },
+  {
+    "id": "fantasy_star_serpent",
+    "name": "星河蛟",
+    "rarity": "传说",
+    "description": "身躯缀满星辰的蛟龙，游过的水面会倒映出银河。",
+    "base_price": 392,
+    "difficulty": 226,
+    "weight": [
+      160,
+      240
+    ],
+    "active_hours": [
+      [
+        20,
+        24
+      ],
+      [
+        0,
+        4
+      ]
+    ],
+    "locations": [
+      "lake",
+      "mystic"
+    ]
+  },
+  {
+    "id": "fantasy_eclipse_leviathan",
+    "name": "蚀月利维坦",
+    "rarity": "传说",
+    "description": "月蚀之夜从海沟深处上浮，吞下月亮的影子再缓缓沉回。",
+    "base_price": 398,
+    "difficulty": 228,
+    "weight": [
+      180,
+      250
+    ],
+    "active_hours": [
+      [
+        22,
+        24
+      ],
+      [
+        0,
+        3
+      ]
+    ],
+    "locations": [
+      "abyss",
+      "mystic"
+    ]
+  },
+  {
+    "id": "boss_pond_sakura_carp",
+    "name": "绯樱鲤王",
+    "rarity": "传说",
+    "description": "吞食了百年落樱的池塘霸主，鳞片开合时会喷出令人脱力的绯色瘴气。",
+    "base_price": 2900,
+    "difficulty": 248,
+    "weight": [
+      150,
+      235
+    ],
+    "is_boss": true,
+    "hp": 205,
+    "attack": 12,
+    "boss_mechanic": {
+      "type": "stamina_drain",
+      "name": "樱瘴汲取",
+      "amount": 2,
+      "description": "每次首领攻击额外抽走2点体力；体力归零时挑战失败。"
+    },
+    "locations": [
+      "pond"
+    ]
+  },
+  {
+    "id": "boss_river_ape_king",
+    "name": "青柳猿王",
+    "rarity": "传说",
+    "description": "盘踞河湾的水猿之王，一只手拽线，另一只手总能摸到钓客的钱袋。",
+    "base_price": 3150,
+    "difficulty": 272,
+    "weight": [
+      175,
+      250
+    ],
+    "is_boss": true,
+    "hp": 225,
+    "attack": 14,
+    "boss_mechanic": {
+      "type": "steal_coins",
+      "name": "探囊鬼手",
+      "min": 60,
+      "max": 140,
+      "description": "每次首领攻击持续偷走60～140樱花币，余额不足时偷到0为止。"
+    },
+    "locations": [
+      "river"
+    ]
+  },
+  {
+    "id": "boss_lake_mist_turtle",
+    "name": "雾甲鳄龟",
+    "rarity": "传说",
+    "description": "龟甲上背着一整片浓雾，猛然翻身时连方向感和鱼线张力都会一同失控。",
+    "base_price": 3000,
+    "difficulty": 238,
+    "weight": [
+      130,
+      220
+    ],
+    "is_boss": true,
+    "hp": 195,
+    "attack": 11,
+    "boss_mechanic": {
+      "type": "tension_surge",
+      "name": "迷雾震线",
+      "amount": 12,
+      "description": "每次首领攻击额外增加12点张力，必须及时发送“溜”来卸力。"
+    },
+    "locations": [
+      "lake"
+    ]
+  },
+  {
+    "id": "boss_coast_saw_shark",
+    "name": "赤潮锯鲨皇",
+    "rarity": "传说",
+    "description": "随着落日赤潮巡游的锯鲨皇，锯齿吻能像割草一样反复切削鱼线。",
+    "base_price": 3250,
+    "difficulty": 265,
+    "weight": [
+      165,
+      245
+    ],
+    "is_boss": true,
+    "hp": 215,
+    "attack": 13,
+    "boss_mechanic": {
+      "type": "line_rend",
+      "name": "赤潮锯刑",
+      "multiplier": 1.6,
+      "description": "首领攻击对鱼线的永久耐久造成1.6倍伤害，耐久归零会立即断线。"
+    },
+    "locations": [
+      "coast"
+    ]
+  },
+  {
+    "id": "boss_abyss_trench_maw",
+    "name": "海沟吞舟兽",
+    "rarity": "传说",
+    "description": "能把沉船连同海水一起吞下的深渊巨口，每次撞击都直奔鱼竿最脆弱的关节。",
+    "base_price": 3100,
+    "difficulty": 245,
+    "weight": [
+      180,
+      250
+    ],
+    "is_boss": true,
+    "hp": 200,
+    "attack": 12,
+    "boss_mechanic": {
+      "type": "rod_crush",
+      "name": "吞舟重撞",
+      "multiplier": 1.8,
+      "description": "首领攻击对鱼竿造成1.8倍持久伤害，折断的鱼竿会永久损失。"
+    },
+    "locations": [
+      "abyss"
+    ]
+  },
+  {
+    "id": "boss_mystic_astral_dragon",
+    "name": "星渊古龙",
+    "rarity": "传说",
+    "description": "沉睡在星河尽头的古龙，伤口会吸收坠落的星辉，在战斗中不断弥合。",
+    "base_price": 3300,
+    "difficulty": 258,
+    "weight": [
+      155,
+      240
+    ],
+    "is_boss": true,
+    "hp": 230,
+    "attack": 10,
+    "boss_mechanic": {
+      "type": "regenerate",
+      "name": "星辉再生",
+      "amount": 8,
+      "description": "每次首领攻击恢复8点生命，必须持续进攻压过它的再生速度。"
+    },
+    "locations": [
+      "mystic"
+    ]
   }
 ]
