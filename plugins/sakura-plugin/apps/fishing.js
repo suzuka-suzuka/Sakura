@@ -2117,7 +2117,7 @@ export default class Fishing extends plugin {
     return true;
   });
 
-  fishingStatus = Command(/^#?钓鱼状态$/, async (e) => {
+  fishingStatus = Command(/^#?钓鱼(状态|信息)$/, async (e) => {
     if (!this.checkWhitelist(e)) return false;
     const groupId = e.group_id;
     const userId = e.user_id;

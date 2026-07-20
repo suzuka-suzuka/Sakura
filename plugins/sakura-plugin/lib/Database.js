@@ -178,6 +178,11 @@ class DB {
 
   // 老库补列：CREATE TABLE IF NOT EXISTS 不会给已存在的表加新列
   migrate() {
+    const economyColumns = this.db.prepare('PRAGMA table_info(economy)').all();
+    if (!economyColumns.some((column) => column.name === 'bag_level')) {
+      this.db.exec('ALTER TABLE economy ADD COLUMN bag_level INTEGER DEFAULT 1');
+    }
+
     const fishingStatsColumns = this.db.prepare('PRAGMA table_info(fishing_stats)').all();
     if (!fishingStatsColumns.some((column) => column.name === 'fishing_exp')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_exp INTEGER DEFAULT 0');
