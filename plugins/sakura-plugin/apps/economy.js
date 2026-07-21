@@ -14,6 +14,7 @@ import {
 } from "../lib/economy/time.js";
 import {
   canUseTransfer,
+  EQUIPMENT_SELL_PRICE_RATIO,
   getReviveCoinPolicy,
   TRANSFER_UNLOCK_FISHING_LEVEL,
 } from "../lib/economy/rules.js";
@@ -578,7 +579,7 @@ export default class Economy extends plugin {
       return true;
     }
 
-    let sellPrice = Math.floor(item.price * 0.8);
+    let sellPrice = Math.floor(item.price * EQUIPMENT_SELL_PRICE_RATIO);
     let durabilityMsg = "";
     
     const fishingManager = new FishingManager(e.group_id);
@@ -762,7 +763,7 @@ export default class Economy extends plugin {
           return true;
         }
         await e.reply(
-          `🌠 你对着瓶中的流星许下心愿……\n⭐ 30分钟内的下一竿必定咬钩传说稀有度的鱼！`,
+          `🌠 你对着瓶中的流星许下心愿……\n⭐ ${Math.round(FISHING_BENEFIT_DURATION_SECONDS / 60)}分钟内的下一竿必定咬钩传说稀有度的鱼！`,
         );
         return true;
       }

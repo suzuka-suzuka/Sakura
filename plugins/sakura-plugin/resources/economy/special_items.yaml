@@ -9,73 +9,73 @@ categories:
         name: 双倍金币卡
         icon: 💰
         type: buff
-        duration: 1800
-        description: 神奇的魔法卡片，使用后30分钟内钓鱼可获得双倍收益。
-        activation_message: "✨ 双倍金币卡已激活！\n💰 接下来30分钟内钓鱼可获得双倍收益！"
+        duration: 2100
+        description: 神奇的魔法卡片，使用后35分钟内钓鱼可获得双倍收益。
+        activation_message: "✨ 双倍金币卡已激活！\n💰 接下来35分钟内钓鱼可获得双倍收益！"
 
       - id: item_charm_lucky
         name: 好运护符
         icon: 🍀
         type: buff
-        duration: 1800
-        description: 受到祝福的护符，使用后30分钟内钓鱼必定上钩。
-        activation_message: "🍀 好运护符已激活！\n🎣 接下来30分钟内钓鱼必定上钩！"
+        duration: 2100
+        description: 受到祝福的护符，使用后35分钟内钓鱼必定上钩。
+        activation_message: "🍀 好运护符已激活！\n🎣 接下来35分钟内钓鱼必定上钩！"
 
       - id: item_sign_koi
         name: 锦鲤许愿签
         icon: 🎏
         type: buff
-        duration: 1800
-        description: 写着心愿的许愿签。使用后30分钟内，只要及时收竿就能达成完美收竿。
-        activation_message: "🎏 锦鲤许愿签生效！\n⚡ 接下来30分钟内，及时收竿即可完美收竿！"
+        duration: 2100
+        description: 写着心愿的许愿签。使用后35分钟内，只要及时收竿就能达成完美收竿。
+        activation_message: "🎏 锦鲤许愿签生效！\n⚡ 接下来35分钟内，及时收竿即可完美收竿！"
 
       - id: item_charm_river
         name: 河神垂青
         icon: 🌊
         type: buff
-        duration: 1800
-        description: 河神大人的一缕青睐。使用后30分钟内，无论发生什么鱼线都不会断。
-        activation_message: "🌊 河神垂青！\n🧵 接下来30分钟内你的鱼线坚不可摧！"
+        duration: 2100
+        description: 河神大人的一缕青睐。使用后35分钟内，无论发生什么鱼线都不会断。
+        activation_message: "🌊 河神垂青！\n🧵 接下来35分钟内你的鱼线坚不可摧！"
 
       - id: item_lamp_fog
         name: 雾灯
         icon: 🌫️
         type: buff
-        duration: 1800
-        description: 雾隐湖的引路灯。使用后30分钟内你的个人天气固定为「雾」，可定向垂钓雾天限定鱼。
-        activation_message: "🌫️ 雾灯亮起！\n🎣 接下来30分钟内你的个人天气固定为「雾」！"
+        duration: 2100
+        description: 雾隐湖的引路灯。使用后35分钟内你的个人天气固定为「雾」，可定向垂钓雾天限定鱼。
+        activation_message: "🌫️ 雾灯亮起！\n🎣 接下来35分钟内你的个人天气固定为「雾」！"
 
       - id: item_bait_monster
         name: 怪物诱饵
         icon: 🩸
         type: buff
-        duration: 1800
-        description: 散发着危险气息的血腥诱饵。使用后30分钟内噩梦渔获概率大幅上升，噩梦渔获经验翻倍。
-        activation_message: "🩸 怪物诱饵撒入水中！\n💀 接下来30分钟内噩梦出没概率大增，噩梦经验翻倍！"
+        duration: 2100
+        description: 散发着危险气息的血腥诱饵。使用后35分钟内噩梦权重提高，噩梦渔获经验增加50%。
+        activation_message: "🩸 怪物诱饵撒入水中！\n💀 接下来35分钟内噩梦权重提高，噩梦经验+50%！"
 
       - id: item_charm_starlight
         name: 星光护符
         icon: ✨
         type: buff
-        duration: 1800
-        description: 凝聚星辉的护符，好运护符的上位品。使用后30分钟内钓鱼必定上钩。
-        activation_message: "✨ 星光护符已激活！\n🎣 接下来30分钟内钓鱼必定上钩！"
+        duration: 2100
+        description: 凝聚星辉的护符，好运护符的上位品。使用后35分钟内钓鱼必定上钩。
+        activation_message: "✨ 星光护符已激活！\n🎣 接下来35分钟内钓鱼必定上钩！"
 
       - id: item_card_star_double
         name: 双倍星辉卡
         icon: 🌟
         type: buff
-        duration: 1800
-        description: 浸染星辉的魔法卡片。使用后30分钟内钓鱼金币与经验双倍。
-        activation_message: "🌟 双倍星辉卡已激活！\n💰 接下来30分钟内钓鱼金币、经验双双翻倍！"
+        duration: 2100
+        description: 浸染星辉的魔法卡片。使用后35分钟内钓鱼金币与经验双倍。
+        activation_message: "🌟 双倍星辉卡已激活！\n💰 接下来35分钟内钓鱼金币、经验双双翻倍！"
 
       - id: item_scale_leviathan
         name: 利维坦的逆鳞
         icon: 🐉
         type: buff
-        duration: 1800
-        description: 拔下逆鳞者本应暴怒相向，但它选择庇护你。使用后30分钟内噩梦渔获不会造成任何惩罚。
-        activation_message: "🐉 利维坦的逆鳞开始震颤！\n🛡️ 接下来30分钟内噩梦无法伤害你！"
+        duration: 2100
+        description: 拔下逆鳞者本应暴怒相向，但它选择庇护你。使用后35分钟内噩梦渔获不会造成任何惩罚。
+        activation_message: "🐉 利维坦的逆鳞开始震颤！\n🛡️ 接下来35分钟内噩梦无法伤害你！"
 
       # ===== 即时生效类（#使用 后立即结算） =====
       - id: item_snack_petal
@@ -89,8 +89,8 @@ categories:
         name: 时之沙
         type: consumable
         instant_effect: restore_stamina
-        amount: 40
-        description: 从时间尽头收集的流沙。使用后钓鱼体力完全恢复。
+        amount: 16
+        description: 从时间尽头收集的流沙。使用后恢复16点钓鱼体力。
 
       - id: item_toolkit_repair
         name: 修理工具箱
@@ -108,7 +108,7 @@ categories:
         name: 星愿瓶
         type: consumable
         instant_effect: star_wish
-        description: 封着一颗流星的琉璃瓶。使用后30分钟内的下一竿必定咬钩传说稀有度的鱼。
+        description: 封着一颗流星的琉璃瓶。使用后35分钟内的下一竿必定咬钩传说稀有度的鱼。
 
   chests:
     name: "🗝️ 钓点宝箱"

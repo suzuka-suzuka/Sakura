@@ -1,11 +1,11 @@
 # 钓鱼职业配置
 # 解锁条件: 钓鱼等级 >= 8 可选择1级职业
-# 进阶条件: 钓鱼等级 >= 12 可进阶到2级
+# 进阶条件: 钓鱼等级 >= 14 可进阶到2级
 # 注意: 每人只能选择一个职业，选择后不可更换
 
 unlock_requirements:
   choose_fishing_level: 8     # 选择1级职业所需钓鱼等级
-  advance_fishing_level: 12   # 进阶2级职业所需钓鱼等级
+  advance_fishing_level: 14   # 进阶2级职业所需钓鱼等级
 
 professions:
   treasure_hunter:
@@ -16,12 +16,12 @@ professions:
     levels:
       1:
         title: "寻宝新手"
-        treasure_bonus: 4
-        description: "宝藏概率权重+4"
+        treasure_bonus: 2
+        description: "宝藏概率权重+2"
       2:
         title: "寻宝大师"
-        treasure_bonus: 8
-        description: "宝藏概率权重+8"
+        treasure_bonus: 4
+        description: "宝藏概率权重+4"
 
   fishing_master:
     name: "钓鱼大师"
@@ -31,12 +31,12 @@ professions:
     levels:
       1:
         title: "老练钓手"
-        mastery_multiplier: 0.4
-        description: "鱼线承重+0.4×熟练度"
+        mastery_multiplier: 0.5
+        description: "鱼线承重+0.5×熟练度"
       2:
         title: "垂钓宗师"
-        mastery_multiplier: 0.8
-        description: "鱼线承重+0.8×熟练度"
+        mastery_multiplier: 0.9
+        description: "鱼线承重+0.9×熟练度"
 
   merchant:
     name: "精明商人"
@@ -46,12 +46,12 @@ professions:
     levels:
       1:
         title: "小贩"
-        coin_bonus: 0.20
-        description: "金币收益+20%"
+        coin_bonus: 0.08
+        description: "金币收益+8%"
       2:
         title: "富商巨贾"
-        coin_bonus: 0.35
-        description: "金币收益+35%"
+        coin_bonus: 0.15
+        description: "金币收益+15%"
 
   abyss_hunter:
     name: "深渊猎手"
@@ -61,13 +61,13 @@ professions:
     levels:
       1:
         title: "猎魔新人"
-        nightmare_exp_bonus: 0.30
-        nightmare_penalty_reduction: 0.30
-        nightmare_line_save_chance: 0.30
-        description: "噩梦经验+30%，噩梦惩罚降低30%，30%概率保住鱼线"
+        nightmare_exp_bonus: 0.20
+        nightmare_penalty_reduction: 0.20
+        nightmare_line_save_chance: 0.20
+        description: "噩梦经验+20%，噩梦惩罚降低20%，20%概率保住鱼线"
       2:
         title: "深渊克星"
-        nightmare_exp_bonus: 0.60
-        nightmare_penalty_reduction: 0.60
-        nightmare_line_save_chance: 0.60
-        description: "噩梦经验+60%，噩梦惩罚降低60%，60%概率保住鱼线"
+        nightmare_exp_bonus: 0.40
+        nightmare_penalty_reduction: 0.40
+        nightmare_line_save_chance: 0.40
+        description: "噩梦经验+40%，噩梦惩罚降低40%，40%概率保住鱼线"

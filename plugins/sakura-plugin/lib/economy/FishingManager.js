@@ -15,6 +15,7 @@ import {
   getNightmareCurseDisplay,
   NIGHTMARE_CURSE_HIDDEN_LAYERS,
   normalizeFishingLocation,
+  TORPEDO_PRICE_BOOST_MULTIPLIER,
 } from "../fishing/rules.js";
 
 export default class FishingManager {
@@ -1374,7 +1375,7 @@ export default class FishingManager {
 
   async getFishPriceMultiplier() {
     const isActive = await this.isFishPriceBoostActive();
-    return isActive ? 1.5 : 1;
+    return isActive ? TORPEDO_PRICE_BOOST_MULTIPLIER : 1;
   }
 
   async getFishPriceBoostRemainingMinutes() {

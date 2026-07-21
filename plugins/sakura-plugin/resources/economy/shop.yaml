@@ -6,51 +6,51 @@ categories:
     items:
       - id: rod_bamboo
         name: 竹竿
-        price: 50
+        price: 100
         type: equipment
-        control: 30
-        durability: 35
+        control: 32
+        durability: 50
         description: 随处可见的普通竹竿，适合新手练习，只能钓小鱼。
 
       - id: rod_fiberglass
         name: 玻璃纤维竿
-        price: 320
+        price: 500
         type: equipment
-        control: 60
-        durability: 80
+        control: 65
+        durability: 110
         description: 轻便耐用的玻璃纤维鱼竿，控制力有所提升。
 
       - id: rod_carbon
         name: 碳素鱼竿
-        price: 1100
+        price: 1500
         type: equipment
-        control: 100
-        durability: 160
+        control: 105
+        durability: 220
         description: 轻盈强韧的碳素纤维打造，能应对大多数普通鱼类。
 
       - id: rod_titanium
         name: 钛合金鱼竿
-        price: 2600
+        price: 3200
         type: equipment
-        control: 150
-        durability: 280
+        control: 155
+        durability: 380
         description: 泛着冷光的钛合金鱼竿，即使是凶猛的大鱼也能驾驭。
 
       - id: rod_legendary
         name: 传说之竿
-        price: 5000
+        price: 6000
         type: equipment
-        control: 200
-        durability: 450
+        control: 205
+        durability: 600
         description: 传说中的神器，拥有顶尖控制力，能征服绝大多数鱼类！
 
       - id: rod_astral
         name: 星穹御灵竿
-        price: 28000
+        price: 120000
         type: equipment
-        control: 230
-        durability: 9999
-        description: 以星辉秘境坠落的星核锻成，竿身流转着星河，几乎不会磨损。终局钓客的毕生追求，面对星渊古龙也游刃有余。
+        control: 240
+        durability: 1000
+        description: 以星辉秘境坠落的星核锻成，竿身流转着星河。耐久惊人，是顶级钓客挑战传说渔获与极端天气的依仗。
 
   lines:
     name: "🧵 鱼线"
@@ -59,43 +59,43 @@ categories:
     items:
       - id: line_basic
         name: 尼龙线
-        price: 20
+        price: 40
         type: equipment
-        capacity: 5
-        durability: 40
+        capacity: 6
+        durability: 55
         description: 最基础的尼龙鱼线，只能承受较小的拉力。
 
       - id: line_braided
         name: 编织线
-        price: 50
+        price: 120
         type: equipment
-        capacity: 20
-        durability: 80
+        capacity: 24
+        durability: 100
         description: 多股编织的耐用鱼线，承重相较普通鱼线有所提升。
 
       - id: line_fluorocarbon
         name: 碳氟线
-        price: 90
+        price: 300
         type: equipment
-        capacity: 50
-        durability: 130
+        capacity: 55
+        durability: 170
         description: 几乎隐形的碳氟材质鱼线，拥有不错的承重能力。
 
       - id: line_steel
         name: 钢丝线
-        price: 140
+        price: 650
         type: equipment
-        capacity: 100
-        durability: 180
+        capacity: 115
+        durability: 270
         description: 不锈钢打造的超强鱼线，坚固无比，能应对大部分体型巨大的鱼类。
 
       - id: line_mythril
         name: 秘银线
-        price: 200
+        price: 1200
         type: equipment
-        capacity: 200
-        durability: 240
-        description: 传说中的秘银材质，不仅承重能力极强，且几乎无法被扯断！
+        capacity: 215
+        durability: 430
+        description: 传说中的秘银材质，承重和耐久都极强，但在首领与噩梦面前仍需谨慎使用。
 
   baits:
     name: "🪱 鱼饵"
@@ -104,42 +104,42 @@ categories:
     items:
       - id: bait_worm
         name: 蚯蚓
-        price: 2
+        price: 4
         type: consumable
         quality: 1
         description: 刚挖出来的鲜活蚯蚓，新手钓鱼的入门之选。
 
       - id: bait_shrimp
         name: 鲜虾饵
-        price: 15
+        price: 22
         type: consumable
         quality: 2
         description: 鲜嫩多汁的虾肉，散发着诱人的气息。
 
       - id: bait_premium
         name: 秘制鱼饵
-        price: 60
+        price: 70
         type: consumable
         quality: 3
         description: 秘方调制的鱼饵，据说效果比普通鱼饵好得多。
 
       - id: bait_magic
         name: 魔法鱼饵
-        price: 120
+        price: 155
         type: consumable
         quality: 4
         description: 注入了魔法的鱼饵，散发着神秘的魔力光芒。
 
       - id: bait_divine
         name: 神之诱饵
-        price: 200
+        price: 260
         type: consumable
         quality: 5
         description: 传说中的神之诱饵，没有鱼能抗拒它的诱惑！
 
       - id: bait_treasure
         name: 寻宝鱼饵
-        price: 450
+        price: 300
         type: consumable
         quality: 6
         description: 高风险高回报的寻宝鱼饵，宝藏会被吸引过来——水底的噩梦也一样。
@@ -150,7 +150,7 @@ categories:
         type: consumable
         quality: 1
         boss_bait: true
-        description: 宝箱中偶尔出现的非卖品。在任意钓点使用，下一竿必定挑战该钓点的首领。
+        description: 宝箱中偶尔出现的非卖品。在任意钓点使用，下一竿必定呼出当地首领。
 
   torpedoes:
     name: "💣 鱼雷"
@@ -159,8 +159,8 @@ categories:
     items:
       - id: torpedo
         name: 鱼雷
-        price: 400
+        price: 800
         type: consumable
-        duration: 86400
-        description: 一种恶作剧道具，投放后可能被其他钓鱼者钓到，24小时未触发会自动失效。
+        duration: 43200
+        description: 一种恶作剧道具，投放后可能被其他钓鱼者钓到，12小时未触发会自动失效。
 

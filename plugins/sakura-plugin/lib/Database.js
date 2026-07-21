@@ -85,7 +85,7 @@ class DB {
         profession TEXT,
         profession_level INTEGER DEFAULT 0,
         fishing_exp INTEGER DEFAULT 0,
-        fishing_stamina INTEGER DEFAULT 10,
+        fishing_stamina INTEGER DEFAULT 8,
         fishing_stamina_updated_at INTEGER DEFAULT 0,
         nightmare_curse_layers INTEGER DEFAULT 0,
         nightmare_curse_prank_revealed INTEGER DEFAULT 0,
@@ -189,7 +189,7 @@ class DB {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_exp INTEGER DEFAULT 0');
     }
     if (!fishingStatsColumns.some((column) => column.name === 'fishing_stamina')) {
-      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_stamina INTEGER DEFAULT 10');
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_stamina INTEGER DEFAULT 8');
     }
     if (!fishingStatsColumns.some((column) => column.name === 'fishing_stamina_updated_at')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_stamina_updated_at INTEGER DEFAULT 0');

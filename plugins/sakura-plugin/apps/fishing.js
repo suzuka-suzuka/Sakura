@@ -20,14 +20,20 @@ import {
 import {
   BOSS_ATTACK_INTERVAL_MS,
   BOSS_BAIT_ID,
+  BOSS_EXP_MULTIPLIER,
   FISH_FIGHT_STATE,
   FISHING_BENEFIT_DURATION_SECONDS,
   FISHING_COOLDOWN_SECONDS,
   FISHING_LOCATIONS,
+  FORCE_PULL_DIFFICULTY_RANGE,
+  PERFECT_EXP_MULTIPLIER,
   RARITY_CONFIG,
   SHINY_DIFFICULTY_MULTIPLIER,
   SHINY_EXP_MULTIPLIER,
   SHINY_PRICE_MULTIPLIER,
+  TORPEDO_HOOK_WEIGHT_PER_ITEM,
+  TORPEDO_PRICE_BOOST_MULTIPLIER,
+  TORPEDO_ROD_DAMAGE,
   WEATHER_CONFIG,
   applyFishFightStateModifiers,
   calculateLegacyFishPrice,
@@ -38,6 +44,7 @@ import {
   getFishFightStateChangeDelay,
   getFishFightStateConfig,
   getFishingLocationConfig,
+  getFishingEnvironmentModifiers,
   getFishingLevelExp,
   getLostSoulRewardMultiplier,
   getWeatherByTime,
@@ -111,7 +118,7 @@ function getDexProgress(fishingManager, userId, settleResult) {
 
 // 渔获消息统一尾部：完美收竿提示 + 经验数值 + 升级提示 + 图鉴新收录提示
 function formatCatchTail(expGain, isPerfect, settleResult, dexProgress) {
-  const perfectMsg = isPerfect ? `\n⚡ 完美收竿！经验×2！` : "";
+  const perfectMsg = isPerfect ? `\n⚡ 完美收竿！经验×${PERFECT_EXP_MULTIPLIER}！` : "";
   const levelUp = settleResult?.levelUp;
   const levelUpMsg = levelUp ? `\n🎉 钓鱼等级提升至 Lv.${levelUp.to}` : "";
   const staminaResetMsg = Number.isFinite(levelUp?.staminaResetTo)
@@ -168,6 +175,7 @@ async function selectRandomFish(
   {
     forceRarity = null,
     nightmareBonus = 0,
+    environment = null,
     hasDebuff = false,
     brideThreadActive = false,
   } = {},
@@ -176,7 +184,7 @@ async function selectRandomFish(
   if (!forceRarity && fishingManager && userId) {
     const torpedoCount = fishingManager.getAvailableTorpedoCount(userId);
     if (torpedoCount > 0) {
-      const torpedoWeight = torpedoCount * 5;
+      const torpedoWeight = torpedoCount * TORPEDO_HOOK_WEIGHT_PER_ITEM;
       const totalWeight = 100 + torpedoWeight;
       const random = Math.random() * totalWeight;
 
@@ -199,12 +207,13 @@ async function selectRandomFish(
   if (fishingManager && userId) {
     treasureBonus = fishingManager.getTreasureBonus(userId);
   }
+  treasureBonus += Number(environment?.treasureWeight) || 0;
 
   return selectFishFromData(fishData, {
     baitQuality,
     hasDebuff,
     treasureBonus,
-    nightmareBonus,
+    nightmareBonus: nightmareBonus + (Number(environment?.nightmareWeight) || 0),
     brideThreadActive,
     forceRarity,
     hour: getShanghaiHour(),
@@ -213,7 +222,7 @@ async function selectRandomFish(
   });
 }
 
-async function calculateFishPrice(fish, fishingManager = null) {
+async function calculateFishPrice(fish, fishingManager = null, environmentMultiplier = 1) {
   let torpedoMultiplier = 1;
   if (fishingManager) {
     try {
@@ -222,7 +231,10 @@ async function calculateFishPrice(fish, fishingManager = null) {
       logger.warn(`[钓鱼] 获取全局鱼价加成失败，按原价结算: ${err.message}`);
     }
   }
-  return calculateLegacyFishPrice(fish, torpedoMultiplier);
+  return calculateLegacyFishPrice(
+    fish,
+    torpedoMultiplier * Math.max(0.1, Number(environmentMultiplier) || 1),
+  );
 }
 
 function getFishImagePath(fishId) {
@@ -786,6 +798,7 @@ export default class Fishing extends plugin {
 
       // 雾灯只改本人选鱼用的天气，不影响全局天气播报
       const effectiveWeather = buffFlags.hasFogLamp ? "雾" : pondWeather.name;
+      const environment = getFishingEnvironmentModifiers(locationId, effectiveWeather);
       const selectedFish = isBossBait
         ? selectBossFromData(fishData, { location: locationId })
         : await selectRandomFish(
@@ -796,11 +809,21 @@ export default class Fishing extends plugin {
           locationId,
           {
             forceRarity: hasWish ? "传说" : null,
-            nightmareBonus: buffFlags.hasMonsterBait ? 15 : 0,
+            nightmareBonus: buffFlags.hasMonsterBait ? 8 : 0,
+            environment,
             hasDebuff: curseResult.consumed,
             brideThreadActive: brideThreadResult.consumed,
           },
         );
+      if (!selectedFish.isTorpedo) {
+        selectedFish.actualWeight = Math.round(
+          selectedFish.actualWeight * environment.weightMultiplier * 100,
+        ) / 100;
+        selectedFish.difficulty = Math.max(
+          0,
+          Math.round(selectedFish.difficulty * environment.difficultyMultiplier),
+        );
+      }
       // 异色判定在选鱼时完成并随会话流转；溜掉即失去，咬钩提示会预告虹光。
       // selectedFish 是浅拷贝副本，直接抬高难度不会污染 fish.json，且下游搏斗判定与展示统一读它。
       selectedFish.isShiny = rollShiny(selectedFish);
@@ -832,7 +855,7 @@ export default class Fishing extends plugin {
           ? `\n🔔 深压回响令本竿额外消耗 1 点体力（剩余 ${staminaResult.deepPressureLayers} 层）。`
           : "",
         hasWish ? "\n🌠 星愿闪耀！这一竿将迎来传说！" : "",
-        isBossBait ? `\n👑 首领鱼饵正在呼唤【${selectedFish.name}】！` : "",
+        isBossBait ? `\n👑 首领鱼饵的气息正在水中扩散，当地首领正向鱼钩逼近……` : "",
       ].join("");
 
       Object.assign(state, {
@@ -851,11 +874,14 @@ export default class Fishing extends plugin {
         hasStarDouble: buffFlags.hasStarDouble,
         hasLostSoul: nightmareStatus.lostSoul,
         locationId,
+        environment,
         isBossBait,
       });
 
       await e.reply(
-        `🎣 在${locationConfig.emoji}【${locationConfig.name}】挥动【${rodConfig.name}】挂上【${baitConfig.name}】伴随着优美的抛物线，鱼钩落入水中...耐心等待浮漂的动静吧...\n🌤️ 当前天气：${pondWeather.emoji}${pondWeather.name}\n⚡体力：${formatFishingStamina(staminaResult)}${buffNotes}`
+        `🎣 在${locationConfig.emoji}【${locationConfig.name}】挥动【${rodConfig.name}】挂上【${baitConfig.name}】，鱼钩落入水中...\n` +
+        `🌤️ 当前天气：${pondWeather.emoji}${pondWeather.name}${buffFlags.hasFogLamp ? "（个人天气：🌫️雾）" : ""}\n` +
+        `⚡体力：${formatFishingStamina(staminaResult)}${buffNotes}`
       );
 
       state.totalTimer = setTimeout(() => {
@@ -1038,7 +1064,12 @@ export default class Fishing extends plugin {
 
         const lineBreak = this.breakLineWithBlessing(state, fishingManager, userId, lineConfig);
 
-        const damageResult = applyRodDamage(fishingManager, userId, rodConfig, 20);
+        const damageResult = applyRodDamage(
+          fishingManager,
+          userId,
+          rodConfig,
+          TORPEDO_ROD_DAMAGE,
+        );
 
         await this.finishFailedAttempt(e, state);
 
@@ -1052,14 +1083,14 @@ export default class Fishing extends plugin {
             : `🧵 鱼线被炸断了！`,
           `${damageResult.msg}\n`,
           priceBoostApplied
-            ? `😱 鱼雷爆炸引发恐慌！接下来30分钟内鱼价1.5倍！`
+            ? `😱 鱼雷爆炸引发恐慌！接下来${Math.round(FISHING_BENEFIT_DURATION_SECONDS / 60)}分钟内鱼价×${TORPEDO_PRICE_BOOST_MULTIPLIER}！`
             : `😱 鱼雷爆炸了，但鱼价加成暂时没有生效。`,
         ]);
 
         return;
       }
 
-      // 完美收竿：5 秒内操作，并且装备足以通过重量与难度判定，
+      // 完美收竿：4 秒内操作，并且装备足以通过重量与难度判定，
       // 或有好运护符/锦鲤许愿签兜底。仅满足反应时间不会跳过正常判定。
       const lineBonus = fishingManager.getLineBonusFromMastery(userId, rodConfig.id);
       const lineCapacity = lineConfig.capacity + lineBonus;
@@ -1192,7 +1223,10 @@ export default class Fishing extends plugin {
 
       if (action === FISHING_ACTION.forcePull) {
         const updatedControl = fishingManager.getRodControl(userId, rodConfig.id) + rodMastery;
-        const successRate = Math.max(0, 1 - (fishDifficulty - updatedControl) / 100);
+        const successRate = Math.max(
+          0,
+          1 - (fishDifficulty - updatedControl) / FORCE_PULL_DIFFICULTY_RANGE,
+        );
         const isSuccess = Math.random() < successRate;
 
         if (!isSuccess) {
@@ -1758,12 +1792,13 @@ export default class Fishing extends plugin {
       : 1;
     let expGain = Math.max(1, Math.round(
       rollFishExp(fish.rarity) *
-      (isPerfect ? 2 : 1) *
-      (isBossFish(fish) ? 3 : 1) *
+      (isPerfect ? PERFECT_EXP_MULTIPLIER : 1) *
+      (isBossFish(fish) ? BOSS_EXP_MULTIPLIER : 1) *
       (nightmareEffects?.expMultiplier || 1) *
       (state.hasStarDouble ? 2 : 1) *
-      (state.hasMonsterBait && fish.rarity === "噩梦" ? 2 : 1) *
+      (state.hasMonsterBait && fish.rarity === "噩梦" ? 1.5 : 1) *
       (isShiny ? SHINY_EXP_MULTIPLIER : 1) *
+      (state.environment?.expMultiplier || 1) *
       lostSoulMultiplier,
     ));
     const lostSoulPenaltyMsg = state.hasLostSoul
@@ -1882,7 +1917,11 @@ export default class Fishing extends plugin {
         return true;
       }
 
-      const price = await calculateFishPrice(fish, fishingManager);
+      const price = await calculateFishPrice(
+        fish,
+        fishingManager,
+        state.environment?.priceMultiplier || 1,
+      );
 
       const buffMultiplier = await this.getFishSellBuffMultiplier(groupId, userId);
       const merchantMultiplier = fishingManager.getMerchantCoinMultiplier(userId);
@@ -1913,7 +1952,7 @@ export default class Fishing extends plugin {
       let priceBoostMsg = "";
       try {
         if (await fishingManager.isFishPriceBoostActive()) {
-          priceBoostMsg = `😱 鱼雷恐慌中，鱼价1.5倍！\n`;
+          priceBoostMsg = `😱 鱼雷恐慌中，鱼价×${TORPEDO_PRICE_BOOST_MULTIPLIER}！\n`;
         }
       } catch (err) {
         logger.warn(`[钓鱼] 获取鱼雷鱼价状态失败: ${err.message}`);
@@ -1999,16 +2038,16 @@ export default class Fishing extends plugin {
 
   pondWeatherForecast = Command(/^#?(鱼塘|钓鱼)天气$/, async (e) => {
     if (!this.checkWhitelist(e)) return false;
-    const now = Date.now();
-    const current = getWeatherByTime(now);
-    const next = getWeatherByTime(now + 60 * 60 * 1000);
-    const minutesLeft = Math.ceil((60 * 60 * 1000 - (now % (60 * 60 * 1000))) / 60000);
+    const current = getWeatherByTime();
+    const fishingManager = new FishingManager(e.group_id);
+    const locationId = fishingManager.getFishingLocation(e.user_id);
+    const location = getFishingLocationConfig(locationId);
 
     await e.reply([
-      `🌤️ 鱼塘天气预报\n`,
-      `当前：${current.emoji}${current.name}（约 ${minutesLeft} 分钟后轮换）\n`,
-      `下一小时：${next.emoji}${next.name}\n`,
-      `🐟 某些鱼儿只在特定天气出没...`,
+      `🌤️ 当前天气观测\n`,
+      `📍 当前钓点：${location.emoji}【${location.name}】\n`,
+      `现在：${current.emoji}${current.name}\n`,
+      `🔭 水域变化无常，无法预报下一时段天气。`,
     ]);
     return true;
   });
@@ -2127,7 +2166,7 @@ export default class Fishing extends plugin {
     fishingManager.equipBait(e.user_id, bait.id);
     await e.reply(
       `🪱 饵料挂好啦！当前使用【${bait.name}】，库存 ${count} 个。` +
-      (bait.boss_bait ? "\n👑 下一竿将直接挑战当前钓点首领，请确认装备与体力！" : "")
+      (bait.boss_bait ? "\n👑 下一竿必定呼出当前钓点首领。" : "")
     );
     return true;
   });
@@ -2164,7 +2203,6 @@ export default class Fishing extends plugin {
     const userId = e.user_id;
     const fishingManager = new FishingManager(groupId);
     const locationConfig = getFishingLocationConfig(fishingManager.getFishingLocation(userId));
-    let weather = getWeatherByTime();
     const staminaStatus = fishingManager.getFishingStaminaStatus(userId);
     const equippedRodId = fishingManager.getEquippedRod(userId);
     const equippedLineId = fishingManager.getEquippedLine(userId);
@@ -2210,7 +2248,7 @@ export default class Fishing extends plugin {
         handler: "fishing_bait",
         details: [
           `库存 ${baitCount} 个`,
-          baitConfig.boss_bait ? "下一竿挑战当前钓点首领" : "已准备就绪",
+          baitConfig.boss_bait ? "下一竿必定呼出当前钓点首领" : "已准备就绪",
         ],
       });
     } else {
@@ -2238,9 +2276,6 @@ export default class Fishing extends plugin {
     for (const [index, item] of buffItems.entries()) {
       const ttl = buffTtls[index];
       if (ttl > 0) {
-        if (item.id === "item_lamp_fog") {
-          weather = { name: "雾", ...WEATHER_CONFIG["雾"] };
-        }
         effects.push({
           icon: item.icon || "✨",
           name: item.name,

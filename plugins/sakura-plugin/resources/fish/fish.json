@@ -2065,7 +2065,7 @@
     "name": "利维坦幼崽",
     "rarity": "传说",
     "description": "远古海怪的幼体，虽然还小，但力量已经足以在大海掀起波澜。",
-    "base_price": 515,
+    "base_price": 460,
     "difficulty": 218,
     "weight": [
       160,
@@ -2083,7 +2083,7 @@
     "name": "噬星者",
     "rarity": "传说",
     "description": "大嘴里仿佛有一个黑洞，吞噬一切光线，极其沉重。",
-    "base_price": 525,
+    "base_price": 470,
     "difficulty": 225,
     "weight": [
       170,
@@ -2108,7 +2108,7 @@
     "name": "克拉肯之触",
     "rarity": "传说",
     "description": "拥有独立意识和怪力的巨型触手，只在雷暴中苏醒。",
-    "base_price": 475,
+    "base_price": 430,
     "difficulty": 212,
     "weight": [
       150,
@@ -2132,7 +2132,7 @@
     "name": "浴火锦鲤",
     "rarity": "传说",
     "description": "能令水温沸腾的燃烧之鱼，只在晴日正午苏醒。",
-    "base_price": 540,
+    "base_price": 480,
     "difficulty": 218,
     "weight": [
       20,
@@ -2156,7 +2156,7 @@
     "name": "深渊幽鲸",
     "rarity": "传说",
     "description": "来自最深海沟的孤独歌者，身体承载着深海的高压。",
-    "base_price": 505,
+    "base_price": 450,
     "difficulty": 228,
     "weight": [
       180,
@@ -2304,7 +2304,7 @@
     "difficulty": 130,
     "nightmare_effect": {
       "type": "rod_damage",
-      "amount": 20
+      "amount": 14
     },
     "weight": [
       30,
@@ -2326,7 +2326,7 @@
     "difficulty": 140,
     "nightmare_effect": {
       "type": "rod_damage",
-      "amount": 20
+      "amount": 18
     },
     "weight": [
       50,
@@ -2348,9 +2348,9 @@
     "difficulty": 110,
     "nightmare_effect": {
       "type": "steal_coins_flat",
-      "min": 1,
-      "max": 120,
-      "fallback_rod_damage": 20
+      "min": 5,
+      "max": 90,
+      "fallback_rod_damage": 14
     },
     "weight": [
       15,
@@ -2372,9 +2372,9 @@
     "difficulty": 150,
     "nightmare_effect": {
       "type": "steal_coins_percent",
-      "min_percent": 1,
-      "max_percent": 20,
-      "fallback_rod_damage": 20
+      "min_percent": 2,
+      "max_percent": 12,
+      "fallback_rod_damage": 16
     },
     "weight": [
       8,
@@ -2396,7 +2396,7 @@
     "difficulty": 100,
     "nightmare_effect": {
       "type": "curse",
-      "layers": 4
+      "layers": 3
     },
     "weight": [
       3,
@@ -2418,8 +2418,8 @@
     "difficulty": 105,
     "nightmare_effect": {
       "type": "bride_thread",
-      "layers": 4,
-      "max_layers": 8
+      "layers": 3,
+      "max_layers": 6
     },
     "weight": [
       18,
@@ -2493,8 +2493,8 @@
     "difficulty": 135,
     "nightmare_effect": {
       "type": "ghost_debt",
-      "amount": 120,
-      "max_debt": 360
+      "amount": 150,
+      "max_debt": 450
     },
     "weight": [
       80,
@@ -2519,8 +2519,8 @@
     "difficulty": 150,
     "nightmare_effect": {
       "type": "deep_pressure",
-      "layers": 4,
-      "max_layers": 8
+      "layers": 3,
+      "max_layers": 6
     },
     "weight": [
       140,
@@ -2545,7 +2545,7 @@
     "difficulty": 145,
     "nightmare_effect": {
       "type": "devour_buff",
-      "duration_seconds": 1800
+        "duration_seconds": 2100
     },
     "weight": [
       6,
@@ -4724,7 +4724,7 @@
     "name": "江河龙王",
     "rarity": "传说",
     "description": "暴雨倾盆时逆流而上的龙影，河道为它让路。",
-    "base_price": 520,
+    "base_price": 465,
     "difficulty": 220,
     "weight": [
       150,
@@ -4748,7 +4748,7 @@
     "name": "雾隐麒麟",
     "rarity": "传说",
     "description": "雾夜踏水而行的麒麟，蹄印落处涟漪成环。",
-    "base_price": 535,
+    "base_price": 475,
     "difficulty": 222,
     "weight": [
       120,
@@ -4776,7 +4776,7 @@
     "name": "落日金鲸",
     "rarity": "传说",
     "description": "驮着落日游过海平线的金色巨鲸，晚霞是它的尾迹。",
-    "base_price": 525,
+    "base_price": 470,
     "difficulty": 224,
     "weight": [
       170,
@@ -4800,7 +4800,7 @@
     "name": "星河蛟",
     "rarity": "传说",
     "description": "身躯缀满星辰的蛟龙，游过的水面会倒映出银河。",
-    "base_price": 530,
+    "base_price": 472,
     "difficulty": 226,
     "weight": [
       160,
@@ -4826,7 +4826,7 @@
     "name": "蚀月利维坦",
     "rarity": "传说",
     "description": "月蚀之夜从海沟深处上浮，吞下月亮的影子再缓缓沉回。",
-    "base_price": 535,
+    "base_price": 475,
     "difficulty": 228,
     "weight": [
       180,
@@ -4852,14 +4852,14 @@
     "name": "绯樱鲤王",
     "rarity": "传说",
     "description": "吞食了百年落樱的池塘霸主，鳞片开合时会喷出令人脱力的绯色瘴气。",
-    "base_price": 1500,
-    "difficulty": 205,
+    "base_price": 520,
+    "difficulty": 245,
     "weight": [
-      150,
+      170,
       235
     ],
     "is_boss": true,
-    "hp": 90,
+    "hp": 300,
     "attack": 8,
     "boss_mechanic": {
       "type": "stamina_drain",
@@ -4869,128 +4869,133 @@
     },
     "locations": [
       "pond"
-    ]
+    ],
+    "fight_timeout_seconds": 100
   },
   {
     "id": "boss_river_ape_king",
     "name": "青柳猿王",
     "rarity": "传说",
     "description": "盘踞河湾的水猿之王，一只手拽线，另一只手总能摸到钓客的钱袋。",
-    "base_price": 1900,
-    "difficulty": 228,
+    "base_price": 700,
+    "difficulty": 252,
     "weight": [
       175,
-      250
+      240
     ],
     "is_boss": true,
-    "hp": 170,
-    "attack": 11,
+    "hp": 330,
+    "attack": 9,
     "boss_mechanic": {
       "type": "steal_coins",
       "name": "探囊鬼手",
-      "min": 20,
-      "max": 50,
-      "description": "每次首领攻击持续偷走20～50樱花币，余额不足时偷到0为止。"
+      "min": 30,
+      "max": 70,
+      "description": "每次首领攻击持续偷走30～70樱花币，余额不足时偷到0为止。"
     },
     "locations": [
       "river"
-    ]
+    ],
+    "fight_timeout_seconds": 100
   },
   {
     "id": "boss_lake_mist_turtle",
     "name": "雾甲鳄龟",
     "rarity": "传说",
     "description": "龟甲上背着一整片浓雾，猛然翻身时连方向感和鱼线张力都会一同失控。",
-    "base_price": 2400,
-    "difficulty": 232,
+    "base_price": 950,
+    "difficulty": 259,
     "weight": [
-      130,
-      220
+      180,
+      245
     ],
     "is_boss": true,
-    "hp": 190,
-    "attack": 12,
+    "hp": 360,
+    "attack": 10,
     "boss_mechanic": {
       "type": "tension_surge",
       "name": "迷雾震线",
-      "amount": 10,
-      "description": "每次首领攻击额外增加10点张力，必须及时发送“溜”来卸力。"
+      "amount": 12,
+      "description": "每次首领攻击额外增加12点张力，必须及时发送“溜”来卸力。"
     },
     "locations": [
       "lake"
-    ]
+    ],
+    "fight_timeout_seconds": 105
   },
   {
     "id": "boss_coast_saw_shark",
     "name": "赤潮锯鲨皇",
     "rarity": "传说",
     "description": "随着落日赤潮巡游的锯鲨皇，锯齿吻能像割草一样反复切削鱼线。",
-    "base_price": 3400,
-    "difficulty": 252,
+    "base_price": 1250,
+    "difficulty": 266,
     "weight": [
-      165,
-      245
+      185,
+      250
     ],
     "is_boss": true,
-    "hp": 440,
-    "attack": 16,
+    "hp": 390,
+    "attack": 11,
     "boss_mechanic": {
       "type": "line_rend",
       "name": "赤潮锯刑",
-      "multiplier": 2,
-      "description": "首领攻击对鱼线的永久耐久造成2倍伤害，耐久归零会立即断线。"
+      "multiplier": 1.8,
+      "description": "首领攻击对鱼线的永久耐久造成1.8倍伤害，耐久归零会立即断线。"
     },
     "locations": [
       "coast"
-    ]
+    ],
+    "fight_timeout_seconds": 105
   },
   {
     "id": "boss_abyss_trench_maw",
     "name": "海沟吞舟兽",
     "rarity": "传说",
     "description": "能把沉船连同海水一起吞下的深渊巨口，高压水域中的搏斗必须速战速决。",
-    "base_price": 4000,
-    "difficulty": 260,
+    "base_price": 1650,
+    "difficulty": 273,
     "weight": [
-      180,
-      250
+      190,
+      255
     ],
     "is_boss": true,
-    "hp": 520,
-    "attack": 16,
+    "hp": 420,
+    "attack": 12,
     "boss_mechanic": {
       "type": "rod_crush",
       "name": "吞舟重撞",
-      "multiplier": 1.4,
-      "description": "首领攻击对鱼竿造成1.4倍持久伤害，折断的鱼竿会永久损失。"
+      "multiplier": 1.7,
+      "description": "首领攻击对鱼竿造成1.7倍持久伤害，折断的鱼竿会永久损失。"
     },
     "locations": [
       "abyss"
     ],
-    "fight_timeout_seconds": 75
+    "fight_timeout_seconds": 110
   },
   {
     "id": "boss_mystic_astral_dragon",
     "name": "星渊古龙",
     "rarity": "传说",
     "description": "沉睡在星河尽头的古龙，伤口会吸收坠落的星辉，在战斗中不断弥合。",
-    "base_price": 4400,
-    "difficulty": 268,
+    "base_price": 2200,
+    "difficulty": 280,
     "weight": [
-      155,
-      240
+      195,
+      260
     ],
     "is_boss": true,
-    "hp": 400,
-    "attack": 19,
+    "hp": 310,
+    "attack": 13,
     "boss_mechanic": {
       "type": "regenerate",
       "name": "星髓再生",
-      "amount": 18,
-      "description": "每次首领攻击后为自身恢复18点生命，输出不足将永远耗不死它。"
+      "amount": 10,
+      "description": "每次首领攻击后为自身恢复10点生命，输出不足将永远耗不死它。"
     },
     "locations": [
       "mystic"
-    ]
+    ],
+    "fight_timeout_seconds": 110
   }
 ]

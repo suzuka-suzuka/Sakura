@@ -1,8 +1,9 @@
-export const REVIVE_COIN_BASE_AMOUNT = 20;
+export const REVIVE_COIN_BASE_AMOUNT = 35;
 export const REVIVE_COIN_PER_LEVEL = 2;
 export const TRANSFER_UNLOCK_FISHING_LEVEL = 5;
 export const AI_TRANSFER_MAX_BALANCE_PERCENT = 20;
 export const AI_TRANSFER_GROUP_COOLDOWN_SECONDS = 2 * 60;
+export const EQUIPMENT_SELL_PRICE_RATIO = 0.55;
 
 function normalizeFishingLevel(level) {
   const numericLevel = Number(level);

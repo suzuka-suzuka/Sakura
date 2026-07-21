@@ -3,6 +3,7 @@ import fs from "node:fs"
 import path from "node:path"
 import EconomyImageGenerator from "./ImageGenerator.js"
 import { pluginresources } from "../path.js"
+import { TORPEDO_PRICE_BOOST_MULTIPLIER } from "../fishing/rules.js"
 
 const CANVAS_WIDTH = 1000
 const FONT_FAMILY = 'ZhuZiAYuan, "MotoyaMaru", "Noto Color Emoji", "Segoe UI Emoji", "Noto Sans SC", sans-serif'
@@ -695,7 +696,7 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
     ctx.font = `bold 18px ${this.fontFamily}`
     ctx.fillText(
       torpedo.priceBoostActive
-        ? `鱼价 ×1.5 · 剩余 ${torpedo.priceBoostRemainingMinutes} 分钟`
+        ? `鱼价 ×${TORPEDO_PRICE_BOOST_MULTIPLIER} · 剩余 ${torpedo.priceBoostRemainingMinutes} 分钟`
         : "当前鱼价正常",
       178,
       infoTop + 190,

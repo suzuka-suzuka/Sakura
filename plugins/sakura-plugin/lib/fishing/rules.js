@@ -1,26 +1,44 @@
 export const RARITY_CONFIG = Object.freeze({
   "垃圾": Object.freeze({ color: "⚫", level: 0, exp: 1 }),
   "普通": Object.freeze({ color: "⚪", level: 1, exp: 2 }),
-  "精品": Object.freeze({ color: "🟢", level: 2, exp: 5 }),
-  "稀有": Object.freeze({ color: "🔵", level: 3, exp: 10 }),
-  "史诗": Object.freeze({ color: "🟣", level: 4, exp: 20 }),
-  "传说": Object.freeze({ color: "🟠", level: 5, exp: 35 }),
-  // 宝箱本体已经是钱，经验压到传说之下；噩梦经验略高补偿惩罚
-  "宝藏": Object.freeze({ color: "👑", level: 6, exp: 28 }),
-  "噩梦": Object.freeze({ color: "💀", level: 7, exp: 32 }),
+  "精品": Object.freeze({ color: "🟢", level: 2, exp: 4 }),
+  "稀有": Object.freeze({ color: "🔵", level: 3, exp: 8 }),
+  "史诗": Object.freeze({ color: "🟣", level: 4, exp: 14 }),
+  "传说": Object.freeze({ color: "🟠", level: 5, exp: 22 }),
+  // 宝箱本体已经含有额外奖励；噩梦经验只补偿风险，不再成为最优刷级路线。
+  "宝藏": Object.freeze({ color: "👑", level: 6, exp: 16 }),
+  "噩梦": Object.freeze({ color: "💀", level: 7, exp: 18 }),
 });
 
 export const WEATHER_CONFIG = Object.freeze({
-  "晴": Object.freeze({ emoji: "☀️", weight: 30 }),
-  "多云": Object.freeze({ emoji: "⛅", weight: 25 }),
-  "雨": Object.freeze({ emoji: "🌧️", weight: 20 }),
-  "雾": Object.freeze({ emoji: "🌫️", weight: 12 }),
-  "雷暴": Object.freeze({ emoji: "⛈️", weight: 8 }),
-  "雪": Object.freeze({ emoji: "❄️", weight: 5 }),
+  "晴": Object.freeze({
+    emoji: "☀️", weight: 28, difficultyMultiplier: 0.94, priceMultiplier: 0.97,
+    expMultiplier: 0.95, weightMultiplier: 0.94, treasureWeight: -1, nightmareWeight: -1,
+  }),
+  "多云": Object.freeze({
+    emoji: "⛅", weight: 26, difficultyMultiplier: 1, priceMultiplier: 1,
+    expMultiplier: 1, weightMultiplier: 1, treasureWeight: 0, nightmareWeight: 0,
+  }),
+  "雨": Object.freeze({
+    emoji: "🌧️", weight: 20, difficultyMultiplier: 1.05, priceMultiplier: 1.03,
+    expMultiplier: 1.05, weightMultiplier: 1.06, treasureWeight: 0, nightmareWeight: 1,
+  }),
+  "雾": Object.freeze({
+    emoji: "🌫️", weight: 13, difficultyMultiplier: 1.1, priceMultiplier: 1.05,
+    expMultiplier: 1.1, weightMultiplier: 1.08, treasureWeight: 0.5, nightmareWeight: 2,
+  }),
+  "雷暴": Object.freeze({
+    emoji: "⛈️", weight: 8, difficultyMultiplier: 1.22, priceMultiplier: 1.08,
+    expMultiplier: 1.18, weightMultiplier: 1.18, treasureWeight: 0.3, nightmareWeight: 4,
+  }),
+  "雪": Object.freeze({
+    emoji: "❄️", weight: 5, difficultyMultiplier: 1.14, priceMultiplier: 1.06,
+    expMultiplier: 1.12, weightMultiplier: 1.12, treasureWeight: 0.6, nightmareWeight: 0,
+  }),
 });
 
-// 钓点只筛物种池（fish.json 的 locations 字段），不影响稀有度权重；
-// 未填 locations 的鱼视为全钓点通用。unlockLevel 为钓鱼等级解锁门槛
+// 钓点只筛选物种池并控制解锁顺序，不承担强度分层；未填 locations 的鱼视为全钓点通用。
+// 渔获强度由鱼自身稀有度与数值决定，同稀有度不会因钓点而获得额外倍率。
 export const FISHING_LOCATIONS = Object.freeze({
   pond: Object.freeze({ name: "樱花池塘", emoji: "🌸", unlockLevel: 1, description: "飘着花瓣的新手鱼塘，波光里透着家的味道。" }),
   river: Object.freeze({ name: "青柳河湾", emoji: "🍃", unlockLevel: 3, description: "垂柳掩映的湍急河湾，洄游鱼的必经之路。" }),
@@ -34,9 +52,9 @@ export const DEFAULT_FISHING_LOCATION = "pond";
 export const BOSS_BAIT_ID = "bait_boss";
 export const BOSS_ATTACK_INTERVAL_MS = 5000;
 export const BOSS_PLAYER_ATTACK_COOLDOWN_MS = 5000;
-export const BOSS_FIGHT_TIMEOUT_MS = 150 * 1000;
-export const BOSS_MIN_DIFFICULTY = 200;
-export const BOSS_MIN_HP = 90;
+export const BOSS_FIGHT_TIMEOUT_MS = 110 * 1000;
+export const BOSS_MIN_DIFFICULTY = 230;
+export const BOSS_MIN_HP = 150;
 export const BOSS_MIN_ATTACK = 8;
 export const BOSS_MECHANIC_TYPES = Object.freeze([
   "stamina_drain",
@@ -70,11 +88,11 @@ export const LOCAL_NIGHTMARE_EFFECT_BY_LOCATION = Object.freeze({
 
 // 异色个体：捕获时低概率触发的外观变体，金币与经验按倍率放大。
 // 宝藏本体是宝箱（=钱）、噩梦是惩罚事件，二者不参与异色；鱼雷同理。
-export const SHINY_CHANCE = 1 / 80;
-export const SHINY_PRICE_MULTIPLIER = 4;
-export const SHINY_EXP_MULTIPLIER = 2;
+export const SHINY_CHANCE = 1 / 100;
+export const SHINY_PRICE_MULTIPLIER = 2.5;
+export const SHINY_EXP_MULTIPLIER = 1.5;
 // 异色个体搏斗难度提升，会触及更多“拉不动/溜鱼”判定，也更难完美收竿
-export const SHINY_DIFFICULTY_MULTIPLIER = 1.5;
+export const SHINY_DIFFICULTY_MULTIPLIER = 1.35;
 const SHINY_EXCLUDED_RARITIES = new Set(["宝藏", "噩梦"]);
 
 export function isShinyEligible(fish) {
@@ -92,12 +110,35 @@ export function getFishingLocationConfig(locationId) {
   return FISHING_LOCATIONS[locationId] || null;
 }
 
+function readEnvironmentNumber(config, key, fallback) {
+  const value = Number(config?.[key]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+// 天气是全钓点共用的可观察变量；locationId 仅随结果返回，用于鱼种池与界面展示。
+// 所有返回值都在这里归一，避免个人天气或自定义配置产生非法数值。
+export function getFishingEnvironmentModifiers(
+  locationId = DEFAULT_FISHING_LOCATION,
+  weatherName = "多云",
+) {
+  const weather = WEATHER_CONFIG[weatherName] || WEATHER_CONFIG["多云"];
+  return {
+    locationId: FISHING_LOCATIONS[locationId] ? locationId : DEFAULT_FISHING_LOCATION,
+    weatherName: WEATHER_CONFIG[weatherName] ? weatherName : "多云",
+    difficultyMultiplier: Math.max(0.1, readEnvironmentNumber(weather, "difficultyMultiplier", 1)),
+    priceMultiplier: Math.max(0.1, readEnvironmentNumber(weather, "priceMultiplier", 1)),
+    expMultiplier: Math.max(0.1, readEnvironmentNumber(weather, "expMultiplier", 1)),
+    weightMultiplier: Math.max(0.1, readEnvironmentNumber(weather, "weightMultiplier", 1)),
+    treasureWeight: readEnvironmentNumber(weather, "treasureWeight", 0),
+    nightmareWeight: readEnvironmentNumber(weather, "nightmareWeight", 0),
+  };
+}
+
 export function isBossFish(fish) {
   return fish?.is_boss === true;
 }
 
 // 首领战限时可按 Boss 单独配置（fight_timeout_seconds），未配置时用全局默认。
-// 深渊系 Boss 用短窗口制造“输出竞速”压力。
 export function getBossFightTimeoutMs(fish) {
   const seconds = Number(fish?.fight_timeout_seconds);
   return Number.isFinite(seconds) && seconds >= 30
@@ -142,8 +183,8 @@ export function rollBossPlayerDamage(effectiveControl, random = Math.random) {
 
 // 钓鱼等级折算的首领战搏斗加成：视作叠加到控制力上的“等效战力”，随等级线性提升并封顶。
 // 只注入首领战的伤害与收线，普通钓鱼仍纯由装备决定，避免等级碾压使鱼竿/鱼线贬值。
-export const FISHING_COMBAT_BONUS_PER_LEVEL = 2.5;
-export const FISHING_COMBAT_BONUS_CAP = 45;
+export const FISHING_COMBAT_BONUS_PER_LEVEL = 2;
+export const FISHING_COMBAT_BONUS_CAP = 36;
 
 export function getBossCombatBonus(level) {
   const safeLevel = Math.max(1, Math.floor(Number(level) || 1));
@@ -216,49 +257,55 @@ export function normalizeFishingLocation(locationId) {
 }
 
 const WEATHER_ROTATION_MS = 60 * 60 * 1000;
+const WEATHER_BY_HOUR = new Map();
 
-// 32 位整数混淆散列，把小时序号映射为 [0, 1) 的确定值
-function hashHourIndex(hourIndex) {
-  let h = (Math.imul(hourIndex, 0x9E3779B1) + 0x85EBCA6B) >>> 0;
-  h = Math.imul(h ^ (h >>> 16), 0x21F0AAAD) >>> 0;
-  h = Math.imul(h ^ (h >>> 15), 0x735A2D97) >>> 0;
-  return ((h ^ (h >>> 15)) >>> 0) / 4294967296;
-}
-
-// 鱼塘天气按整点轮换，同一小时内全局一致；传入未来时间即可做预报
+// 每个小时首次读取时随机生成并缓存；同一进程、同一小时内全局一致，但未来天气无法提前计算。
 export function getWeatherByTime(timestamp = Date.now()) {
   const hourIndex = Math.floor((Number(timestamp) || 0) / WEATHER_ROTATION_MS);
-  const pool = Object.keys(WEATHER_CONFIG);
-  const weights = pool.map((name) => WEATHER_CONFIG[name].weight);
-  const name = selectRarityByWeight(pool, weights, () => hashHourIndex(hourIndex));
+  if (!WEATHER_BY_HOUR.has(hourIndex)) {
+    const pool = Object.keys(WEATHER_CONFIG);
+    const weights = pool.map((name) => WEATHER_CONFIG[name].weight);
+    WEATHER_BY_HOUR.set(hourIndex, selectRarityByWeight(pool, weights));
+    if (WEATHER_BY_HOUR.size > 4) {
+      const oldestHour = Math.min(...WEATHER_BY_HOUR.keys());
+      WEATHER_BY_HOUR.delete(oldestHour);
+    }
+  }
+  const name = WEATHER_BY_HOUR.get(hourIndex);
   return { name, emoji: WEATHER_CONFIG[name].emoji };
 }
 
 const ALL_RARITIES = Object.freeze(["垃圾", "普通", "精品", "稀有", "史诗", "传说", "宝藏", "噩梦"]);
-// 宝藏/噩梦权重随饵料品质递增：低档饵开箱率低（杜绝低价饵蹲高级钓点刷宝），
-// 高档饵稳步提升，寻宝鱼饵(q6)是高开箱高噩梦的赌狗专精
+// 每档鱼饵都是宽分布而非“50%命中单一稀有度”：升级提高上限和期望，
+// 但低档仍有惊喜、高档仍承担空军与噩梦成本，装备和环境选择才是收益核心。
 const QUALITY_WEIGHTS = Object.freeze({
-  1: [["垃圾", "普通", "精品", "宝藏", "噩梦"], [34, 58, 5, 1, 2]],
-  2: [["垃圾", "普通", "精品", "稀有", "宝藏", "噩梦"], [17, 24, 50, 4, 2, 3]],
-  3: [["垃圾", "普通", "精品", "稀有", "史诗", "宝藏", "噩梦"], [7, 12, 21, 50, 3, 3, 4]],
-  4: [ALL_RARITIES, [3, 6, 11, 20, 50, 1, 4, 5]],
-  5: [ALL_RARITIES, [2, 3, 5, 10, 21, 49, 5, 5]],
-  6: [ALL_RARITIES, [1, 2, 4, 7, 12, 22, 40, 12]],
+  1: [["垃圾", "普通", "精品", "宝藏", "噩梦"], [32, 50, 14, 1, 3]],
+  2: [["垃圾", "普通", "精品", "稀有", "宝藏", "噩梦"], [16, 35, 32, 10, 3, 4]],
+  3: [["垃圾", "普通", "精品", "稀有", "史诗", "宝藏", "噩梦"], [8, 18, 29, 29, 8, 3, 5]],
+  4: [ALL_RARITIES, [4, 9, 17, 28, 25, 7, 4, 6]],
+  5: [ALL_RARITIES, [2, 5, 10, 20, 28, 23, 5, 7]],
+  6: [ALL_RARITIES, [1, 3, 6, 12, 21, 28, 18, 11]],
 });
 
-const FISHING_LEVEL_EXP_BASE = 20;
-const PERFECT_CATCH_WINDOW_MS = 5000;
+const FISHING_LEVEL_EXP_BASE = 24;
+export const PERFECT_CATCH_WINDOW_MS = 4000;
+export const PERFECT_EXP_MULTIPLIER = 1.5;
+export const BOSS_EXP_MULTIPLIER = 2;
 export const NIGHTMARE_CURSE_HIDDEN_LAYERS = 2;
-export const FISHING_COOLDOWN_SECONDS = 6 * 60;
-export const FISHING_BENEFIT_DURATION_SECONDS = 30 * 60;
-export const FISHING_BITE_WAIT_MAX_SECONDS = 120;
-export const FISHING_BITE_WAIT_REDUCTION_PER_LEVEL_SECONDS = 2;
-export const FISHING_STAMINA_BASE = 10;
+export const FISHING_COOLDOWN_SECONDS = 5 * 60;
+export const FISHING_BENEFIT_DURATION_SECONDS = 35 * 60;
+export const FISHING_BITE_WAIT_MAX_SECONDS = 80;
+export const FISHING_BITE_WAIT_REDUCTION_PER_LEVEL_SECONDS = 1;
+export const FISHING_STAMINA_BASE = 8;
 export const FISHING_STAMINA_PER_LEVEL = 1;
 // 保留旧导出名作为 1 级/新玩家的初始体力上限。
 export const FISHING_STAMINA_MAX = FISHING_STAMINA_BASE;
 export const FISHING_STAMINA_COST = 1;
-export const FISHING_STAMINA_RECOVERY_MS = 30 * 60 * 1000;
+export const FISHING_STAMINA_RECOVERY_MS = 20 * 60 * 1000;
+export const FORCE_PULL_DIFFICULTY_RANGE = 80;
+export const TORPEDO_HOOK_WEIGHT_PER_ITEM = 3;
+export const TORPEDO_ROD_DAMAGE = 18;
+export const TORPEDO_PRICE_BOOST_MULTIPLIER = 1.1;
 
 export function getFishingBiteWaitMaxMs(level) {
   const safeLevel = Math.max(1, Math.floor(Number(level) || 1));
@@ -535,7 +582,7 @@ export function isPerfectCatch({
   return equipmentOverpowersFish || Boolean(hasAssist);
 }
 
-function getRarityPoolByBaitQuality(
+export function getRarityPoolByBaitQuality(
   quality,
   hasDebuff = false,
   treasureBonus = 0,
@@ -548,11 +595,11 @@ function getRarityPoolByBaitQuality(
   const treasureIndex = pool.indexOf("宝藏");
   const nightmareIndex = pool.indexOf("噩梦");
 
-  if (treasureIndex >= 0 && Number(treasureBonus) > 0) {
-    weights[treasureIndex] += Number(treasureBonus);
+  if (treasureIndex >= 0 && Number.isFinite(Number(treasureBonus))) {
+    weights[treasureIndex] = Math.max(0.5, weights[treasureIndex] + Number(treasureBonus));
   }
-  if (nightmareIndex >= 0 && Number(nightmareBonus) > 0) {
-    weights[nightmareIndex] += Number(nightmareBonus);
+  if (nightmareIndex >= 0 && Number.isFinite(Number(nightmareBonus))) {
+    weights[nightmareIndex] = Math.max(0.5, weights[nightmareIndex] + Number(nightmareBonus));
   }
   if (brideThreadActive && treasureIndex >= 0 && nightmareIndex >= 0) {
     const transferredWeight = weights[treasureIndex] / 2;
