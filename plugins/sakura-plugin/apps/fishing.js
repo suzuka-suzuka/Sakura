@@ -2203,6 +2203,7 @@ export default class Fishing extends plugin {
     const userId = e.user_id;
     const fishingManager = new FishingManager(groupId);
     const locationConfig = getFishingLocationConfig(fishingManager.getFishingLocation(userId));
+    const weather = getWeatherByTime();
     const staminaStatus = fishingManager.getFishingStaminaStatus(userId);
     const equippedRodId = fishingManager.getEquippedRod(userId);
     const equippedLineId = fishingManager.getEquippedLine(userId);
