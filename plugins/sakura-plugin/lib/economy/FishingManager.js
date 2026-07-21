@@ -1224,7 +1224,8 @@ export default class FishingManager {
   getUserCatchHistory(userId) {
     userId = String(userId);
     const rows = db.prepare(`
-        SELECT fish_id as fishId, count, success_count as successCount, max_weight as maxWeight
+        SELECT fish_id as fishId, count, success_count as successCount, max_weight as maxWeight,
+               shiny_count as shinyCount
         FROM fishing_counts
         WHERE group_id = ? AND user_id = ?
         ORDER BY success_count DESC

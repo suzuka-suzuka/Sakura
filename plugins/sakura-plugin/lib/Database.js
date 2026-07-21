@@ -104,6 +104,7 @@ class DB {
         count INTEGER DEFAULT 0,
         success_count INTEGER DEFAULT 0,
         max_weight REAL DEFAULT 0,
+        shiny_count INTEGER DEFAULT 0,
         PRIMARY KEY (group_id, user_id, fish_id)
       );
 
@@ -215,6 +216,9 @@ class DB {
     const fishingCountsColumns = this.db.prepare('PRAGMA table_info(fishing_counts)').all();
     if (!fishingCountsColumns.some((column) => column.name === 'max_weight')) {
       this.db.exec('ALTER TABLE fishing_counts ADD COLUMN max_weight REAL DEFAULT 0');
+    }
+    if (!fishingCountsColumns.some((column) => column.name === 'shiny_count')) {
+      this.db.exec('ALTER TABLE fishing_counts ADD COLUMN shiny_count INTEGER DEFAULT 0');
     }
 
     if (!fishingStatsColumns.some((column) => column.name === 'location')) {

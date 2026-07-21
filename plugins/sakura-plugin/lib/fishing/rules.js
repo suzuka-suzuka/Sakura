@@ -68,6 +68,26 @@ export const LOCAL_NIGHTMARE_EFFECT_BY_LOCATION = Object.freeze({
   mystic: "devour_buff",
 });
 
+// 异色个体：捕获时低概率触发的外观变体，金币与经验按倍率放大。
+// 宝藏本体是宝箱（=钱）、噩梦是惩罚事件，二者不参与异色；鱼雷同理。
+export const SHINY_CHANCE = 1 / 80;
+export const SHINY_PRICE_MULTIPLIER = 4;
+export const SHINY_EXP_MULTIPLIER = 2;
+// 异色个体搏斗难度提升，会触及更多“拉不动/溜鱼”判定，也更难完美收竿
+export const SHINY_DIFFICULTY_MULTIPLIER = 1.5;
+const SHINY_EXCLUDED_RARITIES = new Set(["宝藏", "噩梦"]);
+
+export function isShinyEligible(fish) {
+  if (!fish || fish.isTorpedo) return false;
+  if (!RARITY_CONFIG[fish.rarity]) return false;
+  return !SHINY_EXCLUDED_RARITIES.has(fish.rarity);
+}
+
+export function rollShiny(fish, random = Math.random) {
+  if (!isShinyEligible(fish)) return false;
+  return Math.max(0, Math.min(0.999999999999, Number(random()) || 0)) < SHINY_CHANCE;
+}
+
 export function getFishingLocationConfig(locationId) {
   return FISHING_LOCATIONS[locationId] || null;
 }
@@ -118,6 +138,16 @@ export function rollBossPlayerDamage(effectiveControl, random = Math.random) {
   const control = Math.max(0, Number(effectiveControl) || 0);
   const roll = Math.max(0, Math.min(0.999999999999, Number(random()) || 0));
   return Math.max(6, Math.floor(control / 10) + 5 + Math.floor(roll * 5));
+}
+
+// 钓鱼等级折算的首领战搏斗加成：视作叠加到控制力上的“等效战力”，随等级线性提升并封顶。
+// 只注入首领战的伤害与收线，普通钓鱼仍纯由装备决定，避免等级碾压使鱼竿/鱼线贬值。
+export const FISHING_COMBAT_BONUS_PER_LEVEL = 2.5;
+export const FISHING_COMBAT_BONUS_CAP = 45;
+
+export function getBossCombatBonus(level) {
+  const safeLevel = Math.max(1, Math.floor(Number(level) || 1));
+  return Math.min(FISHING_COMBAT_BONUS_CAP, (safeLevel - 1) * FISHING_COMBAT_BONUS_PER_LEVEL);
 }
 
 export function getBossAttackCooldownRemaining(

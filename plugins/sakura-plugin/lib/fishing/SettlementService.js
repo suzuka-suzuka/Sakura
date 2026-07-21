@@ -61,8 +61,9 @@ export default class FishingSettlementService {
     return result.changes === 1;
   }
 
-  _recordCatch({ fishId, success, earnings, rodId, masteryGain, recordCatch, weight }) {
+  _recordCatch({ fishId, success, earnings, rodId, masteryGain, recordCatch, weight, shiny = false }) {
     let newlyRecorded = false;
+    let newlyShiny = false;
     if (recordCatch) {
       db.prepare(`
           UPDATE fishing_stats
@@ -73,30 +74,36 @@ export default class FishingSettlementService {
 
       if (fishId) {
         const successIncrement = success ? 1 : 0;
+        // 异色只在成功捕获时计入图鉴
+        const shinyIncrement = success && shiny ? 1 : 0;
         // 图鉴口径：仅成功渔获刷新最大重量；新收录 = success_count 首次由 0 变正
         const recordedWeight = success ? normalizeWeight(weight) : 0;
         if (success) {
           const previous = db.prepare(`
-              SELECT success_count FROM fishing_counts
+              SELECT success_count, shiny_count FROM fishing_counts
               WHERE group_id = ? AND user_id = ? AND fish_id = ?
           `).get(this.groupId, this.userId, fishId);
           newlyRecorded = !(previous?.success_count > 0);
+          newlyShiny = shinyIncrement > 0 && !(previous?.shiny_count > 0);
         }
         db.prepare(`
-            INSERT INTO fishing_counts (group_id, user_id, fish_id, count, success_count, max_weight)
-            VALUES (?, ?, ?, 1, ?, ?)
+            INSERT INTO fishing_counts (group_id, user_id, fish_id, count, success_count, max_weight, shiny_count)
+            VALUES (?, ?, ?, 1, ?, ?, ?)
             ON CONFLICT(group_id, user_id, fish_id)
             DO UPDATE SET count = count + 1,
                           success_count = success_count + ?,
-                          max_weight = MAX(COALESCE(max_weight, 0), ?)
+                          max_weight = MAX(COALESCE(max_weight, 0), ?),
+                          shiny_count = COALESCE(shiny_count, 0) + ?
         `).run(
           this.groupId,
           this.userId,
           fishId,
           successIncrement,
           recordedWeight,
+          shinyIncrement,
           successIncrement,
           recordedWeight,
+          shinyIncrement,
         );
       }
     }
@@ -109,7 +116,7 @@ export default class FishingSettlementService {
           DO UPDATE SET mastery = mastery + ?
       `).run(this.groupId, this.userId, rodId, masteryGain, masteryGain);
     }
-    return newlyRecorded;
+    return { newlyRecorded, newlyShiny };
   }
 
   // 发放钓鱼经验并检测升级，仅在成功渔获时由结算方法调用
@@ -150,6 +157,7 @@ export default class FishingSettlementService {
     recordCatch = success,
     expGain = 0,
     weight = 0,
+    shiny = false,
   }) {
     const safeEarnings = normalizeNonNegativeInteger(earnings);
     const safeMastery = normalizeNonNegativeInteger(masteryGain);
@@ -163,7 +171,7 @@ export default class FishingSettlementService {
       if (!this._claimSession({ sessionId, fishId, success, earnings: safeEarnings })) {
         return { success: false, reason: "duplicate" };
       }
-      const newlyRecorded = this._recordCatch({
+      const { newlyRecorded, newlyShiny } = this._recordCatch({
         fishId,
         success,
         earnings: safeEarnings,
@@ -171,13 +179,14 @@ export default class FishingSettlementService {
         masteryGain: safeMastery,
         recordCatch: Boolean(recordCatch),
         weight,
+        shiny: Boolean(shiny),
       });
       const levelUp = this._grantExp(safeExpGain);
-      return { success: true, levelUp, newlyRecorded };
+      return { success: true, levelUp, newlyRecorded, newlyShiny };
     })();
   }
 
-  settleCoinCatch({ sessionId, fishId, earnings, rodId, note, expGain = 0, weight = 0 }) {
+  settleCoinCatch({ sessionId, fishId, earnings, rodId, note, expGain = 0, weight = 0, shiny = false }) {
     const safeEarnings = normalizeNonNegativeInteger(earnings);
     const safeExpGain = normalizeNonNegativeInteger(expGain);
     if (!sessionId || safeEarnings == null || safeExpGain == null) {
@@ -232,7 +241,7 @@ export default class FishingSettlementService {
         );
       }
 
-      const newlyRecorded = this._recordCatch({
+      const { newlyRecorded, newlyShiny } = this._recordCatch({
         fishId,
         success: true,
         earnings: debtResult.earnings,
@@ -240,9 +249,10 @@ export default class FishingSettlementService {
         masteryGain: 1,
         recordCatch: true,
         weight,
+        shiny: Boolean(shiny),
       });
       const levelUp = this._grantExp(safeExpGain);
-      return { success: true, ...debtResult, levelUp, newlyRecorded };
+      return { success: true, ...debtResult, levelUp, newlyRecorded, newlyShiny };
     })();
   }
 
@@ -273,7 +283,7 @@ export default class FishingSettlementService {
         `).run(this.groupId, this.userId, fishId);
       }
 
-      const newlyRecorded = this._recordCatch({
+      const { newlyRecorded, newlyShiny } = this._recordCatch({
         fishId,
         success: true,
         earnings: 0,
@@ -283,7 +293,7 @@ export default class FishingSettlementService {
         weight,
       });
       const levelUp = this._grantExp(safeExpGain);
-      return { success: true, added, levelUp, newlyRecorded };
+      return { success: true, added, levelUp, newlyRecorded, newlyShiny };
     })();
   }
 }

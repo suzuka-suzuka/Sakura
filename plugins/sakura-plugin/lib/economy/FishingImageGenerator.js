@@ -130,6 +130,7 @@ export default class FishingImageGenerator extends EconomyImageGenerator {
     sections,
     collected,
     sighted,
+    shinyCollected = 0,
     total,
     locationLabel = null,
     pageIndex = null,
@@ -178,7 +179,8 @@ export default class FishingImageGenerator extends EconomyImageGenerator {
     ctx.fillStyle = '#5D4037'
     ctx.font = `26px ${this.fontFamily}`
     const locationSuffix = locationLabel ? ` · 📍${locationLabel}` : ""
-    ctx.fillText(`📖 已收录 ${collected}/${total} · 👀 目击 ${sighted}${locationSuffix}`, 200, 130)
+    const shinySuffix = shinyCollected > 0 ? ` · 🌈 异色 ${shinyCollected}` : ""
+    ctx.fillText(`📖 已收录 ${collected}/${total} · 👀 目击 ${sighted}${shinySuffix}${locationSuffix}`, 200, 130)
 
     const barX = 200
     const barY = 146
@@ -244,6 +246,19 @@ export default class FishingImageGenerator extends EconomyImageGenerator {
 
         if (entry.status === 'collected') {
           await this.drawFishImage(ctx, entry.fishId, imgX, imgY, imgSize)
+          // 捕获过异色个体的卡片：右上角虹光角标
+          if (entry.shinyCount > 0) {
+            const badgeX = imgX + imgSize - 14
+            const badgeY = imgY + 14
+            ctx.beginPath()
+            ctx.arc(badgeX, badgeY, 15, 0, Math.PI * 2)
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.85)'
+            ctx.fill()
+            ctx.font = `20px ${this.fontFamily}`
+            ctx.textAlign = 'center'
+            ctx.fillText('🌈', badgeX, badgeY + 7)
+            ctx.textAlign = 'left'
+          }
         } else if (entry.status === 'sighted') {
           await this.drawFishSilhouette(ctx, entry.fishId, imgX, imgY, imgSize)
         } else {

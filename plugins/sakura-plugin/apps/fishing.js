@@ -25,11 +25,15 @@ import {
   FISHING_COOLDOWN_SECONDS,
   FISHING_LOCATIONS,
   RARITY_CONFIG,
+  SHINY_DIFFICULTY_MULTIPLIER,
+  SHINY_EXP_MULTIPLIER,
+  SHINY_PRICE_MULTIPLIER,
   WEATHER_CONFIG,
   applyFishFightStateModifiers,
   calculateLegacyFishPrice,
   createProgressBar,
   getBossAttackCooldownRemaining,
+  getBossCombatBonus,
   getBossFightTimeoutMs,
   getFishFightStateChangeDelay,
   getFishFightStateConfig,
@@ -44,11 +48,13 @@ import {
   rollFishExp,
   rollFishingBiteWaitMs,
   rollBossPlayerDamage,
+  rollShiny,
   selectNextFishFightState,
   selectBossFromData,
   selectFishFromData,
   validateLegacyFishData,
 } from "../lib/fishing/rules.js";
+import { getShinyFishImagePath } from "../lib/fishing/shinyImage.js";
 import {
   acquireRedisLock,
   completeFishingAttempt,
@@ -114,7 +120,13 @@ function formatCatchTail(expGain, isPerfect, settleResult, dexProgress) {
   const dexMsg = dexProgress
     ? `\n📖 图鉴新收录！(${dexProgress.collected}/${dexProgress.total})`
     : "";
-  return `${perfectMsg}\n✨ 经验：+${expGain}${levelUpMsg}${staminaResetMsg}${dexMsg}`;
+  const shinyDexMsg = settleResult?.newlyShiny ? `\n🌈 图鉴异色标记点亮！` : "";
+  return `${perfectMsg}\n✨ 经验：+${expGain}${levelUpMsg}${staminaResetMsg}${dexMsg}${shinyDexMsg}`;
+}
+
+// 异色个体逃走时的专属惋惜提示
+function formatShinyEscape(fish) {
+  return fish?.isShiny ? `\n🌈 那抹奇异的虹光一闪，消失在水底…` : "";
 }
 
 function formatFishFightState(stateId) {
@@ -472,6 +484,7 @@ export default class Fishing extends plugin {
         `🧵 鱼线永久耐久 -${attackResult.lineDamage}｜🎣 鱼竿 -${attackResult.rodDamage}\n`,
         effectMessages.length > 0 ? `${effectMessages.join("\n")}\n` : "",
         `${reasons.join("\n")}\n❌ 首领挑战失败！`,
+        formatShinyEscape(state.fish),
       ]);
       return false;
     }
@@ -521,7 +534,6 @@ export default class Fishing extends plugin {
 
       await e.reply([
         `👑 首领战开始！【${state.fish.name}】现身！\n`,
-        `⚖️ 重量：${state.fish.actualWeight}｜🎯 难度：${state.fish.difficulty}｜⚔️ 攻击力：${state.fish.attack}\n`,
         `🌀 特殊机制【${state.fish.boss_mechanic.name}】：${state.fish.boss_mechanic.description}\n\n`,
         `${formatBossCombatStatus(state, fishingManager, e.user_id)}\n\n`,
         `📝 指令：\n  「拉」拉近距离并增加张力\n  「溜」降低张力但会拉远距离\n  「攻」攻击首领（5秒冷却）\n`,
@@ -577,9 +589,11 @@ export default class Fishing extends plugin {
       return false;
     }
 
+    // 结算会清理会话，异色标记先取出用于逃走文案
+    const shinyEscapeMsg = formatShinyEscape(state.fish);
     try {
       const settled = await this.finishFailedAttempt(e, state);
-      if (settled && message) await e.reply(message, false, true);
+      if (settled && message) await e.reply(`${message}${shinyEscapeMsg}`, false, true);
       return settled;
     } catch (err) {
       logger.error(`[钓鱼] 超时处理失败: ${err.stack || err}`);
@@ -787,6 +801,12 @@ export default class Fishing extends plugin {
             brideThreadActive: brideThreadResult.consumed,
           },
         );
+      // 异色判定在选鱼时完成并随会话流转；溜掉即失去，咬钩提示会预告虹光。
+      // selectedFish 是浅拷贝副本，直接抬高难度不会污染 fish.json，且下游搏斗判定与展示统一读它。
+      selectedFish.isShiny = rollShiny(selectedFish);
+      if (selectedFish.isShiny) {
+        selectedFish.difficulty = Math.round(selectedFish.difficulty * SHINY_DIFFICULTY_MULTIPLIER);
+      }
       const fishingLevel = fishingManager.getUserFishingLevel(userId);
       const waitTime = rollFishingBiteWaitMs(fishingLevel);
 
@@ -862,24 +882,29 @@ export default class Fishing extends plugin {
 
         currentState.phase = FISHING_PHASE.weightCheck;
         currentState.isOverweight = !fish.isTorpedo && fishWeight > lineCapacity;
+        const shinyHint = fish.isShiny ? `🌈 水面泛起一层奇异的虹光…！\n` : "";
         if (isBossFish(fish) && currentState.isOverweight) {
           await e.reply([
+            shinyHint,
             `👑 水面轰然炸开，【${fish.name}】吞下了首领鱼饵！\n`,
             `⚖️ 这股力量远超鱼线承重……回复「收竿」迎战，回复「放弃」保住装备！`,
           ], false, true);
         } else if (isBossFish(fish)) {
           await e.reply([
+            shinyHint,
             `👑 水面轰然炸开，【${fish.name}】吞下了首领鱼饵！\n`,
             `⚔️ 快回复「收竿」完成重量判定并进入首领战！`,
           ], false, true);
         } else if (currentState.isOverweight) {
           await e.reply([
+            shinyHint,
             `🌊 浮漂猛地沉下去了！\n`,
             `😨 这条鱼太大了！鱼线可能撑不住...\n`,
             `📝 回复「收竿」拼了，回复「放弃」保平安`,
           ], false, true);
         } else {
           await e.reply([
+            shinyHint,
             `🌊 浮漂动了！有鱼上钩啦！\n`,
             `🤩 快！回复「收竿」把它拉上来！`,
           ], false, true);
@@ -980,8 +1005,11 @@ export default class Fishing extends plugin {
 
     if (state.phase === FISHING_PHASE.weightCheck) {
       if (action === FISHING_ACTION.abandon) {
+        const shinyReleaseMsg = fish.isShiny
+          ? `\n🌈 你亲手放走了一抹罕见的虹光…忍痛割爱。`
+          : "";
         await this.finishFailedAttempt(e, state);
-        await e.reply(`🎣 放生了这条鱼，期待下次相遇~`);
+        await e.reply(`🎣 放生了这条鱼，期待下次相遇~${shinyReleaseMsg}`);
         return;
       }
 
@@ -1103,6 +1131,7 @@ export default class Fishing extends plugin {
             lineBreak.saved
               ? `🌊 河神的祝福护住了【${lineConfig.name}】！${damageResult.msg}`
               : `🧵 失去了【${lineConfig.name}】${damageResult.msg}`,
+            formatShinyEscape(fish),
           ]);
 
           return;
@@ -1176,6 +1205,7 @@ export default class Fishing extends plugin {
             lineBreak.saved
               ? `🌊 河神的祝福护住了【${lineConfig.name}】！`
               : `🧵 鱼线应声而断，失去了【${lineConfig.name}】`,
+            formatShinyEscape(fish),
           ]);
           return;
         }
@@ -1197,6 +1227,10 @@ export default class Fishing extends plugin {
       const updatedControl = fishingManager.getRodControl(userId, rodConfig.id) + rodMastery;
       const fishStateLabel = formatFishFightState(state.fishState);
       const bossFight = isBossFish(fish);
+      // 首领战按钓鱼等级追加搏斗加成；普通渔获恒为 0，收线与伤害不受等级影响。
+      const bossCombatBonus = bossFight
+        ? getBossCombatBonus(fishingManager.getUserFishingLevel(userId))
+        : 0;
       const contextSeconds = bossFight ? Math.ceil(getBossFightTimeoutMs(fish) / 1000) + 5 : 65;
 
       if (action === FISHING_ACTION.attack) {
@@ -1231,7 +1265,7 @@ export default class Fishing extends plugin {
 
         state.bossLastPlayerAttackAt = now;
         state.fightingRounds += 1;
-        const damage = rollBossPlayerDamage(updatedControl);
+        const damage = rollBossPlayerDamage(updatedControl + bossCombatBonus);
         state.bossHp = Math.max(0, state.bossHp - damage);
 
         if (state.bossHp <= 0 && state.bossAttackTimer) {
@@ -1260,7 +1294,7 @@ export default class Fishing extends plugin {
         state.fightingRounds++;
 
         // 除数 6：保证碳素级控制力在首领战里也有正向距离收益，Boss 门槛不至于全卡在拉力上
-        const pullPower = Math.max(8, Math.floor(updatedControl / 6));
+        const pullPower = Math.max(8, Math.floor((updatedControl + bossCombatBonus) / 6));
         const fishResist = Math.max(3, Math.floor(fishDifficulty / 20));
         const effects = applyFishFightStateModifiers({
           stateId: state.fishState,
@@ -1299,6 +1333,7 @@ export default class Fishing extends plugin {
             lineBreak.saved
               ? `🌊 河神的祝福护住了【${lineConfig.name}】！`
               : `🧵 鱼线断掉了，失去了【${lineConfig.name}】`,
+            formatShinyEscape(fish),
           ]);
           return;
         }
@@ -1696,11 +1731,21 @@ export default class Fishing extends plugin {
 
     const rarity = RARITY_CONFIG[fish.rarity] || { color: "⚪", level: 0 };
     const fishWeight = fish.actualWeight;
-    const fishImagePath = getFishImagePath(fish.id);
-    // 图片资源尚未就位的鱼先不带图，避免整条渔获消息发送失败
+    const isShiny = Boolean(fish.isShiny);
+    // 异色优先取虹光/金色图；生成失败则回退原图。图片资源缺失时不带图，避免整条消息发送失败
+    let fishImagePath = null;
+    if (isShiny) {
+      try {
+        fishImagePath = await getShinyFishImagePath(fish.id);
+      } catch (err) {
+        logger.warn(`[钓鱼] 生成异色图失败，回退原图: ${err.message}`);
+      }
+    }
+    if (!fishImagePath) fishImagePath = getFishImagePath(fish.id);
     const fishImageSegment = fs.existsSync(fishImagePath)
       ? segment.image(`file:///${fishImagePath}`)
       : "";
+    const shinyNameTag = isShiny ? "🌈异色·" : "";
     const economyManager = new EconomyManager(e);
     const settlement = new FishingSettlementService(e);
     const isPerfect = Boolean(state.isPerfect) && !state.hasLostSoul;
@@ -1718,6 +1763,7 @@ export default class Fishing extends plugin {
       (nightmareEffects?.expMultiplier || 1) *
       (state.hasStarDouble ? 2 : 1) *
       (state.hasMonsterBait && fish.rarity === "噩梦" ? 2 : 1) *
+      (isShiny ? SHINY_EXP_MULTIPLIER : 1) *
       lostSoulMultiplier,
     ));
     const lostSoulPenaltyMsg = state.hasLostSoul
@@ -1840,7 +1886,8 @@ export default class Fishing extends plugin {
 
       const buffMultiplier = await this.getFishSellBuffMultiplier(groupId, userId);
       const merchantMultiplier = fishingManager.getMerchantCoinMultiplier(userId);
-      const priceBeforeLostSoul = Math.round(price * buffMultiplier * merchantMultiplier);
+      const shinyMultiplier = isShiny ? SHINY_PRICE_MULTIPLIER : 1;
+      const priceBeforeLostSoul = Math.round(price * buffMultiplier * merchantMultiplier * shinyMultiplier);
       const finalPrice = Math.round(priceBeforeLostSoul * lostSoulMultiplier);
 
       const settleResult = settlement.settleCoinCatch({
@@ -1848,9 +1895,10 @@ export default class Fishing extends plugin {
         fishId: fish.id,
         earnings: finalPrice,
         rodId: rodConfig.id,
-        note: `钓鱼出售 ${fish.name}`,
+        note: `钓鱼出售 ${isShiny ? "异色·" : ""}${fish.name}`,
         expGain,
         weight: fish.actualWeight,
+        shiny: isShiny,
       });
       const dexProgress = getDexProgress(fishingManager, userId, settleResult);
       const newMastery = fishingManager.getRodMastery(userId, rodConfig.id);
@@ -1882,6 +1930,10 @@ export default class Fishing extends plugin {
         merchantMsg = `💰 商人加成：+${bonusPercent}%！\n`;
       }
 
+      const shinyMsg = isShiny
+        ? `🌈 异色个体！价值 ×${SHINY_PRICE_MULTIPLIER}、经验 ×${SHINY_EXP_MULTIPLIER}！\n`
+        : "";
+
       const debtMsg = settleResult.debtPaid > 0
         ? `👻 亡者船票扣走 ${settleResult.debtPaid} 樱花币，剩余债务 ${settleResult.remainingDebt}\n`
         : "";
@@ -1895,12 +1947,12 @@ export default class Fishing extends plugin {
       const bossVictory = isBossFish(fish);
       const resultMsg = [
         bossVictory
-          ? `🏆 单人讨伐成功！击败了${state.locationId ? "当前钓点的" : ""}首领【${fish.name}】！\n`
-          : `🎉 钓到了【${fish.name}】！\n`,
+          ? `🏆 单人讨伐成功！击败了${state.locationId ? "当前钓点的" : ""}首领【${shinyNameTag}${fish.name}】！\n`
+          : `🎉 钓到了【${shinyNameTag}${fish.name}】！\n`,
         fishImageSegment,
         `📝 ${fish.description}\n`,
         bossVictory
-          ? `👑 类型：钓点首领｜⚔️ 攻击力：${fish.attack}｜🌀 ${fish.boss_mechanic.name}\n`
+          ? `👑 类型：钓点首领｜🌀 ${fish.boss_mechanic.name}\n`
           : `📊 稀有度：${rarity.color}${fish.rarity}${weatherTag}\n`,
         `⚖️ 重量：${fishWeight}\n`,
         bossVictory
@@ -1910,6 +1962,7 @@ export default class Fishing extends plugin {
         priceBoostMsg,
         buffMsg,
         merchantMsg,
+        shinyMsg,
         lostSoulPenaltyMsg,
         debtMsg,
         soulRecoveryMsg,
@@ -2399,6 +2452,7 @@ export default class Fishing extends plugin {
               successCount,
               escapeCount: Math.max(0, encounterCount - successCount),
               maxWeight: record?.maxWeight || 0,
+              shinyCount: record?.shinyCount || 0,
             };
           });
         return {
@@ -2416,6 +2470,11 @@ export default class Fishing extends plugin {
         sum + section.entries.filter((entry) => entry.status === "sighted").length,
       0,
     );
+    const shinyCollected = sections.reduce(
+      (sum, section) =>
+        sum + section.entries.filter((entry) => entry.shinyCount > 0).length,
+      0,
+    );
     const userData = fishingManager.getUserData(targetId);
 
     try {
@@ -2427,6 +2486,7 @@ export default class Fishing extends plugin {
         sections,
         collected,
         sighted,
+        shinyCollected,
         total: dexFishData.length,
         locationLabel: dexLocationConfig
           ? `${dexLocationConfig.emoji}${dexLocationConfig.name}`
@@ -2445,6 +2505,7 @@ export default class Fishing extends plugin {
             prompt: `📖 点击查看钓鱼图鉴（共 ${images.length} 页）`,
             news: [
               { text: `📖 已收录 ${collected}/${dexFishData.length}` },
+              { text: `🌈 异色 ${shinyCollected}` },
               { text: `👀 目击 ${sighted}` },
               { text: `📚 共 ${images.length} 页` },
             ],
