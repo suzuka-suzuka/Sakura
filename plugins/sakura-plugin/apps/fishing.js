@@ -1600,25 +1600,22 @@ export default class Fishing extends plugin {
         break;
       }
 
-      case "rod_damage_control_loss": {
-        const controlLoss = normalizePenalty(effect.control_loss || 10);
-        const controlResult = fishingManager.reduceRodControl(
+      case "rod_control_loss": {
+        const controlLoss = normalizePenalty(effect.control_loss || 20);
+        const effectResult = fishingManager.applyRodControlLoss(
           e.user_id,
           rodConfig.id,
           controlLoss,
         );
-        const rodDamage = normalizePenalty(effect.rod_damage || 10);
-        const damageResult = applyRodDamage(
-          fishingManager,
-          e.user_id,
-          rodConfig,
-          rodDamage,
-        );
-        rodBroken ||= damageResult.isBroken;
-        const controlMessage = controlResult.applied && !damageResult.isBroken
-          ? "\n🕸️ 鱼竿内部留下了一处难以修复的暗伤。"
-          : "";
-        message = `🦈 骨刺狠狠撕磨着竿身！${damageResult.msg}${controlMessage}`;
+        rodBroken ||= effectResult.isBroken;
+        if (effectResult.isBroken) {
+          message = `🦈 骨刺留下的暗伤彻底侵蚀了竿身，【${rodConfig.name}】应声断裂！` +
+            `\n🎣 失去了【${rodConfig.name}】`;
+        } else if (effectResult.controlResult.applied && !effectResult.isBroken) {
+          message = "🦈 骨刺划过竿身，鱼竿内部留下了一处难以修复的暗伤。";
+        } else {
+          message = "🦈 骨刺狠狠划过竿身，却没有留下新的暗伤。";
+        }
         break;
       }
 

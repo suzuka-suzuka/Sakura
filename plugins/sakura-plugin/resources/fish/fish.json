@@ -2325,9 +2325,8 @@
     "base_price": 0,
     "difficulty": 100,
     "nightmare_effect": {
-      "type": "rod_damage_control_loss",
-      "rod_damage": 10,
-      "control_loss": 10
+      "type": "rod_control_loss",
+      "control_loss": 20
     },
     "weight": [
       28,

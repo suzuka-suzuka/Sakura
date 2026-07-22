@@ -291,12 +291,30 @@ export default class FishingImageGenerator extends EconomyImageGenerator {
           ctx.fillStyle = '#795548'
           ctx.font = `16px ${this.fontFamily}`
           if (entry.status === 'collected') {
-            const shinySuffix = entry.shinyCount > 0 ? ` · 异色 ×${entry.shinyCount}` : ''
-            ctx.fillText(
-              this.truncateText(ctx, `捕获 ×${entry.successCount}${shinySuffix}`, cellWidth - 12),
-              centerX,
-              y + 155,
-            )
+            const shinyCount = Math.max(0, Math.floor(Number(entry.shinyCount) || 0))
+            const successCount = Math.max(0, Math.floor(Number(entry.successCount) || 0))
+            if (shinyCount > 0) {
+              const countSegments = [
+                { text: '捕获 ×', color: '#795548' },
+                { text: String(shinyCount), color: '#C026D3' },
+                { text: `|${successCount}`, color: '#795548' },
+              ]
+              const countWidth = countSegments.reduce(
+                (width, segment) => width + ctx.measureText(segment.text).width,
+                0,
+              )
+              let countX = centerX - countWidth / 2
+              ctx.save()
+              ctx.textAlign = 'left'
+              for (const segment of countSegments) {
+                ctx.fillStyle = segment.color
+                ctx.fillText(segment.text, countX, y + 155)
+                countX += ctx.measureText(segment.text).width
+              }
+              ctx.restore()
+            } else {
+              ctx.fillText(`捕获 ×${successCount}`, centerX, y + 155)
+            }
             if (entry.maxWeight > 0) {
               ctx.fillText(`最大 ${Math.round(entry.maxWeight * 100) / 100}`, centerX, y + 174)
             }

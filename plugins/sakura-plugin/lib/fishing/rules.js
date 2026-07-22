@@ -67,7 +67,7 @@ export const BOSS_MECHANIC_TYPES = Object.freeze([
 export const LOCAL_NIGHTMARE_CHANCE = 0.4;
 export const NIGHTMARE_EFFECT_TYPES = Object.freeze([
   "rod_damage",
-  "rod_damage_control_loss",
+  "rod_control_loss",
   "steal_coins_flat",
   "steal_coins_percent",
   "curse",

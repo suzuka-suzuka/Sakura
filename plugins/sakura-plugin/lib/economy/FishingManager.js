@@ -933,6 +933,42 @@ export default class FishingManager {
     return transaction.immediate();
   }
 
+  breakRod(userId, rodId) {
+    userId = String(userId);
+    const transaction = db.transaction(() => {
+      const removed = db.prepare(`
+          DELETE FROM inventory
+          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count > 0
+      `).run(this.groupId, userId, rodId);
+      if (removed.changes !== 1) return false;
+
+      db.prepare(`
+          DELETE FROM rod_stats
+          WHERE group_id = ? AND user_id = ? AND rod_id = ?
+      `).run(this.groupId, userId, rodId);
+      db.prepare(`
+          UPDATE fishing_stats
+          SET rod = CASE WHEN rod = ? THEN NULL ELSE rod END
+          WHERE group_id = ? AND user_id = ?
+      `).run(rodId, this.groupId, userId);
+      return true;
+    });
+    return transaction.immediate();
+  }
+
+  // 骸骨鲨只施加暗伤；本次暗伤耗尽剩余控制力时直接断竿。
+  applyRodControlLoss(userId, rodId, controlLoss) {
+    const safeControlLoss = Math.max(0, Math.floor(Number(controlLoss) || 0));
+    const controlResult = this.reduceRodControl(userId, rodId, safeControlLoss);
+    const controlBroken = safeControlLoss > 0 &&
+      controlResult.currentControl <= 0 &&
+      this.breakRod(userId, rodId);
+    return {
+      controlResult,
+      isBroken: Boolean(controlBroken),
+    };
+  }
+
   clearRodDamage(userId, rodId) {
     userId = String(userId);
     db.prepare(`
