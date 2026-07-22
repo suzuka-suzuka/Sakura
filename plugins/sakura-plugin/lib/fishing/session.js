@@ -17,6 +17,12 @@ export const FISHING_ACTION = Object.freeze({
   attack: "attack",
 });
 
+// 精准溜鱼中，无论最后一次选择“拉”还是“溜”，鱼逃远都采用同一结算口径。
+export const FIGHT_ESCAPE_SETTLEMENT_OPTIONS = Object.freeze({
+  recordCatch: true,
+  masteryGain: 1,
+});
+
 export function parseFishingAction(phase, message) {
   const msg = String(message || "").trim();
   if (phase === FISHING_PHASE.weightCheck) {

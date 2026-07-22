@@ -13,6 +13,7 @@ import Setting from "../lib/setting.js";
 import FishingSettlementService from "../lib/fishing/SettlementService.js";
 import {
   FISHING_ACTION,
+  FIGHT_ESCAPE_SETTLEMENT_OPTIONS,
   FishingSessionStore,
   FISHING_PHASE,
   parseFishingAction,
@@ -1411,7 +1412,7 @@ export default class Fishing extends plugin {
         }
 
         if (state.distance >= 100) {
-          await this.finishFailedAttempt(e, state, { recordCatch: true, masteryGain: 1 });
+          await this.finishFailedAttempt(e, state, FIGHT_ESCAPE_SETTLEMENT_OPTIONS);
           await e.reply([
             bossFight ? `🌊 首领冲回了水域深处！\n` : `🌊 鱼跑得太远了！\n`,
             `👋 只能目送它离开了...\n`,
@@ -1456,7 +1457,7 @@ export default class Fishing extends plugin {
         state.distance += effects.distanceEffect;
 
         if (state.distance >= 100) {
-          await this.finishFailedAttempt(e, state, { recordCatch: true });
+          await this.finishFailedAttempt(e, state, FIGHT_ESCAPE_SETTLEMENT_OPTIONS);
           await e.reply([
             bossFight ? `🌊 首领冲回了水域深处！\n` : `🌊 鱼跑得太远了！\n`,
             `👋 只能目送它离开了...\n`,
