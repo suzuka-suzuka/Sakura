@@ -1,9 +1,19 @@
-export const REVIVE_COIN_BASE_AMOUNT = 35;
+export const REVIVE_COIN_BASE_AMOUNT = 100;
 export const REVIVE_COIN_PER_LEVEL = 2;
 export const TRANSFER_UNLOCK_FISHING_LEVEL = 5;
 export const AI_TRANSFER_MAX_BALANCE_PERCENT = 20;
 export const AI_TRANSFER_GROUP_COOLDOWN_SECONDS = 2 * 60;
-export const EQUIPMENT_SELL_PRICE_RATIO = 0.55;
+export const EQUIPMENT_SELL_PRICE_RATIO = 0.8;
+
+export function calculateEquipmentSellPrice(originalPrice, durabilityRatio = 1) {
+  const price = Number(originalPrice);
+  if (!Number.isFinite(price) || price <= 0) return 0;
+  const numericDurabilityRatio = Number(durabilityRatio);
+  const safeDurabilityRatio = Number.isFinite(numericDurabilityRatio)
+    ? Math.max(0, Math.min(1, numericDurabilityRatio))
+    : 1;
+  return Math.floor(price * EQUIPMENT_SELL_PRICE_RATIO * safeDurabilityRatio);
+}
 
 function normalizeFishingLevel(level) {
   const numericLevel = Number(level);

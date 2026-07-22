@@ -14,11 +14,14 @@ import {
 } from "../lib/economy/time.js";
 import {
   canUseTransfer,
-  EQUIPMENT_SELL_PRICE_RATIO,
+  calculateEquipmentSellPrice,
   getReviveCoinPolicy,
   TRANSFER_UNLOCK_FISHING_LEVEL,
 } from "../lib/economy/rules.js";
-import { FISHING_BENEFIT_DURATION_SECONDS } from "../lib/fishing/rules.js";
+import {
+  FISHING_BENEFIT_DURATION_SECONDS,
+  RARITY_CONFIG,
+} from "../lib/fishing/rules.js";
 import _ from "lodash";
 import Setting from "../lib/setting.js";
 
@@ -302,6 +305,7 @@ export default class Economy extends plugin {
         description: item?.description || "尚未收录说明的物品",
         icon: item?.icon,
         type: item?.type,
+        sellPrice: Number(item?.sell_price) || 0,
         handler,
         count,
         bossBait: Boolean(item?.boss_bait),
@@ -310,19 +314,21 @@ export default class Economy extends plugin {
 
       if (itemId.startsWith("rod_")) {
         const durability = fishingManager.getRodDurabilityInfo(e.user_id, itemId);
+        const rodStats = fishingManager.getRodStats(e.user_id, itemId);
         entry.kind = "rod";
         entry.mastery = fishingManager.getRodMastery(e.user_id, itemId);
+        entry.control = {
+          current: fishingManager.getRodControl(e.user_id, itemId),
+          base: Number(item?.control) || 0,
+          loss: rodStats.controlLoss,
+        };
         entry.durability = {
           current: durability.currentDurability,
           max: durability.maxDurability,
         };
       } else if (itemId.startsWith("line_")) {
-        const durability = fishingManager.getLineDurabilityInfo(e.user_id, itemId);
         entry.kind = "line";
-        entry.durability = {
-          current: durability.currentDurability,
-          max: durability.maxDurability,
-        };
+        entry.capacity = item?.capacity;
       }
       return entry;
     }).sort((left, right) => {
@@ -564,11 +570,15 @@ export default class Economy extends plugin {
     const shopManager = new ShopManager();
     const inventoryManager = new InventoryManager(e);
 
-    const item = shopManager.findShopItemByName(itemName) || shopManager.findShopItemById(itemName);
-    if (!item || item.type !== 'equipment') return false;
+    const item = shopManager.findItemByName(itemName) || shopManager.findItemById(itemName);
+    const isEquipment = item?.type === "equipment";
+    const treasureSellPrice = Number(item?.sell_price);
+    const isSellableTreasure = item?.type === "treasure" &&
+      Number.isSafeInteger(treasureSellPrice) && treasureSellPrice > 0;
+    if (!item || (!isEquipment && !isSellableTreasure)) return false;
 
     const fishingSessionKey = `sakura:fishing:session:${e.group_id}:${e.user_id}`;
-    if (await redis.exists(fishingSessionKey)) {
+    if (isEquipment && await redis.exists(fishingSessionKey)) {
       await e.reply("钓鱼过程中不能出售装备，请先完成本次钓鱼。", 10);
       return true;
     }
@@ -579,51 +589,51 @@ export default class Economy extends plugin {
       return true;
     }
 
-    let sellPrice = Math.floor(item.price * EQUIPMENT_SELL_PRICE_RATIO);
+    let durabilityRatio = 1;
     let durabilityMsg = "";
     
     const fishingManager = new FishingManager(e.group_id);
-    const rodConfig = fishingManager.getRodConfig(itemId);
-    const lineConfig = fishingManager.getLineConfig(itemId);
+    const rodConfig = isEquipment ? fishingManager.getRodConfig(itemId) : null;
 
     if (rodConfig) {
       const durabilityInfo = fishingManager.getRodDurabilityInfo(e.user_id, itemId);
       if (durabilityInfo.maxDurability > 0) {
-        const ratio = durabilityInfo.currentDurability / durabilityInfo.maxDurability;
-        sellPrice = Math.floor(sellPrice * ratio);
-        durabilityMsg = `(耐久:${Math.floor(ratio * 100)}%)`;
-      }
-    } else if (lineConfig) {
-      const durabilityInfo = fishingManager.getLineDurabilityInfo(e.user_id, itemId);
-      if (durabilityInfo.maxDurability > 0) {
-        const ratio = durabilityInfo.currentDurability / durabilityInfo.maxDurability;
-        sellPrice = Math.floor(sellPrice * ratio);
-        durabilityMsg = `(耐久:${Math.floor(ratio * 100)}%)`;
+        durabilityRatio = durabilityInfo.currentDurability / durabilityInfo.maxDurability;
+        durabilityMsg = `(耐久:${Math.floor(durabilityRatio * 100)}%)`;
       }
     }
+    const sellPrice = isSellableTreasure
+      ? treasureSellPrice
+      : calculateEquipmentSellPrice(item.price, durabilityRatio);
 
     const result = new EconomyOperations(e).sellItem({
       itemId,
       price: sellPrice,
       itemName: item.name,
-      equipmentSlot: item.handler === "fishing_rod"
+      equipmentSlot: isEquipment && item.handler === "fishing_rod"
         ? "rod"
-        : item.handler === "fishing_line" ? "line" : null,
+        : isEquipment && item.handler === "fishing_line" ? "line" : null,
     });
     if (!result.success) {
       await e.reply("出售失败，请稍后再试~", 10);
       return true;
     }
 
+    const debtSettlement = result.penaltyDeducted > 0 || result.debtPaid > 0
+      ? `\n🚢 幽灵船先将收益减半：${result.grossEarnings} → ${result.earningsAfterPenalty}` +
+        `\n👻 再偿还 ${result.debtPaid} 樱花币债务，剩余 ${result.remainingDebt}` +
+        `\n💵 实际到账 ${result.earnings} 樱花币`
+      : `\n💵 获得 ${sellPrice} 樱花币`;
     await e.reply(
-      `💰 成功出售【${item.name}】${durabilityMsg}！\n💵 获得 ${sellPrice} 樱花币`
+      `💰 成功出售【${item.name}】${durabilityMsg}！${debtSettlement}`,
     );
     return true;
   });
 
-  useItem = Command(/^#?使用\s*(\S+)$/, async (e) => {
+  useItem = Command(/^#?使用\s*(\S+)(?:\s+(\S+))?$/, async (e) => {
     if (!this.checkWhitelist(e)) return false;
     const itemName = e.match[1].trim();
+    const itemArgument = (e.match[2] || "").trim();
     const shopManager = new ShopManager();
     const item = shopManager.findItemByName(itemName);
 
@@ -648,7 +658,11 @@ export default class Economy extends plugin {
     }
 
     if (item.instant_effect) {
-      return await this.applyInstantItem(e, item, { inventoryManager, fishingManager });
+      return await this.applyInstantItem(e, item, {
+        inventoryManager,
+        fishingManager,
+        argument: itemArgument,
+      });
     }
 
     const buffKey = `sakura:fishing:buff:${item.id}:${groupId}:${userId}`;
@@ -672,28 +686,10 @@ export default class Economy extends plugin {
   });
 
   // 即时生效道具：先做前置校验（不满足不消耗），再扣道具、结算效果
-  async applyInstantItem(e, item, { inventoryManager, fishingManager }) {
+  async applyInstantItem(e, item, { inventoryManager, fishingManager, argument = "" }) {
     const userId = e.user_id;
 
     switch (item.instant_effect) {
-      case "restore_stamina": {
-        const status = fishingManager.getFishingStaminaStatus(userId);
-        if (status.current >= status.max) {
-          await e.reply(`⚡ 体力已满，不需要使用【${item.name}】~`, 10);
-          return true;
-        }
-        if (!inventoryManager.removeItem(item.id, 1)) {
-          await e.reply(`你没有【${item.name}】，无法使用~`, 10);
-          return true;
-        }
-        const amount = Math.max(1, Math.floor(Number(item.amount) || 1));
-        const restored = fishingManager.restoreFishingStamina(userId, amount);
-        await e.reply(
-          `🍡 使用了【${item.name}】！\n⚡ 体力恢复 ${restored.recovered} 点，当前 ${restored.current}/${restored.max}`,
-        );
-        return true;
-      }
-
       case "repair_rod": {
         const rodId = fishingManager.getEquippedRod(userId);
         const rodConfig = rodId ? fishingManager.getRodConfig(rodId) : null;
@@ -702,47 +698,70 @@ export default class Economy extends plugin {
           return true;
         }
         const durability = fishingManager.getRodDurabilityInfo(userId, rodId);
-        if (durability.damage <= 0) {
-          await e.reply(`🔧 【${rodConfig.name}】完好无损，不需要修理~`, 10);
+        const rodStats = fishingManager.getRodStats(userId, rodId);
+        if (durability.damage <= 0 && rodStats.controlLoss <= 0) {
+          await e.reply(`🔧 【${rodConfig.name}】耐久与控制力都完好，不需要修理~`, 10);
           return true;
         }
         if (!inventoryManager.removeItem(item.id, 1)) {
           await e.reply(`你没有【${item.name}】，无法使用~`, 10);
           return true;
         }
-        fishingManager.clearRodDamage(userId, rodId);
+        const repaired = fishingManager.repairRod(userId, rodId);
+        const repairDetails = [
+          repaired.durabilityRepaired > 0
+            ? `耐久损耗 -${repaired.durabilityRepaired}`
+            : "",
+          repaired.controlRestored > 0
+            ? `永久控制力损失 -${repaired.controlRestored}`
+            : "",
+        ].filter(Boolean).join("，");
         await e.reply(
-          `🔧 使用了【${item.name}】！\n🎣 【${rodConfig.name}】焕然一新，耐久完全恢复！`,
+          `🔧 使用了【${item.name}】！\n` +
+          `🎣 【${rodConfig.name}】焕然一新：${repairDetails}，已完全修复！`,
         );
         return true;
       }
 
-      case "clear_curse": {
+      case "clear_debuffs": {
         const afflictions = fishingManager.getCleansableNightmareAfflictions(userId);
         if (afflictions.total <= 0) {
-          await e.reply("☀️ 你身上没有诅咒，圣水还是留着以后用吧~", 10);
+          await e.reply("☀️ 你身上没有可净化的噩梦减益，圣水还是留着以后用吧~", 10);
           return true;
         }
         if (!inventoryManager.removeItem(item.id, 1)) {
           await e.reply(`你没有【${item.name}】，无法使用~`, 10);
           return true;
         }
-        const result = fishingManager.clearNightmareCurse(userId);
+        const result = fishingManager.clearNightmareDebuffs(userId);
         const cleared = [
-          result.curseLayers > 0 ? `${result.curseLayers} 层噩梦诅咒` : "",
-          result.brideThreadLayers > 0 ? `${result.brideThreadLayers} 层冥婚红线` : "",
-          result.lostSoul ? "失魂状态" : "",
+          result.curseLayers > 0 ? `${result.curseLayers} 层骷髅诅咒` : "",
+          result.brideMarked ? `花嫁印记（原噩梦权重 ×${result.brideNightmareMultiplier}）` : "",
+          result.ghostDebt > 0 ? `${result.ghostDebt} 樱花币幽灵船债务` : "",
+          result.deepPressureLayers > 0 ? `${result.deepPressureLayers} 层深压` : "",
         ].filter(Boolean).join("、");
         await e.reply(
-          `💧 使用了【${item.name}】！\n☀️ ${cleared}被彻底洗净！`,
+          `💧 使用了【${item.name}】！\n☀️ 已彻底洗净：${cleared}。\n` +
+          `🎣 鱼竿的永久控制力损失不受影响。`,
         );
         return true;
       }
 
       case "star_wish": {
+        const rarity = String(argument || "").trim();
+        const availableRarities = Object.keys(RARITY_CONFIG);
+        if (!RARITY_CONFIG[rarity]) {
+          await e.reply(
+            `🌠 请指定星愿品质：#使用 ${item.name} <品质>\n` +
+            `可选：${availableRarities.join("、")}`,
+            10,
+          );
+          return true;
+        }
         const wishKey = `sakura:fishing:wish:${e.group_id}:${userId}`;
-        if (await redis.exists(wishKey)) {
-          await e.reply("⭐ 你已经许过愿了，先把这一竿钓完吧~", 10);
+        const existingWish = await redis.get(wishKey);
+        if (existingWish) {
+          await e.reply(`⭐ 已有“${existingWish}”品质的星愿在等待下一次咬钩~`, 10);
           return true;
         }
         if (!inventoryManager.removeItem(item.id, 1)) {
@@ -752,9 +771,9 @@ export default class Economy extends plugin {
         try {
           await redis.set(
             wishKey,
-            "传说",
+            rarity,
             "EX",
-            FISHING_BENEFIT_DURATION_SECONDS,
+            item.duration || FISHING_BENEFIT_DURATION_SECONDS,
           );
         } catch (err) {
           await inventoryManager.forceAddItem(item.id, 1);
@@ -763,7 +782,8 @@ export default class Economy extends plugin {
           return true;
         }
         await e.reply(
-          `🌠 你对着瓶中的流星许下心愿……\n⭐ ${Math.round(FISHING_BENEFIT_DURATION_SECONDS / 60)}分钟内的下一竿必定咬钩传说稀有度的鱼！`,
+          `🌠 你对着瓶中的流星许下“${rarity}”心愿……\n` +
+          `⭐ ${Math.round((item.duration || FISHING_BENEFIT_DURATION_SECONDS) / 60)}分钟内，下一次普通咬钩必定为【${rarity}】品质！`,
         );
         return true;
       }
@@ -817,10 +837,6 @@ export default class Economy extends plugin {
         await e.reply(`🎒 ${result.msg || "背包空间不足"}\n先清理背包再开箱吧~`, 10);
       } else if (result.reason === "bad_config") {
         await e.reply("宝箱的掉落配置有误，请联系管理员。", 10);
-      } else if (result.reason === "grant_failed") {
-        await e.reply("开箱失败，宝箱已放回背包，请稍后再试~", 10);
-      } else if (result.reason === "retry") {
-        await e.reply("开箱奖励状态刚刚发生变化，请重新开启一次~", 10);
       } else {
         await e.reply(`你没有【${chestItem.name}】~`, 10);
       }
@@ -830,44 +846,15 @@ export default class Economy extends plugin {
     const remaining = chestManager.inventoryManager.getItemCount(chestItem.id);
     const remainMsg = remaining > 0 ? `\n📦 背包里还有 ${remaining} 个【${chestItem.name}】` : "";
 
-    if (result.type === "coins") {
-      if (result.treasureName) {
-        await e.reply(
-          `🗝️ 打开了【${chestItem.name}】！\n` +
-          `✨ 开出了【${result.treasureName}】！\n` +
-          (result.treasureDescription ? `📝 ${result.treasureDescription}\n` : "") +
-          `💰 已变卖入账 ${result.amount} 樱花币${remainMsg}`,
-        );
-      } else {
-        await e.reply(
-          `🗝️ 打开了【${chestItem.name}】！\n💰 开出了 ${result.amount} 樱花币！${remainMsg}`,
-        );
-      }
-      return true;
-    }
-
     if (result.type === "item") {
       const prefix = result.isRandomBait
         ? "🪱 摸出一把随机鱼饵——"
-        : result.isRandomLine
-          ? "🧵 开出了一卷尚未拥有的鱼线——"
-          : "✨ 获得了";
+        : "✨ 获得了";
       await e.reply(
         `🗝️ 打开了【${chestItem.name}】！\n` +
         `${prefix}【${result.item.name}】×${result.count}！\n` +
         (result.item.description ? `📝 ${result.item.description}` : "") +
-        (result.autoEquipped ? "\n🎣 当前没有装备鱼线，已自动装备。" : "") +
         remainMsg,
-      );
-      return true;
-    }
-
-    if (result.type === "curse") {
-      await e.reply(
-        `🗝️ 打开了【${chestItem.name}】……\n` +
-        `😱 咔哒——箱中冲出一团怨灵！\n` +
-        `☠️ 噩梦诅咒 +${result.layers} 层！\n` +
-        `💰 慌乱中在箱底摸到 ${result.coins} 樱花币压惊${remainMsg}`,
       );
       return true;
     }

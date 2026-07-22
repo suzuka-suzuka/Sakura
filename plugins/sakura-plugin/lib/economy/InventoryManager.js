@@ -69,10 +69,6 @@ export default class InventoryManager {
       `).run(itemId, this.groupId, this.userId);
     } else if (String(itemId).startsWith("line_")) {
       db.prepare(`
-          DELETE FROM line_stats
-          WHERE group_id = ? AND user_id = ? AND line_id = ?
-      `).run(this.groupId, this.userId, itemId);
-      db.prepare(`
           UPDATE fishing_stats
           SET line = CASE WHEN line = ? THEN NULL ELSE line END
           WHERE group_id = ? AND user_id = ?
@@ -99,7 +95,7 @@ export default class InventoryManager {
       if (currentSize + safeCount > maxCapacity) {
         return {
           success: false,
-          msg: `背包空间不足！当前剩余空间：${maxCapacity - currentSize}，需要空间：${safeCount}`,
+          msg: `背包空间不足！当前剩余空间：${Math.max(0, maxCapacity - currentSize)}，需要空间：${safeCount}`,
         };
       }
 
@@ -170,7 +166,7 @@ export default class InventoryManager {
     return transaction();
   }
 
-  exchangeItem(inputItemId, inputCount, outputItemId, outputCount) {
+  exchangeItem(inputItemId, inputCount, outputItemId, outputCount, { allowOverflow = false } = {}) {
     const safeInputCount = Number(inputCount);
     const safeOutputCount = Number(outputCount);
     if (
@@ -194,10 +190,10 @@ export default class InventoryManager {
       const capacity = this.economyManager.getBagCapacity(this.e);
       const currentSize = this.getCurrentSize();
       const projectedSize = currentSize - safeInputCount + safeOutputCount;
-      if (projectedSize > capacity) {
+      if (!allowOverflow && projectedSize > capacity) {
         return {
           success: false,
-          msg: `背包空间不足！当前剩余空间：${capacity - currentSize}`,
+          msg: `背包空间不足！当前剩余空间：${Math.max(0, capacity - currentSize)}`,
         };
       }
 

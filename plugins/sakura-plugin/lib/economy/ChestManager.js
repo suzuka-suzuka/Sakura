@@ -1,14 +1,7 @@
-import _ from "lodash";
 import Setting from "../setting.js";
 import InventoryManager from "./InventoryManager.js";
-import EconomyManager from "./EconomyManager.js";
 import FishingManager from "./FishingManager.js";
 import ShopManager from "./ShopManager.js";
-import {
-  getUnownedFishingLines,
-  resolveRandomLineLootWeight,
-  selectRandomUnownedLine,
-} from "./chestRules.js";
 
 /**
  * 钓点宝箱管理器
@@ -21,7 +14,6 @@ export default class ChestManager {
     this.groupId = String(e.group_id);
     this.userId = String(e.user_id);
     this.inventoryManager = new InventoryManager(e);
-    this.economyManager = new EconomyManager(e);
     this.fishingManager = new FishingManager(e.group_id);
     this.shopManager = new ShopManager();
   }
@@ -51,15 +43,7 @@ export default class ChestManager {
     const configuredLoot = loot.filter((entry) => (
       entry && typeof entry.type === "string" && Number(entry.weight) > 0
     ));
-    return resolveRandomLineLootWeight(
-      configuredLoot,
-      this.getUnownedLines().length > 0,
-    );
-  }
-
-  getUnownedLines() {
-    const ownedItemIds = new Set(Object.keys(this.inventoryManager.getInventory()));
-    return getUnownedFishingLines(this.fishingManager.getAllLines(), ownedItemIds);
+    return configuredLoot;
   }
 
   rollLoot(chestId, random = Math.random) {
@@ -76,42 +60,24 @@ export default class ChestManager {
 
   /**
    * 打开一个宝箱：消耗宝箱并发放奖励。
-   * 任何失败分支都不消耗宝箱（金币入账失败时会把宝箱放回背包）。
+   * 开箱奖励属于强制入包物品，可以突破背包容量；整个交换仍保持原子性。
    */
   openChest(chestItem) {
     const entry = this.rollLoot(chestItem.id);
     if (!entry) return { success: false, reason: "bad_config" };
 
     switch (entry.type) {
-      case "coins": {
-        const min = Math.max(0, Math.floor(Number(entry.min) || 0));
-        const max = Math.max(min, Math.floor(Number(entry.max) || min));
-        const amount = _.random(min, max);
-        if (!this.inventoryManager.removeItem(chestItem.id, 1)) {
-          return { success: false, reason: "no_chest" };
-        }
-        const added = this.economyManager.addCoins(this.e, amount, {
-          type: "收入",
-          note: `开启${chestItem.name}`,
-        });
-        if (!added) {
-          this.inventoryManager.forceAddItem(chestItem.id, 1);
-          return { success: false, reason: "grant_failed" };
-        }
-        return {
-          success: true,
-          type: "coins",
-          amount,
-          treasureName: entry.name || null,
-          treasureDescription: entry.description || null,
-        };
-      }
-
       case "item": {
         const rewardItem = this.shopManager.findItemById(entry.item_id);
         if (!rewardItem) return { success: false, reason: "bad_config" };
         const count = Math.max(1, Math.floor(Number(entry.count) || 1));
-        const exchange = this.inventoryManager.exchangeItem(chestItem.id, 1, rewardItem.id, count);
+        const exchange = this.inventoryManager.exchangeItem(
+          chestItem.id,
+          1,
+          rewardItem.id,
+          count,
+          { allowOverflow: true },
+        );
         if (!exchange.success) {
           return { success: false, reason: "bag_full", msg: exchange.msg };
         }
@@ -119,58 +85,27 @@ export default class ChestManager {
       }
 
       case "random_bait": {
-        // 首领鱼饵有独立掉落权重，避免被“随机鱼饵”再次稀释概率口径。
+        // 首领鱼饵单独掉落。普通随机鱼饵优先选择背包里完全没有的种类；
+        // 六种普通鱼饵都已持有时，才在完整普通鱼饵池中真随机。
         const baits = this.fishingManager.getAllBaits().filter((bait) => !bait.boss_bait);
         if (baits.length === 0) return { success: false, reason: "bad_config" };
-        const bait = baits[_.random(0, baits.length - 1)];
+        const missingBaits = baits.filter(
+          (bait) => this.inventoryManager.getItemCount(bait.id) <= 0,
+        );
+        const candidates = missingBaits.length > 0 ? missingBaits : baits;
+        const bait = candidates[Math.floor(Math.random() * candidates.length)];
         const count = Math.max(1, Math.floor(Number(entry.count) || 1));
-        const exchange = this.inventoryManager.exchangeItem(chestItem.id, 1, bait.id, count);
+        const exchange = this.inventoryManager.exchangeItem(
+          chestItem.id,
+          1,
+          bait.id,
+          count,
+          { allowOverflow: true },
+        );
         if (!exchange.success) {
           return { success: false, reason: "bag_full", msg: exchange.msg };
         }
         return { success: true, type: "item", item: bait, count, isRandomBait: true };
-      }
-
-      case "random_line": {
-        const ownedItemIds = new Set(Object.keys(this.inventoryManager.getInventory()));
-        const line = selectRandomUnownedLine(
-          this.fishingManager.getAllLines(),
-          ownedItemIds,
-        );
-        // 正常情况下，全收集时该权重已在 rollLoot 前并入金币；这里防御并发获得鱼线。
-        if (!line) return { success: false, reason: "retry" };
-        const exchange = this.inventoryManager.exchangeItem(chestItem.id, 1, line.id, 1);
-        if (!exchange.success) {
-          return { success: false, reason: "bag_full", msg: exchange.msg };
-        }
-        let autoEquipped = false;
-        if (!this.fishingManager.getEquippedLine(this.userId)) {
-          autoEquipped = this.fishingManager.equipLine(this.userId, line.id);
-        }
-        return {
-          success: true,
-          type: "item",
-          item: line,
-          count: 1,
-          isRandomLine: true,
-          autoEquipped,
-        };
-      }
-
-      case "curse": {
-        const layers = Math.max(1, Math.floor(Number(entry.layers) || 1));
-        const coins = Math.max(0, Math.floor(Number(entry.coins) || 0));
-        if (!this.inventoryManager.removeItem(chestItem.id, 1)) {
-          return { success: false, reason: "no_chest" };
-        }
-        this.fishingManager.addNightmareCurseLayers(this.userId, layers);
-        if (coins > 0) {
-          this.economyManager.addCoins(this.e, coins, {
-            type: "收入",
-            note: `开启${chestItem.name}：压惊费`,
-          });
-        }
-        return { success: true, type: "curse", layers, coins };
       }
 
       default:

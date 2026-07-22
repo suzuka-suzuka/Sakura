@@ -4,11 +4,11 @@
     "name": "破旧的靴子",
     "rarity": "垃圾",
     "description": "一只被遗弃很久的皮靴，里面塞满了淤泥。",
-    "base_price": 0,
-    "difficulty": 28,
+    "base_price": 17,
+    "difficulty": 8,
     "weight": [
-      1,
-      3.5
+      6.12,
+      6.88
     ],
     "active_hours": [
       [
@@ -25,11 +25,11 @@
     "name": "压扁的易拉罐",
     "rarity": "垃圾",
     "description": "虽然已经生锈，但依稀能辨认出是某种碳酸饮料。",
-    "base_price": 1,
-    "difficulty": 25,
+    "base_price": 0,
+    "difficulty": 8,
     "weight": [
-      0.1,
-      0.5
+      0.61,
+      3.07
     ],
     "active_hours": [
       [
@@ -43,11 +43,11 @@
     "name": "纠缠的水草",
     "rarity": "垃圾",
     "description": "一大团黏糊糊的绿色植物，散发着腥味。",
-    "base_price": 1,
-    "difficulty": 30,
+    "base_price": 0,
+    "difficulty": 8,
     "weight": [
-      0.5,
-      3
+      0.65,
+      3.91
     ],
     "active_hours": [
       [
@@ -64,11 +64,11 @@
     "name": "吸饱水的浮木",
     "rarity": "垃圾",
     "description": "一块沉重的木头，表面已经被水流冲刷得非常光滑。",
-    "base_price": 2,
-    "difficulty": 32,
+    "base_price": 17,
+    "difficulty": 8,
     "weight": [
-      2.5,
-      4.5
+      6.12,
+      6.88
     ],
     "active_hours": [
       [
@@ -85,11 +85,11 @@
     "name": "废弃轮胎",
     "rarity": "垃圾",
     "description": "不知道是谁把它扔进水里的，非常沉重，毫无价值。",
-    "base_price": 0,
-    "difficulty": 33,
+    "base_price": 17,
+    "difficulty": 8,
     "weight": [
-      3,
-      5
+      6.12,
+      6.88
     ],
     "active_hours": [
       [
@@ -106,11 +106,11 @@
     "name": "不知名的骨头",
     "rarity": "垃圾",
     "description": "看起来像是某种大型哺乳动物的骨骼碎片，有点吓人。",
-    "base_price": 3,
-    "difficulty": 26,
+    "base_price": 1,
+    "difficulty": 8,
     "weight": [
-      0.8,
-      2.5
+      1.15,
+      3.59
     ],
     "active_hours": [
       [
@@ -132,10 +132,10 @@
     "rarity": "垃圾",
     "description": "水中常见的污染物，如果不仔细看会以为是水母。",
     "base_price": 0,
-    "difficulty": 27,
+    "difficulty": 8,
     "weight": [
-      0.1,
-      0.4
+      0.74,
+      2.96
     ],
     "active_hours": [
       [
@@ -150,10 +150,10 @@
     "rarity": "垃圾",
     "description": "上面的文字已经模糊不清，只能隐约看到几十年前的日期。",
     "base_price": 0,
-    "difficulty": 24,
+    "difficulty": 8,
     "weight": [
-      0.1,
-      0.3
+      0.95,
+      2.86
     ],
     "active_hours": [
       [
@@ -171,11 +171,11 @@
     "name": "碎裂的眼镜",
     "rarity": "垃圾",
     "description": "镜片已经碎了一半，镜框也歪曲变形了。",
-    "base_price": 1,
-    "difficulty": 25,
+    "base_price": 0,
+    "difficulty": 8,
     "weight": [
-      0.1,
-      0.2
+      1.38,
+      2.75
     ],
     "active_hours": [
       [
@@ -192,11 +192,11 @@
     "name": "生锈的铁锚",
     "rarity": "垃圾",
     "description": "极其沉重的废铁，虽然是垃圾，但卖给废品站或许能值点钱。",
-    "base_price": 15,
-    "difficulty": 35,
+    "base_price": 6,
+    "difficulty": 8,
     "weight": [
-      4,
-      5.2
+      3.65,
+      4.75
     ],
     "active_hours": [
       [
@@ -213,11 +213,11 @@
     "name": "鲫鱼",
     "rarity": "普通",
     "description": "淡水水域中最常见的鱼类之一，生命力顽强。",
-    "base_price": 10,
-    "difficulty": 28,
+    "base_price": 16,
+    "difficulty": 8,
     "weight": [
-      0.3,
-      1.5
+      0.77,
+      3.83
     ],
     "active_hours": [
       [
@@ -231,11 +231,11 @@
     "name": "鲤鱼",
     "rarity": "普通",
     "description": "体型较宽，鳞片较大，喜欢在水底拱泥觅食。",
-    "base_price": 12,
-    "difficulty": 35,
+    "base_price": 16,
+    "difficulty": 8,
     "weight": [
-      1.5,
-      5
+      1.37,
+      4.58
     ],
     "active_hours": [
       [
@@ -252,11 +252,11 @@
     "name": "草鱼",
     "rarity": "普通",
     "description": "身体修长，游动迅速，以水草为食。",
-    "base_price": 14,
-    "difficulty": 38,
+    "base_price": 17,
+    "difficulty": 8,
     "weight": [
-      2,
-      5.5
+      1.7,
+      4.68
     ],
     "active_hours": [
       [
@@ -273,11 +273,11 @@
     "name": "蓝鳃太阳鱼",
     "rarity": "普通",
     "description": "体色鲜艳的小型鱼类，虽然好看但属于外来入侵物种。",
-    "base_price": 7,
-    "difficulty": 30,
+    "base_price": 15,
+    "difficulty": 8,
     "weight": [
-      0.2,
-      1
+      0.73,
+      3.63
     ],
     "active_hours": [
       [
@@ -294,11 +294,11 @@
     "name": "白鲢",
     "rarity": "普通",
     "description": "性情急躁，受到惊吓时会跃出水面。",
-    "base_price": 11,
-    "difficulty": 33,
+    "base_price": 18,
+    "difficulty": 8,
     "weight": [
-      1,
-      4
+      7.2,
+      7.96
     ],
     "active_hours": [
       [
@@ -315,11 +315,11 @@
     "name": "虾虎鱼",
     "rarity": "普通",
     "description": "趴在水底石头上的小鱼，呆头呆脑的。",
-    "base_price": 6,
-    "difficulty": 26,
+    "base_price": 10,
+    "difficulty": 8,
     "weight": [
-      0.05,
-      0.3
+      0.49,
+      2.95
     ],
     "active_hours": [
       [
@@ -333,11 +333,11 @@
     "name": "鲦鱼",
     "rarity": "普通",
     "description": "成群结队游动的小银鱼，通常作为其他大鱼的饵料。",
-    "base_price": 6,
-    "difficulty": 25,
+    "base_price": 13,
+    "difficulty": 8,
     "weight": [
-      0.05,
-      0.2
+      0.7,
+      2.78
     ],
     "active_hours": [
       [
@@ -351,11 +351,11 @@
     "name": "河鲈",
     "rarity": "普通",
     "description": "背部有锋利的刺鳍，肉质非常鲜美。",
-    "base_price": 18,
-    "difficulty": 34,
+    "base_price": 16,
+    "difficulty": 8,
     "weight": [
-      0.5,
-      3
+      0.7,
+      4.17
     ],
     "active_hours": [
       [
@@ -376,11 +376,11 @@
     "name": "鲭鱼",
     "rarity": "普通",
     "description": "背部有青黑色的纹路，游速很快。",
-    "base_price": 17,
-    "difficulty": 36,
+    "base_price": 16,
+    "difficulty": 8,
     "weight": [
-      0.5,
-      2
+      1.01,
+      4.04
     ],
     "active_hours": [
       [
@@ -397,11 +397,11 @@
     "name": "沙丁鱼",
     "rarity": "普通",
     "description": "总是成千上万地聚集在一起，非常脆弱。",
-    "base_price": 6,
-    "difficulty": 25,
+    "base_price": 19,
+    "difficulty": 8,
     "weight": [
-      0.1,
-      0.4
+      8.36,
+      9.12
     ],
     "active_hours": [
       [
@@ -415,11 +415,11 @@
     "name": "凤尾鱼",
     "rarity": "普通",
     "description": "细长的小鱼，银白色的腹部在水中闪闪发光。",
-    "base_price": 7,
-    "difficulty": 26,
+    "base_price": 10,
+    "difficulty": 8,
     "weight": [
-      0.05,
-      0.3
+      0.49,
+      2.95
     ],
     "active_hours": [
       [
@@ -436,11 +436,11 @@
     "name": "竹荚鱼",
     "rarity": "普通",
     "description": "侧线上有明显的棱鳞，是常见的食用鱼。",
-    "base_price": 12,
-    "difficulty": 32,
+    "base_price": 16,
+    "difficulty": 8,
     "weight": [
-      0.3,
-      1
+      1.09,
+      3.63
     ],
     "active_hours": [
       [
@@ -457,11 +457,11 @@
     "name": "比目鱼",
     "rarity": "普通",
     "description": "两只眼睛长在同一侧，喜欢把自己埋在沙子里。",
-    "base_price": 22,
-    "difficulty": 40,
+    "base_price": 16,
+    "difficulty": 8,
     "weight": [
-      1,
-      4.5
+      0.99,
+      4.44
     ],
     "active_hours": [
       [
@@ -478,11 +478,11 @@
     "name": "鲶鱼",
     "rarity": "普通",
     "description": "长着长长的胡须，皮肤光滑无鳞，喜欢雨后浑浊的水域。",
-    "base_price": 18,
-    "difficulty": 38,
+    "base_price": 16,
+    "difficulty": 8,
     "weight": [
-      2,
-      5.5
+      1.7,
+      4.68
     ],
     "active_hours": [
       [
@@ -506,11 +506,11 @@
     "name": "泥鳅",
     "rarity": "普通",
     "description": "滑溜溜的，非常难以抓住。",
-    "base_price": 8,
-    "difficulty": 28,
+    "base_price": 19,
+    "difficulty": 25.89,
     "weight": [
-      0.05,
-      0.3
+      6.21,
+      6.97
     ],
     "active_hours": [
       [
@@ -524,11 +524,11 @@
     "name": "小龙虾",
     "rarity": "普通",
     "description": "挥舞着两只钳子，虽然不是鱼，但也是水产之一。",
-    "base_price": 12,
-    "difficulty": 30,
+    "base_price": 20,
+    "difficulty": 58.5,
     "weight": [
-      0.1,
-      0.5
+      9.78,
+      9.92
     ],
     "active_hours": [
       [
@@ -545,11 +545,11 @@
     "name": "罗非鱼",
     "rarity": "普通",
     "description": "适应力极强，背鳍上有硬刺。",
-    "base_price": 11,
-    "difficulty": 33,
+    "base_price": 16,
+    "difficulty": 8,
     "weight": [
-      0.5,
-      2.5
+      0.81,
+      4.07
     ],
     "active_hours": [
       [
@@ -566,11 +566,11 @@
     "name": "雅罗鱼",
     "rarity": "普通",
     "description": "喜欢生活在水流湍急的溪流中。",
-    "base_price": 13,
-    "difficulty": 35,
+    "base_price": 18,
+    "difficulty": 8,
     "weight": [
-      0.3,
-      1.5
+      7.34,
+      8.1
     ],
     "active_hours": [
       [
@@ -587,11 +587,11 @@
     "name": "杜父鱼",
     "rarity": "普通",
     "description": "头部很大且扁平，样子有点丑陋。",
-    "base_price": 10,
-    "difficulty": 30,
+    "base_price": 15,
+    "difficulty": 8,
     "weight": [
-      0.2,
-      0.8
+      0.89,
+      3.56
     ],
     "active_hours": [
       [
@@ -605,11 +605,11 @@
     "name": "胡瓜鱼",
     "rarity": "普通",
     "description": "身体散发着类似黄瓜的清香。只有降雪的寒冷水域才能钓到。",
-    "base_price": 14,
-    "difficulty": 28,
+    "base_price": 15,
+    "difficulty": 8,
     "weight": [
-      0.1,
-      0.5
+      0.67,
+      3.33
     ],
     "active_hours": [
       [
@@ -629,11 +629,11 @@
     "name": "鲱鱼",
     "rarity": "普通",
     "description": "银色的鱼群像是一道流动的墙壁。",
-    "base_price": 10,
-    "difficulty": 28,
+    "base_price": 18,
+    "difficulty": 33.4,
     "weight": [
-      0.2,
-      0.8
+      2,
+      3.56
     ],
     "active_hours": [
       [
@@ -648,10 +648,10 @@
     "rarity": "普通",
     "description": "深海中常见的经济鱼类。",
     "base_price": 16,
-    "difficulty": 35,
+    "difficulty": 8,
     "weight": [
-      0.5,
-      3.5
+      0.61,
+      4.24
     ],
     "active_hours": [
       [
@@ -668,11 +668,11 @@
     "name": "乌头鱼",
     "rarity": "普通",
     "description": "喜欢在河口和近海游弋，经常跃出水面。",
-    "base_price": 14,
-    "difficulty": 36,
+    "base_price": 20,
+    "difficulty": 58.37,
     "weight": [
-      0.8,
-      3.5
+      2,
+      4.24
     ],
     "active_hours": [
       [
@@ -689,11 +689,11 @@
     "name": "大西洋鳕鱼",
     "rarity": "普通",
     "description": "下巴上有一根明显的触须，肉质雪白。",
-    "base_price": 24,
-    "difficulty": 40,
+    "base_price": 19,
+    "difficulty": 39.96,
     "weight": [
       2,
-      5.5
+      4.68
     ],
     "active_hours": [
       [
@@ -710,11 +710,11 @@
     "name": "黑线鳕",
     "rarity": "普通",
     "description": "体侧有一条黑色的侧线，胸鳍上方有黑斑。",
-    "base_price": 22,
-    "difficulty": 38,
+    "base_price": 16,
+    "difficulty": 8,
     "weight": [
-      1,
-      4.5
+      0.99,
+      4.44
     ],
     "active_hours": [
       [
@@ -731,11 +731,11 @@
     "name": "牙鳕",
     "rarity": "普通",
     "description": "一种小型鳕鱼，通常在沙质海底活动。",
-    "base_price": 12,
-    "difficulty": 30,
+    "base_price": 19,
+    "difficulty": 25.69,
     "weight": [
-      0.3,
-      1.5
+      6.19,
+      6.95
     ],
     "active_hours": [
       [
@@ -752,11 +752,11 @@
     "name": "欧鲌",
     "rarity": "普通",
     "description": "在水面附近活动的小型银色鱼类。",
-    "base_price": 6,
-    "difficulty": 26,
+    "base_price": 18,
+    "difficulty": 24.49,
     "weight": [
-      0.05,
-      0.2
+      2,
+      2.78
     ],
     "active_hours": [
       [
@@ -773,11 +773,11 @@
     "name": "拟鲤",
     "rarity": "普通",
     "description": "眼睛是红色的，鳍也是红色的。",
-    "base_price": 8,
-    "difficulty": 28,
+    "base_price": 15,
+    "difficulty": 8,
     "weight": [
-      0.2,
-      1
+      0.73,
+      3.63
     ],
     "active_hours": [
       [
@@ -791,11 +791,11 @@
     "name": "鳊鱼",
     "rarity": "普通",
     "description": "身体侧扁且高，呈菱形。",
-    "base_price": 18,
-    "difficulty": 33,
+    "base_price": 16,
+    "difficulty": 8,
     "weight": [
-      1,
-      4.5
+      0.99,
+      4.44
     ],
     "active_hours": [
       [
@@ -812,11 +812,11 @@
     "name": "丁尤鱼",
     "rarity": "普通",
     "description": "鳞片非常细小，体表覆盖着厚厚的粘液。",
-    "base_price": 19,
-    "difficulty": 38,
+    "base_price": 16,
+    "difficulty": 8,
     "weight": [
-      1.5,
-      5
+      1.37,
+      4.58
     ],
     "active_hours": [
       [
@@ -837,11 +837,11 @@
     "name": "虹鳟",
     "rarity": "精品",
     "description": "体侧有一条美丽的彩虹色纵带，对水质要求很高。",
-    "base_price": 40,
-    "difficulty": 58,
+    "base_price": 49,
+    "difficulty": 59.7,
     "weight": [
-      3,
-      18
+      0.68,
+      4.1
     ],
     "active_hours": [
       [
@@ -858,11 +858,11 @@
     "name": "大口黑鲈",
     "rarity": "精品",
     "description": "凶猛的掠食者，上钩后会剧烈挣扎并洗鳃。",
-    "base_price": 45,
-    "difficulty": 65,
+    "base_price": 34,
+    "difficulty": 35.03,
     "weight": [
-      2,
-      16
+      0.5,
+      3.97
     ],
     "active_hours": [
       [
@@ -883,11 +883,11 @@
     "name": "鲑鱼",
     "rarity": "精品",
     "description": "逆流而上的坚毅鱼类，常趁雨水上涨时启程。",
-    "base_price": 50,
-    "difficulty": 68,
+    "base_price": 34,
+    "difficulty": 35.03,
     "weight": [
-      4,
-      20
+      0.88,
+      4.38
     ],
     "active_hours": [
       [
@@ -907,11 +907,11 @@
     "name": "白斑狗鱼",
     "rarity": "精品",
     "description": "水下的伏击者，牙齿极其锋利，性格凶暴。",
-    "base_price": 50,
-    "difficulty": 70,
+    "base_price": 34,
+    "difficulty": 35.03,
     "weight": [
-      5,
-      22
+      1.04,
+      4.59
     ],
     "active_hours": [
       [
@@ -928,11 +928,11 @@
     "name": "鳗鱼",
     "rarity": "精品",
     "description": "身体像蛇一样长，力量惊人，会缠绕鱼线。",
-    "base_price": 55,
-    "difficulty": 55,
+    "base_price": 25,
+    "difficulty": 10.05,
     "weight": [
-      1.5,
-      12
+      0.45,
+      3.61
     ],
     "active_hours": [
       [
@@ -953,11 +953,11 @@
     "name": "小丑鱼",
     "rarity": "精品",
     "description": "橘色和白色相间的条纹，喜欢在海葵附近活动。",
-    "base_price": 35,
-    "difficulty": 50,
+    "base_price": 37,
+    "difficulty": 47.51,
     "weight": [
-      0.1,
-      0.5
+      0.57,
+      2.83
     ],
     "active_hours": [
       [
@@ -974,11 +974,11 @@
     "name": "河豚",
     "rarity": "精品",
     "description": "受到威胁时会吸水膨胀成一个刺球。",
-    "base_price": 45,
-    "difficulty": 52,
+    "base_price": 25,
+    "difficulty": 10.05,
     "weight": [
-      0.8,
-      5
+      0.51,
+      3.16
     ],
     "active_hours": [
       [
@@ -992,11 +992,11 @@
     "name": "乌贼",
     "rarity": "精品",
     "description": "虽然不是鱼，但会喷出墨汁干扰视线。",
-    "base_price": 35,
-    "difficulty": 48,
+    "base_price": 33,
+    "difficulty": 35.03,
     "weight": [
-      0.8,
-      8
+      0.4,
+      3.28
     ],
     "active_hours": [
       [
@@ -1017,11 +1017,11 @@
     "name": "章鱼",
     "rarity": "精品",
     "description": "拥有八条灵活的腕足，吸附力极强。",
-    "base_price": 40,
-    "difficulty": 60,
+    "base_price": 62,
+    "difficulty": 39.65,
     "weight": [
-      1.5,
-      18
+      46.93,
+      47.59
     ],
     "active_hours": [
       [
@@ -1042,11 +1042,11 @@
     "name": "真鲷",
     "rarity": "精品",
     "description": "通体红色，被视为吉祥的象征。",
-    "base_price": 65,
-    "difficulty": 58,
+    "base_price": 34,
+    "difficulty": 35.03,
     "weight": [
-      2,
-      15
+      0.51,
+      3.85
     ],
     "active_hours": [
       [
@@ -1060,11 +1060,11 @@
     "name": "梭鱼",
     "rarity": "精品",
     "description": "像鱼雷一样迅猛，满嘴獠牙，极具攻击性。",
-    "base_price": 55,
-    "difficulty": 72,
+    "base_price": 34,
+    "difficulty": 35.03,
     "weight": [
-      4,
-      20
+      0.88,
+      4.38
     ],
     "active_hours": [
       [
@@ -1078,11 +1078,11 @@
     "name": "黄貂鱼",
     "rarity": "精品",
     "description": "扁平的身体像风筝，尾部有剧毒的刺。",
-    "base_price": 60,
-    "difficulty": 66,
+    "base_price": 56,
+    "difficulty": 80.47,
     "weight": [
-      6,
-      22
+      9.6,
+      22.02
     ],
     "active_hours": [
       [
@@ -1103,11 +1103,11 @@
     "name": "海马",
     "rarity": "精品",
     "description": "垂直游泳的奇特生物，尾巴可以卷住物体。",
-    "base_price": 50,
-    "difficulty": 45,
+    "base_price": 33,
+    "difficulty": 35.03,
     "weight": [
-      0.05,
-      0.3
+      0.46,
+      2.75
     ],
     "active_hours": [
       [
@@ -1124,11 +1124,11 @@
     "name": "飞鱼",
     "rarity": "精品",
     "description": "胸鳍极其发达，能够滑翔出水面。只在晴朗的天空下起飞。",
-    "base_price": 40,
-    "difficulty": 54,
+    "base_price": 59,
+    "difficulty": 100,
     "weight": [
-      0.5,
-      3
+      9.6,
+      14.77
     ],
     "active_hours": [
       [
@@ -1148,11 +1148,11 @@
     "name": "黑鱼",
     "rarity": "精品",
     "description": "凶猛的肉食性鱼类，护崽时攻击性倍增。",
-    "base_price": 45,
-    "difficulty": 70,
+    "base_price": 25,
+    "difficulty": 10.05,
     "weight": [
-      3,
-      18
+      0.68,
+      4.1
     ],
     "active_hours": [
       [
@@ -1166,11 +1166,11 @@
     "name": "梭鲈",
     "rarity": "精品",
     "description": "眼睛具有反光层，能在弱光下看清猎物。",
-    "base_price": 50,
-    "difficulty": 62,
+    "base_price": 34,
+    "difficulty": 34.73,
     "weight": [
-      3,
-      20
+      0.66,
+      4.38
     ],
     "active_hours": [
       [
@@ -1191,11 +1191,11 @@
     "name": "茴鱼",
     "rarity": "精品",
     "description": "拥有巨大的且色彩斑斓的背鳍。",
-    "base_price": 55,
-    "difficulty": 55,
+    "base_price": 33,
+    "difficulty": 35.03,
     "weight": [
-      0.8,
-      5
+      0.51,
+      3.16
     ],
     "active_hours": [
       [
@@ -1212,11 +1212,11 @@
     "name": "大比目鱼",
     "rarity": "精品",
     "description": "比目鱼中的巨无霸，力量很大。寒潮降雪时会游入近岸觅食。",
-    "base_price": 70,
-    "difficulty": 75,
+    "base_price": 30,
+    "difficulty": 22.54,
     "weight": [
-      12,
-      22
+      2.5,
+      4.59
     ],
     "active_hours": [
       [
@@ -1236,11 +1236,11 @@
     "name": "军曹鱼",
     "rarity": "精品",
     "description": "体型像鲨鱼，力量极大，耐力持久。",
-    "base_price": 65,
-    "difficulty": 78,
+    "base_price": 30,
+    "difficulty": 22.24,
     "weight": [
-      8,
-      22
+      1.67,
+      4.59
     ],
     "active_hours": [
       [
@@ -1258,11 +1258,11 @@
     "name": "安康鱼",
     "rarity": "精品",
     "description": "长相狰狞的深海鱼，雾夜里以头顶发光器引路。",
-    "base_price": 65,
-    "difficulty": 64,
+    "base_price": 34,
+    "difficulty": 35.03,
     "weight": [
-      4,
-      20
+      0.88,
+      4.38
     ],
     "active_hours": [
       [
@@ -1286,11 +1286,11 @@
     "name": "鹦嘴鱼",
     "rarity": "精品",
     "description": "牙齿愈合成鹦鹉嘴状，身体色彩艳丽。",
-    "base_price": 55,
-    "difficulty": 52,
+    "base_price": 25,
+    "difficulty": 10.05,
     "weight": [
-      1.5,
-      12
+      0.45,
+      3.61
     ],
     "active_hours": [
       [
@@ -1307,11 +1307,11 @@
     "name": "狮子鱼",
     "rarity": "精品",
     "description": "鳍棘有毒，游动时像一只开屏的孔雀。",
-    "base_price": 75,
-    "difficulty": 58,
+    "base_price": 54,
+    "difficulty": 80.75,
     "weight": [
-      0.8,
-      5
+      9.6,
+      15.16
     ],
     "active_hours": [
       [
@@ -1328,11 +1328,11 @@
     "name": "海鳗",
     "rarity": "精品",
     "description": "藏在岩缝中，牙齿向内弯曲，一旦咬住绝不松口。",
-    "base_price": 70,
-    "difficulty": 72,
+    "base_price": 34,
+    "difficulty": 35.03,
     "weight": [
-      3,
-      18
+      0.68,
+      4.1
     ],
     "active_hours": [
       [
@@ -1353,11 +1353,11 @@
     "name": "箱鲀",
     "rarity": "精品",
     "description": "身体像个硬盒子，游起来笨拙可爱。",
-    "base_price": 45,
-    "difficulty": 48,
+    "base_price": 62,
+    "difficulty": 87.92,
     "weight": [
-      0.3,
-      2.5
+      4.8,
+      43.2
     ],
     "active_hours": [
       [
@@ -1372,10 +1372,10 @@
     "rarity": "精品",
     "description": "背鳍有锁定机制，牙齿非常坚硬。",
     "base_price": 55,
-    "difficulty": 56,
+    "difficulty": 35.65,
     "weight": [
-      1.5,
-      10
+      35.58,
+      39.18
     ],
     "active_hours": [
       [
@@ -1389,11 +1389,11 @@
     "name": "蓝鳍金枪鱼",
     "rarity": "稀有",
     "description": "海洋中的鱼雷，游速极快，肉质顶级。",
-    "base_price": 160,
-    "difficulty": 108,
+    "base_price": 85,
+    "difficulty": 80.03,
     "weight": [
-      30,
-      55
+      10.02,
+      18.37
     ],
     "active_hours": [
       [
@@ -1410,11 +1410,11 @@
     "name": "剑鱼",
     "rarity": "稀有",
     "description": "上颌延长如剑，发怒时甚至会攻击船只。",
-    "base_price": 150,
-    "difficulty": 115,
+    "base_price": 140,
+    "difficulty": 130.62,
     "weight": [
-      35,
-      60
+      27.85,
+      47.74
     ],
     "active_hours": [
       [
@@ -1435,11 +1435,11 @@
     "name": "鬼头刀",
     "rarity": "稀有",
     "description": "色彩绚丽，在水中呈现金绿色，出水后颜色迅速暗淡。",
-    "base_price": 130,
-    "difficulty": 105,
+    "base_price": 82,
+    "difficulty": 80.03,
     "weight": [
-      8,
-      45
+      3,
+      16.89
     ],
     "active_hours": [
       [
@@ -1456,11 +1456,11 @@
     "name": "中华鲟",
     "rarity": "稀有",
     "description": "活化石鱼类，体表有五行硬鳞，体型巨大。",
-    "base_price": 175,
-    "difficulty": 118,
+    "base_price": 137,
+    "difficulty": 129.25,
     "weight": [
-      30,
-      60
+      23.87,
+      47.74
     ],
     "active_hours": [
       [
@@ -1474,11 +1474,11 @@
     "name": "巨骨舌鱼",
     "rarity": "稀有",
     "description": "淡水中的巨怪，鳞片坚硬如盔甲，力大无穷。",
-    "base_price": 170,
-    "difficulty": 120,
+    "base_price": 86,
+    "difficulty": 80.03,
     "weight": [
-      35,
-      60
+      12.15,
+      20.83
     ],
     "active_hours": [
       [
@@ -1495,11 +1495,11 @@
     "name": "鳄雀鳝",
     "rarity": "稀有",
     "description": "长着像鳄鱼一样的嘴，牙齿锋利，鳞片坚硬。",
-    "base_price": 140,
-    "difficulty": 112,
+    "base_price": 84,
+    "difficulty": 80.03,
     "weight": [
-      25,
-      55
+      8.35,
+      18.37
     ],
     "active_hours": [
       [
@@ -1513,11 +1513,11 @@
     "name": "腔棘鱼",
     "rarity": "稀有",
     "description": "被认为已经灭绝了亿万年的深海活化石。",
-    "base_price": 190,
-    "difficulty": 100,
+    "base_price": 85,
+    "difficulty": 80.03,
     "weight": [
-      30,
-      55
+      10.02,
+      18.37
     ],
     "active_hours": [
       [
@@ -1538,11 +1538,11 @@
     "name": "皇带鱼",
     "rarity": "稀有",
     "description": "身形极长、背鳍鲜红，只在雷暴中现身浅水。",
-    "base_price": 180,
-    "difficulty": 108,
+    "base_price": 128,
+    "difficulty": 80.15,
     "weight": [
-      25,
-      58
+      79.2,
+      87.46
     ],
     "active_hours": [
       [
@@ -1562,11 +1562,11 @@
     "name": "双髻鲨",
     "rarity": "稀有",
     "description": "头部呈锤状，视野360度，极其敏锐的猎手。",
-    "base_price": 155,
-    "difficulty": 115,
+    "base_price": 87,
+    "difficulty": 80.03,
     "weight": [
-      40,
-      60
+      13.89,
+      20.83
     ],
     "active_hours": [
       [
@@ -1583,11 +1583,11 @@
     "name": "苏眉鱼",
     "rarity": "稀有",
     "description": "体型巨大，额头突起，色彩纹路非常复杂。",
-    "base_price": 175,
-    "difficulty": 110,
+    "base_price": 84,
+    "difficulty": 80.03,
     "weight": [
-      25,
-      55
+      8.35,
+      18.37
     ],
     "active_hours": [
       [
@@ -1604,11 +1604,11 @@
     "name": "电鳗",
     "rarity": "稀有",
     "description": "能释放高压电流，雷暴天会兴奋地浮出水面。",
-    "base_price": 150,
-    "difficulty": 118,
+    "base_price": 82,
+    "difficulty": 80.03,
     "weight": [
-      8,
-      40
+      3.18,
+      15.91
     ],
     "active_hours": [
       [
@@ -1628,11 +1628,11 @@
     "name": "浪人鲹",
     "rarity": "稀有",
     "description": "珊瑚礁的霸主，冲击力极强，甚至能捕食飞鸟。",
-    "base_price": 160,
-    "difficulty": 120,
+    "base_price": 84,
+    "difficulty": 80.03,
     "weight": [
-      20,
-      55
+      6.68,
+      18.37
     ],
     "active_hours": [
       [
@@ -1649,11 +1649,11 @@
     "name": "锯鳐",
     "rarity": "稀有",
     "description": "吻部延长呈锯齿状，挥动起来是致命的武器。",
-    "base_price": 165,
-    "difficulty": 115,
+    "base_price": 132,
+    "difficulty": 86.65,
     "weight": [
-      30,
-      60
+      77.69,
+      85.95
     ],
     "active_hours": [
       [
@@ -1667,11 +1667,11 @@
     "name": "巨型虎鱼",
     "rarity": "稀有",
     "description": "牙齿像匕首一样交错，性格极其凶暴。",
-    "base_price": 150,
-    "difficulty": 115,
+    "base_price": 75,
+    "difficulty": 69.85,
     "weight": [
-      15,
-      50
+      5.22,
+      17.38
     ],
     "active_hours": [
       [
@@ -1685,11 +1685,11 @@
     "name": "欧鲶",
     "rarity": "稀有",
     "description": "欧洲淡水霸主，常趁暴雨搅浑水域时捕猎。",
-    "base_price": 145,
-    "difficulty": 118,
+    "base_price": 133,
+    "difficulty": 90.65,
     "weight": [
-      35,
-      60
+      73.99,
+      82.25
     ],
     "active_hours": [
       [
@@ -1713,11 +1713,11 @@
     "name": "琉璃隐鱼",
     "rarity": "稀有",
     "description": "通体透明、骨泛蓝光，只在雾中显露轮廓。",
-    "base_price": 195,
-    "difficulty": 98,
+    "base_price": 132,
+    "difficulty": 129.25,
     "weight": [
-      3,
-      15
+      22,
+      31.38
     ],
     "active_hours": [
       [
@@ -1737,11 +1737,11 @@
     "name": "熔岩孔雀鱼",
     "rarity": "稀有",
     "description": "鳞片如燃烧的余烬，只在烈日下浮出极热水域。",
-    "base_price": 185,
-    "difficulty": 105,
+    "base_price": 81,
+    "difficulty": 80.03,
     "weight": [
-      0.8,
-      5
+      2.15,
+      13.45
     ],
     "active_hours": [
       [
@@ -1761,11 +1761,11 @@
     "name": "枯叶鳐",
     "rarity": "稀有",
     "description": "形似巨大枯叶，常借多云的昏暗天色随波潜行。",
-    "base_price": 170,
-    "difficulty": 95,
+    "base_price": 82,
+    "difficulty": 80.03,
     "weight": [
-      10,
-      35
+      4.4,
+      15.42
     ],
     "active_hours": [
       [
@@ -1785,11 +1785,11 @@
     "name": "发条鳟鱼",
     "rarity": "稀有",
     "description": "游动时发出滴答声，仿佛体内有机械装置。",
-    "base_price": 205,
-    "difficulty": 105,
+    "base_price": 81,
+    "difficulty": 80.03,
     "weight": [
-      5,
-      25
+      2.89,
+      14.43
     ],
     "active_hours": [
       [
@@ -1806,11 +1806,11 @@
     "name": "墨影幽灵",
     "rarity": "稀有",
     "description": "身体由黑烟构成，只在浓雾中忽聚忽散。",
-    "base_price": 200,
-    "difficulty": 112,
+    "base_price": 132,
+    "difficulty": 83.65,
     "weight": [
-      0.2,
-      3
+      80.7,
+      88.96
     ],
     "active_hours": [
       [
@@ -1834,11 +1834,11 @@
     "name": "大白鲨",
     "rarity": "史诗",
     "description": "海洋顶级掠食者，拥有令人绝望的咬合力和体型。",
-    "base_price": 310,
-    "difficulty": 165,
+    "base_price": 283,
+    "difficulty": 130.32,
     "weight": [
-      70,
-      115
+      140.02,
+      157.28
     ],
     "active_hours": [
       [
@@ -1855,11 +1855,11 @@
     "name": "大王酸浆鱿",
     "rarity": "史诗",
     "description": "深海梦魇，触手上长满钩爪，眼球大如篮球。",
-    "base_price": 300,
-    "difficulty": 160,
+    "base_price": 175,
+    "difficulty": 110,
     "weight": [
-      60,
-      110
+      20.29,
+      37.2
     ],
     "active_hours": [
       [
@@ -1880,11 +1880,11 @@
     "name": "鬼蝠魟",
     "rarity": "史诗",
     "description": "巨大的双翼在海中滑翔，如同一张巨大的飞毯。",
-    "base_price": 285,
-    "difficulty": 175,
+    "base_price": 317,
+    "difficulty": 140.84,
     "weight": [
-      80,
-      120
+      169.29,
+      186.55
     ],
     "active_hours": [
       [
@@ -1898,11 +1898,11 @@
     "name": "蓝枪鱼",
     "rarity": "史诗",
     "description": "海钓者的终极梦想之一，力量、速度与美的完美结合。",
-    "base_price": 325,
-    "difficulty": 172,
+    "base_price": 178,
+    "difficulty": 110,
     "weight": [
-      70,
-      115
+      25.46,
+      41.83
     ],
     "active_hours": [
       [
@@ -1916,11 +1916,11 @@
     "name": "月鱼",
     "rarity": "史诗",
     "description": "圆盘状的身体呈现鲜红与银色，是唯一一种温血鱼类。",
-    "base_price": 275,
-    "difficulty": 162,
+    "base_price": 278,
+    "difficulty": 127.16,
     "weight": [
-      50,
-      95
+      140.02,
+      157.28
     ],
     "active_hours": [
       [
@@ -1942,10 +1942,10 @@
     "rarity": "史诗",
     "description": "背负沉重水晶簇，飘雪时会共鸣发光并上浮。",
     "base_price": 350,
-    "difficulty": 158,
+    "difficulty": 170.54,
     "weight": [
-      85,
-      118
+      153.62,
+      170.88
     ],
     "active_hours": [
       [
@@ -1965,11 +1965,11 @@
     "name": "虚空鳐",
     "rarity": "史诗",
     "description": "仿佛游动在星空中，身体映照着宇宙的星辰。",
-    "base_price": 345,
-    "difficulty": 178,
+    "base_price": 299,
+    "difficulty": 182.64,
     "weight": [
-      30,
-      80
+      46,
+      68.09
     ],
     "active_hours": [
       [
@@ -1990,11 +1990,11 @@
     "name": "海妖之泪",
     "rarity": "史诗",
     "description": "一种散发着悲伤光芒的小鱼，据说会引诱渔人迷失。",
-    "base_price": 360,
-    "difficulty": 175,
+    "base_price": 215,
+    "difficulty": 142.65,
     "weight": [
-      1.5,
-      10
+      4.54,
+      30.25
     ],
     "active_hours": [
       [
@@ -2015,11 +2015,11 @@
     "name": "雷霆鲨",
     "rarity": "史诗",
     "description": "背鳍伴有微型雷云，只随雷暴现身。",
-    "base_price": 340,
-    "difficulty": 175,
+    "base_price": 177,
+    "difficulty": 110,
     "weight": [
-      60,
-      115
+      21.82,
+      41.83
     ],
     "active_hours": [
       [
@@ -2040,11 +2040,11 @@
     "name": "金鳞龙鱼",
     "rarity": "史诗",
     "description": "通体纯金、长须如龙，只在晴日现身。",
-    "base_price": 365,
-    "difficulty": 170,
+    "base_price": 180,
+    "difficulty": 117.35,
     "weight": [
-      15,
-      60
+      7.85,
+      31.41
     ],
     "active_hours": [
       [
@@ -2065,11 +2065,11 @@
     "name": "利维坦幼崽",
     "rarity": "传说",
     "description": "远古海怪的幼体，虽然还小，但力量已经足以在大海掀起波澜。",
-    "base_price": 460,
-    "difficulty": 218,
+    "base_price": 360,
+    "difficulty": 150.5,
     "weight": [
-      160,
-      240
+      55.8,
+      83.69
     ],
     "active_hours": [
       [
@@ -2083,11 +2083,11 @@
     "name": "噬星者",
     "rarity": "传说",
     "description": "大嘴里仿佛有一个黑洞，吞噬一切光线，极其沉重。",
-    "base_price": 470,
-    "difficulty": 225,
+    "base_price": 472,
+    "difficulty": 220,
     "weight": [
-      170,
-      248
+      126.91,
+      185.14
     ],
     "active_hours": [
       [
@@ -2108,11 +2108,11 @@
     "name": "克拉肯之触",
     "rarity": "传说",
     "description": "拥有独立意识和怪力的巨型触手，只在雷暴中苏醒。",
-    "base_price": 430,
-    "difficulty": 212,
+    "base_price": 466,
+    "difficulty": 180,
     "weight": [
-      150,
-      230
+      241.87,
+      274.13
     ],
     "active_hours": [
       [
@@ -2132,11 +2132,11 @@
     "name": "浴火锦鲤",
     "rarity": "传说",
     "description": "能令水温沸腾的燃烧之鱼，只在晴日正午苏醒。",
-    "base_price": 480,
-    "difficulty": 218,
+    "base_price": 392,
+    "difficulty": 189.5,
     "weight": [
-      20,
-      80
+      15.81,
+      63.25
     ],
     "active_hours": [
       [
@@ -2156,11 +2156,11 @@
     "name": "深渊幽鲸",
     "rarity": "传说",
     "description": "来自最深海沟的孤独歌者，身体承载着深海的高压。",
-    "base_price": 450,
-    "difficulty": 228,
+    "base_price": 500,
+    "difficulty": 225,
     "weight": [
-      180,
-      250
+      43,
+      387
     ],
     "active_hours": [
       [
@@ -2175,10 +2175,10 @@
     "rarity": "宝藏",
     "description": "缠着樱花枝的小木箱，随波轻轻摇晃，里面装着新手钓客的小惊喜。",
     "base_price": 0,
-    "difficulty": 40,
+    "difficulty": 35,
     "weight": [
       2,
-      4
+      8
     ],
     "active_hours": [
       [
@@ -2196,10 +2196,10 @@
     "rarity": "宝藏",
     "description": "柳木打造的严实匣子，随沉船落入河湾，里面多是渔具与养护用品。",
     "base_price": 0,
-    "difficulty": 50,
+    "difficulty": 40,
     "weight": [
       4,
-      8
+      10
     ],
     "active_hours": [
       [
@@ -2217,7 +2217,7 @@
     "rarity": "宝藏",
     "description": "被浓雾浸透的古旧木匣，打开前谁也说不准里面是淤泥还是奇珍。",
     "base_price": 0,
-    "difficulty": 60,
+    "difficulty": 45,
     "weight": [
       6,
       12
@@ -2238,10 +2238,10 @@
     "rarity": "宝藏",
     "description": "从沉没商船漂来的鎏金宝箱，缝隙里都透着金光。",
     "base_price": 0,
-    "difficulty": 70,
+    "difficulty": 45,
     "weight": [
-      10,
-      18
+      8,
+      16
     ],
     "active_hours": [
       [
@@ -2259,10 +2259,10 @@
     "rarity": "宝藏",
     "description": "深渊铁铸成的囚箱，锁链上刻满封印符文——里面锁着财富，也可能锁着别的东西。",
     "base_price": 0,
-    "difficulty": 85,
+    "difficulty": 50,
     "weight": [
-      15,
-      30
+      10,
+      20
     ],
     "active_hours": [
       [
@@ -2280,10 +2280,10 @@
     "rarity": "宝藏",
     "description": "凝固的星光织成的圣匣，只在幻想水域现身，装着秘境最珍贵的馈赠。",
     "base_price": 0,
-    "difficulty": 95,
+    "difficulty": 50,
     "weight": [
-      20,
-      40
+      12,
+      24
     ],
     "active_hours": [
       [
@@ -2297,18 +2297,18 @@
   },
   {
     "id": "monster_mimic",
-    "name": "宝箱怪",
+    "name": "拟态怪",
     "rarity": "噩梦",
-    "description": "伪装成宝箱的怪物！",
+    "description": "它伪装成宝箱，咬钩后却猛然张开利齿啃噬鱼竿。",
     "base_price": 0,
-    "difficulty": 130,
+    "difficulty": 85,
     "nightmare_effect": {
       "type": "rod_damage",
-      "amount": 14
+      "amount": 20
     },
     "weight": [
-      30,
-      70
+      18,
+      32
     ],
     "active_hours": [
       [
@@ -2321,16 +2321,17 @@
     "id": "nightmare_bone_shark",
     "name": "骸骨鲨",
     "rarity": "噩梦",
-    "description": "只剩下骨架的鲨鱼，锋利的骨刺会严重损坏你的鱼竿！",
+    "description": "只剩骨架的鲨鱼用骨刺磨损鱼竿，还会永久破坏竿身的控制力。",
     "base_price": 0,
-    "difficulty": 140,
+    "difficulty": 100,
     "nightmare_effect": {
-      "type": "rod_damage",
-      "amount": 18
+      "type": "rod_damage_control_loss",
+      "rod_damage": 10,
+      "control_loss": 10
     },
     "weight": [
-      50,
-      90
+      28,
+      46
     ],
     "active_hours": [
       [
@@ -2341,20 +2342,20 @@
   },
   {
     "id": "nightmare_thief_murloc",
-    "name": "窃贼鱼人",
+    "name": "水鬼",
     "rarity": "噩梦",
-    "description": "狡猾的鱼人，它不会上钩，反而会趁机偷走你的一些樱花币！",
+    "description": "湿漉漉的水鬼会随机摸走少量樱花币；无钱可偷时便转而袭击鱼竿。",
     "base_price": 0,
-    "difficulty": 110,
+    "difficulty": 80,
     "nightmare_effect": {
       "type": "steal_coins_flat",
-      "min": 5,
-      "max": 90,
-      "fallback_rod_damage": 14
+      "min": 1,
+      "max": 100,
+      "fallback_rod_damage": 20
     },
     "weight": [
-      15,
-      45
+      8,
+      20
     ],
     "active_hours": [
       [
@@ -2369,16 +2370,16 @@
     "rarity": "噩梦",
     "description": "来自虚空的恐怖生物，它的出现意味着财富的大量流失...",
     "base_price": 0,
-    "difficulty": 150,
+    "difficulty": 110,
     "nightmare_effect": {
       "type": "steal_coins_percent",
-      "min_percent": 2,
+      "min_percent": 1,
       "max_percent": 12,
-      "fallback_rod_damage": 16
+      "fallback_rod_damage": 20
     },
     "weight": [
-      8,
-      25
+      12,
+      26
     ],
     "active_hours": [
       [
@@ -2393,14 +2394,14 @@
     "rarity": "噩梦",
     "description": "散发着不祥气息的骷髅头，接触它会让你厄运缠身！",
     "base_price": 0,
-    "difficulty": 100,
+    "difficulty": 75,
     "nightmare_effect": {
       "type": "curse",
-      "layers": 3
+      "layers": 5
     },
     "weight": [
       3,
-      12
+      14
     ],
     "active_hours": [
       [
@@ -2411,19 +2412,18 @@
   },
   {
     "id": "nightmare_pond_drowned_bride",
-    "name": "池底花嫁",
+    "name": "溺水花嫁",
     "rarity": "噩梦",
-    "description": "樱花池塘的怪谈。她披着被水草缠住的白无垢，会用冥婚红线将宝藏的气息引向噩梦。",
+    "description": "樱花池塘的怪谈。她的印记会让噩梦权重乘2，重复遇见还会继续连乘，直至被净化。",
     "base_price": 0,
-    "difficulty": 105,
+    "difficulty": 80,
     "nightmare_effect": {
-      "type": "bride_thread",
-      "layers": 3,
-      "max_layers": 6
+      "type": "nightmare_weight_multiplier",
+      "multiplier": 2
     },
     "weight": [
-      18,
-      36
+      10,
+      24
     ],
     "active_hours": [
       [
@@ -2437,18 +2437,18 @@
   },
   {
     "id": "nightmare_river_water_monkey",
-    "name": "柳下水猴",
+    "name": "河童水猴",
     "rarity": "噩梦",
-    "description": "青柳河湾的怪谈。雨夜若听见柳根下有人学你说话，低头时它已经顺走了钩边的鱼饵。",
+    "description": "青柳河湾的怪谈。它专挑背包里价值最高的鱼饵下手，无饵可偷便抓伤鱼竿。",
     "base_price": 0,
-    "difficulty": 115,
+    "difficulty": 85,
     "nightmare_effect": {
       "type": "steal_bait",
-      "fallback_rod_damage": 10
+      "fallback_rod_damage": 20
     },
     "weight": [
-      24,
-      48
+      14,
+      28
     ],
     "active_hours": [
       [
@@ -2464,15 +2464,17 @@
     "id": "nightmare_lake_corpse_fisher",
     "name": "雾中捞尸人",
     "rarity": "噩梦",
-    "description": "雾隐湖的怪谈。没有脸的老渔夫会把人的倒影留在湖底，再将失魂者抛到陌生水岸。",
+    "description": "雾隐湖的怪谈。它以钓客的当前体力重创鱼竿，最多造成20点损耗，并将体力强制压到1点。",
     "base_price": 0,
-    "difficulty": 125,
+    "difficulty": 90,
     "nightmare_effect": {
-      "type": "lost_soul"
+      "type": "stamina_crush",
+      "max_rod_damage": 20,
+      "forced_stamina": 1
     },
     "weight": [
-      35,
-      70
+      20,
+      38
     ],
     "active_hours": [
       [
@@ -2488,17 +2490,16 @@
     "id": "nightmare_coast_ghost_ship",
     "name": "暮潮幽灵船",
     "rarity": "噩梦",
-    "description": "落日海岸的怪谈。无灯旧船追着最后一线夕阳靠岸，并向每个目击者寄出无法拒付的亡者船票。",
+    "description": "落日海岸的怪谈。它留下100樱花币债务；债清前每笔钓鱼金币先减半，再用于还债。",
     "base_price": 0,
-    "difficulty": 135,
+    "difficulty": 105,
     "nightmare_effect": {
       "type": "ghost_debt",
-      "amount": 150,
-      "max_debt": 450
+      "amount": 100
     },
     "weight": [
-      80,
-      180
+      40,
+      70
     ],
     "active_hours": [
       [
@@ -2514,17 +2515,16 @@
     "id": "nightmare_abyss_diving_bell",
     "name": "叩舱潜水钟",
     "rarity": "噩梦",
-    "description": "深渊海沟的怪谈。锈死的潜水钟每响一次，深海重压便会缠住此后数次抛竿。",
+    "description": "深渊海沟的怪谈。每次敲响都会叠加3层深压，使之后受影响的鱼竿控制力减半。",
     "base_price": 0,
-    "difficulty": 150,
+    "difficulty": 115,
     "nightmare_effect": {
       "type": "deep_pressure",
-      "layers": 3,
-      "max_layers": 6
+      "layers": 3
     },
     "weight": [
-      140,
-      320
+      55,
+      90
     ],
     "active_hours": [
       [
@@ -2540,15 +2540,15 @@
     "id": "nightmare_mystic_star_eater",
     "name": "食星之影",
     "rarity": "噩梦",
-    "description": "星辉秘境的怪谈。它游过的地方星光会一颗颗熄灭，连护符与祝福的光芒也会被吞进腹中。",
+    "description": "星辉秘境的怪谈。它会随机吞掉背包中的一个物品，但无法吞噬当前鱼竿。",
     "base_price": 0,
-    "difficulty": 145,
+    "difficulty": 100,
     "nightmare_effect": {
-      "type": "devour_buff",
-        "duration_seconds": 2100
+      "type": "devour_inventory",
+      "fallback_rod_damage": 2
     },
     "weight": [
-      6,
+      8,
       22
     ],
     "active_hours": [
@@ -2566,11 +2566,11 @@
     "name": "破洞的渔网",
     "rarity": "垃圾",
     "description": "不知道哪位同行丢失的渔网，破得连小鱼都拦不住。",
-    "base_price": 2,
-    "difficulty": 29,
+    "base_price": 19,
+    "difficulty": 25,
     "weight": [
-      0.5,
-      2.5
+      0.72,
+      3.59
     ],
     "active_hours": [
       [
@@ -2587,11 +2587,11 @@
     "name": "断裂的船桨",
     "rarity": "垃圾",
     "description": "半截船桨，另一半大概还在某位船夫的手里。",
-    "base_price": 3,
-    "difficulty": 31,
+    "base_price": 17,
+    "difficulty": 8,
     "weight": [
-      1.5,
-      3.5
+      6.12,
+      6.88
     ],
     "active_hours": [
       [
@@ -2608,11 +2608,11 @@
     "name": "腐朽的舵轮",
     "rarity": "垃圾",
     "description": "不知沉睡了多少年的舵轮，握把处还留着深深的抓痕。",
-    "base_price": 8,
-    "difficulty": 34,
+    "base_price": 4,
+    "difficulty": 8,
     "weight": [
-      3,
-      5
+      2.72,
+      4.54
     ],
     "active_hours": [
       [
@@ -2629,11 +2629,11 @@
     "name": "黯淡的星尘碎片",
     "rarity": "垃圾",
     "description": "失去光芒的星星碎片，捏在手里只剩一点微温。",
-    "base_price": 5,
-    "difficulty": 26,
+    "base_price": 0,
+    "difficulty": 8,
     "weight": [
-      0.1,
-      0.5
+      0.61,
+      3.07
     ],
     "active_hours": [
       [
@@ -2650,11 +2650,11 @@
     "name": "折断的法杖",
     "rarity": "垃圾",
     "description": "断口处偶尔冒出一两个火花，吓人一跳。",
-    "base_price": 6,
-    "difficulty": 28,
+    "base_price": 20,
+    "difficulty": 25,
     "weight": [
-      0.5,
-      1.5
+      1.13,
+      3.38
     ],
     "active_hours": [
       [
@@ -2671,11 +2671,11 @@
     "name": "开花的雨伞",
     "rarity": "垃圾",
     "description": "被风吹翻过无数次的伞，伞骨支棱着像朵铁艺花。",
-    "base_price": 1,
-    "difficulty": 28,
+    "base_price": 20,
+    "difficulty": 25,
     "weight": [
-      0.5,
-      2
+      0.87,
+      3.49
     ],
     "active_hours": [
       [
@@ -2693,11 +2693,11 @@
     "name": "空空的漂流瓶",
     "rarity": "垃圾",
     "description": "瓶里的信纸泡烂了，只能辨认出一句「救……」，希望没事。",
-    "base_price": 4,
-    "difficulty": 25,
+    "base_price": 0,
+    "difficulty": 8,
     "weight": [
-      0.2,
-      0.8
+      0.82,
+      3.28
     ],
     "active_hours": [
       [
@@ -2715,11 +2715,11 @@
     "name": "熄灭的雾灯",
     "rarity": "垃圾",
     "description": "灯芯早已熄灭，可雾气总绕着它打转。",
-    "base_price": 5,
-    "difficulty": 30,
+    "base_price": 1,
+    "difficulty": 8,
     "weight": [
-      0.8,
-      2.5
+      1.15,
+      3.59
     ],
     "active_hours": [
       [
@@ -2737,11 +2737,11 @@
     "name": "进水的潜水头盔",
     "rarity": "垃圾",
     "description": "老式铜制潜水头盔，倒过来能当花盆。",
-    "base_price": 10,
-    "difficulty": 34,
+    "base_price": 17,
+    "difficulty": 8,
     "weight": [
-      2.5,
-      4.8
+      6.12,
+      6.88
     ],
     "active_hours": [
       [
@@ -2759,11 +2759,11 @@
     "name": "磨损的符文石板",
     "rarity": "垃圾",
     "description": "刻着看不懂的符号，学者说是古文，骗子说是菜单。",
-    "base_price": 12,
-    "difficulty": 33,
+    "base_price": 17,
+    "difficulty": 8,
     "weight": [
-      2,
-      4.5
+      6.12,
+      6.88
     ],
     "active_hours": [
       [
@@ -2781,11 +2781,11 @@
     "name": "灰锦鲤",
     "rarity": "普通",
     "description": "还没变红的锦鲤，据说心怀梦想的它总有一天会发光。",
-    "base_price": 11,
-    "difficulty": 30,
+    "base_price": 16,
+    "difficulty": 8,
     "weight": [
-      0.5,
-      2.5
+      0.81,
+      4.07
     ],
     "active_hours": [
       [
@@ -2803,10 +2803,10 @@
     "rarity": "普通",
     "description": "尾巴像把小剪刀，脾气比样子大得多。",
     "base_price": 10,
-    "difficulty": 29,
+    "difficulty": 8,
     "weight": [
-      0.05,
-      0.3
+      0.49,
+      2.95
     ],
     "active_hours": [
       [
@@ -2823,11 +2823,11 @@
     "name": "福寿螺",
     "rarity": "普通",
     "description": "繁殖力惊人的外来户，钓上来算是为民除害。",
-    "base_price": 6,
-    "difficulty": 25,
+    "base_price": 18,
+    "difficulty": 8,
     "weight": [
-      0.1,
-      0.6
+      7.36,
+      8.12
     ],
     "active_hours": [
       [
@@ -2844,11 +2844,11 @@
     "name": "麦穗鱼",
     "rarity": "普通",
     "description": "小得像颗麦穗，闹窝小能手，气得钓鱼佬直跺脚。",
-    "base_price": 6,
-    "difficulty": 26,
+    "base_price": 18,
+    "difficulty": 25.12,
     "weight": [
-      0.05,
-      0.2
+      2,
+      2.78
     ],
     "active_hours": [
       [
@@ -2865,11 +2865,11 @@
     "name": "黄颡鱼",
     "rarity": "普通",
     "description": "背鳍带刺的小黄鱼，抓它请务必小心手指。",
-    "base_price": 14,
-    "difficulty": 34,
+    "base_price": 15,
+    "difficulty": 8,
     "weight": [
-      0.2,
-      1.2
+      0.63,
+      3.8
     ],
     "active_hours": [
       [
@@ -2890,11 +2890,11 @@
     "name": "河虾",
     "rarity": "普通",
     "description": "透明的小家伙，在钩子上蹦跶得像在跳舞。",
-    "base_price": 7,
-    "difficulty": 25,
+    "base_price": 18,
+    "difficulty": 34.98,
     "weight": [
-      0.05,
-      0.3
+      2,
+      2.95
     ],
     "active_hours": [
       [
@@ -2911,11 +2911,11 @@
     "name": "高白鲑",
     "rarity": "普通",
     "description": "银白细鳞的冷水鱼，湖水越冷它越精神。",
-    "base_price": 17,
-    "difficulty": 34,
+    "base_price": 18,
+    "difficulty": 34.73,
     "weight": [
-      0.8,
-      3
+      2,
+      4.17
     ],
     "active_hours": [
       [
@@ -2932,11 +2932,11 @@
     "name": "银鱼",
     "rarity": "普通",
     "description": "通体透明如冰，一出水就要化在阳光里似的。",
-    "base_price": 12,
-    "difficulty": 26,
+    "base_price": 13,
+    "difficulty": 8,
     "weight": [
-      0.05,
-      0.2
+      0.7,
+      2.78
     ],
     "active_hours": [
       [
@@ -2953,11 +2953,11 @@
     "name": "湖鳟",
     "rarity": "普通",
     "description": "湖泊深处的常客，喜欢在晨光里巡游。",
-    "base_price": 19,
-    "difficulty": 38,
+    "base_price": 18,
+    "difficulty": 8,
     "weight": [
-      1.5,
-      5
+      7.36,
+      8.12
     ],
     "active_hours": [
       [
@@ -2975,10 +2975,10 @@
     "rarity": "普通",
     "description": "淡水里唯一的鳕鱼，长着一副没睡醒的脸。",
     "base_price": 18,
-    "difficulty": 36,
+    "difficulty": 8,
     "weight": [
-      1,
-      4
+      7.65,
+      8.41
     ],
     "active_hours": [
       [
@@ -2999,11 +2999,11 @@
     "name": "河蚌",
     "rarity": "普通",
     "description": "紧闭的贝壳，撬开也许有珍珠，也许只有一口湖水。",
-    "base_price": 10,
-    "difficulty": 28,
+    "base_price": 16,
+    "difficulty": 8,
     "weight": [
-      0.3,
-      1.5
+      0.77,
+      3.83
     ],
     "active_hours": [
       [
@@ -3020,11 +3020,11 @@
     "name": "海鲈鱼",
     "rarity": "普通",
     "description": "海岸线的巡逻兵，浪头一起就开饭。",
-    "base_price": 19,
-    "difficulty": 36,
+    "base_price": 16,
+    "difficulty": 8,
     "weight": [
-      1,
-      4.5
+      0.99,
+      4.44
     ],
     "active_hours": [
       [
@@ -3041,11 +3041,11 @@
     "name": "寄居蟹",
     "rarity": "普通",
     "description": "背着别人的壳到处跑，租房一族的精神图腾。",
-    "base_price": 8,
-    "difficulty": 27,
+    "base_price": 15,
+    "difficulty": 8,
     "weight": [
-      0.1,
-      0.5
+      0.67,
+      3.33
     ],
     "active_hours": [
       [
@@ -3062,11 +3062,11 @@
     "name": "银鲳",
     "rarity": "普通",
     "description": "扁得像枚银币，在阳光下闪闪发亮。",
-    "base_price": 17,
-    "difficulty": 33,
+    "base_price": 18,
+    "difficulty": 8,
     "weight": [
-      0.3,
-      1.5
+      6.38,
+      7.14
     ],
     "active_hours": [
       [
@@ -3083,11 +3083,11 @@
     "name": "灯笼鱼",
     "rarity": "普通",
     "description": "自带小夜灯的深海居民，省电模式常年开启。",
-    "base_price": 14,
-    "difficulty": 30,
+    "base_price": 18,
+    "difficulty": 8,
     "weight": [
-      0.05,
-      0.3
+      7.37,
+      8.13
     ],
     "active_hours": [
       [
@@ -3108,11 +3108,11 @@
     "name": "鼠尾鳕",
     "rarity": "普通",
     "description": "尾巴细长如鼠尾，深海泥地里的老实人。",
-    "base_price": 18,
-    "difficulty": 36,
+    "base_price": 16,
+    "difficulty": 8,
     "weight": [
-      0.8,
-      3.5
+      0.97,
+      4.24
     ],
     "active_hours": [
       [
@@ -3129,11 +3129,11 @@
     "name": "银斧鱼",
     "rarity": "普通",
     "description": "薄得像片斧刃，肚皮上的光点是它的隐身衣。",
-    "base_price": 16,
-    "difficulty": 31,
+    "base_price": 10,
+    "difficulty": 8,
     "weight": [
-      0.05,
-      0.3
+      0.49,
+      2.95
     ],
     "active_hours": [
       [
@@ -3150,11 +3150,11 @@
     "name": "鼬鳚",
     "rarity": "普通",
     "description": "住在深不见底的海沟，见到阳光反而会害羞。",
-    "base_price": 19,
-    "difficulty": 37,
+    "base_price": 18,
+    "difficulty": 34.98,
     "weight": [
-      0.5,
-      2.5
+      2,
+      4.07
     ],
     "active_hours": [
       [
@@ -3171,11 +3171,11 @@
     "name": "泡泡精",
     "rarity": "普通",
     "description": "一串会咯咯笑的泡泡，戳破一个另一个笑得更响。",
-    "base_price": 12,
-    "difficulty": 28,
+    "base_price": 10,
+    "difficulty": 8,
     "weight": [
-      0.05,
-      0.3
+      0.49,
+      2.95
     ],
     "active_hours": [
       [
@@ -3192,11 +3192,11 @@
     "name": "微光蝌蚪",
     "rarity": "普通",
     "description": "尾巴拖着一缕星光，长大后会变成什么谁也不知道。",
-    "base_price": 10,
-    "difficulty": 26,
+    "base_price": 13,
+    "difficulty": 8,
     "weight": [
-      0.05,
-      0.2
+      0.7,
+      2.78
     ],
     "active_hours": [
       [
@@ -3213,11 +3213,11 @@
     "name": "花瓣鱼",
     "rarity": "普通",
     "description": "像一片粉色花瓣在水里游，落英时节会成群结队。",
-    "base_price": 14,
-    "difficulty": 30,
+    "base_price": 20,
+    "difficulty": 8,
     "weight": [
-      0.1,
-      0.6
+      9.43,
+      9.79
     ],
     "active_hours": [
       [
@@ -3234,11 +3234,11 @@
     "name": "月光鲦",
     "rarity": "普通",
     "description": "月亮升起时才现身的小鱼，鳞片里存着借来的月光。",
-    "base_price": 13,
-    "difficulty": 29,
+    "base_price": 10,
+    "difficulty": 8,
     "weight": [
-      0.05,
-      0.3
+      0.49,
+      2.95
     ],
     "active_hours": [
       [
@@ -3259,11 +3259,11 @@
     "name": "烛光水母",
     "rarity": "普通",
     "description": "伞盖里点着一簇不会熄灭的小火苗，风一吹晃晃悠悠。",
-    "base_price": 16,
-    "difficulty": 31,
+    "base_price": 15,
+    "difficulty": 8,
     "weight": [
-      0.2,
-      1
+      0.73,
+      3.63
     ],
     "active_hours": [
       [
@@ -3280,11 +3280,11 @@
     "name": "纸鹤鱼",
     "rarity": "普通",
     "description": "折痕分明像张会游泳的纸，淋湿了也不会散架。",
-    "base_price": 14,
-    "difficulty": 30,
+    "base_price": 15,
+    "difficulty": 8,
     "weight": [
-      0.1,
-      0.5
+      0.67,
+      3.33
     ],
     "active_hours": [
       [
@@ -3301,11 +3301,11 @@
     "name": "雾中游丝",
     "rarity": "普通",
     "description": "一缕成了精的雾气，钓上来的瞬间会在指间凉一下。",
-    "base_price": 12,
-    "difficulty": 27,
+    "base_price": 18,
+    "difficulty": 36.35,
     "weight": [
-      0.1,
-      0.4
+      2,
+      3.26
     ],
     "active_hours": [
       [
@@ -3325,11 +3325,11 @@
     "name": "小星鱼",
     "rarity": "普通",
     "description": "五角星形状的小家伙，掉进水里的星星大概就是它。",
-    "base_price": 17,
-    "difficulty": 32,
+    "base_price": 15,
+    "difficulty": 8,
     "weight": [
-      0.1,
-      0.6
+      0.58,
+      3.46
     ],
     "active_hours": [
       [
@@ -3351,10 +3351,10 @@
     "rarity": "普通",
     "description": "滑不留手的夜行者，稻田与河湾的双栖住户。",
     "base_price": 16,
-    "difficulty": 33,
+    "difficulty": 8,
     "weight": [
-      0.3,
-      1.8
+      0.67,
+      4
     ],
     "active_hours": [
       [
@@ -3376,11 +3376,11 @@
     "name": "青鳉",
     "rarity": "普通",
     "description": "指甲盖大的小鱼，成群游过像一阵青色的雨。",
-    "base_price": 6,
-    "difficulty": 24,
+    "base_price": 14,
+    "difficulty": 8,
     "weight": [
-      0.05,
-      0.15
+      0.92,
+      2.75
     ],
     "active_hours": [
       [
@@ -3398,11 +3398,11 @@
     "name": "香鱼",
     "rarity": "普通",
     "description": "身上带着西瓜般的清香，逆流而上是它一生的执念。",
-    "base_price": 18,
-    "difficulty": 34,
+    "base_price": 15,
+    "difficulty": 8,
     "weight": [
-      0.2,
-      1
+      0.73,
+      3.63
     ],
     "active_hours": [
       [
@@ -3420,11 +3420,11 @@
     "name": "带鱼",
     "rarity": "普通",
     "description": "银光闪闪的长条，站着游泳的怪家伙。",
-    "base_price": 19,
-    "difficulty": 36,
+    "base_price": 16,
+    "difficulty": 8,
     "weight": [
-      0.8,
-      3.5
+      0.97,
+      4.24
     ],
     "active_hours": [
       [
@@ -3446,11 +3446,11 @@
     "name": "三色锦鲤",
     "rarity": "精品",
     "description": "红白黑三色分明，转发这条锦鲤好运连连。",
-    "base_price": 55,
-    "difficulty": 55,
+    "base_price": 63,
+    "difficulty": 74.99,
     "weight": [
-      2,
-      12
+      29.39,
+      32.99
     ],
     "active_hours": [
       [
@@ -3467,11 +3467,11 @@
     "name": "金鲫",
     "rarity": "精品",
     "description": "阳光下通体金黄，是鲫鱼家族里最靓的仔。",
-    "base_price": 50,
-    "difficulty": 52,
+    "base_price": 33,
+    "difficulty": 35.03,
     "weight": [
-      1,
-      8
+      0.41,
+      3.28
     ],
     "active_hours": [
       [
@@ -3488,11 +3488,11 @@
     "name": "胖头鱼",
     "rarity": "精品",
     "description": "脑袋占了身体三分之一，据说炖汤特别鲜。",
-    "base_price": 45,
-    "difficulty": 60,
+    "base_price": 59,
+    "difficulty": 39.65,
     "weight": [
-      5,
-      20
+      40,
+      43.6
     ],
     "active_hours": [
       [
@@ -3509,11 +3509,11 @@
     "name": "老甲鱼",
     "rarity": "精品",
     "description": "咬住就不撒口的倔脾气，人称水中王八……不，中华鳖。",
-    "base_price": 65,
-    "difficulty": 65,
+    "base_price": 33,
+    "difficulty": 35.03,
     "weight": [
-      1.5,
-      10
+      0.52,
+      3.44
     ],
     "active_hours": [
       [
@@ -3534,11 +3534,11 @@
     "name": "鳜鱼",
     "rarity": "精品",
     "description": "西塞山前白鹭飞，桃花流水鳜鱼肥。",
-    "base_price": 60,
-    "difficulty": 62,
+    "base_price": 59,
+    "difficulty": 67.61,
     "weight": [
-      1.5,
-      10
+      26.01,
+      29.29
     ],
     "active_hours": [
       [
@@ -3560,10 +3560,10 @@
     "rarity": "精品",
     "description": "北方河流的猛将，传说大的能拖走一头小鹿。",
     "base_price": 65,
-    "difficulty": 72,
+    "difficulty": 50.65,
     "weight": [
-      5,
-      22
+      46.96,
+      47.6
     ],
     "active_hours": [
       [
@@ -3580,11 +3580,11 @@
     "name": "巨型丝足鱼",
     "rarity": "精品",
     "description": "两根长长的腹鳍像触角，慢悠悠地在湖里踱步。",
-    "base_price": 50,
-    "difficulty": 58,
+    "base_price": 34,
+    "difficulty": 35.03,
     "weight": [
-      3,
-      15
+      0.77,
+      3.85
     ],
     "active_hours": [
       [
@@ -3601,11 +3601,11 @@
     "name": "匙吻鲟",
     "rarity": "精品",
     "description": "长着鸭嘴般的吻部，滤食时像在用勺子喝汤。",
-    "base_price": 60,
-    "difficulty": 64,
+    "base_price": 34,
+    "difficulty": 35.03,
     "weight": [
-      4,
-      18
+      0.91,
+      4.1
     ],
     "active_hours": [
       [
@@ -3622,11 +3622,11 @@
     "name": "北极红点鲑",
     "rarity": "精品",
     "description": "雪落时分最活跃，腹部的红色像雪地里的一团火。",
-    "base_price": 60,
-    "difficulty": 62,
+    "base_price": 54,
+    "difficulty": 80.76,
     "weight": [
-      2,
-      12
+      9.6,
+      17.31
     ],
     "active_hours": [
       [
@@ -3646,11 +3646,11 @@
     "name": "幽灵鲤",
     "rarity": "精品",
     "description": "苍白如纸的鲤鱼，雾夜里一闪而过，像个善意的谣言。",
-    "base_price": 55,
-    "difficulty": 60,
+    "base_price": 32,
+    "difficulty": 29.75,
     "weight": [
-      3,
-      16
+      0.75,
+      3.97
     ],
     "active_hours": [
       [
@@ -3674,11 +3674,11 @@
     "name": "水晶虾",
     "rarity": "精品",
     "description": "通体剔透的小虾，养虾人愿意为它一掷千金。",
-    "base_price": 45,
-    "difficulty": 48,
+    "base_price": 50,
+    "difficulty": 28.65,
     "weight": [
-      0.05,
-      0.3
+      31.33,
+      34.93
     ],
     "active_hours": [
       [
@@ -3695,11 +3695,11 @@
     "name": "波士顿龙虾",
     "rarity": "精品",
     "description": "钳子比脑子发达，被夹到的钓鱼佬都说疼。",
-    "base_price": 65,
-    "difficulty": 66,
+    "base_price": 57,
+    "difficulty": 47.65,
     "weight": [
-      1.5,
-      8
+      33.61,
+      37.21
     ],
     "active_hours": [
       [
@@ -3720,11 +3720,11 @@
     "name": "棱镜水母",
     "rarity": "精品",
     "description": "光线穿过伞盖会折射出一道小彩虹，雨后限定同款。",
-    "base_price": 65,
-    "difficulty": 58,
+    "base_price": 33,
+    "difficulty": 35.03,
     "weight": [
-      0.5,
-      4
+      0.4,
+      3.12
     ],
     "active_hours": [
       [
@@ -3741,11 +3741,11 @@
     "name": "风铃鱼",
     "rarity": "精品",
     "description": "尾鳍摆动会发出风铃般的声响，一群游过就是一场演奏会。",
-    "base_price": 55,
-    "difficulty": 54,
+    "base_price": 31,
+    "difficulty": 29.75,
     "weight": [
-      0.3,
-      2.5
+      0.4,
+      2.95
     ],
     "active_hours": [
       [
@@ -3762,11 +3762,11 @@
     "name": "折纸鳐",
     "rarity": "精品",
     "description": "边缘的折痕整整齐齐，像被哪位巨人随手折出来的作品。",
-    "base_price": 55,
-    "difficulty": 56,
+    "base_price": 33,
+    "difficulty": 35.03,
     "weight": [
-      1,
-      8
+      0.41,
+      3.28
     ],
     "active_hours": [
       [
@@ -3783,11 +3783,11 @@
     "name": "茶汤精灵",
     "rarity": "精品",
     "description": "泡在水里的时候，周围会散发出淡淡的茶香。",
-    "base_price": 60,
-    "difficulty": 50,
+    "base_price": 52,
+    "difficulty": 30.15,
     "weight": [
-      0.2,
-      1.5
+      33.81,
+      37.41
     ],
     "active_hours": [
       [
@@ -3804,11 +3804,11 @@
     "name": "余烬锦鲤",
     "rarity": "精品",
     "description": "鳞片像烧到一半的炭火，夜里游过会留下一道暖光。",
-    "base_price": 65,
-    "difficulty": 62,
+    "base_price": 34,
+    "difficulty": 35.03,
     "weight": [
-      2,
-      12
+      0.6,
+      3.61
     ],
     "active_hours": [
       [
@@ -3829,11 +3829,11 @@
     "name": "梦境鳗",
     "rarity": "精品",
     "description": "只在梦最深的时辰出没，钓到它的人当晚都会做个好梦。",
-    "base_price": 65,
-    "difficulty": 64,
+    "base_price": 33,
+    "difficulty": 35.03,
     "weight": [
-      1.5,
-      10
+      0.52,
+      3.44
     ],
     "active_hours": [
       [
@@ -3854,11 +3854,11 @@
     "name": "翘嘴鲌",
     "rarity": "精品",
     "description": "嘴巴上翘一脸傲气，捕食时水面炸出一朵水花。",
-    "base_price": 55,
-    "difficulty": 60,
+    "base_price": 34,
+    "difficulty": 35.03,
     "weight": [
-      2,
-      12
+      0.6,
+      3.61
     ],
     "active_hours": [
       [
@@ -3876,11 +3876,11 @@
     "name": "针鱼",
     "rarity": "精品",
     "description": "细长如针，游起来像一支离弦的银箭。",
-    "base_price": 45,
-    "difficulty": 52,
+    "base_price": 55,
+    "difficulty": 87.22,
     "weight": [
-      0.3,
-      2
+      9.6,
+      13.98
     ],
     "active_hours": [
       [
@@ -3898,11 +3898,11 @@
     "name": "白化鲶鱼",
     "rarity": "精品",
     "description": "通体雪白的夜行者，在暗处白得发亮。",
-    "base_price": 55,
-    "difficulty": 62,
+    "base_price": 34,
+    "difficulty": 35.03,
     "weight": [
-      3,
-      16
+      0.75,
+      3.97
     ],
     "active_hours": [
       [
@@ -3924,11 +3924,11 @@
     "name": "尖吻鲈",
     "rarity": "精品",
     "description": "在咸水淡水间来去自如，河海两栖的自由人。",
-    "base_price": 60,
-    "difficulty": 64,
+    "base_price": 34,
+    "difficulty": 35.03,
     "weight": [
-      3,
-      18
+      0.68,
+      4.1
     ],
     "active_hours": [
       [
@@ -3946,11 +3946,11 @@
     "name": "月光鲤",
     "rarity": "精品",
     "description": "月圆之夜鳞片会泛起银光，湖面像撒了一层碎银。",
-    "base_price": 65,
-    "difficulty": 60,
+    "base_price": 60,
+    "difficulty": 100,
     "weight": [
-      3,
-      15
+      9.6,
+      18.49
     ],
     "active_hours": [
       [
@@ -3972,11 +3972,11 @@
     "name": "鰤鱼",
     "rarity": "精品",
     "description": "洄游路上的健将，刺身爱好者的心头好。",
-    "base_price": 65,
-    "difficulty": 68,
+    "base_price": 51,
+    "difficulty": 48.65,
     "weight": [
-      4,
-      18
+      13.9,
+      34.1
     ],
     "active_hours": [
       [
@@ -3994,11 +3994,11 @@
     "name": "虚空虾",
     "rarity": "精品",
     "description": "身体一半透明一半虚无，煮熟了会变成什么颜色是个谜。",
-    "base_price": 60,
-    "difficulty": 58,
+    "base_price": 52,
+    "difficulty": 75.6,
     "weight": [
-      0.3,
-      2.5
+      9.6,
+      14.18
     ],
     "active_hours": [
       [
@@ -4020,11 +4020,11 @@
     "name": "黄金锦鲤",
     "rarity": "稀有",
     "description": "全身金光灿灿，晒着太阳才肯露面的祥瑞本瑞。",
-    "base_price": 180,
-    "difficulty": 100,
+    "base_price": 125,
+    "difficulty": 76.15,
     "weight": [
-      5,
-      25
+      79.19,
+      87.45
     ],
     "active_hours": [
       [
@@ -4044,11 +4044,11 @@
     "name": "大鲵",
     "rarity": "稀有",
     "description": "叫声像婴儿啼哭的娃娃鱼，拍照留念后请务必放生。",
-    "base_price": 175,
-    "difficulty": 110,
+    "base_price": 82,
+    "difficulty": 80.03,
     "weight": [
-      8,
-      40
+      3.18,
+      15.91
     ],
     "active_hours": [
       [
@@ -4069,11 +4069,11 @@
     "name": "白玉鳖",
     "rarity": "稀有",
     "description": "通体如白玉雕成的老鳖，传说已经修行了百年。",
-    "base_price": 160,
-    "difficulty": 105,
+    "base_price": 81,
+    "difficulty": 80.03,
     "weight": [
-      5,
-      30
+      2.49,
+      14.92
     ],
     "active_hours": [
       [
@@ -4090,11 +4090,11 @@
     "name": "龙睛金鱼王",
     "rarity": "稀有",
     "description": "眼睛鼓得像两盏灯笼，金鱼界的显眼包之王。",
-    "base_price": 155,
-    "difficulty": 98,
+    "base_price": 133,
+    "difficulty": 130.62,
     "weight": [
-      2,
-      15
+      22,
+      31.38
     ],
     "active_hours": [
       [
@@ -4111,11 +4111,11 @@
     "name": "绯红龙虾王",
     "rarity": "稀有",
     "description": "小龙虾中的霸主，据说麻辣味的它能称霸一整桌宵夜。",
-    "base_price": 160,
-    "difficulty": 108,
+    "base_price": 81,
+    "difficulty": 80.03,
     "weight": [
-      3,
-      20
+      2.13,
+      14.18
     ],
     "active_hours": [
       [
@@ -4132,11 +4132,11 @@
     "name": "湄公河巨魟",
     "rarity": "稀有",
     "description": "淡水里的巨型飞毯，尾刺的威名让老渔夫都发怵。",
-    "base_price": 190,
-    "difficulty": 118,
+    "base_price": 86,
+    "difficulty": 80.03,
     "weight": [
-      35,
-      60
+      12.15,
+      20.83
     ],
     "active_hours": [
       [
@@ -4153,11 +4153,11 @@
     "name": "白鲟",
     "rarity": "稀有",
     "description": "长江里的活化石，能再见到它是钓鱼佬最大的浪漫。",
-    "base_price": 195,
-    "difficulty": 115,
+    "base_price": 160,
+    "difficulty": 122.93,
     "weight": [
-      30,
-      55
+      76.1,
+      84.36
     ],
     "active_hours": [
       [
@@ -4174,11 +4174,11 @@
     "name": "湖怪巨狗鱼",
     "rarity": "稀有",
     "description": "被目击过无数次的「湖怪」，其实是条活得太久的狗鱼。",
-    "base_price": 175,
-    "difficulty": 115,
+    "base_price": 136,
+    "difficulty": 130.62,
     "weight": [
-      30,
-      55
+      22.96,
+      42.1
     ],
     "active_hours": [
       [
@@ -4195,11 +4195,11 @@
     "name": "古雀鳝",
     "rarity": "稀有",
     "description": "披着菱形硬鳞的活化石，一亿年没换过造型。",
-    "base_price": 170,
-    "difficulty": 112,
+    "base_price": 131,
+    "difficulty": 83.65,
     "weight": [
-      25,
-      50
+      79.2,
+      87.46
     ],
     "active_hours": [
       [
@@ -4220,11 +4220,11 @@
     "name": "欧洲鳇",
     "rarity": "稀有",
     "description": "淡水鱼类的体型天花板，鱼子酱爱好者眼中的金矿。",
-    "base_price": 190,
-    "difficulty": 118,
+    "base_price": 86,
+    "difficulty": 80.03,
     "weight": [
-      35,
-      60
+      12.15,
+      20.83
     ],
     "active_hours": [
       [
@@ -4241,11 +4241,11 @@
     "name": "雪鳟",
     "rarity": "稀有",
     "description": "落雪时才上浮的银白鳟鱼，鳞片冷得像冰。",
-    "base_price": 165,
-    "difficulty": 105,
+    "base_price": 82,
+    "difficulty": 80.03,
     "weight": [
-      10,
-      40
+      3.98,
+      15.91
     ],
     "active_hours": [
       [
@@ -4265,11 +4265,11 @@
     "name": "镜鲤王",
     "rarity": "稀有",
     "description": "鳞片大得像一面面小镜子，雾中反光时如同幻影。",
-    "base_price": 170,
-    "difficulty": 108,
+    "base_price": 83,
+    "difficulty": 80.03,
     "weight": [
-      15,
-      45
+      5.63,
+      16.89
     ],
     "active_hours": [
       [
@@ -4289,11 +4289,11 @@
     "name": "旗鱼",
     "rarity": "稀有",
     "description": "海中第一飞毛腿，背鳍张开就是一面得意的旗。",
-    "base_price": 180,
-    "difficulty": 118,
+    "base_price": 158,
+    "difficulty": 121.7,
     "weight": [
-      25,
-      55
+      74.74,
+      83
     ],
     "active_hours": [
       [
@@ -4310,11 +4310,11 @@
     "name": "龙趸石斑",
     "rarity": "稀有",
     "description": "礁石后的大嗓门房东，一口能吞下整只龙虾。",
-    "base_price": 185,
-    "difficulty": 116,
+    "base_price": 132,
+    "difficulty": 122.39,
     "weight": [
-      30,
-      58
+      24.11,
+      46.61
     ],
     "active_hours": [
       [
@@ -4331,11 +4331,11 @@
     "name": "鳗王",
     "rarity": "稀有",
     "description": "活了不知多少年的巨鳗，滑溜得像个老江湖。",
-    "base_price": 160,
-    "difficulty": 112,
+    "base_price": 82,
+    "difficulty": 80.03,
     "weight": [
-      10,
-      42
+      3.96,
+      16.65
     ],
     "active_hours": [
       [
@@ -4357,11 +4357,11 @@
     "name": "幽灵锦鲤",
     "rarity": "稀有",
     "description": "雾夜水面一闪而过的白影，老人说见到它要许愿。",
-    "base_price": 165,
-    "difficulty": 106,
+    "base_price": 82,
+    "difficulty": 80.03,
     "weight": [
-      8,
-      35
+      3.52,
+      15.42
     ],
     "active_hours": [
       [
@@ -4386,11 +4386,11 @@
     "name": "帝王鲑",
     "rarity": "稀有",
     "description": "雨季溯流而上的王者，每一跃都像加冕。",
-    "base_price": 180,
-    "difficulty": 114,
+    "base_price": 84,
+    "difficulty": 80.03,
     "weight": [
-      20,
-      50
+      6.95,
+      17.38
     ],
     "active_hours": [
       [
@@ -4411,11 +4411,11 @@
     "name": "符文龟",
     "rarity": "稀有",
     "description": "背甲上的符文会缓缓发光，驮着一整套看不懂的学问。",
-    "base_price": 185,
-    "difficulty": 108,
+    "base_price": 84,
+    "difficulty": 80.03,
     "weight": [
-      20,
-      50
+      6.95,
+      17.38
     ],
     "active_hours": [
       [
@@ -4433,11 +4433,11 @@
     "name": "巨口鲨",
     "rarity": "稀有",
     "description": "张开巨口滤食的深海隐士，被人类目击的次数屈指可数。",
-    "base_price": 190,
-    "difficulty": 115,
+    "base_price": 86,
+    "difficulty": 80.03,
     "weight": [
-      35,
-      60
+      12.15,
+      20.83
     ],
     "active_hours": [
       [
@@ -4459,11 +4459,11 @@
     "name": "深渊提灯鱼",
     "rarity": "稀有",
     "description": "头顶的灯笼里装的不是光，是一小片会发亮的星空。",
-    "base_price": 195,
-    "difficulty": 112,
+    "base_price": 81,
+    "difficulty": 80.03,
     "weight": [
-      5,
-      30
+      2.49,
+      14.92
     ],
     "active_hours": [
       [
@@ -4485,11 +4485,11 @@
     "name": "化龙鲤",
     "rarity": "史诗",
     "description": "正在跃龙门的鲤鱼，雨天的水花是它的进度条。",
-    "base_price": 350,
-    "difficulty": 168,
+    "base_price": 226,
+    "difficulty": 146.79,
     "weight": [
-      40,
-      90
+      15.5,
+      34.88
     ],
     "active_hours": [
       [
@@ -4509,11 +4509,11 @@
     "name": "百年玄鳖",
     "rarity": "史诗",
     "description": "池塘真正的主人，甲壳上的纹路记着一百年的水温。",
-    "base_price": 330,
-    "difficulty": 162,
+    "base_price": 177,
+    "difficulty": 111.27,
     "weight": [
-      60,
-      110
+      20.29,
+      37.2
     ],
     "active_hours": [
       [
@@ -4534,11 +4534,11 @@
     "name": "河神巨鲶",
     "rarity": "史诗",
     "description": "雨夜河水暴涨时现身，老一辈都管它叫「河神」。",
-    "base_price": 335,
-    "difficulty": 170,
+    "base_price": 187,
+    "difficulty": 115.97,
     "weight": [
-      70,
-      115
+      25.46,
+      41.83
     ],
     "active_hours": [
       [
@@ -4562,11 +4562,11 @@
     "name": "鎏金鲟",
     "rarity": "史诗",
     "description": "鳞甲泛着鎏金光泽，游过的河段连水都变得贵气。",
-    "base_price": 340,
-    "difficulty": 165,
+    "base_price": 225,
+    "difficulty": 144.03,
     "weight": [
-      65,
-      110
+      21.98,
+      37.2
     ],
     "active_hours": [
       [
@@ -4583,11 +4583,11 @@
     "name": "雾湖蛇颈龙",
     "rarity": "史诗",
     "description": "雾最浓时湖心露出的长脖子，照片拍出来永远是糊的。",
-    "base_price": 350,
-    "difficulty": 172,
+    "base_price": 226,
+    "difficulty": 140.71,
     "weight": [
-      75,
-      118
+      30.27,
+      47.62
     ],
     "active_hours": [
       [
@@ -4607,11 +4607,11 @@
     "name": "巨型翻车鱼",
     "rarity": "史诗",
     "description": "躺平晒太阳的巨型圆盘，摆烂界的精神领袖。",
-    "base_price": 320,
-    "difficulty": 160,
+    "base_price": 183,
+    "difficulty": 110,
     "weight": [
-      80,
-      120
+      33.29,
+      49.93
     ],
     "active_hours": [
       [
@@ -4628,11 +4628,11 @@
     "name": "白金龙鱼",
     "rarity": "史诗",
     "description": "通体白金色的龙鱼，风水学认证的镇宅之宝。",
-    "base_price": 345,
-    "difficulty": 168,
+    "base_price": 299,
+    "difficulty": 182.64,
     "weight": [
-      30,
-      80
+      46,
+      68.09
     ],
     "active_hours": [
       [
@@ -4650,11 +4650,11 @@
     "name": "月影龟王",
     "rarity": "史诗",
     "description": "月夜浮出水面换气，背甲上映着一整片月色。",
-    "base_price": 335,
-    "difficulty": 164,
+    "base_price": 181,
+    "difficulty": 111.94,
     "weight": [
-      70,
-      115
+      25.46,
+      41.83
     ],
     "active_hours": [
       [
@@ -4676,11 +4676,11 @@
     "name": "潮汐枪鱼",
     "rarity": "史诗",
     "description": "追着潮水冲刺的长枪，入海口是它的赛道。",
-    "base_price": 335,
-    "difficulty": 170,
+    "base_price": 176,
+    "difficulty": 110,
     "weight": [
-      65,
-      110
+      21.98,
+      37.2
     ],
     "active_hours": [
       [
@@ -4698,11 +4698,11 @@
     "name": "幽影鲸鲨",
     "rarity": "史诗",
     "description": "深夜贴着海面滑行的巨大阴影，温柔得不像它的体型。",
-    "base_price": 355,
-    "difficulty": 174,
+    "base_price": 299,
+    "difficulty": 168.01,
     "weight": [
-      85,
-      120
+      73.96,
+      104.41
     ],
     "active_hours": [
       [
@@ -4724,11 +4724,11 @@
     "name": "江河龙王",
     "rarity": "传说",
     "description": "暴雨倾盆时逆流而上的龙影，河道为它让路。",
-    "base_price": 465,
-    "difficulty": 220,
+    "base_price": 402,
+    "difficulty": 189.5,
     "weight": [
-      150,
-      235
+      50.16,
+      78.58
     ],
     "active_hours": [
       [
@@ -4748,11 +4748,11 @@
     "name": "雾隐麒麟",
     "rarity": "传说",
     "description": "雾夜踏水而行的麒麟，蹄印落处涟漪成环。",
-    "base_price": 475,
-    "difficulty": 222,
+    "base_price": 440,
+    "difficulty": 172.11,
     "weight": [
-      120,
-      200
+      43,
+      387
     ],
     "active_hours": [
       [
@@ -4776,11 +4776,11 @@
     "name": "落日金鲸",
     "rarity": "传说",
     "description": "驮着落日游过海平线的金色巨鲸，晚霞是它的尾迹。",
-    "base_price": 470,
-    "difficulty": 224,
+    "base_price": 408,
+    "difficulty": 189.5,
     "weight": [
-      170,
-      245
+      65.17,
+      93.92
     ],
     "active_hours": [
       [
@@ -4800,11 +4800,11 @@
     "name": "星河蛟",
     "rarity": "传说",
     "description": "身躯缀满星辰的蛟龙，游过的水面会倒映出银河。",
-    "base_price": 472,
-    "difficulty": 226,
+    "base_price": 393,
+    "difficulty": 180,
     "weight": [
-      160,
-      240
+      55.8,
+      83.69
     ],
     "active_hours": [
       [
@@ -4826,11 +4826,11 @@
     "name": "蚀月利维坦",
     "rarity": "传说",
     "description": "月蚀之夜从海沟深处上浮，吞下月亮的影子再缓缓沉回。",
-    "base_price": 475,
-    "difficulty": 228,
+    "base_price": 389,
+    "difficulty": 169.5,
     "weight": [
-      180,
-      250
+      74.98,
+      104.14
     ],
     "active_hours": [
       [
@@ -4852,15 +4852,17 @@
     "name": "绯樱鲤王",
     "rarity": "传说",
     "description": "吞食了百年落樱的池塘霸主，鳞片开合时会喷出令人脱力的绯色瘴气。",
-    "base_price": 520,
-    "difficulty": 245,
+    "base_price": 600,
+    "difficulty": 230,
     "weight": [
       170,
-      235
+      210
     ],
     "is_boss": true,
-    "hp": 300,
+    "hp": 180,
     "attack": 8,
+    "boss_exp": 200,
+    "reward_chest_id": "chest_pond",
     "boss_mechanic": {
       "type": "stamina_drain",
       "name": "樱瘴汲取",
@@ -4870,22 +4872,24 @@
     "locations": [
       "pond"
     ],
-    "fight_timeout_seconds": 100
+    "fight_timeout_seconds": 60
   },
   {
     "id": "boss_river_ape_king",
     "name": "青柳猿王",
     "rarity": "传说",
     "description": "盘踞河湾的水猿之王，一只手拽线，另一只手总能摸到钓客的钱袋。",
-    "base_price": 700,
-    "difficulty": 252,
+    "base_price": 600,
+    "difficulty": 230,
     "weight": [
-      175,
-      240
+      170,
+      210
     ],
     "is_boss": true,
-    "hp": 330,
-    "attack": 9,
+    "hp": 180,
+    "attack": 8,
+    "boss_exp": 200,
+    "reward_chest_id": "chest_river",
     "boss_mechanic": {
       "type": "steal_coins",
       "name": "探囊鬼手",
@@ -4896,22 +4900,24 @@
     "locations": [
       "river"
     ],
-    "fight_timeout_seconds": 100
+    "fight_timeout_seconds": 60
   },
   {
     "id": "boss_lake_mist_turtle",
     "name": "雾甲鳄龟",
     "rarity": "传说",
     "description": "龟甲上背着一整片浓雾，猛然翻身时连方向感和鱼线张力都会一同失控。",
-    "base_price": 950,
-    "difficulty": 259,
+    "base_price": 600,
+    "difficulty": 230,
     "weight": [
-      180,
-      245
+      170,
+      210
     ],
     "is_boss": true,
-    "hp": 360,
-    "attack": 10,
+    "hp": 180,
+    "attack": 8,
+    "boss_exp": 200,
+    "reward_chest_id": "chest_lake",
     "boss_mechanic": {
       "type": "tension_surge",
       "name": "迷雾震线",
@@ -4921,47 +4927,51 @@
     "locations": [
       "lake"
     ],
-    "fight_timeout_seconds": 105
+    "fight_timeout_seconds": 60
   },
   {
     "id": "boss_coast_saw_shark",
     "name": "赤潮锯鲨皇",
     "rarity": "传说",
     "description": "随着落日赤潮巡游的锯鲨皇，锯齿吻能像割草一样反复切削鱼线。",
-    "base_price": 1250,
-    "difficulty": 266,
+    "base_price": 600,
+    "difficulty": 230,
     "weight": [
-      185,
-      250
+      170,
+      210
     ],
     "is_boss": true,
-    "hp": 390,
-    "attack": 11,
+    "hp": 180,
+    "attack": 8,
+    "boss_exp": 200,
+    "reward_chest_id": "chest_coast",
     "boss_mechanic": {
       "type": "line_rend",
       "name": "赤潮锯刑",
       "multiplier": 1.8,
-      "description": "首领攻击对鱼线的永久耐久造成1.8倍伤害，耐久归零会立即断线。"
+      "description": "首领攻击对鱼线的本场耐久造成1.8倍伤害，耐久归零会立即断线。"
     },
     "locations": [
       "coast"
     ],
-    "fight_timeout_seconds": 105
+    "fight_timeout_seconds": 60
   },
   {
     "id": "boss_abyss_trench_maw",
     "name": "海沟吞舟兽",
     "rarity": "传说",
     "description": "能把沉船连同海水一起吞下的深渊巨口，高压水域中的搏斗必须速战速决。",
-    "base_price": 1650,
-    "difficulty": 273,
+    "base_price": 600,
+    "difficulty": 230,
     "weight": [
-      190,
-      255
+      170,
+      210
     ],
     "is_boss": true,
-    "hp": 420,
-    "attack": 12,
+    "hp": 180,
+    "attack": 8,
+    "boss_exp": 200,
+    "reward_chest_id": "chest_abyss",
     "boss_mechanic": {
       "type": "rod_crush",
       "name": "吞舟重撞",
@@ -4971,31 +4981,33 @@
     "locations": [
       "abyss"
     ],
-    "fight_timeout_seconds": 110
+    "fight_timeout_seconds": 60
   },
   {
     "id": "boss_mystic_astral_dragon",
     "name": "星渊古龙",
     "rarity": "传说",
     "description": "沉睡在星河尽头的古龙，伤口会吸收坠落的星辉，在战斗中不断弥合。",
-    "base_price": 2200,
-    "difficulty": 280,
+    "base_price": 600,
+    "difficulty": 230,
     "weight": [
-      195,
-      260
+      170,
+      210
     ],
     "is_boss": true,
-    "hp": 310,
-    "attack": 13,
+    "hp": 180,
+    "attack": 8,
+    "boss_exp": 200,
+    "reward_chest_id": "chest_mystic",
     "boss_mechanic": {
       "type": "regenerate",
       "name": "星髓再生",
-      "amount": 10,
-      "description": "每次首领攻击后为自身恢复10点生命，输出不足将永远耗不死它。"
+      "amount": 8,
+      "description": "每次首领攻击后为自身恢复8点生命，输出不足将永远耗不死它。"
     },
     "locations": [
       "mystic"
     ],
-    "fight_timeout_seconds": 110
+    "fight_timeout_seconds": 60
   }
 ]

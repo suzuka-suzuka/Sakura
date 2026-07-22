@@ -3,6 +3,19 @@ import path from 'path';
 import fs from 'fs';
 import { plugindata } from './path.js';
 
+const REMOVED_FISHING_ITEMS = Object.freeze([
+  'item_sign_koi',
+  '锦鲤许愿签',
+  'item_charm_starlight',
+  '星光护符',
+  'item_card_star_double',
+  '双倍星辉卡',
+  'item_scale_leviathan',
+  '利维坦的逆鳞',
+  'item_snack_petal',
+  '花瓣小鱼干',
+]);
+
 class DB {
   constructor() {
     this.dbPath = path.join(plugindata, 'sakura.sqlite');
@@ -85,14 +98,17 @@ class DB {
         profession TEXT,
         profession_level INTEGER DEFAULT 0,
         fishing_exp INTEGER DEFAULT 0,
-        fishing_stamina INTEGER DEFAULT 8,
+        fishing_stamina INTEGER DEFAULT 10,
         fishing_stamina_updated_at INTEGER DEFAULT 0,
         nightmare_curse_layers INTEGER DEFAULT 0,
         nightmare_curse_prank_revealed INTEGER DEFAULT 0,
         bride_thread_layers INTEGER DEFAULT 0,
+        bride_nightmare_multiplier REAL DEFAULT 1,
         lost_soul INTEGER DEFAULT 0,
         ghost_debt INTEGER DEFAULT 0,
         deep_pressure_layers INTEGER DEFAULT 0,
+        nightmare_immunity_charges INTEGER DEFAULT 0,
+        nightmare_immunity_updated_at INTEGER DEFAULT 0,
         location TEXT,
         PRIMARY KEY (group_id, user_id)
       );
@@ -127,15 +143,8 @@ class DB {
         rod_id TEXT NOT NULL,
         damage INTEGER DEFAULT 0,
         mastery INTEGER DEFAULT 0,
+        control_loss INTEGER DEFAULT 0,
         PRIMARY KEY (group_id, user_id, rod_id)
-      );
-
-      CREATE TABLE IF NOT EXISTS line_stats (
-        group_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        line_id TEXT NOT NULL,
-        damage INTEGER DEFAULT 0,
-        PRIMARY KEY (group_id, user_id, line_id)
       );
 
       CREATE TABLE IF NOT EXISTS pond_torpedoes (
@@ -189,7 +198,7 @@ class DB {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_exp INTEGER DEFAULT 0');
     }
     if (!fishingStatsColumns.some((column) => column.name === 'fishing_stamina')) {
-      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_stamina INTEGER DEFAULT 8');
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_stamina INTEGER DEFAULT 10');
     }
     if (!fishingStatsColumns.some((column) => column.name === 'fishing_stamina_updated_at')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_stamina_updated_at INTEGER DEFAULT 0');
@@ -203,6 +212,16 @@ class DB {
     if (!fishingStatsColumns.some((column) => column.name === 'bride_thread_layers')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN bride_thread_layers INTEGER DEFAULT 0');
     }
+    if (!fishingStatsColumns.some((column) => column.name === 'bride_nightmare_multiplier')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN bride_nightmare_multiplier REAL DEFAULT 1');
+      // 旧版冥婚红线只要仍有层数，就迁移为新版花嫁噩梦权重翻倍。
+      this.db.exec(`
+        UPDATE fishing_stats
+        SET bride_nightmare_multiplier = 2,
+            bride_thread_layers = 0
+        WHERE COALESCE(bride_thread_layers, 0) > 0
+      `);
+    }
     if (!fishingStatsColumns.some((column) => column.name === 'lost_soul')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN lost_soul INTEGER DEFAULT 0');
     }
@@ -211,6 +230,12 @@ class DB {
     }
     if (!fishingStatsColumns.some((column) => column.name === 'deep_pressure_layers')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN deep_pressure_layers INTEGER DEFAULT 0');
+    }
+    if (!fishingStatsColumns.some((column) => column.name === 'nightmare_immunity_charges')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN nightmare_immunity_charges INTEGER DEFAULT 0');
+    }
+    if (!fishingStatsColumns.some((column) => column.name === 'nightmare_immunity_updated_at')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN nightmare_immunity_updated_at INTEGER DEFAULT 0');
     }
 
     const fishingCountsColumns = this.db.prepare('PRAGMA table_info(fishing_counts)').all();
@@ -224,6 +249,22 @@ class DB {
     if (!fishingStatsColumns.some((column) => column.name === 'location')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN location TEXT');
     }
+
+    const rodStatsColumns = this.db.prepare('PRAGMA table_info(rod_stats)').all();
+    if (!rodStatsColumns.some((column) => column.name === 'control_loss')) {
+      this.db.exec('ALTER TABLE rod_stats ADD COLUMN control_loss INTEGER DEFAULT 0');
+    }
+
+    // 新道具体系不兼容已删除物品：启动迁移时直接从所有旧背包和旧Buff表清掉。
+    const removedItemPlaceholders = REMOVED_FISHING_ITEMS.map(() => '?').join(', ');
+    this.db.prepare(`
+      DELETE FROM inventory
+      WHERE item_id IN (${removedItemPlaceholders})
+    `).run(...REMOVED_FISHING_ITEMS);
+    this.db.prepare(`
+      DELETE FROM user_buffs
+      WHERE buff_id IN (${removedItemPlaceholders})
+    `).run(...REMOVED_FISHING_ITEMS);
   }
 
   prepare(sql) {

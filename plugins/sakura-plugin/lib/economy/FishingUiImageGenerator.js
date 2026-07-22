@@ -255,9 +255,12 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
   }
 
   getShopItemDetail(item, handler) {
-    if (handler === "fishing_rod" || handler === "fishing_line") {
+    if (handler === "fishing_rod") {
       const durability = Math.max(0, Math.floor(toFiniteNumber(item.durability)))
       return durability > 0 ? `耐久 ${durability}` : "永久装备"
+    }
+    if (handler === "fishing_line") {
+      return `承重 ${Math.max(0, toFiniteNumber(item.capacity))}`
     }
     if (handler === "fishing_bait") {
       return item.boss_bait ? "首领挑战专用" : `品质 ${Math.max(1, Math.floor(toFiniteNumber(item.quality, 1)))}`
@@ -378,16 +381,28 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
     if (item.durability) {
       const current = Math.max(0, Math.floor(toFiniteNumber(item.durability.current)))
       const max = Math.max(0, Math.floor(toFiniteNumber(item.durability.max)))
+      const controlCurrent = Math.max(0, toFiniteNumber(item.control?.current))
+      const controlBase = Math.max(0, toFiniteNumber(item.control?.base))
+      const controlLoss = Math.max(0, toFiniteNumber(item.control?.loss))
       return [
         `耐久 ${current}/${max}`,
+        item.kind === "rod"
+          ? `控制力 ${controlCurrent}/${controlBase}${controlLoss > 0 ? `（永久 -${controlLoss}）` : ""}`
+          : "",
         item.kind === "rod" ? `熟练度 ${Math.max(0, Math.floor(toFiniteNumber(item.mastery)))}` : "",
       ].filter(Boolean)
+    }
+    if (item.handler === "fishing_line") {
+      return [`承重 ${Math.max(0, toFiniteNumber(item.capacity))}`]
     }
     if (item.handler === "fishing_bait") {
       return [item.bossBait ? "首领挑战专用" : "钓鱼消耗品"]
     }
     if (item.handler === "fishing_chest") return ["发送 #开宝箱 开启"]
     if (item.type === "buff") return ["发送 #使用 激活效果"]
+    if (item.type === "treasure") {
+      return [`发送 #出售 变卖 · ${this.formatNumber(item.sellPrice)} 樱花币`]
+    }
     return [handlerMeta.label]
   }
 
@@ -534,8 +549,8 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
     ctx.fillText(this.truncateText(ctx, item.name || `未装备${meta.label}`, width - 30), x + width / 2, y + 151)
     ctx.fillStyle = meta.color
     ctx.font = `17px ${this.fontFamily}`
-    const details = Array.isArray(item.details) ? item.details : []
-    if (details.length === 0) details.push("尚未装备")
+    const details = Array.isArray(item.details) ? [...item.details] : []
+    if (details.length === 0 && !item.id) details.push("尚未装备")
     details.slice(0, 2).forEach((detail, index) => {
       ctx.fillText(
         this.truncateText(ctx, String(detail), width - 28),

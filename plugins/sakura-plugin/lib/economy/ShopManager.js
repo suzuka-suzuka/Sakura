@@ -147,7 +147,7 @@ class ShopManager {
       if (currentSize + count > maxCapacity) {
         return {
           success: false,
-          msg: `背包空间不足！当前剩余空间：${maxCapacity - currentSize}，需要空间：${count}`,
+          msg: `背包空间不足！当前剩余空间：${Math.max(0, maxCapacity - currentSize)}，需要空间：${count}`,
         };
       }
 

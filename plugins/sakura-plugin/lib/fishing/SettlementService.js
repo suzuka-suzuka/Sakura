@@ -186,10 +186,31 @@ export default class FishingSettlementService {
     })();
   }
 
-  settleCoinCatch({ sessionId, fishId, earnings, rodId, note, expGain = 0, weight = 0, shiny = false }) {
+  settleCoinCatch({
+    sessionId,
+    fishId,
+    earnings,
+    rodId,
+    note,
+    expGain = 0,
+    weight = 0,
+    shiny = false,
+    rewardItemId = null,
+    rewardItemCount = 0,
+  }) {
     const safeEarnings = normalizeNonNegativeInteger(earnings);
     const safeExpGain = normalizeNonNegativeInteger(expGain);
-    if (!sessionId || safeEarnings == null || safeExpGain == null) {
+    const safeRewardItemCount = normalizeNonNegativeInteger(rewardItemCount);
+    const safeRewardItemId = typeof rewardItemId === "string" && rewardItemId.trim()
+      ? rewardItemId.trim()
+      : null;
+    if (
+      !sessionId ||
+      safeEarnings == null ||
+      safeExpGain == null ||
+      safeRewardItemCount == null ||
+      (safeRewardItemCount > 0 && !safeRewardItemId)
+    ) {
       return { success: false, reason: "invalid" };
     }
 
@@ -241,6 +262,16 @@ export default class FishingSettlementService {
         );
       }
 
+      // 首领鱼饵在开战时已经消耗一个背包空间；胜利宝箱在同一结算事务中补回。
+      if (safeRewardItemId && safeRewardItemCount > 0) {
+        db.prepare(`
+            INSERT INTO inventory (group_id, user_id, item_id, count)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(group_id, user_id, item_id)
+            DO UPDATE SET count = count + excluded.count
+        `).run(this.groupId, this.userId, safeRewardItemId, safeRewardItemCount);
+      }
+
       const { newlyRecorded, newlyShiny } = this._recordCatch({
         fishId,
         success: true,
@@ -252,14 +283,21 @@ export default class FishingSettlementService {
         shiny: Boolean(shiny),
       });
       const levelUp = this._grantExp(safeExpGain);
-      return { success: true, ...debtResult, levelUp, newlyRecorded, newlyShiny };
+      return {
+        success: true,
+        ...debtResult,
+        levelUp,
+        newlyRecorded,
+        newlyShiny,
+        rewardItemId: safeRewardItemId,
+        rewardItemCount: safeRewardItemCount,
+      };
     })();
   }
 
-  settleInventoryCatch({ sessionId, fishId, rodId, capacity, expGain = 0, weight = 0 }) {
-    const safeCapacity = normalizeNonNegativeInteger(capacity);
+  settleInventoryCatch({ sessionId, fishId, rodId, expGain = 0, weight = 0 }) {
     const safeExpGain = normalizeNonNegativeInteger(expGain);
-    if (!sessionId || !fishId || safeCapacity == null || safeExpGain == null) {
+    if (!sessionId || !fishId || safeExpGain == null) {
       return { success: false, reason: "invalid" };
     }
 
@@ -269,19 +307,13 @@ export default class FishingSettlementService {
         return { success: false, reason: "duplicate" };
       }
 
-      const currentSize = db.prepare(`
-          SELECT COALESCE(SUM(count), 0) AS total
-          FROM inventory WHERE group_id = ? AND user_id = ?
-      `).get(this.groupId, this.userId).total;
-      const added = currentSize + 1 <= safeCapacity;
-      if (added) {
-        db.prepare(`
-            INSERT INTO inventory (group_id, user_id, item_id, count)
-            VALUES (?, ?, ?, 1)
-            ON CONFLICT(group_id, user_id, item_id)
-            DO UPDATE SET count = count + 1
-        `).run(this.groupId, this.userId, fishId);
-      }
+      // 钓获的宝藏宝箱属于系统强制奖励，即使背包已满或已经超限也必须入包。
+      db.prepare(`
+          INSERT INTO inventory (group_id, user_id, item_id, count)
+          VALUES (?, ?, ?, 1)
+          ON CONFLICT(group_id, user_id, item_id)
+          DO UPDATE SET count = count + 1
+      `).run(this.groupId, this.userId, fishId);
 
       const { newlyRecorded, newlyShiny } = this._recordCatch({
         fishId,
@@ -293,7 +325,7 @@ export default class FishingSettlementService {
         weight,
       });
       const levelUp = this._grantExp(safeExpGain);
-      return { success: true, added, levelUp, newlyRecorded, newlyShiny };
+      return { success: true, added: true, levelUp, newlyRecorded, newlyShiny };
     })();
   }
 }

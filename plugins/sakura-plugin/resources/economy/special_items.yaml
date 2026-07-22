@@ -1,40 +1,57 @@
 categories:
   special:
     name: "🎁 特殊物品"
-    description: "钓鱼与宝箱获得的特殊道具"
+    description: "钓鱼宝箱中获得的特殊道具"
     handler: fishing_special
     items:
-      # ===== 持续 Buff 类（#使用 后写入限时 buff） =====
-      - id: item_card_double_coin
-        name: 双倍金币卡
-        icon: 💰
-        type: buff
-        duration: 2100
-        description: 神奇的魔法卡片，使用后35分钟内钓鱼可获得双倍收益。
-        activation_message: "✨ 双倍金币卡已激活！\n💰 接下来35分钟内钓鱼可获得双倍收益！"
-
+      # ===== 通用道具 =====
       - id: item_charm_lucky
         name: 好运护符
         icon: 🍀
         type: buff
         duration: 2100
-        description: 受到祝福的护符，使用后35分钟内钓鱼必定上钩。
-        activation_message: "🍀 好运护符已激活！\n🎣 接下来35分钟内钓鱼必定上钩！"
+        description: 使用后35分钟内，普通渔获跳过重量与困难度判断。
+        activation_message: "🍀 好运护符已激活！\n🎣 接下来35分钟内，普通渔获将跳过重量与困难度判断！"
 
-      - id: item_sign_koi
-        name: 锦鲤许愿签
-        icon: 🎏
+      - id: item_toolkit_repair
+        name: 修理工具箱
+        icon: 🔧
+        type: consumable
+        instant_effect: repair_rod
+        description: 完全修复当前鱼竿的耐久损耗，并恢复骨鲨造成的永久控制力损失。
+
+      - id: item_holy_water
+        name: 净化圣水
+        icon: 💧
+        type: consumable
+        instant_effect: clear_debuffs
+        description: 清除骷髅诅咒、花嫁印记、幽灵船债务与深压诅咒等负面状态。
+
+      - id: item_sand_time
+        name: 时之沙
+        icon: ⏳
         type: buff
         duration: 2100
-        description: 写着心愿的许愿签。使用后35分钟内，只要及时收竿就能达成完美收竿。
-        activation_message: "🎏 锦鲤许愿签生效！\n⚡ 接下来35分钟内，及时收竿即可完美收竿！"
+        description: 使用后35分钟内，钓鱼冷却减半。
+        activation_message: "⏳ 时之沙开始流动！\n🎣 接下来35分钟内，钓鱼冷却减半！"
+
+      # 首领鱼饵沿用 shop.yaml 中的 bait_boss，由所有钓点宝箱共同掉落。
+
+      # ===== 钓点专属道具（均持续35分钟） =====
+      - id: item_card_double_exp
+        name: 双倍经验卡
+        icon: 📚
+        type: buff
+        duration: 2100
+        description: 樱花池塘专属道具。使用后35分钟内钓鱼经验翻倍。
+        activation_message: "📚 双倍经验卡已激活！\n✨ 接下来35分钟内钓鱼经验 ×2！"
 
       - id: item_charm_river
         name: 河神垂青
         icon: 🌊
         type: buff
         duration: 2100
-        description: 河神大人的一缕青睐。使用后35分钟内，无论发生什么鱼线都不会断。
+        description: 青柳河湾专属道具。使用后35分钟内，任何原因都不会让鱼线断裂。
         activation_message: "🌊 河神垂青！\n🧵 接下来35分钟内你的鱼线坚不可摧！"
 
       - id: item_lamp_fog
@@ -42,73 +59,79 @@ categories:
         icon: 🌫️
         type: buff
         duration: 2100
-        description: 雾隐湖的引路灯。使用后35分钟内你的个人天气固定为「雾」，可定向垂钓雾天限定鱼。
-        activation_message: "🌫️ 雾灯亮起！\n🎣 接下来35分钟内你的个人天气固定为「雾」！"
+        description: 雾隐湖专属道具。使用后35分钟内个人天气固定为雾，垃圾与噩梦权重归零。
+        activation_message: "🌫️ 雾灯亮起！\n🎣 接下来35分钟内个人天气固定为雾，垃圾与噩梦权重归零！"
+
+      - id: item_card_double_coin
+        name: 双倍金币卡
+        icon: 💰
+        type: buff
+        duration: 2100
+        description: 落日海岸专属道具。使用后35分钟内钓鱼金币收益翻倍。
+        activation_message: "💰 双倍金币卡已激活！\n✨ 接下来35分钟内钓鱼金币收益 ×2！"
 
       - id: item_bait_monster
         name: 怪物诱饵
         icon: 🩸
         type: buff
         duration: 2100
-        description: 散发着危险气息的血腥诱饵。使用后35分钟内噩梦权重提高，噩梦渔获经验增加50%。
-        activation_message: "🩸 怪物诱饵撒入水中！\n💀 接下来35分钟内噩梦权重提高，噩梦经验+50%！"
-
-      - id: item_charm_starlight
-        name: 星光护符
-        icon: ✨
-        type: buff
-        duration: 2100
-        description: 凝聚星辉的护符，好运护符的上位品。使用后35分钟内钓鱼必定上钩。
-        activation_message: "✨ 星光护符已激活！\n🎣 接下来35分钟内钓鱼必定上钩！"
-
-      - id: item_card_star_double
-        name: 双倍星辉卡
-        icon: 🌟
-        type: buff
-        duration: 2100
-        description: 浸染星辉的魔法卡片。使用后35分钟内钓鱼金币与经验双倍。
-        activation_message: "🌟 双倍星辉卡已激活！\n💰 接下来35分钟内钓鱼金币、经验双双翻倍！"
-
-      - id: item_scale_leviathan
-        name: 利维坦的逆鳞
-        icon: 🐉
-        type: buff
-        duration: 2100
-        description: 拔下逆鳞者本应暴怒相向，但它选择庇护你。使用后35分钟内噩梦渔获不会造成任何惩罚。
-        activation_message: "🐉 利维坦的逆鳞开始震颤！\n🛡️ 接下来35分钟内噩梦无法伤害你！"
-
-      # ===== 即时生效类（#使用 后立即结算） =====
-      - id: item_snack_petal
-        name: 花瓣小鱼干
-        type: consumable
-        instant_effect: restore_stamina
-        amount: 3
-        description: 撒着樱花瓣的小鱼干，咬一口元气满满。使用后恢复3点钓鱼体力。
-
-      - id: item_sand_time
-        name: 时之沙
-        type: consumable
-        instant_effect: restore_stamina
-        amount: 16
-        description: 从时间尽头收集的流沙。使用后恢复16点钓鱼体力。
-
-      - id: item_toolkit_repair
-        name: 修理工具箱
-        type: consumable
-        instant_effect: repair_rod
-        description: 工匠打磨的养护工具。使用后完全修复当前装备鱼竿的耐久。
-
-      - id: item_holy_water
-        name: 净化圣水
-        type: consumable
-        instant_effect: clear_curse
-        description: 神社供奉的圣水。使用后洗净噩梦诅咒、冥婚红线与失魂状态。
+        description: 深渊海沟专属道具。使用后35分钟内噩梦权重+50，钓鱼金币与经验均变为3倍。
+        activation_message: "🩸 怪物诱饵撒入水中！\n💀 接下来35分钟内噩梦权重 +50，钓鱼金币与经验 ×3！"
 
       - id: item_bottle_wish
         name: 星愿瓶
+        icon: 🌠
         type: consumable
+        duration: 2100
         instant_effect: star_wish
-        description: 封着一颗流星的琉璃瓶。使用后35分钟内的下一竿必定咬钩传说稀有度的鱼。
+        description: 星辉秘境专属道具。使用时指定品质，35分钟内下一次普通咬钩必定为该品质。
+
+  treasures:
+    name: "💎 钓点藏品"
+    description: "各钓点宝箱的专属藏品，均可出售666樱花币"
+    handler: fishing_special
+    items:
+      - id: treasure_pond_sakura_amber
+        name: 百年樱珀
+        icon: 🟠
+        type: treasure
+        sell_price: 666
+        description: 樱花池塘沉积百年形成的花瓣琥珀，可出售666樱花币。
+
+      - id: treasure_river_golden_scale
+        name: 河神金鳞
+        icon: 🟡
+        type: treasure
+        sell_price: 666
+        description: 青柳河湾逆流而来的金色鳞片，可出售666樱花币。
+
+      - id: treasure_lake_bronze_mirror
+        name: 雾湖古镜
+        icon: 🪞
+        type: treasure
+        sell_price: 666
+        description: 从雾隐湖底捞出的古老铜镜，可出售666樱花币。
+
+      - id: treasure_coast_black_pearl
+        name: 暮潮黑珍珠
+        icon: ⚫
+        type: treasure
+        sell_price: 666
+        description: 落日海岸暮潮孕育的黑珍珠，可出售666樱花币。
+
+      - id: treasure_abyss_dragon_ambergris
+        name: 深海龙涎香
+        icon: 🐋
+        type: treasure
+        sell_price: 666
+        description: 深渊巨兽遗留的奇香结晶，可出售666樱花币。
+
+      - id: treasure_mystic_star_fragment
+        name: 星河碎片
+        icon: ✨
+        type: treasure
+        sell_price: 666
+        description: 星辉秘境中凝固的一小片星河，可出售666樱花币。
 
   chests:
     name: "🗝️ 钓点宝箱"
@@ -118,29 +141,29 @@ categories:
       - id: chest_pond
         name: 花瓣木箱
         type: chest
-        description: 樱花池塘专属的新手补给箱，装着鱼饵、体力小食和零花钱。
+        description: 樱花池塘专属宝箱，可开出通用道具、双倍经验卡与百年樱珀。
 
       - id: chest_river
         name: 柳木匣
         type: chest
-        description: 青柳河湾专属的养护箱，修理工具和高级鱼饵的主要来源。
+        description: 青柳河湾专属宝箱，可开出通用道具、河神垂青与河神金鳞。
 
       - id: chest_lake
         name: 沉雾古匣
         type: chest
-        description: 雾隐湖专属的赌局箱，开出淤泥还是湖神的馈赠全凭运气。
+        description: 雾隐湖专属宝箱，可开出通用道具、雾灯与雾湖古镜。
 
       - id: chest_coast
         name: 舶来宝箱
         type: chest
-        description: 落日海岸专属的财富箱，珍珠、珊瑚与大把樱花币。
+        description: 落日海岸专属宝箱，可开出通用道具、双倍金币卡与暮潮黑珍珠。
 
       - id: chest_abyss
         name: 渊铁囚箱
         type: chest
-        description: 深渊海沟专属的囚箱，封着净化圣水与稀世奇珍——偶尔也封着怨灵。
+        description: 深渊海沟专属宝箱，可开出通用道具、怪物诱饵与深海龙涎香。
 
       - id: chest_mystic
         name: 星屑圣匣
         type: chest
-        description: 星辉秘境专属的圣匣，顶级道具与绝版珍藏的唯一来源。
+        description: 星辉秘境专属宝箱，可开出通用道具、星愿瓶与星河碎片。

@@ -31,12 +31,12 @@ professions:
     levels:
       1:
         title: "老练钓手"
-        mastery_multiplier: 0.5
-        description: "鱼线承重+0.5×熟练度"
+        mastery_multiplier: 0.25
+        description: "鱼线承重+0.25×当前鱼竿熟练度，无上限"
       2:
         title: "垂钓宗师"
-        mastery_multiplier: 0.9
-        description: "鱼线承重+0.9×熟练度"
+        mastery_multiplier: 0.5
+        description: "鱼线承重+0.5×当前鱼竿熟练度，无上限"
 
   merchant:
     name: "精明商人"
@@ -56,18 +56,16 @@ professions:
   abyss_hunter:
     name: "深渊猎手"
     icon: "🗡️"
-    description: "减轻噩梦惩罚，并从噩梦渔获中获得更多经验"
-    effect_type: "nightmare_specialist"
+    description: "储存能够完整免疫一次噩梦的猎魔守护"
+    effect_type: "nightmare_immunity"
     levels:
       1:
         title: "猎魔新人"
-        nightmare_exp_bonus: 0.20
-        nightmare_penalty_reduction: 0.20
-        nightmare_line_save_chance: 0.20
-        description: "噩梦经验+20%，噩梦惩罚降低20%，20%概率保住鱼线"
+        nightmare_immunity_max_charges: 1
+        nightmare_immunity_recharge_hours: 24
+        description: "最多储存1次完整噩梦免疫，每24小时恢复1次"
       2:
         title: "深渊克星"
-        nightmare_exp_bonus: 0.40
-        nightmare_penalty_reduction: 0.40
-        nightmare_line_save_chance: 0.40
-        description: "噩梦经验+40%，噩梦惩罚降低40%，40%概率保住鱼线"
+        nightmare_immunity_max_charges: 2
+        nightmare_immunity_recharge_hours: 12
+        description: "最多储存2次完整噩梦免疫，每12小时恢复1次"

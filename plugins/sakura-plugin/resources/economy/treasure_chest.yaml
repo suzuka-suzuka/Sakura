@@ -1,289 +1,76 @@
-# 钓点宝箱掉落配置
-# 每个钓点的宝藏稀有度渔获固定为该钓点专属宝箱（见 fish.json 中 chest_* 条目），
-# 钓上后进背包，发送「#开宝箱」按下方权重表随机开出一项奖励。
-#
-# 条目字段说明：
-#   weight  权重（同一宝箱内相对值，建议合计 100 方便读作百分比）
-#   type    奖励类型：
-#     coins        樱花币。min/max 为金额区间；带 name/description 时展示为“开出珍宝并自动变卖”
-#     item         背包物品。item_id 对应 shop.yaml / special_items.yaml 的物品 id，count 为数量
-#     random_bait  随机一种鱼饵 ×count（等概率，含寻宝鱼饵）
-#     random_line  随机一种尚未拥有的鱼线；全部拥有时，其权重自动并入普通樱花币
-#     curse        开箱事故：噩梦诅咒 +layers 层，同时给 coins 慰问金
-# 每张表总权重为 100；首领鱼饵统一占 5%，装备后下一竿必定呼出当地首领；random_bait 会排除首领鱼饵。
-#
-# 期望值设计（特殊道具与首领鱼饵按 0 折算）：
-#   六个钓点的直接价值约 394～414，期望基本相同。
-#   池塘以稳定补给为主并保留 1% 惊喜；越靠后的箱子，高价值金币与强力道具越集中在低权重档位。
+# 钓点宝箱统一掉落表
+# 每张表合计100：五种通用奖励各8%，地点专属道具15%，
+# 优先补齐未持有鱼饵×3为20%，鱼雷×2为10%，地点藏品为15%。
 
 chests:
   chest_pond:
-    # 🌸 樱花池塘 · 稳定补给箱（低方差，保留 1% 大奖）
     loot:
-      - weight: 61
-        type: coins
-        min: 350
-        max: 592
-      - weight: 5
-        type: item
-        item_id: bait_boss
-        count: 1
-      - weight: 15
-        type: random_bait
-        count: 2
-      - weight: 10
-        type: item
-        item_id: bait_shrimp
-        count: 5
-      - weight: 3
-        type: item
-        item_id: item_snack_petal
-        count: 1
-      - weight: 1
-        type: item
-        item_id: item_charm_lucky
-        count: 1
-      - weight: 4
-        type: coins
-        min: 1000
-        max: 1000
-        name: 花瓣零钱袋
-        description: 沉在箱底的零钱袋，硬币上还沾着几片樱花瓣。
-      - weight: 1
-        type: coins
-        min: 1800
-        max: 1800
-        name: 百年樱珀
-        description: 花瓣在湖底凝成的琥珀，罕见得足以让收藏家争抢。
+      - { weight: 8, type: item, item_id: item_charm_lucky, count: 1 }
+      - { weight: 8, type: item, item_id: item_toolkit_repair, count: 1 }
+      - { weight: 8, type: item, item_id: item_holy_water, count: 1 }
+      - { weight: 8, type: item, item_id: item_sand_time, count: 1 }
+      - { weight: 8, type: item, item_id: bait_boss, count: 1 }
+      - { weight: 15, type: item, item_id: item_card_double_exp, count: 1 }
+      - { weight: 20, type: random_bait, count: 3 }
+      - { weight: 10, type: item, item_id: torpedo, count: 2 }
+      - { weight: 15, type: item, item_id: treasure_pond_sakura_amber, count: 1 }
 
   chest_river:
-    # 🍃 青柳河湾 · 装备养护箱（中低方差）
     loot:
-      - weight: 65
-        type: coins
-        min: 300
-        max: 503
-      - weight: 5
-        type: item
-        item_id: bait_boss
-        count: 1
-      - weight: 15
-        type: item
-        item_id: bait_premium
-        count: 4
-      - weight: 3
-        type: random_line
-      - weight: 3
-        type: item
-        item_id: item_toolkit_repair
-        count: 1
-      - weight: 1
-        type: item
-        item_id: item_card_double_coin
-        count: 1
-      - weight: 1
-        type: item
-        item_id: item_charm_river
-        count: 1
-      - weight: 5
-        type: coins
-        min: 1200
-        max: 1200
-        name: 鎏金鱼子酱
-        description: 鎏金鲟的鱼子酱，河湾商队眼里的硬通货。
-      - weight: 2
-        type: coins
-        min: 1800
-        max: 1800
-        name: 河神金鳞
-        description: 逆流而来的金鳞，离水后仍泛着柔和光泽。
+      - { weight: 8, type: item, item_id: item_charm_lucky, count: 1 }
+      - { weight: 8, type: item, item_id: item_toolkit_repair, count: 1 }
+      - { weight: 8, type: item, item_id: item_holy_water, count: 1 }
+      - { weight: 8, type: item, item_id: item_sand_time, count: 1 }
+      - { weight: 8, type: item, item_id: bait_boss, count: 1 }
+      - { weight: 15, type: item, item_id: item_charm_river, count: 1 }
+      - { weight: 20, type: random_bait, count: 3 }
+      - { weight: 10, type: item, item_id: torpedo, count: 2 }
+      - { weight: 15, type: item, item_id: treasure_river_golden_scale, count: 1 }
 
   chest_lake:
-    # 🌫️ 雾隐湖 · 赌局箱（高方差：大量哑弹 + 小概率大奖）
     loot:
-      - weight: 37
-        type: coins
-        min: 10
-        max: 30
-        name: 湖底淤泥
-        description: 湿哒哒的一坨……好歹能从里面淘出几枚铜板。
-      - weight: 5
-        type: item
-        item_id: bait_boss
-        count: 1
-      - weight: 20
-        type: coins
-        min: 250
-        max: 600
-      - weight: 15
-        type: item
-        item_id: bait_magic
-        count: 3
-      - weight: 8
-        type: coins
-        min: 500
-        max: 1200
-        name: 青铜古镜
-        description: 湖底捞起的古镜，擦去水锈还照得出人影。
-      - weight: 7
-        type: coins
-        min: 500
-        max: 1200
-        name: 沉船怀表
-        description: 早已停摆的怀表，收藏家愿意出个好价钱。
-      - weight: 7
-        type: coins
-        min: 1200
-        max: 1800
-        name: 湖神的馈赠
-        description: 雾散的一瞬，箱底铺满了闪闪发光的金币。
-      - weight: 1
-        type: item
-        item_id: item_lamp_fog
-        count: 1
+      - { weight: 8, type: item, item_id: item_charm_lucky, count: 1 }
+      - { weight: 8, type: item, item_id: item_toolkit_repair, count: 1 }
+      - { weight: 8, type: item, item_id: item_holy_water, count: 1 }
+      - { weight: 8, type: item, item_id: item_sand_time, count: 1 }
+      - { weight: 8, type: item, item_id: bait_boss, count: 1 }
+      - { weight: 15, type: item, item_id: item_lamp_fog, count: 1 }
+      - { weight: 20, type: random_bait, count: 3 }
+      - { weight: 10, type: item, item_id: torpedo, count: 2 }
+      - { weight: 15, type: item, item_id: treasure_lake_bronze_mirror, count: 1 }
 
   chest_coast:
-    # 🌅 落日海岸 · 财富箱（几乎只出钱和可变卖珍宝）
     loot:
-      - weight: 38
-        type: coins
-        min: 140
-        max: 352
-      - weight: 5
-        type: item
-        item_id: bait_boss
-        count: 1
-      - weight: 20
-        type: coins
-        min: 300
-        max: 300
-        name: 珍珠
-        description: 圆润饱满的珍珠，光泽迷人。
-      - weight: 1
-        type: item
-        item_id: item_card_double_coin
-        count: 1
-      - weight: 12
-        type: item
-        item_id: bait_divine
-        count: 2
-      - weight: 10
-        type: coins
-        min: 400
-        max: 750
-        name: 金色珊瑚
-        description: 被落日余晖染成金色的珊瑚，是抢手的装饰珍品。
-      - weight: 8
-        type: coins
-        min: 750
-        max: 750
-        name: 黑珍珠
-        description: 深海孕育的稀世黑珍珠，可遇不可求。
-      - weight: 4
-        type: coins
-        min: 750
-        max: 1250
-      - weight: 2
-        type: coins
-        min: 1900
-        max: 1900
-        name: 沉船金锭
-        description: 沉船宝库里的金锭，分量十足，闪瞎眼睛。
+      - { weight: 8, type: item, item_id: item_charm_lucky, count: 1 }
+      - { weight: 8, type: item, item_id: item_toolkit_repair, count: 1 }
+      - { weight: 8, type: item, item_id: item_holy_water, count: 1 }
+      - { weight: 8, type: item, item_id: item_sand_time, count: 1 }
+      - { weight: 8, type: item, item_id: bait_boss, count: 1 }
+      - { weight: 15, type: item, item_id: item_card_double_coin, count: 1 }
+      - { weight: 20, type: random_bait, count: 3 }
+      - { weight: 10, type: item, item_id: torpedo, count: 2 }
+      - { weight: 15, type: item, item_id: treasure_coast_black_pearl, count: 1 }
 
   chest_abyss:
-    # 🌀 深渊海沟 · 风险箱（净化与诅咒并存，唯一可能开出坏结果的箱子）
     loot:
-      - weight: 38
-        type: coins
-        min: 210
-        max: 516
-      - weight: 5
-        type: item
-        item_id: bait_boss
-        count: 1
-      - weight: 8
-        type: item
-        item_id: item_holy_water
-        count: 1
-      - weight: 14
-        type: item
-        item_id: bait_treasure
-        count: 1
-      - weight: 12
-        type: coins
-        min: 600
-        max: 1100
-        name: 深海龙涎香
-        description: 深渊巨兽的分泌物凝成的奇香，价值连城。
-      - weight: 10
-        type: item
-        item_id: torpedo
-        count: 1
-      - weight: 2
-        type: item
-        item_id: item_bait_monster
-        count: 1
-      - weight: 8
-        type: curse
-        layers: 1
-        coins: 150
-      - weight: 1
-        type: item
-        item_id: item_scale_leviathan
-        count: 1
-      - weight: 2
-        type: coins
-        min: 1500
-        max: 1900
-        name: 渊底金脉碎块
-        description: 从海沟岩壁上凿下来的天然金块，沉得压手。
+      - { weight: 8, type: item, item_id: item_charm_lucky, count: 1 }
+      - { weight: 8, type: item, item_id: item_toolkit_repair, count: 1 }
+      - { weight: 8, type: item, item_id: item_holy_water, count: 1 }
+      - { weight: 8, type: item, item_id: item_sand_time, count: 1 }
+      - { weight: 8, type: item, item_id: bait_boss, count: 1 }
+      - { weight: 15, type: item, item_id: item_bait_monster, count: 1 }
+      - { weight: 20, type: random_bait, count: 3 }
+      - { weight: 10, type: item, item_id: torpedo, count: 2 }
+      - { weight: 15, type: item, item_id: treasure_abyss_dragon_ambergris, count: 1 }
 
   chest_mystic:
-    # ✨ 星辉秘境 · 星辉奇物箱（高方差，大奖与强力道具均为低权重）
     loot:
-      - weight: 50
-        type: coins
-        min: 33
-        max: 133
-        name: 黯淡星尘
-        description: 光芒几乎散尽的星尘，只剩一点纪念价值。
-      - weight: 5
-        type: item
-        item_id: bait_boss
-        count: 1
-      - weight: 18
-        type: coins
-        min: 800
-        max: 1000
-        name: 星尘
-        description: 星光落进水里凝成的粉末，在夜里也熠熠生辉。
-      - weight: 8
-        type: coins
-        min: 1800
-        max: 1800
-        name: 星河碎片
-        description: 一小片凝固的星河，握在手心能听见星星的声音。
-      - weight: 2
-        type: item
-        item_id: item_charm_starlight
-        count: 1
-      - weight: 3
-        type: item
-        item_id: item_sand_time
-        count: 1
-      - weight: 1
-        type: item
-        item_id: item_card_star_double
-        count: 1
-      - weight: 7
-        type: item
-        item_id: bait_divine
-        count: 2
-      - weight: 5
-        type: item
-        item_id: bait_treasure
-        count: 1
-      - weight: 1
-        type: item
-        item_id: item_bottle_wish
-        count: 1
+      - { weight: 8, type: item, item_id: item_charm_lucky, count: 1 }
+      - { weight: 8, type: item, item_id: item_toolkit_repair, count: 1 }
+      - { weight: 8, type: item, item_id: item_holy_water, count: 1 }
+      - { weight: 8, type: item, item_id: item_sand_time, count: 1 }
+      - { weight: 8, type: item, item_id: bait_boss, count: 1 }
+      - { weight: 15, type: item, item_id: item_bottle_wish, count: 1 }
+      - { weight: 20, type: random_bait, count: 3 }
+      - { weight: 10, type: item, item_id: torpedo, count: 2 }
+      - { weight: 15, type: item, item_id: treasure_mystic_star_fragment, count: 1 }

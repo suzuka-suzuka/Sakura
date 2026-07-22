@@ -20,12 +20,11 @@ import {
 import {
   BOSS_ATTACK_INTERVAL_MS,
   BOSS_BAIT_ID,
-  BOSS_EXP_MULTIPLIER,
   FISH_FIGHT_STATE,
   FISHING_BENEFIT_DURATION_SECONDS,
   FISHING_COOLDOWN_SECONDS,
+  FISHING_TIME_SAND_COOLDOWN_SECONDS,
   FISHING_LOCATIONS,
-  FORCE_PULL_DIFFICULTY_RANGE,
   PERFECT_EXP_MULTIPLIER,
   RARITY_CONFIG,
   SHINY_DIFFICULTY_MULTIPLIER,
@@ -35,26 +34,30 @@ import {
   TORPEDO_PRICE_BOOST_MULTIPLIER,
   TORPEDO_ROD_DAMAGE,
   WEATHER_CONFIG,
-  applyFishFightStateModifiers,
+  calculateBossLineDurability,
+  calculateBossCatchReward,
+  calculateCorpseFisherRodDamage,
+  calculateForcePullSuccessRate,
   calculateLegacyFishPrice,
+  calculateNormalTugActionEffects,
   createProgressBar,
   getBossAttackCooldownRemaining,
-  getBossCombatBonus,
   getBossFightTimeoutMs,
   getFishFightStateChangeDelay,
   getFishFightStateConfig,
   getFishingLocationConfig,
   getFishingEnvironmentModifiers,
   getFishingLevelExp,
-  getLostSoulRewardMultiplier,
   getWeatherByTime,
   isBossFish,
   isPerfectCatch,
   resolveBossAttack,
+  resolveBossLineDamage,
   resolveNightmareRarityAfflictions,
   rollFishExp,
   rollFishingBiteWaitMs,
   rollBossPlayerDamage,
+  rollNormalTugPressure,
   rollShiny,
   selectNextFishFightState,
   selectBossFromData,
@@ -121,9 +124,11 @@ function formatCatchTail(expGain, isPerfect, settleResult, dexProgress) {
   const perfectMsg = isPerfect ? `\n⚡ 完美收竿！经验×${PERFECT_EXP_MULTIPLIER}！` : "";
   const levelUp = settleResult?.levelUp;
   const levelUpMsg = levelUp ? `\n🎉 钓鱼等级提升至 Lv.${levelUp.to}` : "";
-  const staminaResetMsg = Number.isFinite(levelUp?.staminaResetTo)
-    ? `\n⚡ 升级后体力已回满：${levelUp.staminaResetTo}/${levelUp.staminaResetTo}`
-    : "";
+  const staminaResetMsg = Number.isFinite(levelUp?.staminaForcedTo)
+    ? `\n🪝 捞尸人的力量压过升级恢复，体力仍被强制为 ${levelUp.staminaForcedTo}`
+    : Number.isFinite(levelUp?.staminaResetTo)
+      ? `\n⚡ 升级后体力已回满：${levelUp.staminaResetTo}/${levelUp.staminaResetTo}`
+      : "";
   const dexMsg = dexProgress
     ? `\n📖 图鉴新收录！(${dexProgress.collected}/${dexProgress.total})`
     : "";
@@ -145,23 +150,46 @@ function formatFishingStamina(status) {
 }
 
 function formatFishingStaminaUnavailable(status) {
-  const costNote = Number(status?.cost) > 1 ? `（深压影响，本竿需要 ${status.cost} 点）` : "";
-  return `⚡体力不足：${formatFishingStamina(status)}${costNote}`;
+  return `⚡体力不足：${formatFishingStamina(status)}`;
+}
+
+function formatDurationMs(durationMs) {
+  const minutes = Math.max(1, Math.ceil((Number(durationMs) || 0) / 60000));
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes > 0
+    ? `${hours} 小时 ${remainingMinutes} 分钟`
+    : `${hours} 小时`;
+}
+
+function formatNightmareImmunityDetail(status) {
+  if (!status?.active) return "";
+  const capacity = `${status.charges}/${status.maxCharges} 次`;
+  return status.nextRecoveryMs > 0
+    ? `${capacity} · ${formatDurationMs(status.nextRecoveryMs)}后恢复1次`
+    : `${capacity} · 已充满（每${status.rechargeHours}小时恢复1次）`;
+}
+
+function getEffectiveRodControl(fishingManager, userId, state, rodMastery = 0) {
+  const multiplier = state.deepPressureActive ? 0.5 : 1;
+  return fishingManager.getRodControl(userId, state.rodConfig.id) * multiplier + rodMastery;
 }
 
 function formatBossCombatStatus(state, fishingManager, userId) {
   const hpBar = createProgressBar(state.bossHp, state.bossMaxHp, 10);
   const distanceBar = createProgressBar(state.distance, 100, 10);
   const tensionBar = createProgressBar(state.tension, 100, 10);
-  const line = fishingManager.getLineDurabilityInfo(userId, state.lineConfig.id);
-  const lineBar = createProgressBar(line.currentDurability, line.maxDurability, 10);
+  const lineCurrent = Math.max(0, Number(state.bossLineDurability) || 0);
+  const lineMax = Math.max(1, Number(state.bossLineMaxDurability) || 1);
+  const lineBar = createProgressBar(lineCurrent, lineMax, 10);
   const rod = fishingManager.getRodDurabilityInfo(userId, state.rodConfig.id);
   const rodBar = createProgressBar(rod.currentDurability, rod.maxDurability, 10);
   return [
     `👑 生命：${hpBar} ${state.bossHp}/${state.bossMaxHp}`,
     `📏 距离：${distanceBar} ${Math.max(0, Math.round(state.distance))}/100`,
     `⚡ 张力：${tensionBar} ${Math.max(0, Math.round(state.tension))}/100`,
-    `🧵 鱼线（永久）：${lineBar} ${line.currentDurability}/${line.maxDurability}`,
+    `🧵 鱼线（本场）：${lineBar} ${lineCurrent}/${lineMax}`,
     `🎣 鱼竿：${rodBar} ${rod.currentDurability}/${rod.maxDurability}`,
   ].join("\n");
 }
@@ -175,9 +203,9 @@ async function selectRandomFish(
   {
     forceRarity = null,
     nightmareBonus = 0,
-    environment = null,
     hasDebuff = false,
-    brideThreadActive = false,
+    nightmareWeightMultiplier = 1,
+    zeroWeightRarities = [],
   } = {},
 ) {
   // 星愿强制稀有度时跳过鱼雷拦截，保证“必中传说”兑现
@@ -207,14 +235,14 @@ async function selectRandomFish(
   if (fishingManager && userId) {
     treasureBonus = fishingManager.getTreasureBonus(userId);
   }
-  treasureBonus += Number(environment?.treasureWeight) || 0;
 
   return selectFishFromData(fishData, {
     baitQuality,
     hasDebuff,
     treasureBonus,
-    nightmareBonus: nightmareBonus + (Number(environment?.nightmareWeight) || 0),
-    brideThreadActive,
+    nightmareBonus,
+    nightmareWeightMultiplier,
+    zeroWeightRarities,
     forceRarity,
     hour: getShanghaiHour(),
     weather: weatherName || getWeatherByTime().name,
@@ -383,20 +411,23 @@ export default class Fishing extends plugin {
     const effectMessages = [];
 
     state.bossAttackRounds = (state.bossAttackRounds || 0) + 1;
-    const lineDamage = fishingManager.damageLine(
-      e.user_id,
-      state.lineConfig.id,
-      attackResult.lineDamage,
-      { protectFromBreak: Boolean(state.hasRiverBless) },
-    );
+    const lineDamage = resolveBossLineDamage({
+      currentDurability: state.bossLineDurability,
+      maxDurability: state.bossLineMaxDurability,
+      damage: attackResult.lineDamage,
+      protectFromBreak: Boolean(state.hasRiverBless),
+    });
     state.bossLineDurability = lineDamage.currentDurability;
     state.bossLineMaxDurability = lineDamage.maxDurability;
+    if (lineDamage.isBroken) {
+      fishingManager.breakLine(e.user_id, state.lineConfig.id);
+    }
     state.distance = Math.min(100, state.distance + attackResult.distanceGain);
     state.tension = Math.min(100, state.tension + attackResult.tensionGain);
 
     if (lineDamage.applied && !lineDamage.isBroken && !lineDamage.breakPrevented) {
       effectMessages.push(
-        `🧵 鱼线永久耐久剩余 ${lineDamage.currentDurability}/${lineDamage.maxDurability}`,
+        `🧵 鱼线本场耐久剩余 ${lineDamage.currentDurability}/${lineDamage.maxDurability}`,
       );
     }
 
@@ -477,9 +508,9 @@ export default class Fishing extends plugin {
       const reasons = [];
       if (rodBroken) reasons.push(`🎣 【${state.rodConfig.name}】被击断了`);
       if (lineDamage.isBroken) {
-        reasons.push(`🧵 永久耐久归零，【${state.lineConfig.name}】当场断裂`);
+        reasons.push(`🧵 本场耐久归零，【${state.lineConfig.name}】当场断裂`);
       } else if (lineDamage.breakPrevented) {
-        reasons.push(`🌊 河神将【${state.lineConfig.name}】护在 1 点永久耐久`);
+        reasons.push(`🌊 河神在最后一刻护住了【${state.lineConfig.name}】，鱼线没有断裂`);
       } else if (lineDestroyed) {
         reasons.push("🧵 当前鱼线已经不可用");
       }
@@ -493,7 +524,7 @@ export default class Fishing extends plugin {
 
       await e.reply([
         `👑 【${state.fish.name}】发动了【${mechanic.name}】！\n`,
-        `🧵 鱼线永久耐久 -${attackResult.lineDamage}｜🎣 鱼竿 -${attackResult.rodDamage}\n`,
+        `🧵 鱼线本场耐久 -${attackResult.lineDamage}｜🎣 鱼竿 -${attackResult.rodDamage}\n`,
         effectMessages.length > 0 ? `${effectMessages.join("\n")}\n` : "",
         `${reasons.join("\n")}\n❌ 首领挑战失败！`,
         formatShinyEscape(state.fish),
@@ -503,7 +534,7 @@ export default class Fishing extends plugin {
 
     await e.reply([
       `👑 【${state.fish.name}】发动了【${mechanic.name}】！\n`,
-      `🧵 鱼线永久耐久 -${attackResult.lineDamage}｜🎣 鱼竿 -${attackResult.rodDamage}\n`,
+      `🧵 鱼线本场耐久 -${attackResult.lineDamage}｜🎣 鱼竿 -${attackResult.rodDamage}\n`,
       effectMessages.length > 0 ? `${effectMessages.join("\n")}\n` : "",
       formatBossCombatStatus(state, fishingManager, e.user_id),
     ]);
@@ -519,6 +550,7 @@ export default class Fishing extends plugin {
     state.fightingRounds = 0;
     state.fishState = FISH_FIGHT_STATE.calm;
     state.fishStateChangedAt = Date.now();
+    state.normalTugPressure = rollNormalTugPressure();
 
     if (state.totalTimer) clearTimeout(state.totalTimer);
     const timeoutMs = boss ? getBossFightTimeoutMs(state.fish) : 60 * 1000;
@@ -535,12 +567,8 @@ export default class Fishing extends plugin {
     if (boss) {
       state.bossHp = Math.max(1, Math.floor(Number(state.fish.hp) || 1));
       state.bossMaxHp = state.bossHp;
-      const lineDurability = fishingManager.getLineDurabilityInfo(
-        e.user_id,
-        state.lineConfig.id,
-      );
-      state.bossLineMaxDurability = lineDurability.maxDurability;
-      state.bossLineDurability = lineDurability.currentDurability;
+      state.bossLineMaxDurability = calculateBossLineDurability(state.lineConfig.capacity);
+      state.bossLineDurability = state.bossLineMaxDurability;
       state.bossLastPlayerAttackAt = 0;
       state.bossAttackRounds = 0;
 
@@ -548,9 +576,9 @@ export default class Fishing extends plugin {
         `👑 首领战开始！【${state.fish.name}】现身！\n`,
         `🌀 特殊机制【${state.fish.boss_mechanic.name}】：${state.fish.boss_mechanic.description}\n\n`,
         `${formatBossCombatStatus(state, fishingManager, e.user_id)}\n\n`,
-        `📝 指令：\n  「拉」拉近距离并增加张力\n  「溜」降低张力但会拉远距离\n  「攻」攻击首领（5秒冷却）\n`,
+        `📝 指令：\n  「拉」拉近距离并增加张力\n  「溜」降低张力但会拉远距离\n  「攻」按当前鱼竿控制力造成伤害（5秒冷却）\n`,
         `🏆 必须同时把首领生命与距离降到 0；首领每5秒反击一次！\n`,
-        `🧵 首领造成的鱼线损伤会永久保留，耐久归零立即断线！\n`,
+        `🧵 鱼线按承重生成本场临时耐久，归零立即断线；战斗结束后不保留损伤！\n`,
         `⚠️ 限时 ${Math.floor(timeoutMs / 1000)} 秒，当前为单人挑战。`,
       ]);
       this.scheduleBossAttack(e, stateKey, state.id);
@@ -617,13 +645,12 @@ export default class Fishing extends plugin {
   async readFishingBuffs(groupId, userId) {
     const buffIds = [
       "item_charm_lucky",
-      "item_charm_starlight",
-      "item_sign_koi",
       "item_lamp_fog",
       "item_bait_monster",
       "item_charm_river",
-      "item_scale_leviathan",
-      "item_card_star_double",
+      "item_card_double_coin",
+      "item_card_double_exp",
+      "item_sand_time",
     ];
     let values;
     try {
@@ -634,17 +661,15 @@ export default class Fishing extends plugin {
       logger.warn(`[钓鱼] 读取Buff状态失败: ${err.message}`);
       values = buffIds.map(() => null);
     }
-    const [lucky, starlight, koi, fog, monster, river, scale, starDouble] = values.map(Boolean);
+    const [lucky, fog, monster, river, doubleCoin, doubleExp, timeSand] = values.map(Boolean);
     return {
-      // 星光护符是好运护符的上位品，共用“必上钩”判定
-      hasLucky: lucky || starlight,
-      hasStarlight: starlight,
-      hasKoiSign: koi,
+      hasLucky: lucky,
       hasFogLamp: fog,
       hasMonsterBait: monster,
       hasRiverBless: river,
-      hasLeviathanScale: scale,
-      hasStarDouble: starDouble,
+      hasDoubleCoin: doubleCoin,
+      hasDoubleExp: doubleExp,
+      hasTimeSand: timeSand,
     };
   }
 
@@ -685,11 +710,15 @@ export default class Fishing extends plugin {
       return true;
     }
 
+    const buffFlags = await this.readFishingBuffs(groupId, userId);
+    const cooldownSeconds = buffFlags.hasTimeSand
+      ? FISHING_TIME_SAND_COOLDOWN_SECONDS
+      : FISHING_COOLDOWN_SECONDS;
     const cooldownKey = `sakura:fishing:cooldown:${groupId}:${userId}`;
     let ttl = await redis.ttl(cooldownKey);
-    if (ttl > FISHING_COOLDOWN_SECONDS) {
-      await redis.expire(cooldownKey, FISHING_COOLDOWN_SECONDS);
-      ttl = FISHING_COOLDOWN_SECONDS;
+    if (ttl > cooldownSeconds) {
+      await redis.expire(cooldownKey, cooldownSeconds);
+      ttl = cooldownSeconds;
     }
     if (ttl > 0) {
       const remainingTime = ttl < 60
@@ -762,39 +791,30 @@ export default class Fishing extends plugin {
       const locationId = fishingManager.getFishingLocation(userId);
       const locationConfig = getFishingLocationConfig(locationId);
 
-      const buffFlags = await this.readFishingBuffs(groupId, userId);
       const nightmareStatus = fishingManager.getNightmareStatus(userId);
 
-      // 持续型噩梦状态按实际抛竿消耗；即使随后钓到鱼雷也照常减少一层。
-      // 普通诅咒优先于冥婚红线；二者并存时，本竿红线暂停且不消耗。
+      // 骷髅诅咒与深压按实际抛竿消耗；即使随后钓到鱼雷也照常减少一层。
+      // 权重严格按花嫁连乘 → 骷髅诅咒 → 怪物诱饵 → 雾灯结算。
       const rarityAfflictions = isBossBait
-        ? {
-          consumeCurse: false,
-          consumeBrideThread: false,
-          brideThreadPaused: false,
-        }
-        : resolveNightmareRarityAfflictions(
-          nightmareStatus.curse.actualLayers,
-          nightmareStatus.brideThreadLayers,
-        );
+        ? { consumeCurse: false }
+        : resolveNightmareRarityAfflictions(nightmareStatus.curse.actualLayers);
       const curseResult = rarityAfflictions.consumeCurse
         ? fishingManager.consumeNightmareCurseLayer(userId)
         : { consumed: false, remaining: nightmareStatus.curse.actualLayers };
-      const brideThreadResult = rarityAfflictions.consumeBrideThread
-        ? fishingManager.consumeBrideThreadLayer(userId)
-        : { consumed: false, remaining: nightmareStatus.brideThreadLayers };
 
-      // 星愿一次性生效：抛竿即消耗，本竿必中传说；启动失败会在 catch 中退还
-      let hasWish = false;
+      // 星愿一次性生效：抛竿即消耗所选品质；启动失败会在 catch 中原样退还。
+      let wishRarity = null;
       try {
         const wishKey = `sakura:fishing:wish:${groupId}:${userId}`;
-        hasWish = !isBossBait && Boolean(await redis.get(wishKey));
-        if (hasWish) await redis.del(wishKey);
+        const storedWish = await redis.get(wishKey);
+        wishRarity = !isBossBait && RARITY_CONFIG[storedWish] ? storedWish : null;
+        if (wishRarity) await redis.del(wishKey);
       } catch (err) {
-        hasWish = false;
+        wishRarity = null;
         logger.warn(`[钓鱼] 读取星愿状态失败: ${err.message}`);
       }
-      state.wishConsumed = hasWish;
+      state.wishConsumed = Boolean(wishRarity);
+      state.wishRarity = wishRarity;
 
       // 雾灯只改本人选鱼用的天气，不影响全局天气播报
       const effectiveWeather = buffFlags.hasFogLamp ? "雾" : pondWeather.name;
@@ -808,14 +828,16 @@ export default class Fishing extends plugin {
           effectiveWeather,
           locationId,
           {
-            forceRarity: hasWish ? "传说" : null,
-            nightmareBonus: buffFlags.hasMonsterBait ? 8 : 0,
-            environment,
+            forceRarity: wishRarity,
+            nightmareBonus: buffFlags.hasMonsterBait ? 50 : 0,
             hasDebuff: curseResult.consumed,
-            brideThreadActive: brideThreadResult.consumed,
+            nightmareWeightMultiplier: nightmareStatus.brideNightmareMultiplier,
+            // 最后判定雾灯：即使花嫁、诅咒与怪物诱饵先抬高噩梦，最终仍归零。
+            zeroWeightRarities: buffFlags.hasFogLamp ? ["垃圾", "噩梦"] : [],
           },
         );
-      if (!selectedFish.isTorpedo) {
+      // 首领保持固定的传说级基准，天气不改变其重量与困难度。
+      if (!selectedFish.isTorpedo && !isBossFish(selectedFish)) {
         selectedFish.actualWeight = Math.round(
           selectedFish.actualWeight * environment.weightMultiplier * 100,
         ) / 100;
@@ -834,27 +856,27 @@ export default class Fishing extends plugin {
       const waitTime = rollFishingBiteWaitMs(fishingLevel);
 
       const buffNotes = [
-        buffFlags.hasStarlight
-          ? "\n✨ 星光护符生效中！"
-          : buffFlags.hasLucky ? "\n🍀 好运护符生效中！" : "",
-        buffFlags.hasKoiSign ? "\n🎏 锦鲤许愿签生效中！" : "",
-        buffFlags.hasFogLamp ? "\n🌫️ 雾灯亮着，你的水面雾气弥漫（个人天气：雾）" : "",
-        buffFlags.hasMonsterBait ? "\n🩸 怪物诱饵的血腥味在水中扩散……" : "",
+        buffFlags.hasLucky ? "\n🍀 好运护符生效：跳过本次重量与困难度判断。" : "",
+        buffFlags.hasFogLamp
+          ? "\n🌫️ 雾灯生效：个人天气固定为雾，垃圾与噩梦权重最终归零。"
+          : "",
+        buffFlags.hasMonsterBait
+          ? "\n🩸 怪物诱饵生效：噩梦权重 +50，金币与经验 ×3。"
+          : "",
         buffFlags.hasRiverBless ? "\n🌊 河神注视着你的鱼线。" : "",
-        buffFlags.hasLeviathanScale ? "\n🐉 利维坦的逆鳞微微发烫。" : "",
-        brideThreadResult.consumed
-          ? `\n💍 冥婚红线缠绕着鱼钩（剩余 ${brideThreadResult.remaining} 层）。`
+        buffFlags.hasDoubleCoin ? "\n💰 双倍金币卡生效中。" : "",
+        buffFlags.hasDoubleExp ? "\n📚 双倍经验卡生效中。" : "",
+        buffFlags.hasTimeSand ? "\n⏳ 时之沙生效：本次钓鱼冷却减半。" : "",
+        nightmareStatus.brideNightmareMultiplier > 1
+          ? `\n💍 花嫁印记生效：净化前噩梦权重 ×${nightmareStatus.brideNightmareMultiplier}。`
           : "",
-        rarityAfflictions.brideThreadPaused
-          ? `\n☠️ 诅咒压过冥婚红线，本竿红线暂停（仍有 ${brideThreadResult.remaining} 层）。`
-          : "",
-        nightmareStatus.lostSoul
-          ? "\n🪞 你的倒影仍留在雾隐湖，本次无法完美收竿且收益、经验降低。"
+        curseResult.consumed
+          ? `\n☠️ 花嫁倍率结算后，骷髅诅咒再将本竿全部宝藏权重转为噩梦（剩余 ${curseResult.remaining} 层）。`
           : "",
         staminaResult.deepPressureConsumed
-          ? `\n🔔 深压回响令本竿额外消耗 1 点体力（剩余 ${staminaResult.deepPressureLayers} 层）。`
+          ? `\n🔔 深压回响令本竿控制力减半（剩余 ${staminaResult.deepPressureLayers} 层）。`
           : "",
-        hasWish ? "\n🌠 星愿闪耀！这一竿将迎来传说！" : "",
+        wishRarity ? `\n🌠 星愿闪耀！这一竿将迎来【${wishRarity}】品质！` : "",
         isBossBait ? `\n👑 首领鱼饵的气息正在水中扩散，当地首领正向鱼钩逼近……` : "",
       ].join("");
 
@@ -865,14 +887,13 @@ export default class Fishing extends plugin {
         baitConfig,
         phase: FISHING_PHASE.waiting,
         hasLucky: buffFlags.hasLucky,
-        hasStarlight: buffFlags.hasStarlight,
-        hasKoiSign: buffFlags.hasKoiSign,
         hasFogLamp: buffFlags.hasFogLamp,
         hasMonsterBait: buffFlags.hasMonsterBait,
         hasRiverBless: buffFlags.hasRiverBless,
-        hasLeviathanScale: buffFlags.hasLeviathanScale,
-        hasStarDouble: buffFlags.hasStarDouble,
-        hasLostSoul: nightmareStatus.lostSoul,
+        hasDoubleCoin: buffFlags.hasDoubleCoin,
+        hasDoubleExp: buffFlags.hasDoubleExp,
+        hasTimeSand: buffFlags.hasTimeSand,
+        deepPressureActive: Boolean(staminaResult.deepPressureConsumed),
         locationId,
         environment,
         isBossBait,
@@ -907,7 +928,9 @@ export default class Fishing extends plugin {
         const lineCapacity = lineConfig.capacity + lineBonus;
 
         currentState.phase = FISHING_PHASE.weightCheck;
-        currentState.isOverweight = !fish.isTorpedo && fishWeight > lineCapacity;
+        currentState.isOverweight = !fish.isTorpedo &&
+          fishWeight > lineCapacity &&
+          !currentState.hasLucky;
         const shinyHint = fish.isShiny ? `🌈 水面泛起一层奇异的虹光…！\n` : "";
         if (isBossFish(fish) && currentState.isOverweight) {
           await e.reply([
@@ -977,7 +1000,7 @@ export default class Fishing extends plugin {
         try {
           await redis.set(
             `sakura:fishing:wish:${groupId}:${userId}`,
-            "传说",
+            state.wishRarity,
             "EX",
             FISHING_BENEFIT_DURATION_SECONDS,
           );
@@ -1090,36 +1113,28 @@ export default class Fishing extends plugin {
         return;
       }
 
-      // 完美收竿：4 秒内操作，并且装备足以通过重量与难度判定，
-      // 或有好运护符/锦鲤许愿签兜底。仅满足反应时间不会跳过正常判定。
+      // 完美收竿：5 秒内操作，并且装备足以通过重量与难度判定，
+      // 好运护符会跳过重量与困难度判定，但仍需在5秒内操作才算完美收竿。
       const lineBonus = fishingManager.getLineBonusFromMastery(userId, rodConfig.id);
       const lineCapacity = lineConfig.capacity + lineBonus;
-      const effectiveControl = fishingManager.getRodControl(userId, rodConfig.id) + rodMastery;
+      const effectiveControl = getEffectiveRodControl(fishingManager, userId, state, rodMastery);
       const qualifiesForPerfect = !isBossFish(fish) && isPerfectCatch({
         reelDelayMs: state.biteTime ? Date.now() - state.biteTime : Number.NaN,
         fishWeight: fish.actualWeight,
         fishDifficulty,
         lineCapacity,
         effectiveControl,
-        hasAssist: state.hasLucky || state.hasKoiSign,
+        hasAssist: state.hasLucky,
       });
 
-      if (qualifiesForPerfect && !state.hasLostSoul) {
+      if (qualifiesForPerfect) {
         state.isPerfect = true;
         await this.finishSuccess(e, state, fishingManager);
         return;
       }
 
-      if (qualifiesForPerfect && state.hasLostSoul) {
-        await e.reply("🪞 水面映不出你的身影……失魂状态阻止了完美收竿！");
-      }
-
       if (!isBossFish(fish) && state.hasLucky) {
-        await e.reply(
-          state.hasStarlight
-            ? `✨ 星光护符发挥了作用！轻松把鱼拉了上来！`
-            : `🍀 好运护符发挥了作用！轻松把鱼拉了上来！`,
-        );
+        await e.reply(`🍀 好运护符跳过了重量与困难度判断，轻松把鱼拉了上来！`);
         await this.finishSuccess(e, state, fishingManager);
         return;
       }
@@ -1191,7 +1206,7 @@ export default class Fishing extends plugin {
       }
 
       state.phase = FISHING_PHASE.difficultyCheck;
-      const updatedControl = fishingManager.getRodControl(userId, rodConfig.id) + rodMastery;
+      const updatedControl = getEffectiveRodControl(fishingManager, userId, state, rodMastery);
 
       if (fishDifficulty > updatedControl) {
         await e.reply([
@@ -1222,11 +1237,8 @@ export default class Fishing extends plugin {
       }
 
       if (action === FISHING_ACTION.forcePull) {
-        const updatedControl = fishingManager.getRodControl(userId, rodConfig.id) + rodMastery;
-        const successRate = Math.max(
-          0,
-          1 - (fishDifficulty - updatedControl) / FORCE_PULL_DIFFICULTY_RANGE,
-        );
+        const updatedControl = getEffectiveRodControl(fishingManager, userId, state, rodMastery);
+        const successRate = calculateForcePullSuccessRate(fishDifficulty, updatedControl);
         const isSuccess = Math.random() < successRate;
 
         if (!isSuccess) {
@@ -1258,13 +1270,9 @@ export default class Fishing extends plugin {
     }
 
     if (state.phase === FISHING_PHASE.fighting) {
-      const updatedControl = fishingManager.getRodControl(userId, rodConfig.id) + rodMastery;
+      const updatedControl = getEffectiveRodControl(fishingManager, userId, state, rodMastery);
       const fishStateLabel = formatFishFightState(state.fishState);
       const bossFight = isBossFish(fish);
-      // 首领战按钓鱼等级追加搏斗加成；普通渔获恒为 0，收线与伤害不受等级影响。
-      const bossCombatBonus = bossFight
-        ? getBossCombatBonus(fishingManager.getUserFishingLevel(userId))
-        : 0;
       const contextSeconds = bossFight ? Math.ceil(getBossFightTimeoutMs(fish) / 1000) + 5 : 65;
 
       if (action === FISHING_ACTION.attack) {
@@ -1299,7 +1307,8 @@ export default class Fishing extends plugin {
 
         state.bossLastPlayerAttackAt = now;
         state.fightingRounds += 1;
-        const damage = rollBossPlayerDamage(updatedControl + bossCombatBonus);
+        // 「攻」只读取当前鱼竿实际控制力，不叠加钓鱼等级隐藏战力。
+        const damage = rollBossPlayerDamage(updatedControl);
         state.bossHp = Math.max(0, state.bossHp - damage);
 
         if (state.bossHp <= 0 && state.bossAttackTimer) {
@@ -1327,14 +1336,13 @@ export default class Fishing extends plugin {
       if (action === FISHING_ACTION.pull) {
         state.fightingRounds++;
 
-        // 除数 6：保证碳素级控制力在首领战里也有正向距离收益，Boss 门槛不至于全卡在拉力上
-        const pullPower = Math.max(8, Math.floor((updatedControl + bossCombatBonus) / 6));
-        const fishResist = Math.max(3, Math.floor(fishDifficulty / 20));
-        const effects = applyFishFightStateModifiers({
+        // 首领的「拉」与普通精准溜鱼完全共用同一套数值，只额外拥有血条和「攻」。
+        const effects = calculateNormalTugActionEffects({
+          fishDifficulty,
+          effectiveControl: updatedControl,
+          pressure: state.normalTugPressure,
           stateId: state.fishState,
           action: FISHING_ACTION.pull,
-          distanceEffect: pullPower - fishResist + _.random(0, 3),
-          tensionEffect: Math.floor(fishDifficulty / 12) + _.random(4, 9),
         });
 
         state.distance -= effects.distanceEffect;
@@ -1428,11 +1436,12 @@ export default class Fishing extends plugin {
       if (action === FISHING_ACTION.loosen) {
         state.fightingRounds++;
 
-        const effects = applyFishFightStateModifiers({
+        const effects = calculateNormalTugActionEffects({
+          fishDifficulty,
+          effectiveControl: updatedControl,
+          pressure: state.normalTugPressure,
           stateId: state.fishState,
           action: FISHING_ACTION.loosen,
-          distanceEffect: Math.max(2, Math.floor(fishDifficulty / 30)) + _.random(1, 4),
-          tensionEffect: _.random(20, 35),
         });
 
         state.tension = Math.max(0, state.tension - effects.tensionEffect);
@@ -1501,7 +1510,11 @@ export default class Fishing extends plugin {
     } finally {
       this.finish("handleFishing", true);
       try {
-        await this.setCooldownAndIncrement(groupId, userId);
+        await this.setCooldownAndIncrement(
+          groupId,
+          userId,
+          state.hasTimeSand ? FISHING_TIME_SAND_COOLDOWN_SECONDS : FISHING_COOLDOWN_SECONDS,
+        );
       } catch (err) {
         logger.error(`[钓鱼] 写入冷却失败: ${err.stack || err}`);
       } finally {
@@ -1511,7 +1524,11 @@ export default class Fishing extends plugin {
     return true;
   }
 
-  async setCooldownAndIncrement(groupId, userId) {
+  async setCooldownAndIncrement(
+    groupId,
+    userId,
+    cooldownSeconds = FISHING_COOLDOWN_SECONDS,
+  ) {
     const cooldownKey = `sakura:fishing:cooldown:${groupId}:${userId}`;
     const dailyKey = `sakura:economy:daily_fishing_count:${groupId}:${userId}`;
     const now = Date.now();
@@ -1519,7 +1536,7 @@ export default class Fishing extends plugin {
       cooldownKey,
       dailyKey,
       nowSeconds: Math.floor(now / 1000),
-      cooldownSeconds: FISHING_COOLDOWN_SECONDS,
+      cooldownSeconds,
       dailyTtlSeconds: secondsUntilNextShanghaiDay(now),
     });
   }
@@ -1531,54 +1548,27 @@ export default class Fishing extends plugin {
     super.destroy();
   }
 
-  async devourFishingBuff(groupId, userId, durationSeconds, random = Math.random) {
-    const safeDuration = Math.max(1, Math.floor(Number(durationSeconds) || 1));
-    const buffItems = new ShopManager().getAllItems().filter((item) => (
-      item.type === "buff" && item.id !== "item_scale_leviathan"
-    ));
-    const candidates = [];
-    for (const item of buffItems) {
-      const key = `sakura:fishing:buff:${item.id}:${groupId}:${userId}`;
-      const ttl = await redis.ttl(key);
-      if (ttl > 0) candidates.push({ item, key, ttl });
-    }
-    if (candidates.length === 0) return null;
-
-    const roll = Math.max(0, Math.min(0.999999999999, Number(random()) || 0));
-    const selected = candidates[Math.floor(roll * candidates.length)];
-    const remaining = Math.max(0, selected.ttl - safeDuration);
-    if (remaining > 0) {
-      await redis.expire(selected.key, remaining);
-    } else {
-      await redis.del(selected.key);
-    }
-    return {
-      item: selected.item,
-      erodedSeconds: selected.ttl - remaining,
-      remainingSeconds: remaining,
-    };
-  }
-
   async applyNightmareEffect({
     e,
     state,
     fishingManager,
     economyManager,
-    professionEffects,
     expGain,
   }) {
-    const { fish, rodConfig, baitConfig } = state;
+    const { fish, rodConfig } = state;
     const effect = fish.nightmare_effect || {};
-    const reducePenalty = (value) => Math.max(
+    const normalizePenalty = (value) => Math.max(
       1,
-      Math.round(Number(value) * professionEffects.penaltyMultiplier),
+      Math.round(Number(value)),
     );
+    let rodBroken = false;
+    let forceStaminaToOne = false;
     const fallbackRodDamage = (amount, prefix) => {
-      const damage = reducePenalty(amount);
+      const damage = normalizePenalty(amount);
       const result = applyRodDamage(fishingManager, e.user_id, rodConfig, damage);
+      rodBroken ||= result.isBroken;
       return `${prefix}${result.msg}`;
     };
-    let nextExpGain = expGain;
     let message = "💥 这是一个噩梦般的生物！";
 
     switch (effect.type) {
@@ -1587,6 +1577,28 @@ export default class Fishing extends plugin {
           effect.amount || 20,
           "💥 它疯狂挣扎，严重损坏了你的鱼竿！",
         );
+        break;
+      }
+
+      case "rod_damage_control_loss": {
+        const controlLoss = normalizePenalty(effect.control_loss || 10);
+        const controlResult = fishingManager.reduceRodControl(
+          e.user_id,
+          rodConfig.id,
+          controlLoss,
+        );
+        const rodDamage = normalizePenalty(effect.rod_damage || 10);
+        const damageResult = applyRodDamage(
+          fishingManager,
+          e.user_id,
+          rodConfig,
+          rodDamage,
+        );
+        rodBroken ||= damageResult.isBroken;
+        const controlMessage = controlResult.applied && !damageResult.isBroken
+          ? `\n🎛️ 当前控制力永久 -${controlResult.lost}，剩余 ${controlResult.currentControl}`
+          : "";
+        message = `🦈 骨刺同时撕磨竿身与操控结构！${damageResult.msg}${controlMessage}`;
         break;
       }
 
@@ -1602,7 +1614,7 @@ export default class Fishing extends plugin {
         const min = Math.max(1, Math.floor(Number(effect.min) || 1));
         const max = Math.max(min, Math.floor(Number(effect.max) || min));
         const baseAmount = Math.min(_.random(min, max), currentCoins);
-        const stolenAmount = Math.min(reducePenalty(baseAmount), currentCoins);
+        const stolenAmount = Math.min(normalizePenalty(baseAmount), currentCoins);
         economyManager.reduceCoins(e, stolenAmount, {
           type: "支出",
           note: `钓鱼事件：${fish.name}`,
@@ -1624,113 +1636,93 @@ export default class Fishing extends plugin {
         const maxPercent = Math.max(minPercent, Math.floor(Number(effect.max_percent) || minPercent));
         const percent = _.random(minPercent, maxPercent);
         const baseAmount = Math.max(1, Math.min(currentCoins, Math.round(currentCoins * percent / 100)));
-        const stolenAmount = Math.min(reducePenalty(baseAmount), currentCoins);
+        const stolenAmount = Math.min(normalizePenalty(baseAmount), currentCoins);
         economyManager.reduceCoins(e, stolenAmount, {
           type: "支出",
           note: `钓鱼事件：${fish.name}`,
         });
-        message = `🌑 它吞噬了你的财富……你丢失了 ${stolenAmount} 樱花币！`;
+        message = `🌑 它按 ${percent}% 吞噬你的财富……你丢失了 ${stolenAmount} 樱花币！`;
         break;
       }
 
       case "curse": {
-        const layers = reducePenalty(effect.layers || 5);
+        const layers = normalizePenalty(effect.layers || 5);
         fishingManager.addNightmareCurseLayers(e.user_id, layers);
         message = `☠️ 诅咒附身！噩梦诅咒增加了 ${layers} 层。`;
         break;
       }
 
-      case "bride_thread": {
-        const layers = reducePenalty(effect.layers || 4);
-        const result = fishingManager.addBrideThreadLayers(
+      case "nightmare_weight_multiplier": {
+        const result = fishingManager.applyBrideNightmareMultiplier(
           e.user_id,
-          layers,
-          effect.max_layers || 8,
+          effect.multiplier || 2,
         );
-        message = result.added > 0
-          ? `💍 冰冷的红线缠上手腕！冥婚红线增加 ${result.added} 层，当前 ${result.total} 层。`
-          : `💍 冥婚红线已经缠至上限 ${result.total} 层，花嫁仍不肯松手。`;
+        message = `💍 溺水花嫁的印记再次连乘：噩梦权重 ×${result.before} → ×${result.total}，直至被净化！`;
         break;
       }
 
       case "steal_bait": {
-        if (
-          professionEffects.penaltyReduction > 0 &&
-          Math.random() < professionEffects.penaltyReduction
-        ) {
-          message = "🗡️ 深渊猎手看穿了水猴的小动作，鱼饵安然无恙！";
-          break;
-        }
-        const result = fishingManager.stealBait(e.user_id, baitConfig?.id);
+        const result = fishingManager.stealHighestValueBait(e.user_id);
         if (result.stolen) {
-          message = `🐒 水猴顺手摸走了 1 个【${baitConfig.name}】，剩余 ${result.remaining} 个！`;
+          message = `🐒 水猴偷走了背包里价值最高的鱼饵【${result.bait.name}】×1，剩余 ${result.remaining} 个！`;
         } else {
           message = fallbackRodDamage(
-            effect.fallback_rod_damage || 10,
+            effect.fallback_rod_damage || 20,
             "🐒 水猴没摸到鱼饵，恼怒地抓伤了鱼竿！",
           );
         }
         break;
       }
 
-      case "lost_soul": {
-        if (state.hasFogLamp) {
-          message = "🌫️ 雾灯照出了回岸的路，捞尸人没能夺走你的倒影！";
-          break;
-        }
-        fishingManager.applyLostSoul(e.user_id);
-        const destination = fishingManager.moveToRandomUnlockedLocation(e.user_id, "lake");
-        const destinationText = destination
-          ? `${destination.emoji}【${destination.name}】`
-          : "湖岸之外";
-        message = `🪞 捞尸人把你的倒影留在湖底，并将你拖到了${destinationText}！\n` +
-          "👻 你陷入失魂：无法完美收竿，金币与经验减半。返回雾隐湖并成功钓起一条非噩梦渔获才能恢复。";
+      case "stamina_crush": {
+        const staminaStatus = fishingManager.getFishingStaminaStatus(e.user_id);
+        const baseDamage = calculateCorpseFisherRodDamage(
+          staminaStatus.current,
+          effect.max_rod_damage || 20,
+        );
+        const damage = baseDamage > 0 ? normalizePenalty(baseDamage) : 0;
+        const damageResult = damage > 0
+          ? applyRodDamage(fishingManager, e.user_id, rodConfig, damage)
+          : { msg: "", isBroken: false };
+        rodBroken ||= damageResult.isBroken;
+        fishingManager.forceFishingStaminaToOne(e.user_id);
+        forceStaminaToOne = true;
+        message = `🪝 捞尸人以你当前的 ${staminaStatus.current} 点体力反噬鱼竿` +
+          `，造成 ${damage} 点损耗，并将体力强制压到 1！${damageResult.msg}`;
         break;
       }
 
       case "ghost_debt": {
-        const amount = reducePenalty(effect.amount || 120);
-        const result = fishingManager.addGhostDebt(e.user_id, amount, effect.max_debt || 360);
-        message = result.added > 0
-          ? `🚢 幽灵船留下了一张亡者船票，新增 ${result.added} 樱花币债务，当前债务 ${result.total}！`
-          : `🚢 亡者船票上的债务已经达到上限 ${result.total}，幽灵仍在催债……`;
+        const amount = normalizePenalty(effect.amount || 100);
+        const result = fishingManager.addGhostDebt(e.user_id, amount);
+        message = `🚢 幽灵船留下亡者船票：债务 +${result.added}，当前 ${result.total}！` +
+          "\n💰 还清前，钓鱼金币会先减半，再用于偿还债务。";
         break;
       }
 
       case "deep_pressure": {
-        const layers = reducePenalty(effect.layers || 4);
-        const result = fishingManager.addDeepPressureLayers(
-          e.user_id,
-          layers,
-          effect.max_layers || 8,
-        );
-        message = result.added > 0
-          ? `🔔 潜水钟敲响，深压增加 ${result.added} 层，当前 ${result.total} 层！之后每竿额外消耗 1 点体力。`
-          : `🔔 深压已经达到上限 ${result.total} 层，潜水钟的回响仍未停歇！`;
+        const layers = normalizePenalty(effect.layers || 3);
+        const result = fishingManager.addDeepPressureLayers(e.user_id, layers);
+        message = `🔔 潜水钟敲响，深压 +${result.added} 层，当前 ${result.total} 层！` +
+          "之后每层影响一竿，使当前鱼竿控制力减半。";
         break;
       }
 
-      case "devour_buff": {
-        const duration = reducePenalty(effect.duration_seconds || 1800);
-        try {
-          const result = await this.devourFishingBuff(e.group_id, e.user_id, duration);
-          if (result) {
-            const erodedMinutes = Math.max(1, Math.ceil(result.erodedSeconds / 60));
-            const remainingText = result.remainingSeconds > 0
-              ? `，还剩约 ${Math.ceil(result.remainingSeconds / 60)} 分钟`
-              : "，Buff 已熄灭";
-            message = `🌑 它吞掉了【${result.item.name}】${erodedMinutes} 分钟的星光${remainingText}！`;
-          } else {
-            nextExpGain = professionEffects.active
-              ? Math.max(1, Math.round(expGain * professionEffects.penaltyReduction))
-              : 0;
-            message = nextExpGain > 0
-              ? `🌑 找不到可吞噬的星光，它转而吞噬经验；深渊猎手保住了 ${nextExpGain} 点！`
-              : "🌑 找不到可吞噬的星光，它转而吃掉了本次获得的全部经验！";
-          }
-        } catch (err) {
-          logger.warn(`[钓鱼] 食星之影削减 Buff 失败: ${err.message}`);
-          message = "🌑 星光剧烈闪烁，食星之影的力量没能稳定下来。";
+      case "devour_inventory": {
+        const result = fishingManager.devourRandomInventoryItem(
+          e.user_id,
+          [rodConfig.id],
+        );
+        if (result) {
+          const shopManager = new ShopManager();
+          const item = shopManager.findItemById(result.itemId) ||
+            shopManager.findItemByName(result.itemId);
+          message = `🌑 食星之影吞掉了【${item?.name || result.itemId}】×1！`;
+        } else {
+          message = fallbackRodDamage(
+            effect.fallback_rod_damage || 2,
+            "🌑 背包里没有可吞噬的物品，它转而啃噬鱼竿！",
+          );
         }
         break;
       }
@@ -1739,19 +1731,7 @@ export default class Fishing extends plugin {
         break;
     }
 
-    return { message, expGain: nextExpGain };
-  }
-
-  recoverLostSoulAfterCatch(userId, state, fish, fishingManager, settleResult) {
-    if (
-      !state.hasLostSoul ||
-      state.locationId !== "lake" ||
-      fish.rarity === "噩梦" ||
-      !settleResult?.success
-    ) {
-      return false;
-    }
-    return fishingManager.clearLostSoul(userId);
+    return { message, expGain, rodBroken, forceStaminaToOne };
   }
 
   async finishSuccess(e, state, fishingManager) {
@@ -1782,67 +1762,58 @@ export default class Fishing extends plugin {
     const shinyNameTag = isShiny ? "🌈异色·" : "";
     const economyManager = new EconomyManager(e);
     const settlement = new FishingSettlementService(e);
-    const isPerfect = Boolean(state.isPerfect) && !state.hasLostSoul;
-    const professionEffects = fishingManager.getNightmareProfessionEffects(userId);
-    const nightmareEffects = fish.rarity === "噩梦"
-      ? professionEffects
-      : null;
-    const lostSoulMultiplier = state.hasLostSoul
-      ? getLostSoulRewardMultiplier(professionEffects.penaltyReduction)
-      : 1;
-    let expGain = Math.max(1, Math.round(
-      rollFishExp(fish.rarity) *
-      (isPerfect ? PERFECT_EXP_MULTIPLIER : 1) *
-      (isBossFish(fish) ? BOSS_EXP_MULTIPLIER : 1) *
-      (nightmareEffects?.expMultiplier || 1) *
-      (state.hasStarDouble ? 2 : 1) *
-      (state.hasMonsterBait && fish.rarity === "噩梦" ? 1.5 : 1) *
-      (isShiny ? SHINY_EXP_MULTIPLIER : 1) *
-      (state.environment?.expMultiplier || 1) *
-      lostSoulMultiplier,
-    ));
-    const lostSoulPenaltyMsg = state.hasLostSoul
-      ? `🪞 失魂影响：金币与经验 -${Math.round((1 - lostSoulMultiplier) * 100)}%\n`
-      : "";
+    const isPerfect = Boolean(state.isPerfect);
+    const bossVictory = isBossFish(fish);
+    const bossReward = bossVictory ? calculateBossCatchReward(fish) : null;
+    // 首领奖励独立于普通收益链：只允许异色 ×4，不吃其余经验加成。
+    let expGain = bossVictory
+      ? bossReward.expGain
+      : Math.max(1, Math.round(
+        rollFishExp(fish.rarity) *
+        (isPerfect ? PERFECT_EXP_MULTIPLIER : 1) *
+        (state.hasDoubleExp ? 2 : 1) *
+        (state.hasMonsterBait ? 3 : 1) *
+        (isShiny ? SHINY_EXP_MULTIPLIER : 1) *
+        (state.environment?.expMultiplier || 1),
+      ));
     const weatherTag = Array.isArray(fish.weather) && fish.weather.length > 0
       ? `（${fish.weather.map((name) => `${WEATHER_CONFIG[name]?.emoji || ""}${name}`).join("/")}限定）`
       : "";
 
     try {
       if (fish.rarity === "噩梦") {
-        // 利维坦的逆鳞完全免疫噩梦惩罚；否则深渊猎手/河神垂青仍可单独保线
-        const scaleShielded = Boolean(state.hasLeviathanScale);
-        const abyssSaved = !scaleShielded &&
-          nightmareEffects.lineSaveChance > 0 &&
-          Math.random() < nightmareEffects.lineSaveChance;
-        const lineSaved = scaleShielded || abyssSaved || Boolean(state.hasRiverBless);
+        // 深渊猎手先消耗一次完整免疫；没有充能时才进入断线与噩梦效果结算。
+        const immunity = fishingManager.consumeNightmareImmunity(userId);
+        const immunityTriggered = Boolean(immunity.immune);
+        const lineSaved = immunityTriggered || Boolean(state.hasRiverBless);
         if (!lineSaved) {
           fishingManager.breakLine(userId, lineConfig.id);
         }
 
-        let punishmentMsg = "";
-        if (!scaleShielded) {
-          const effectResult = await this.applyNightmareEffect({
+        const effectResult = immunityTriggered
+          ? {
+            message: "🛡️ 本次噩梦的伤害、偷取与附加状态全部未生效。",
+            expGain,
+            rodBroken: false,
+            forceStaminaToOne: false,
+          }
+          : await this.applyNightmareEffect({
             e,
             state,
             fishingManager,
             economyManager,
-            professionEffects: nightmareEffects,
             expGain,
           });
-          punishmentMsg = effectResult.message;
-          expGain = effectResult.expGain;
-        }
+        const punishmentMsg = effectResult.message;
+        expGain = effectResult.expGain;
 
-        const lineResultMsg = scaleShielded
-          ? `🛡️ 利维坦的逆鳞震颤着吞噬了噩梦的恶意，你毫发无伤！\n`
-          : lineSaved
-            ? (abyssSaved
-              ? `🗡️ 深渊猎手识破了噩梦的袭击，鱼线保住了！\n`
-              : `🌊 河神的祝福护住了鱼线！\n`)
-            : `💥 崩！鱼线被扯断了！\n🧵 失去了【${lineConfig.name}】\n`;
-        const professionBonusMsg = nightmareEffects.active
-          ? `🗡️ 深渊猎手：噩梦经验 +${Math.round((nightmareEffects.expMultiplier - 1) * 100)}%，惩罚降低 ${Math.round(nightmareEffects.penaltyReduction * 100)}%\n`
+        const lineResultMsg = lineSaved
+          ? (immunityTriggered
+            ? `🗡️ 猎魔守护完全隔绝了这次噩梦，鱼线安然无恙！\n`
+            : `🌊 河神的祝福护住了鱼线！\n`)
+          : `💥 崩！鱼线被扯断了！\n🧵 失去了【${lineConfig.name}】\n`;
+        const professionBonusMsg = immunity.active
+          ? `🛡️ 噩梦免疫储存：${formatNightmareImmunityDetail(immunity)}\n`
           : "";
 
         const settleResult = settlement.settleAttempt({
@@ -1850,11 +1821,15 @@ export default class Fishing extends plugin {
           fishId: fish.id,
           success: true,
           earnings: 0,
-          rodId: rodConfig.id,
+          rodId: effectResult.rodBroken ? null : rodConfig.id,
           masteryGain: 1,
           expGain,
           weight: fish.actualWeight,
         });
+        if (effectResult.forceStaminaToOne) {
+          fishingManager.forceFishingStaminaToOne(userId);
+          if (settleResult.levelUp) settleResult.levelUp.staminaForcedTo = 1;
+        }
         const dexProgress = getDexProgress(fishingManager, userId, settleResult);
 
         await e.reply([
@@ -1864,7 +1839,6 @@ export default class Fishing extends plugin {
           `📊 稀有度：${rarity.color}${fish.rarity}${weatherTag}\n`,
           lineResultMsg,
           professionBonusMsg,
-          lostSoulPenaltyMsg,
           punishmentMsg + formatCatchTail(expGain, isPerfect, settleResult, dexProgress),
         ]);
         return true;
@@ -1876,58 +1850,41 @@ export default class Fishing extends plugin {
           sessionId: state.id,
           fishId: fish.id,
           rodId: rodConfig.id,
-          capacity: economyManager.getBagCapacity(e),
           expGain,
           weight: fish.actualWeight,
         });
         const dexProgress = getDexProgress(fishingManager, userId, addResult);
         const newMastery = fishingManager.getRodMastery(userId, rodConfig.id);
-        const soulRecovered = this.recoverLostSoulAfterCatch(
-          userId,
-          state,
-          fish,
-          fishingManager,
-          addResult,
-        );
-        const soulRecoveryMsg = soulRecovered
-          ? "\n🪞 水面重新映出了你的身影，失魂状态已经解除！"
-          : "";
 
-        if (addResult.added) {
-          await e.reply([
-            `🎉 钓到了【${fish.name}】！\n`,
-            fishImageSegment,
-            `📝 ${fish.description}\n`,
-            `📊 稀有度：${rarity.color}${fish.rarity}${weatherTag}\n`,
-            `📈 熟练度：${newMastery}\n`,
-            lostSoulPenaltyMsg,
-            `🗝️ 宝箱已放入背包，发送「#开宝箱」开启它！${formatCatchTail(expGain, isPerfect, addResult, dexProgress)}${soulRecoveryMsg}`,
-          ]);
-        } else {
-          await e.reply([
-            `🎉 钓到了【${fish.name}】！\n`,
-            fishImageSegment,
-            `📝 ${fish.description}\n`,
-            `📊 稀有度：${rarity.color}${fish.rarity}${weatherTag}\n`,
-            `📈 熟练度：${newMastery}\n`,
-            lostSoulPenaltyMsg,
-            `❌ 背包已满，无法放入！宝箱掉回水里了...${formatCatchTail(expGain, isPerfect, addResult, dexProgress)}${soulRecoveryMsg}`,
-          ]);
-        }
+        await e.reply([
+          `🎉 钓到了【${fish.name}】！\n`,
+          fishImageSegment,
+          `📝 ${fish.description}\n`,
+          `📊 稀有度：${rarity.color}${fish.rarity}${weatherTag}\n`,
+          `📈 熟练度：${newMastery}\n`,
+          `🗝️ 宝箱已放入背包，发送「#开宝箱」开启它！${formatCatchTail(expGain, isPerfect, addResult, dexProgress)}`,
+        ]);
         return true;
       }
 
-      const price = await calculateFishPrice(
-        fish,
-        fishingManager,
-        state.environment?.priceMultiplier || 1,
-      );
+      // 首领金币只由自身重量偏差决定；普通渔获继续走完整收益加成链。
+      const price = bossVictory
+        ? bossReward.earnings
+        : await calculateFishPrice(
+          fish,
+          fishingManager,
+          state.environment?.priceMultiplier || 1,
+        );
 
-      const buffMultiplier = await this.getFishSellBuffMultiplier(groupId, userId);
-      const merchantMultiplier = fishingManager.getMerchantCoinMultiplier(userId);
-      const shinyMultiplier = isShiny ? SHINY_PRICE_MULTIPLIER : 1;
-      const priceBeforeLostSoul = Math.round(price * buffMultiplier * merchantMultiplier * shinyMultiplier);
-      const finalPrice = Math.round(priceBeforeLostSoul * lostSoulMultiplier);
+      const buffMultiplier = bossVictory
+        ? 1
+        : await this.getFishSellBuffMultiplier(groupId, userId, state);
+      const merchantMultiplier = bossVictory
+        ? 1
+        : fishingManager.getMerchantCoinMultiplier(userId);
+      // 首领的异色倍率已在独立奖励包中计算，普通渔获在这里计算。
+      const shinyMultiplier = bossVictory || !isShiny ? 1 : SHINY_PRICE_MULTIPLIER;
+      const finalPrice = Math.round(price * buffMultiplier * merchantMultiplier * shinyMultiplier);
 
       const settleResult = settlement.settleCoinCatch({
         sessionId: state.id,
@@ -1938,24 +1895,21 @@ export default class Fishing extends plugin {
         expGain,
         weight: fish.actualWeight,
         shiny: isShiny,
+        rewardItemId: bossReward?.rewardItemId || null,
+        rewardItemCount: bossReward?.rewardItemCount || 0,
       });
       const dexProgress = getDexProgress(fishingManager, userId, settleResult);
       const newMastery = fishingManager.getRodMastery(userId, rodConfig.id);
-      const soulRecovered = this.recoverLostSoulAfterCatch(
-        userId,
-        state,
-        fish,
-        fishingManager,
-        settleResult,
-      );
 
       let priceBoostMsg = "";
-      try {
-        if (await fishingManager.isFishPriceBoostActive()) {
-          priceBoostMsg = `😱 鱼雷恐慌中，鱼价×${TORPEDO_PRICE_BOOST_MULTIPLIER}！\n`;
+      if (!bossVictory) {
+        try {
+          if (await fishingManager.isFishPriceBoostActive()) {
+            priceBoostMsg = `😱 鱼雷恐慌中，鱼价×${TORPEDO_PRICE_BOOST_MULTIPLIER}！\n`;
+          }
+        } catch (err) {
+          logger.warn(`[钓鱼] 获取鱼雷鱼价状态失败: ${err.message}`);
         }
-      } catch (err) {
-        logger.warn(`[钓鱼] 获取鱼雷鱼价状态失败: ${err.message}`);
       }
 
       let buffMsg = "";
@@ -1970,20 +1924,26 @@ export default class Fishing extends plugin {
       }
 
       const shinyMsg = isShiny
-        ? `🌈 异色个体！价值 ×${SHINY_PRICE_MULTIPLIER}、经验 ×${SHINY_EXP_MULTIPLIER}！\n`
+        ? `🌈 异色${bossVictory ? "首领" : "个体"}！金币 ×${SHINY_PRICE_MULTIPLIER}、经验 ×${SHINY_EXP_MULTIPLIER}！\n`
         : "";
 
+      const rewardChest = bossVictory
+        ? new ShopManager().findItemById(settleResult.rewardItemId)
+        : null;
+      const bossRewardMsg = bossVictory
+        ? `🗝️ 当地宝箱：【${rewardChest?.name || settleResult.rewardItemId}】×${settleResult.rewardItemCount} 已放入背包\n`
+        : "";
+
+      const debtPenaltyMsg = settleResult.penaltyDeducted > 0
+        ? `🚢 亡者船票先将金币收益减半：${settleResult.grossEarnings} → ${settleResult.earningsAfterPenalty}\n`
+        : "";
       const debtMsg = settleResult.debtPaid > 0
-        ? `👻 亡者船票扣走 ${settleResult.debtPaid} 樱花币，剩余债务 ${settleResult.remainingDebt}\n`
+        ? `👻 再偿还 ${settleResult.debtPaid} 樱花币债务，剩余 ${settleResult.remainingDebt}\n`
         : "";
-      const soulRecoveryMsg = soulRecovered
-        ? `🪞 水面重新映出了你的身影，失魂状态已经解除！\n`
-        : "";
-      const earningsMsg = settleResult.debtPaid > 0
+      const earningsMsg = settleResult.penaltyDeducted > 0 || settleResult.debtPaid > 0
         ? `💰 价值：${finalPrice} 樱花币｜实际到账：${settleResult.earnings} 樱花币`
         : `💰 价值：${finalPrice} 樱花币`;
 
-      const bossVictory = isBossFish(fish);
       const resultMsg = [
         bossVictory
           ? `🏆 单人讨伐成功！击败了${state.locationId ? "当前钓点的" : ""}首领【${shinyNameTag}${fish.name}】！\n`
@@ -2002,16 +1962,20 @@ export default class Fishing extends plugin {
         buffMsg,
         merchantMsg,
         shinyMsg,
-        lostSoulPenaltyMsg,
+        bossRewardMsg,
+        debtPenaltyMsg,
         debtMsg,
-        soulRecoveryMsg,
         `${earningsMsg}${formatCatchTail(expGain, isPerfect, settleResult, dexProgress)}`,
       ];
       await e.reply(resultMsg);
       return true;
     } finally {
       try {
-        await this.setCooldownAndIncrement(groupId, userId);
+        await this.setCooldownAndIncrement(
+          groupId,
+          userId,
+          state.hasTimeSand ? FISHING_TIME_SAND_COOLDOWN_SECONDS : FISHING_COOLDOWN_SECONDS,
+        );
       } catch (err) {
         logger.error(`[钓鱼] 写入冷却失败: ${err.stack || err}`);
       } finally {
@@ -2020,15 +1984,21 @@ export default class Fishing extends plugin {
     }
   }
 
-  async getFishSellBuffMultiplier(groupId, userId) {
-    // 双倍金币卡与双倍星辉卡同为 2 倍，同时生效不叠加
-    const doubleKeys = [
+  async getFishSellBuffMultiplier(groupId, userId, buffSnapshot = null) {
+    if (buffSnapshot) {
+      return (buffSnapshot.hasDoubleCoin ? 2 : 1) *
+        (buffSnapshot.hasMonsterBait ? 3 : 1);
+    }
+
+    const multiplierKeys = [
       `sakura:fishing:buff:item_card_double_coin:${groupId}:${userId}`,
-      `sakura:fishing:buff:item_card_star_double:${groupId}:${userId}`,
+      `sakura:fishing:buff:item_bait_monster:${groupId}:${userId}`,
     ];
     try {
-      const values = await Promise.all(doubleKeys.map((key) => redis.get(key)));
-      if (values.some(Boolean)) return 2;
+      const [doubleCoin, monsterBait] = await Promise.all(
+        multiplierKeys.map((key) => redis.get(key)),
+      );
+      return (doubleCoin ? 2 : 1) * (monsterBait ? 3 : 1);
     } catch (err) {
       logger.warn(`[钓鱼] 获取金币加成失败，按原价结算: ${err.message}`);
     }
@@ -2189,10 +2159,9 @@ export default class Fishing extends plugin {
     }
 
     fishingManager.equipLine(e.user_id, line.id);
-    const durability = fishingManager.getLineDurabilityInfo(e.user_id, line.id);
     await e.reply(
       `🧵 鱼线换好啦！当前使用【${line.name}】。\n` +
-      `耐久：${durability.currentDurability}/${durability.maxDurability}`,
+      `承重：${line.capacity}`,
     );
     return true;
   });
@@ -2229,12 +2198,11 @@ export default class Fishing extends plugin {
 
     const lineConfig = equippedLineId ? fishingManager.getLineConfig(equippedLineId) : null;
     if (lineConfig) {
-      const durability = fishingManager.getLineDurabilityInfo(userId, equippedLineId);
       equipment.push({
         id: equippedLineId,
         name: lineConfig.name,
         handler: "fishing_line",
-        details: [`耐久 ${durability.currentDurability}/${durability.maxDurability}`],
+        details: [],
       });
     } else {
       equipment.push({ name: "未装备鱼线", handler: "fishing_line", details: [] });
@@ -2274,9 +2242,11 @@ export default class Fishing extends plugin {
         redis.ttl(`sakura:fishing:buff:${item.id}:${groupId}:${userId}`).catch(() => 0),
       ),
     );
+    let fogLampActive = false;
     for (const [index, item] of buffItems.entries()) {
       const ttl = buffTtls[index];
       if (ttl > 0) {
+        if (item.id === "item_lamp_fog") fogLampActive = true;
         effects.push({
           icon: item.icon || "✨",
           name: item.name,
@@ -2285,13 +2255,20 @@ export default class Fishing extends plugin {
         });
       }
     }
+    const statusWeather = fogLampActive
+      ? { name: "雾（雾灯）", emoji: WEATHER_CONFIG["雾"].emoji }
+      : weather;
 
-    const wishTtl = await redis.ttl(`sakura:fishing:wish:${groupId}:${userId}`).catch(() => 0);
-    if (wishTtl > 0) {
+    const wishKey = `sakura:fishing:wish:${groupId}:${userId}`;
+    const [wishTtl, wishRarity] = await Promise.all([
+      redis.ttl(wishKey).catch(() => 0),
+      redis.get(wishKey).catch(() => null),
+    ]);
+    if (wishTtl > 0 && RARITY_CONFIG[wishRarity]) {
       effects.push({
         icon: "🌠",
         name: "星愿",
-        detail: `下一竿必中传说 · 剩余 ${formatEffectTime(wishTtl)}`,
+        detail: `下一次咬钩指定为${wishRarity} · 剩余 ${formatEffectTime(wishTtl)}`,
         tone: "positive",
       });
     }
@@ -2308,21 +2285,13 @@ export default class Fishing extends plugin {
         tone: "danger",
       });
     }
-    if (nightmareStatus.brideThreadLayers > 0) {
+    if (nightmareStatus.brideNightmareMultiplier > 1) {
       effects.push({
         icon: "💍",
-        name: "冥婚红线",
-        detail: curseStatus.actualLayers > 0
-          ? `${nightmareStatus.brideThreadLayers} 层 · 当前被普通诅咒压制`
-          : `${nightmareStatus.brideThreadLayers} 层 · 下一竿偏向噩梦`,
-        tone: "danger",
-      });
-    }
-    if (nightmareStatus.lostSoul) {
-      effects.push({
-        icon: "🪞",
-        name: "失魂",
-        detail: "无法完美收竿，金币与经验降低",
+        name: "花嫁印记",
+        detail: `净化前噩梦权重 ×${nightmareStatus.brideNightmareMultiplier}` +
+          (curseStatus.actualLayers > 0 ? " · 花嫁先乘、骷髅诅咒后转移" : "") +
+          " · 再次钓到继续×2",
         tone: "danger",
       });
     }
@@ -2330,7 +2299,7 @@ export default class Fishing extends plugin {
       effects.push({
         icon: "🚢",
         name: "亡者船票",
-        detail: `尚欠 ${nightmareStatus.ghostDebt} 樱花币`,
+        detail: `尚欠 ${nightmareStatus.ghostDebt} · 收益先减半再还债`,
         tone: "warning",
       });
     }
@@ -2338,8 +2307,17 @@ export default class Fishing extends plugin {
       effects.push({
         icon: "🔔",
         name: "深压回响",
-        detail: `${nightmareStatus.deepPressureLayers} 层 · 下竿体力消耗增加`,
+        detail: `${nightmareStatus.deepPressureLayers} 层 · 每层使一竿控制力减半`,
         tone: "warning",
+      });
+    }
+    const nightmareImmunity = fishingManager.getNightmareImmunityStatus(userId);
+    if (nightmareImmunity.active) {
+      effects.push({
+        icon: "🛡️",
+        name: "猎魔守护",
+        detail: formatNightmareImmunityDetail(nightmareImmunity),
+        tone: nightmareImmunity.ready ? "positive" : "warning",
       });
     }
 
@@ -2382,7 +2360,7 @@ export default class Fishing extends plugin {
         avatarUrl: `https://q1.qlogo.cn/g?b=qq&nk=${userId}&s=640`,
         balance,
         location: locationConfig,
-        weather,
+        weather: statusWeather,
         level: fishingLevel,
         exp: {
           current: fishingExp,
@@ -2686,7 +2664,8 @@ export default class Fishing extends plugin {
           const equippedRod = fishingManager.getEquippedRod(e.user_id);
           if (equippedRod) {
             const mastery = fishingManager.getRodMastery(e.user_id, equippedRod);
-            bonusInfo = `\n🎣 当前鱼竿熟练度: ${mastery}，职业强化已生效`;
+            const lineBonus = fishingManager.getLineBonusFromMastery(e.user_id, equippedRod);
+            bonusInfo = `\n🎣 当前鱼竿熟练度: ${mastery}｜鱼线承重: +${lineBonus}`;
           } else {
             bonusInfo = `\n🎣 装备鱼竿后，职业强化会随熟练度生效`;
           }
@@ -2697,11 +2676,8 @@ export default class Fishing extends plugin {
           bonusInfo = `\n💰 当前金币收益加成: +${bonusPercent}%`;
           break;
         case 'abyss_hunter': {
-          const effects = fishingManager.getNightmareProfessionEffects(e.user_id);
-          const expBonus = Math.round((effects.expMultiplier - 1) * 100);
-          const penaltyReduction = Math.round(effects.penaltyReduction * 100);
-          const lineSaveChance = Math.round(effects.lineSaveChance * 100);
-          bonusInfo = `\n🗡️ 噩梦经验: +${expBonus}%｜惩罚降低: ${penaltyReduction}%｜保住鱼线: ${lineSaveChance}%`;
+          const immunity = fishingManager.getNightmareImmunityStatus(e.user_id);
+          bonusInfo = `\n🛡️ 噩梦免疫储存: ${formatNightmareImmunityDetail(immunity)}`;
           break;
         }
       }

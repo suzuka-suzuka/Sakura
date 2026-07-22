@@ -2,7 +2,6 @@ import Setting from "../setting.js";
 import InventoryManager from "./InventoryManager.js";
 import db from "../Database.js";
 import {
-  calculateBossLineDurability,
   calculateFishingStamina,
   FISHING_BENEFIT_DURATION_SECONDS,
   FISHING_LOCATIONS,
@@ -59,6 +58,26 @@ export default class FishingManager {
       id,
       ...professions[id]
     }));
+  }
+
+  static getNightmareImmunityRules(professionId, professionLevel) {
+    if (professionId !== 'abyss_hunter' || professionLevel <= 0) return null;
+    const config = FishingManager.getProfessionConfig('abyss_hunter');
+    const levelConfig = config?.levels?.[professionLevel];
+    const maxCharges = Math.max(
+      0,
+      Math.floor(Number(levelConfig?.nightmare_immunity_max_charges) || 0),
+    );
+    const rechargeHours = Math.max(
+      0,
+      Number(levelConfig?.nightmare_immunity_recharge_hours) || 0,
+    );
+    if (maxCharges <= 0 || rechargeHours <= 0) return null;
+    return {
+      maxCharges,
+      rechargeHours,
+      rechargeMs: rechargeHours * 60 * 60 * 1000,
+    };
   }
 
   _ensureUser(userId) {
@@ -148,7 +167,7 @@ export default class FishingManager {
   }
 
   _formatFishingStaminaStatus(snapshot) {
-    const cost = getFishingStaminaCost(snapshot.deepPressureLayers);
+    const cost = getFishingStaminaCost();
     return {
       current: snapshot.stamina,
       max: snapshot.max,
@@ -179,7 +198,7 @@ export default class FishingManager {
     this._ensureUser(userId);
     const transaction = db.transaction(() => {
       const snapshot = this._readFishingStamina(userId, now);
-      const cost = getFishingStaminaCost(snapshot.deepPressureLayers);
+      const cost = getFishingStaminaCost();
       if (snapshot.stamina < cost) {
         this._writeFishingStamina(userId, snapshot.stamina, snapshot.updatedAt);
         return {
@@ -272,6 +291,30 @@ export default class FishingManager {
     return transaction.immediate();
   }
 
+  forceFishingStaminaToOne(userId, now = Date.now()) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    const transaction = db.transaction(() => {
+      const snapshot = this._readFishingStamina(userId, now);
+      const numericNow = Number(now);
+      const safeNow = Number.isFinite(numericNow) && numericNow >= 0
+        ? Math.floor(numericNow)
+        : Date.now();
+      this._writeFishingStamina(userId, 1, safeNow);
+      return {
+        previous: snapshot.stamina,
+        ...this._formatFishingStaminaStatus({
+          ...snapshot,
+          stamina: 1,
+          updatedAt: safeNow,
+          recovered: 0,
+          nextRecoveryMs: snapshot.max > 1 ? FISHING_STAMINA_RECOVERY_MS : 0,
+        }),
+      };
+    });
+    return transaction.immediate();
+  }
+
   canChooseProfession(userId) {
     const userData = this.getUserData(userId);
     const requirements = FishingManager.getUnlockRequirements();
@@ -310,10 +353,20 @@ export default class FishingManager {
       return { success: false, msg: "无效的职业！" };
     }
 
-    db.prepare('UPDATE fishing_stats SET profession = ?, profession_level = 1 WHERE group_id = ? AND user_id = ?')
-      .run(professionId, this.groupId, userId);
-
     const levelConfig = professionConfig.levels[1];
+    const immunityRules = FishingManager.getNightmareImmunityRules(professionId, 1);
+    db.prepare(`
+        UPDATE fishing_stats
+        SET profession = ?, profession_level = 1,
+            nightmare_immunity_charges = ?, nightmare_immunity_updated_at = ?
+        WHERE group_id = ? AND user_id = ?
+    `).run(
+      professionId,
+      immunityRules?.maxCharges || 0,
+      immunityRules ? Date.now() : 0,
+      this.groupId,
+      userId,
+    );
 
     return {
       success: true,
@@ -346,10 +399,20 @@ export default class FishingManager {
 
     const professionConfig = FishingManager.getProfessionConfig(userData.profession);
 
-    db.prepare('UPDATE fishing_stats SET profession_level = 2 WHERE group_id = ? AND user_id = ?')
-      .run(this.groupId, userId);
-
     const levelConfig = professionConfig.levels[2];
+    const immunityRules = FishingManager.getNightmareImmunityRules(userData.profession, 2);
+    // 进阶时将新的储存上限充满，让二级职业的差异立即可见。
+    db.prepare(`
+        UPDATE fishing_stats
+        SET profession_level = 2,
+            nightmare_immunity_charges = ?, nightmare_immunity_updated_at = ?
+        WHERE group_id = ? AND user_id = ?
+    `).run(
+      immunityRules?.maxCharges || 0,
+      immunityRules ? Date.now() : 0,
+      this.groupId,
+      userId,
+    );
 
     return {
       success: true,
@@ -398,39 +461,161 @@ export default class FishingManager {
     return 1 + bonus;
   }
 
-  getNightmareProfessionEffects(userId) {
-    const defaults = {
-      active: false,
-      expMultiplier: 1,
-      penaltyReduction: 0,
-      penaltyMultiplier: 1,
-      lineSaveChance: 0,
-    };
-    const userData = this.getUserData(userId);
-    if (userData.profession !== 'abyss_hunter' || userData.profession_level <= 0) {
-      return defaults;
+  _calculateNightmareImmunityState(userData, now = Date.now()) {
+    const rules = FishingManager.getNightmareImmunityRules(
+      userData?.profession,
+      Math.max(0, Math.floor(Number(userData?.profession_level) || 0)),
+    );
+    const numericNow = Number(now);
+    const safeNow = Number.isFinite(numericNow) && numericNow >= 0
+      ? Math.floor(numericNow)
+      : Date.now();
+    if (!rules) {
+      return {
+        active: false,
+        ready: false,
+        charges: 0,
+        maxCharges: 0,
+        rechargeHours: 0,
+        rechargeMs: 0,
+        nextRecoveryMs: 0,
+        nextRecoveryAt: 0,
+        updatedAt: 0,
+        now: safeNow,
+        changed: false,
+        recovered: 0,
+      };
     }
 
-    const config = FishingManager.getProfessionConfig('abyss_hunter');
-    const levelConfig = config?.levels?.[userData.profession_level];
-    if (!levelConfig) return defaults;
+    const rawCharges = Math.max(
+      0,
+      Math.floor(Number(userData?.nightmare_immunity_charges) || 0),
+    );
+    let charges = Math.min(rules.maxCharges, rawCharges);
+    let updatedAt = Math.max(
+      0,
+      Math.floor(Number(userData?.nightmare_immunity_updated_at) || 0),
+    );
+    let changed = charges !== rawCharges;
+    let recovered = 0;
 
-    const expBonus = Math.max(0, Number(levelConfig.nightmare_exp_bonus) || 0);
-    const penaltyReduction = Math.max(0, Math.min(
-      1,
-      Number(levelConfig.nightmare_penalty_reduction) || 0,
-    ));
-    const lineSaveChance = Math.max(0, Math.min(
-      1,
-      Number(levelConfig.nightmare_line_save_chance) || 0,
-    ));
+    // 旧职业数据没有充能时间戳，首次读取时按当前职业等级补满。
+    if (updatedAt <= 0) {
+      charges = rules.maxCharges;
+      updatedAt = safeNow;
+      changed = true;
+    } else if (charges < rules.maxCharges) {
+      const elapsed = Math.max(0, safeNow - updatedAt);
+      const recoverable = Math.floor(elapsed / rules.rechargeMs);
+      if (recoverable > 0) {
+        recovered = Math.min(rules.maxCharges - charges, recoverable);
+        charges += recovered;
+        updatedAt = charges >= rules.maxCharges
+          ? safeNow
+          : updatedAt + recovered * rules.rechargeMs;
+        changed = true;
+      }
+    }
+
+    const elapsedSinceTick = Math.max(0, safeNow - updatedAt);
+    const nextRecoveryMs = charges < rules.maxCharges
+      ? Math.max(1, rules.rechargeMs - Math.min(rules.rechargeMs, elapsedSinceTick))
+      : 0;
     return {
       active: true,
-      expMultiplier: 1 + expBonus,
-      penaltyReduction,
-      penaltyMultiplier: 1 - penaltyReduction,
-      lineSaveChance,
+      ready: charges > 0,
+      charges,
+      maxCharges: rules.maxCharges,
+      rechargeHours: rules.rechargeHours,
+      rechargeMs: rules.rechargeMs,
+      nextRecoveryMs,
+      nextRecoveryAt: nextRecoveryMs > 0 ? safeNow + nextRecoveryMs : 0,
+      updatedAt,
+      now: safeNow,
+      changed,
+      recovered,
     };
+  }
+
+  _writeNightmareImmunityState(userId, charges, updatedAt) {
+    db.prepare(`
+        UPDATE fishing_stats
+        SET nightmare_immunity_charges = ?, nightmare_immunity_updated_at = ?
+        WHERE group_id = ? AND user_id = ?
+    `).run(charges, updatedAt, this.groupId, String(userId));
+  }
+
+  _formatNightmareImmunityStatus(status) {
+    return {
+      active: status.active,
+      ready: status.ready,
+      charges: status.charges,
+      maxCharges: status.maxCharges,
+      rechargeHours: status.rechargeHours,
+      rechargeMs: status.rechargeMs,
+      nextRecoveryMs: status.nextRecoveryMs,
+      nextRecoveryAt: status.nextRecoveryAt,
+      recovered: status.recovered,
+    };
+  }
+
+  getNightmareImmunityStatus(userId, now = Date.now()) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    const transaction = db.transaction(() => {
+      const userData = db.prepare(`
+          SELECT profession, profession_level,
+                 nightmare_immunity_charges, nightmare_immunity_updated_at
+          FROM fishing_stats
+          WHERE group_id = ? AND user_id = ?
+      `).get(this.groupId, userId);
+      const status = this._calculateNightmareImmunityState(userData, now);
+      if (status.active && status.changed) {
+        this._writeNightmareImmunityState(userId, status.charges, status.updatedAt);
+      }
+      return this._formatNightmareImmunityStatus(status);
+    });
+    return transaction.immediate();
+  }
+
+  consumeNightmareImmunity(userId, now = Date.now()) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    const transaction = db.transaction(() => {
+      const userData = db.prepare(`
+          SELECT profession, profession_level,
+                 nightmare_immunity_charges, nightmare_immunity_updated_at
+          FROM fishing_stats
+          WHERE group_id = ? AND user_id = ?
+      `).get(this.groupId, userId);
+      const before = this._calculateNightmareImmunityState(userData, now);
+      if (!before.active || before.charges <= 0) {
+        if (before.active && before.changed) {
+          this._writeNightmareImmunityState(userId, before.charges, before.updatedAt);
+        }
+        return {
+          ...this._formatNightmareImmunityStatus(before),
+          consumed: false,
+          immune: false,
+        };
+      }
+
+      const updatedAt = before.charges >= before.maxCharges
+        ? before.now
+        : before.updatedAt;
+      this._writeNightmareImmunityState(userId, before.charges - 1, updatedAt);
+      const after = this._calculateNightmareImmunityState({
+        ...userData,
+        nightmare_immunity_charges: before.charges - 1,
+        nightmare_immunity_updated_at: updatedAt,
+      }, before.now);
+      return {
+        ...this._formatNightmareImmunityStatus(after),
+        consumed: true,
+        immune: true,
+      };
+    });
+    return transaction.immediate();
   }
 
   getNightmareStatus(userId) {
@@ -440,128 +625,86 @@ export default class FishingManager {
         userData.nightmare_curse_layers,
         userData.nightmare_curse_prank_revealed,
       ),
-      brideThreadLayers: Math.max(0, Math.floor(Number(userData.bride_thread_layers) || 0)),
-      lostSoul: Boolean(userData.lost_soul),
+      brideNightmareMultiplier: Math.max(
+        1,
+        Number(userData.bride_nightmare_multiplier) || 1,
+      ),
       ghostDebt: Math.max(0, Math.floor(Number(userData.ghost_debt) || 0)),
       deepPressureLayers: Math.max(0, Math.floor(Number(userData.deep_pressure_layers) || 0)),
     };
   }
 
-  addBrideThreadLayers(userId, layers, maxLayers = 8) {
+  applyBrideNightmareMultiplier(userId, multiplier = 2) {
     userId = String(userId);
-    const safeLayers = Math.max(0, Math.floor(Number(layers) || 0));
-    const safeMax = Math.max(1, Math.floor(Number(maxLayers) || 8));
+    const safeMultiplier = Math.max(1, Number(multiplier) || 1);
     this._ensureUser(userId);
-    const before = this.getNightmareStatus(userId).brideThreadLayers;
-    if (safeLayers <= 0 || before >= safeMax) {
-      return { added: 0, total: Math.min(before, safeMax) };
-    }
+    const before = this.getNightmareStatus(userId).brideNightmareMultiplier;
     const row = db.prepare(`
         UPDATE fishing_stats
-        SET bride_thread_layers = MIN(?, COALESCE(bride_thread_layers, 0) + ?)
+        SET bride_nightmare_multiplier = MAX(
+          1,
+          COALESCE(bride_nightmare_multiplier, 1)
+        ) * ?
         WHERE group_id = ? AND user_id = ?
-        RETURNING bride_thread_layers
-    `).get(safeMax, safeLayers, this.groupId, userId);
-    const total = Math.max(0, Number(row?.bride_thread_layers) || 0);
-    return { added: Math.max(0, total - before), total };
-  }
-
-  consumeBrideThreadLayer(userId) {
-    userId = String(userId);
-    this._ensureUser(userId);
-    const row = db.prepare(`
-        UPDATE fishing_stats
-        SET bride_thread_layers = COALESCE(bride_thread_layers, 0) - 1
-        WHERE group_id = ? AND user_id = ? AND COALESCE(bride_thread_layers, 0) > 0
-        RETURNING bride_thread_layers
-    `).get(this.groupId, userId);
+        RETURNING bride_nightmare_multiplier
+    `).get(safeMultiplier, this.groupId, userId);
+    const total = Math.max(1, Number(row?.bride_nightmare_multiplier) || 1);
     return {
-      consumed: Boolean(row),
-      remaining: Math.max(0, Number(row?.bride_thread_layers) || 0),
+      applied: total > before,
+      before,
+      total,
     };
   }
 
-  applyLostSoul(userId) {
-    userId = String(userId);
-    this._ensureUser(userId);
-    db.prepare(`
-        UPDATE fishing_stats SET lost_soul = 1
-        WHERE group_id = ? AND user_id = ?
-    `).run(this.groupId, userId);
-    return true;
-  }
-
-  clearLostSoul(userId) {
-    userId = String(userId);
-    this._ensureUser(userId);
-    const result = db.prepare(`
-        UPDATE fishing_stats SET lost_soul = 0
-        WHERE group_id = ? AND user_id = ? AND COALESCE(lost_soul, 0) > 0
-    `).run(this.groupId, userId);
-    return result.changes === 1;
-  }
-
-  moveToRandomUnlockedLocation(userId, excludedLocationId, random = Math.random) {
-    const fishingLevel = this.getUserFishingLevel(userId);
-    const candidates = Object.entries(FISHING_LOCATIONS).filter(([locationId, config]) => (
-      locationId !== excludedLocationId && fishingLevel >= config.unlockLevel
-    ));
-    if (candidates.length === 0) return null;
-    const roll = Math.max(0, Math.min(0.999999999999, Number(random()) || 0));
-    const [locationId, config] = candidates[Math.floor(roll * candidates.length)];
-    this.setFishingLocation(userId, locationId);
-    return { id: locationId, ...config };
-  }
-
-  addGhostDebt(userId, amount, maxDebt = 360) {
+  addGhostDebt(userId, amount) {
     userId = String(userId);
     const safeAmount = Math.max(0, Math.floor(Number(amount) || 0));
-    const safeMax = Math.max(1, Math.floor(Number(maxDebt) || 360));
     this._ensureUser(userId);
     const before = this.getNightmareStatus(userId).ghostDebt;
-    if (safeAmount <= 0 || before >= safeMax) {
-      return { added: 0, total: Math.min(before, safeMax) };
-    }
+    if (safeAmount <= 0) return { added: 0, total: before };
     const row = db.prepare(`
         UPDATE fishing_stats
-        SET ghost_debt = MIN(?, COALESCE(ghost_debt, 0) + ?)
+        SET ghost_debt = COALESCE(ghost_debt, 0) + ?
         WHERE group_id = ? AND user_id = ?
         RETURNING ghost_debt
-    `).get(safeMax, safeAmount, this.groupId, userId);
+    `).get(safeAmount, this.groupId, userId);
     const total = Math.max(0, Number(row?.ghost_debt) || 0);
     return { added: Math.max(0, total - before), total };
   }
 
-  addDeepPressureLayers(userId, layers, maxLayers = 8) {
+  addDeepPressureLayers(userId, layers) {
     userId = String(userId);
     const safeLayers = Math.max(0, Math.floor(Number(layers) || 0));
-    const safeMax = Math.max(1, Math.floor(Number(maxLayers) || 8));
     this._ensureUser(userId);
     const before = this.getNightmareStatus(userId).deepPressureLayers;
-    if (safeLayers <= 0 || before >= safeMax) {
-      return { added: 0, total: Math.min(before, safeMax) };
-    }
+    if (safeLayers <= 0) return { added: 0, total: before };
     const row = db.prepare(`
         UPDATE fishing_stats
-        SET deep_pressure_layers = MIN(?, COALESCE(deep_pressure_layers, 0) + ?)
+        SET deep_pressure_layers = COALESCE(deep_pressure_layers, 0) + ?
         WHERE group_id = ? AND user_id = ?
         RETURNING deep_pressure_layers
-    `).get(safeMax, safeLayers, this.groupId, userId);
+    `).get(safeLayers, this.groupId, userId);
     const total = Math.max(0, Number(row?.deep_pressure_layers) || 0);
     return { added: Math.max(0, total - before), total };
   }
 
   restoreDeepPressureLayer(userId) {
-    return this.addDeepPressureLayers(userId, 1, 8);
+    return this.addDeepPressureLayers(userId, 1);
   }
 
   getCleansableNightmareAfflictions(userId) {
     const status = this.getNightmareStatus(userId);
+    const brideMarked = status.brideNightmareMultiplier > 1;
     return {
       curseLayers: status.curse.actualLayers,
-      brideThreadLayers: status.brideThreadLayers,
-      lostSoul: status.lostSoul,
-      total: status.curse.actualLayers + status.brideThreadLayers + (status.lostSoul ? 1 : 0),
+      brideMarked,
+      brideNightmareMultiplier: status.brideNightmareMultiplier,
+      ghostDebt: status.ghostDebt,
+      deepPressureLayers: status.deepPressureLayers,
+      total: Number(status.curse.actualLayers > 0) +
+        Number(brideMarked) +
+        Number(status.ghostDebt > 0) +
+        Number(status.deepPressureLayers > 0),
     };
   }
 
@@ -619,8 +762,8 @@ export default class FishingManager {
     );
   }
 
-  // 净化圣水清除诅咒、冥婚红线和失魂；债务与深压不属于可净化状态。
-  clearNightmareCurse(userId) {
+  // 净化圣水清除所有仍会影响后续垂钓的噩梦减益；鱼竿控制力损失属于鱼竿状态，另由工具箱修复。
+  clearNightmareDebuffs(userId) {
     userId = String(userId);
     this._ensureUser(userId);
     const transaction = db.transaction(() => {
@@ -630,8 +773,9 @@ export default class FishingManager {
           UPDATE fishing_stats
           SET nightmare_curse_layers = 0,
               nightmare_curse_prank_revealed = 0,
-              bride_thread_layers = 0,
-              lost_soul = 0
+              bride_nightmare_multiplier = 1,
+              ghost_debt = 0,
+              deep_pressure_layers = 0
           WHERE group_id = ? AND user_id = ?
       `).run(this.groupId, userId);
       return { cleared: status.total, ...status };
@@ -642,14 +786,59 @@ export default class FishingManager {
   getRodControl(userId, rodId) {
     const rodConfig = this.getRodConfig(rodId);
     if (!rodConfig) return 0;
-    return Math.max(0, Number(rodConfig.control) || 0);
+    const baseControl = Math.max(0, Number(rodConfig.control) || 0);
+    return Math.max(0, baseControl - this.getRodStats(userId, rodId).controlLoss);
   }
 
   getRodStats(userId, rodId) {
     userId = String(userId);
-    const row = db.prepare('SELECT damage, mastery FROM rod_stats WHERE group_id = ? AND user_id = ? AND rod_id = ?')
+    const row = db.prepare(`
+        SELECT damage, mastery, control_loss
+        FROM rod_stats
+        WHERE group_id = ? AND user_id = ? AND rod_id = ?
+    `)
       .get(this.groupId, userId, rodId);
-    return row || { damage: 0, mastery: 0 };
+    return {
+      damage: Math.max(0, Number(row?.damage) || 0),
+      mastery: Math.max(0, Number(row?.mastery) || 0),
+      controlLoss: Math.max(0, Number(row?.control_loss) || 0),
+    };
+  }
+
+  reduceRodControl(userId, rodId, amount) {
+    userId = String(userId);
+    const safeAmount = Math.max(0, Math.floor(Number(amount) || 0));
+    const rodConfig = this.getRodConfig(rodId);
+    const baseControl = Math.max(0, Number(rodConfig?.control) || 0);
+    const currentControl = rodConfig ? this.getRodControl(userId, rodId) : 0;
+    if (!rodConfig || safeAmount <= 0 || currentControl <= 0) {
+      return { applied: false, lost: 0, currentControl, baseControl };
+    }
+
+    const transaction = db.transaction(() => {
+      const owned = db.prepare(`
+          SELECT 1 FROM inventory
+          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count > 0
+      `).get(this.groupId, userId, rodId);
+      if (!owned) return { applied: false, lost: 0, currentControl: 0, baseControl };
+
+      const before = this.getRodControl(userId, rodId);
+      const lost = Math.min(before, safeAmount);
+      if (lost <= 0) return { applied: false, lost: 0, currentControl: before, baseControl };
+      db.prepare(`
+          INSERT INTO rod_stats (group_id, user_id, rod_id, damage, mastery, control_loss)
+          VALUES (?, ?, ?, 0, 0, ?)
+          ON CONFLICT(group_id, user_id, rod_id)
+          DO UPDATE SET control_loss = control_loss + ?
+      `).run(this.groupId, userId, rodId, lost, lost);
+      return {
+        applied: true,
+        lost,
+        currentControl: Math.max(0, before - lost),
+        baseControl,
+      };
+    });
+    return transaction.immediate();
   }
 
   getRodDurabilityInfo(userId, rodId) {
@@ -750,130 +939,18 @@ export default class FishingManager {
     `).run(this.groupId, userId, rodId);
   }
 
-  getLineStats(userId, lineId) {
+  repairRod(userId, rodId) {
     userId = String(userId);
-    const row = db.prepare(`
-        SELECT damage FROM line_stats
-        WHERE group_id = ? AND user_id = ? AND line_id = ?
-    `).get(this.groupId, userId, lineId);
-    return row || { damage: 0 };
-  }
-
-  getLineDurabilityInfo(userId, lineId) {
-    const lineConfig = this.getLineConfig(lineId);
-    if (!lineConfig) return { damage: 0, currentDurability: 0, maxDurability: 0 };
-
-    const damage = Math.max(0, Number(this.getLineStats(userId, lineId).damage) || 0);
-    const configuredDurability = Number(lineConfig.durability);
-    const maxDurability = Number.isFinite(configuredDurability) && configuredDurability > 0
-      ? configuredDurability
-      : calculateBossLineDurability(lineConfig.capacity);
-
-    return {
-      damage,
-      currentDurability: Math.max(0, maxDurability - damage),
-      maxDurability,
-    };
-  }
-
-  damageLine(userId, lineId, damage, { protectFromBreak = false } = {}) {
-    userId = String(userId);
-    const safeDamage = Number(damage);
-    const lineConfig = this.getLineConfig(lineId);
-    const durabilityInfo = lineConfig
-      ? this.getLineDurabilityInfo(userId, lineId)
-      : { currentDurability: 0, maxDurability: 0 };
-    if (!lineConfig || !Number.isFinite(safeDamage) || safeDamage <= 0) {
-      return {
-        applied: false,
-        isBroken: false,
-        breakPrevented: false,
-        currentDurability: durabilityInfo.currentDurability,
-        maxDurability: durabilityInfo.maxDurability,
-      };
-    }
-
-    const transaction = db.transaction(() => {
-      const owned = db.prepare(`
-          SELECT count FROM inventory
-          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count > 0
-      `).get(this.groupId, userId, lineId);
-      if (!owned) {
-        return {
-          applied: false,
-          isBroken: false,
-          breakPrevented: false,
-          currentDurability: 0,
-          maxDurability: durabilityInfo.maxDurability,
-        };
-      }
-
-      const current = this.getLineDurabilityInfo(userId, lineId);
-      const nextDurability = Math.max(0, current.currentDurability - safeDamage);
-      if (nextDurability <= 0 && protectFromBreak) {
-        const protectedDamage = Math.max(0, current.maxDurability - 1);
-        db.prepare(`
-            INSERT INTO line_stats (group_id, user_id, line_id, damage)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(group_id, user_id, line_id)
-            DO UPDATE SET damage = excluded.damage
-        `).run(this.groupId, userId, lineId, protectedDamage);
-        return {
-          applied: true,
-          isBroken: false,
-          breakPrevented: true,
-          currentDurability: 1,
-          maxDurability: current.maxDurability,
-        };
-      }
-
-      if (nextDurability <= 0) {
-        db.prepare(`
-            DELETE FROM inventory
-            WHERE group_id = ? AND user_id = ? AND item_id = ? AND count > 0
-        `).run(this.groupId, userId, lineId);
-        db.prepare(`
-            DELETE FROM line_stats
-            WHERE group_id = ? AND user_id = ? AND line_id = ?
-        `).run(this.groupId, userId, lineId);
-        db.prepare(`
-            UPDATE fishing_stats
-            SET line = CASE WHEN line = ? THEN NULL ELSE line END
-            WHERE group_id = ? AND user_id = ?
-        `).run(lineId, this.groupId, userId);
-        return {
-          applied: true,
-          isBroken: true,
-          breakPrevented: false,
-          currentDurability: 0,
-          maxDurability: current.maxDurability,
-        };
-      }
-
-      db.prepare(`
-          INSERT INTO line_stats (group_id, user_id, line_id, damage)
-          VALUES (?, ?, ?, ?)
-          ON CONFLICT(group_id, user_id, line_id)
-          DO UPDATE SET damage = damage + ?
-      `).run(this.groupId, userId, lineId, safeDamage, safeDamage);
-      return {
-        applied: true,
-        isBroken: false,
-        breakPrevented: false,
-        currentDurability: nextDurability,
-        maxDurability: current.maxDurability,
-      };
-    });
-
-    return transaction.immediate();
-  }
-
-  clearLineDamage(userId, lineId) {
-    userId = String(userId);
+    const before = this.getRodStats(userId, rodId);
     db.prepare(`
-        DELETE FROM line_stats
-        WHERE group_id = ? AND user_id = ? AND line_id = ?
-    `).run(this.groupId, userId, lineId);
+        UPDATE rod_stats
+        SET damage = 0, control_loss = 0
+        WHERE group_id = ? AND user_id = ? AND rod_id = ?
+    `).run(this.groupId, userId, rodId);
+    return {
+      durabilityRepaired: before.damage,
+      controlRestored: before.controlLoss,
+    };
   }
 
   getRodMastery(userId, rodId) {
@@ -1029,13 +1106,6 @@ export default class FishingManager {
       this.clearEquippedLine(userId);
       return null;
     }
-    if (
-      userData.line &&
-      this.getLineDurabilityInfo(userId, userData.line).currentDurability <= 0
-    ) {
-      this.breakLine(userId, userData.line);
-      return null;
-    }
     return userData.line;
   }
 
@@ -1054,10 +1124,6 @@ export default class FishingManager {
           WHERE group_id = ? AND user_id = ? AND item_id = ? AND count > 0
       `).run(this.groupId, userId, lineId);
       if (removed.changes !== 1) return false;
-      db.prepare(`
-          DELETE FROM line_stats
-          WHERE group_id = ? AND user_id = ? AND line_id = ?
-      `).run(this.groupId, userId, lineId);
       db.prepare(`
           UPDATE fishing_stats
           SET line = CASE WHEN line = ? THEN NULL ELSE line END
@@ -1147,45 +1213,80 @@ export default class FishingManager {
     return transaction.immediate();
   }
 
-  stealBait(userId, baitId) {
+  stealHighestValueBait(userId) {
     userId = String(userId);
-    if (!baitId) return { stolen: false, remaining: 0 };
     this._ensureUser(userId);
     const transaction = db.transaction(() => {
+      const inventory = new InventoryManager(this.groupId, userId).getInventory();
+      const bait = this.getAllBaits()
+        .filter((candidate) => inventory[candidate.id] > 0)
+        .sort((left, right) => (
+          (Number(right.price) || 0) - (Number(left.price) || 0)
+        ))[0];
+      if (!bait) return { stolen: false, bait: null, remaining: 0 };
+
       const removed = db.prepare(`
           UPDATE inventory
           SET count = count - 1
           WHERE group_id = ? AND user_id = ? AND item_id = ? AND count >= 1
-      `).run(this.groupId, userId, baitId);
-      if (removed.changes !== 1) return { stolen: false, remaining: 0 };
+      `).run(this.groupId, userId, bait.id);
+      if (removed.changes !== 1) return { stolen: false, bait: null, remaining: 0 };
 
       db.prepare(`
           DELETE FROM inventory
           WHERE group_id = ? AND user_id = ? AND item_id = ? AND count <= 0
-      `).run(this.groupId, userId, baitId);
+      `).run(this.groupId, userId, bait.id);
       const remaining = db.prepare(`
           SELECT count FROM inventory
           WHERE group_id = ? AND user_id = ? AND item_id = ?
-      `).get(this.groupId, userId, baitId)?.count || 0;
+      `).get(this.groupId, userId, bait.id)?.count || 0;
 
       const equippedBait = db.prepare(`
           SELECT bait FROM fishing_stats WHERE group_id = ? AND user_id = ?
       `).get(this.groupId, userId)?.bait;
-      if (equippedBait === baitId && remaining <= 0) {
-        const inventory = new InventoryManager(this.groupId, userId).getInventory();
+      if (equippedBait === bait.id && remaining <= 0) {
+        const remainingInventory = new InventoryManager(this.groupId, userId).getInventory();
         const availableBaits = this.getAllBaits()
-          .filter((bait) => inventory[bait.id] > 0);
+          .filter((candidate) => remainingInventory[candidate.id] > 0);
         const nextBait = availableBaits
-          .filter((bait) => !bait.boss_bait)
+          .filter((candidate) => !candidate.boss_bait)
           .sort((a, b) => (a.price || 0) - (b.price || 0))[0]?.id || null;
         db.prepare(`
             UPDATE fishing_stats SET bait = ?
             WHERE group_id = ? AND user_id = ?
         `).run(nextBait || availableBaits[0]?.id || null, this.groupId, userId);
       }
-      return { stolen: true, remaining };
+      return { stolen: true, bait, remaining };
     });
     return transaction.immediate();
+  }
+
+  devourRandomInventoryItem(userId, excludedItemIds = [], random = Math.random) {
+    userId = String(userId);
+    const excluded = new Set((excludedItemIds || []).map(String));
+    const inventoryManager = new InventoryManager(this.groupId, userId);
+    const candidates = Object.entries(inventoryManager.getInventory())
+      .filter(([itemId, count]) => !excluded.has(String(itemId)) && Number(count) > 0)
+      .map(([itemId, count]) => ({ itemId, count: Math.max(1, Math.floor(Number(count) || 1)) }));
+    if (candidates.length === 0) return null;
+
+    const totalCount = candidates.reduce((sum, candidate) => sum + candidate.count, 0);
+    let roll = Math.max(0, Math.min(0.999999999999, Number(random()) || 0)) * totalCount;
+    let selected = candidates.at(-1);
+    for (const candidate of candidates) {
+      roll -= candidate.count;
+      if (roll < 0) {
+        selected = candidate;
+        break;
+      }
+    }
+    if (!inventoryManager.removeItem(selected.itemId, 1)) return null;
+
+    const remaining = inventoryManager.getItemCount(selected.itemId);
+    if (String(selected.itemId).startsWith("bait_") && remaining <= 0) {
+      this.getEquippedBait(userId);
+    }
+    return { itemId: selected.itemId, remaining };
   }
 
   recordCatch(userId, earnings, fishId, isSuccess = true) {

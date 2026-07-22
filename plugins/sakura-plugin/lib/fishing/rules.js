@@ -12,28 +12,28 @@ export const RARITY_CONFIG = Object.freeze({
 
 export const WEATHER_CONFIG = Object.freeze({
   "晴": Object.freeze({
-    emoji: "☀️", weight: 28, difficultyMultiplier: 0.94, priceMultiplier: 0.97,
-    expMultiplier: 0.95, weightMultiplier: 0.94, treasureWeight: -1, nightmareWeight: -1,
+    emoji: "☀️", weight: 28, difficultyMultiplier: 0.8, priceMultiplier: 0.8,
+    expMultiplier: 0.8, weightMultiplier: 0.8,
   }),
   "多云": Object.freeze({
     emoji: "⛅", weight: 26, difficultyMultiplier: 1, priceMultiplier: 1,
-    expMultiplier: 1, weightMultiplier: 1, treasureWeight: 0, nightmareWeight: 0,
+    expMultiplier: 1, weightMultiplier: 1,
   }),
   "雨": Object.freeze({
-    emoji: "🌧️", weight: 20, difficultyMultiplier: 1.05, priceMultiplier: 1.03,
-    expMultiplier: 1.05, weightMultiplier: 1.06, treasureWeight: 0, nightmareWeight: 1,
+    emoji: "🌧️", weight: 20, difficultyMultiplier: 1.05, priceMultiplier: 1.05,
+    expMultiplier: 1.05, weightMultiplier: 1.05,
   }),
   "雾": Object.freeze({
-    emoji: "🌫️", weight: 13, difficultyMultiplier: 1.1, priceMultiplier: 1.05,
-    expMultiplier: 1.1, weightMultiplier: 1.08, treasureWeight: 0.5, nightmareWeight: 2,
+    emoji: "🌫️", weight: 13, difficultyMultiplier: 1.1, priceMultiplier: 1.1,
+    expMultiplier: 1.1, weightMultiplier: 1.1,
   }),
   "雷暴": Object.freeze({
-    emoji: "⛈️", weight: 8, difficultyMultiplier: 1.22, priceMultiplier: 1.08,
-    expMultiplier: 1.18, weightMultiplier: 1.18, treasureWeight: 0.3, nightmareWeight: 4,
+    emoji: "⛈️", weight: 8, difficultyMultiplier: 1.2, priceMultiplier: 1.2,
+    expMultiplier: 1.2, weightMultiplier: 1.2,
   }),
   "雪": Object.freeze({
-    emoji: "❄️", weight: 5, difficultyMultiplier: 1.14, priceMultiplier: 1.06,
-    expMultiplier: 1.12, weightMultiplier: 1.12, treasureWeight: 0.6, nightmareWeight: 0,
+    emoji: "❄️", weight: 5, difficultyMultiplier: 1.15, priceMultiplier: 1.15,
+    expMultiplier: 1.15, weightMultiplier: 1.15,
   }),
 });
 
@@ -52,7 +52,7 @@ export const DEFAULT_FISHING_LOCATION = "pond";
 export const BOSS_BAIT_ID = "bait_boss";
 export const BOSS_ATTACK_INTERVAL_MS = 5000;
 export const BOSS_PLAYER_ATTACK_COOLDOWN_MS = 5000;
-export const BOSS_FIGHT_TIMEOUT_MS = 110 * 1000;
+export const BOSS_FIGHT_TIMEOUT_MS = 60 * 1000;
 export const BOSS_MIN_DIFFICULTY = 230;
 export const BOSS_MIN_HP = 150;
 export const BOSS_MIN_ATTACK = 8;
@@ -64,33 +64,34 @@ export const BOSS_MECHANIC_TYPES = Object.freeze([
   "rod_crush",
   "regenerate",
 ]);
-export const LOCAL_NIGHTMARE_CHANCE = 0.5;
+export const LOCAL_NIGHTMARE_CHANCE = 0.4;
 export const NIGHTMARE_EFFECT_TYPES = Object.freeze([
   "rod_damage",
+  "rod_damage_control_loss",
   "steal_coins_flat",
   "steal_coins_percent",
   "curse",
-  "bride_thread",
+  "nightmare_weight_multiplier",
   "steal_bait",
-  "lost_soul",
+  "stamina_crush",
   "ghost_debt",
   "deep_pressure",
-  "devour_buff",
+  "devour_inventory",
 ]);
 export const LOCAL_NIGHTMARE_EFFECT_BY_LOCATION = Object.freeze({
-  pond: "bride_thread",
+  pond: "nightmare_weight_multiplier",
   river: "steal_bait",
-  lake: "lost_soul",
+  lake: "stamina_crush",
   coast: "ghost_debt",
   abyss: "deep_pressure",
-  mystic: "devour_buff",
+  mystic: "devour_inventory",
 });
 
 // 异色个体：捕获时低概率触发的外观变体，金币与经验按倍率放大。
 // 宝藏本体是宝箱（=钱）、噩梦是惩罚事件，二者不参与异色；鱼雷同理。
-export const SHINY_CHANCE = 1 / 100;
-export const SHINY_PRICE_MULTIPLIER = 2.5;
-export const SHINY_EXP_MULTIPLIER = 1.5;
+export const SHINY_CHANCE = 0.01;
+export const SHINY_PRICE_MULTIPLIER = 4;
+export const SHINY_EXP_MULTIPLIER = 4;
 // 异色个体搏斗难度提升，会触及更多“拉不动/溜鱼”判定，也更难完美收竿
 export const SHINY_DIFFICULTY_MULTIPLIER = 1.35;
 const SHINY_EXCLUDED_RARITIES = new Set(["宝藏", "噩梦"]);
@@ -129,8 +130,6 @@ export function getFishingEnvironmentModifiers(
     priceMultiplier: Math.max(0.1, readEnvironmentNumber(weather, "priceMultiplier", 1)),
     expMultiplier: Math.max(0.1, readEnvironmentNumber(weather, "expMultiplier", 1)),
     weightMultiplier: Math.max(0.1, readEnvironmentNumber(weather, "weightMultiplier", 1)),
-    treasureWeight: readEnvironmentNumber(weather, "treasureWeight", 0),
-    nightmareWeight: readEnvironmentNumber(weather, "nightmareWeight", 0),
   };
 }
 
@@ -172,23 +171,67 @@ export function selectBossFromData(
 
 export function calculateBossLineDurability(lineCapacity) {
   const capacity = Math.max(0, Number(lineCapacity) || 0);
-  return Math.max(20, Math.round(20 + capacity * 0.5));
+  return Math.max(20, Math.round(20 + capacity));
+}
+
+// Boss 鱼线耐久只存在于当前战斗，会话结束后不写入玩家数据。
+export function resolveBossLineDamage({
+  currentDurability,
+  maxDurability,
+  damage,
+  protectFromBreak = false,
+} = {}) {
+  const safeMax = Math.max(1, Math.floor(Number(maxDurability) || 1));
+  const safeCurrent = Math.max(
+    0,
+    Math.min(safeMax, Math.floor(Number(currentDurability) || 0)),
+  );
+  const safeDamage = Math.max(0, Math.floor(Number(damage) || 0));
+
+  if (safeDamage <= 0) {
+    return {
+      applied: false,
+      isBroken: safeCurrent <= 0,
+      breakPrevented: false,
+      currentDurability: safeCurrent,
+      maxDurability: safeMax,
+    };
+  }
+
+  const nextDurability = Math.max(0, safeCurrent - safeDamage);
+  if (nextDurability > 0) {
+    return {
+      applied: true,
+      isBroken: false,
+      breakPrevented: false,
+      currentDurability: nextDurability,
+      maxDurability: safeMax,
+    };
+  }
+
+  if (protectFromBreak) {
+    return {
+      applied: true,
+      isBroken: false,
+      breakPrevented: true,
+      currentDurability: 1,
+      maxDurability: safeMax,
+    };
+  }
+
+  return {
+    applied: true,
+    isBroken: true,
+    breakPrevented: false,
+    currentDurability: 0,
+    maxDurability: safeMax,
+  };
 }
 
 export function rollBossPlayerDamage(effectiveControl, random = Math.random) {
   const control = Math.max(0, Number(effectiveControl) || 0);
   const roll = Math.max(0, Math.min(0.999999999999, Number(random()) || 0));
   return Math.max(6, Math.floor(control / 10) + 5 + Math.floor(roll * 5));
-}
-
-// 钓鱼等级折算的首领战搏斗加成：视作叠加到控制力上的“等效战力”，随等级线性提升并封顶。
-// 只注入首领战的伤害与收线，普通钓鱼仍纯由装备决定，避免等级碾压使鱼竿/鱼线贬值。
-export const FISHING_COMBAT_BONUS_PER_LEVEL = 2;
-export const FISHING_COMBAT_BONUS_CAP = 36;
-
-export function getBossCombatBonus(level) {
-  const safeLevel = Math.max(1, Math.floor(Number(level) || 1));
-  return Math.min(FISHING_COMBAT_BONUS_CAP, (safeLevel - 1) * FISHING_COMBAT_BONUS_PER_LEVEL);
 }
 
 export function getBossAttackCooldownRemaining(
@@ -275,34 +318,89 @@ export function getWeatherByTime(timestamp = Date.now()) {
   return { name, emoji: WEATHER_CONFIG[name].emoji };
 }
 
-const ALL_RARITIES = Object.freeze(["垃圾", "普通", "精品", "稀有", "史诗", "传说", "宝藏", "噩梦"]);
-// 每档鱼饵都是宽分布而非“50%命中单一稀有度”：升级提高上限和期望，
-// 但低档仍有惊喜、高档仍承担空军与噩梦成本，装备和环境选择才是收益核心。
+const REGULAR_RARITIES = Object.freeze(["垃圾", "普通", "精品", "稀有", "史诗", "传说"]);
+const ALL_RARITIES = Object.freeze([...REGULAR_RARITIES, "宝藏", "噩梦"]);
+const CURRENT_RARITY_WEIGHT = 50;
+const UPGRADE_RARITY_WEIGHT = 12.5;
+const SPECIAL_RARITY_WEIGHT = 5;
+
+// tierCount 个稀有度按从低到高的 1:2:4... 分配：越接近当前档，权重越高。
+// 从当前档向下看即为 2:1:0.5...，用公式生成以避免手填小数破坏比例。
+function distributeDescendingTierWeights(totalWeight, tierCount) {
+  if (tierCount <= 0) return [];
+  const ratioTotal = 2 ** tierCount - 1;
+  return Array.from(
+    { length: tierCount },
+    (_, index) => totalWeight * (2 ** index) / ratioTotal,
+  );
+}
+
+function createStandardBaitWeights(currentTierIndex) {
+  const hasUpgradeTier = currentTierIndex < REGULAR_RARITIES.length - 1;
+  const reservedWeight = (
+    CURRENT_RARITY_WEIGHT +
+    (hasUpgradeTier ? UPGRADE_RARITY_WEIGHT : 0) +
+    SPECIAL_RARITY_WEIGHT * 2
+  );
+  const lowerTierWeights = distributeDescendingTierWeights(
+    100 - reservedWeight,
+    currentTierIndex,
+  );
+  const regularPoolEnd = currentTierIndex + (hasUpgradeTier ? 2 : 1);
+
+  return [
+    [...REGULAR_RARITIES.slice(0, regularPoolEnd), "宝藏", "噩梦"],
+    [
+      ...lowerTierWeights,
+      CURRENT_RARITY_WEIGHT,
+      ...(hasUpgradeTier ? [UPGRADE_RARITY_WEIGHT] : []),
+      SPECIAL_RARITY_WEIGHT,
+      SPECIAL_RARITY_WEIGHT,
+    ],
+  ];
+}
+
+// 普通鱼饵：当前档 50、越一级 12.5、宝藏/噩梦各 5；余量向低档逐级减半。
+// 神之诱饵的当前档已是传说，没有常规越级档，因此余下 40 全部分配给史诗及以下。
+// 寻宝鱼饵：宝藏 50、噩梦 5，其余 45 从传说向下按 2:1:0.5... 分配。
 const QUALITY_WEIGHTS = Object.freeze({
-  1: [["垃圾", "普通", "精品", "宝藏", "噩梦"], [32, 50, 14, 1, 3]],
-  2: [["垃圾", "普通", "精品", "稀有", "宝藏", "噩梦"], [16, 35, 32, 10, 3, 4]],
-  3: [["垃圾", "普通", "精品", "稀有", "史诗", "宝藏", "噩梦"], [8, 18, 29, 29, 8, 3, 5]],
-  4: [ALL_RARITIES, [4, 9, 17, 28, 25, 7, 4, 6]],
-  5: [ALL_RARITIES, [2, 5, 10, 20, 28, 23, 5, 7]],
-  6: [ALL_RARITIES, [1, 3, 6, 12, 21, 28, 18, 11]],
+  1: createStandardBaitWeights(1),
+  2: createStandardBaitWeights(2),
+  3: createStandardBaitWeights(3),
+  4: createStandardBaitWeights(4),
+  5: createStandardBaitWeights(5),
+  6: [
+    ALL_RARITIES,
+    [
+      ...distributeDescendingTierWeights(45, REGULAR_RARITIES.length),
+      50,
+      5,
+    ],
+  ],
 });
 
 const FISHING_LEVEL_EXP_BASE = 24;
-export const PERFECT_CATCH_WINDOW_MS = 4000;
-export const PERFECT_EXP_MULTIPLIER = 1.5;
-export const BOSS_EXP_MULTIPLIER = 2;
+export const PERFECT_CATCH_WINDOW_MS = 5000;
+export const PERFECT_EXP_MULTIPLIER = 2;
 export const NIGHTMARE_CURSE_HIDDEN_LAYERS = 2;
 export const FISHING_COOLDOWN_SECONDS = 5 * 60;
+export const FISHING_TIME_SAND_COOLDOWN_SECONDS = FISHING_COOLDOWN_SECONDS / 2;
 export const FISHING_BENEFIT_DURATION_SECONDS = 35 * 60;
 export const FISHING_BITE_WAIT_MAX_SECONDS = 120;
 export const FISHING_BITE_WAIT_REDUCTION_PER_LEVEL_SECONDS = 3;
-export const FISHING_STAMINA_BASE = 8;
+export const FISHING_STAMINA_BASE = 10;
 export const FISHING_STAMINA_PER_LEVEL = 1;
 // 保留旧导出名作为 1 级/新玩家的初始体力上限。
 export const FISHING_STAMINA_MAX = FISHING_STAMINA_BASE;
 export const FISHING_STAMINA_COST = 1;
-export const FISHING_STAMINA_RECOVERY_MS = 20 * 60 * 1000;
-export const FORCE_PULL_DIFFICULTY_RANGE = 80;
+export const FISHING_STAMINA_RECOVERY_MS = 30 * 60 * 1000;
+export const FORCE_PULL_DIFFICULTY_RANGE = 50;
+export const NORMAL_TUG_SUCCESS_MULTIPLIER = 2;
+// 每场普通溜鱼额外抽取半个强拉判定区间的爆发压力。
+// 精准操作可处理“差值 + 压力 < 50”的场次，因此理论成功率恰好是强拉的 2 倍并封顶 100%。
+export const NORMAL_TUG_PRESSURE_RANGE = (
+  FORCE_PULL_DIFFICULTY_RANGE / NORMAL_TUG_SUCCESS_MULTIPLIER
+);
 export const TORPEDO_HOOK_WEIGHT_PER_ITEM = 3;
 export const TORPEDO_ROD_DAMAGE = 18;
 export const TORPEDO_PRICE_BOOST_MULTIPLIER = 1.1;
@@ -329,35 +427,36 @@ export function getFishingStaminaMax(level) {
   return FISHING_STAMINA_BASE + (safeLevel - 1) * FISHING_STAMINA_PER_LEVEL;
 }
 
-export function getFishingStaminaCost(deepPressureLayers = 0) {
-  return FISHING_STAMINA_COST + (Math.max(0, Math.floor(Number(deepPressureLayers) || 0)) > 0 ? 1 : 0);
+export function getFishingStaminaCost() {
+  return FISHING_STAMINA_COST;
 }
 
-export function getLostSoulRewardMultiplier(penaltyReduction = 0) {
-  const reduction = Math.max(0, Math.min(1, Number(penaltyReduction) || 0));
-  return 1 - 0.5 * (1 - reduction);
-}
-
-export function resolveNightmareRarityAfflictions(curseLayers = 0, brideThreadLayers = 0) {
+export function resolveNightmareRarityAfflictions(curseLayers = 0) {
   const curseActive = Math.max(0, Math.floor(Number(curseLayers) || 0)) > 0;
-  const brideThreadAvailable = Math.max(0, Math.floor(Number(brideThreadLayers) || 0)) > 0;
   return {
     consumeCurse: curseActive,
-    consumeBrideThread: !curseActive && brideThreadAvailable,
-    brideThreadPaused: curseActive && brideThreadAvailable,
   };
 }
 
 export function calculateGhostDebtPayment(earnings, debt) {
   const safeEarnings = Math.max(0, Math.floor(Number(earnings) || 0));
   const safeDebt = Math.max(0, Math.floor(Number(debt) || 0));
-  const debtPaid = Math.min(safeEarnings, safeDebt);
+  const earningsAfterPenalty = safeDebt > 0 ? Math.floor(safeEarnings / 2) : safeEarnings;
+  const debtPaid = Math.min(earningsAfterPenalty, safeDebt);
   return {
     grossEarnings: safeEarnings,
-    earnings: safeEarnings - debtPaid,
+    earningsAfterPenalty,
+    penaltyDeducted: safeEarnings - earningsAfterPenalty,
+    earnings: earningsAfterPenalty - debtPaid,
     debtPaid,
     remainingDebt: safeDebt - debtPaid,
   };
+}
+
+export function calculateCorpseFisherRodDamage(stamina, maximum = 20) {
+  const safeStamina = Math.max(0, Math.floor(Number(stamina) || 0));
+  const safeMaximum = Math.max(0, Math.floor(Number(maximum) || 0));
+  return Math.min(safeStamina, safeMaximum);
 }
 
 export const FISH_FIGHT_STATE = Object.freeze({
@@ -508,6 +607,78 @@ export function applyFishFightStateModifiers({
   throw new TypeError(`未知的溜鱼操作：${action}`);
 }
 
+export function calculateForcePullSuccessRate(fishDifficulty, effectiveControl) {
+  const difficulty = Math.max(0, Number(fishDifficulty) || 0);
+  const control = Math.max(0, Number(effectiveControl) || 0);
+  if (difficulty <= control) return 1;
+  return Math.max(
+    0,
+    1 - (difficulty - control) / FORCE_PULL_DIFFICULTY_RANGE,
+  );
+}
+
+export function calculateNormalTugSuccessRate(fishDifficulty, effectiveControl) {
+  return Math.min(
+    1,
+    calculateForcePullSuccessRate(fishDifficulty, effectiveControl) *
+      NORMAL_TUG_SUCCESS_MULTIPLIER,
+  );
+}
+
+export function rollNormalTugPressure(random = Math.random) {
+  const roll = Math.max(
+    0,
+    Math.min(0.999999999999, Number(random()) || 0),
+  );
+  return roll * NORMAL_TUG_PRESSURE_RANGE;
+}
+
+// 普通渔获与首领共用本公式，只看“鱼困难度 - 当前控制力”。
+// 拉距在有效差值达到 50 时归零，形成不可跨越的硬门槛。
+export function calculateNormalTugActionEffects({
+  fishDifficulty,
+  effectiveControl,
+  pressure = 0,
+  stateId = FISH_FIGHT_STATE.calm,
+  action,
+} = {}) {
+  const difficulty = Math.max(0, Number(fishDifficulty) || 0);
+  const control = Math.max(0, Number(effectiveControl) || 0);
+  const safePressure = Math.max(
+    0,
+    Math.min(NORMAL_TUG_PRESSURE_RANGE, Number(pressure) || 0),
+  );
+  const effectiveGap = Math.max(0, difficulty - control) + safePressure;
+  const boundedGap = Math.min(FORCE_PULL_DIFFICULTY_RANGE, effectiveGap);
+
+  if (action === "pull") {
+    const remainingMargin = FORCE_PULL_DIFFICULTY_RANGE - effectiveGap;
+    const distanceEffect = remainingMargin > 0
+      ? 7 + Math.floor(remainingMargin / 8)
+      : 0;
+    const tensionEffect = 12 + Math.floor(boundedGap / 6);
+    return applyFishFightStateModifiers({
+      stateId,
+      action,
+      distanceEffect,
+      tensionEffect,
+    });
+  }
+
+  if (action === "loosen") {
+    const distanceEffect = 3 + Math.floor(boundedGap / 25);
+    const tensionEffect = 30 - Math.floor(boundedGap / 10);
+    return applyFishFightStateModifiers({
+      stateId,
+      action,
+      distanceEffect,
+      tensionEffect,
+    });
+  }
+
+  throw new TypeError(`未知的普通溜鱼操作：${action}`);
+}
+
 // 按稀有度取单次渔获基础经验，未知稀有度按最低档处理
 export function getFishExpByRarity(rarity) {
   return RARITY_CONFIG[rarity]?.exp || 1;
@@ -587,7 +758,8 @@ export function getRarityPoolByBaitQuality(
   hasDebuff = false,
   treasureBonus = 0,
   nightmareBonus = 0,
-  brideThreadActive = false,
+  nightmareWeightMultiplier = 1,
+  zeroWeightRarities = [],
 ) {
   const [configuredPool, configuredWeights] = QUALITY_WEIGHTS[quality] || QUALITY_WEIGHTS[1];
   const pool = [...configuredPool];
@@ -598,17 +770,26 @@ export function getRarityPoolByBaitQuality(
   if (treasureIndex >= 0 && Number.isFinite(Number(treasureBonus))) {
     weights[treasureIndex] = Math.max(0.5, weights[treasureIndex] + Number(treasureBonus));
   }
-  if (nightmareIndex >= 0 && Number.isFinite(Number(nightmareBonus))) {
-    weights[nightmareIndex] = Math.max(0.5, weights[nightmareIndex] + Number(nightmareBonus));
-  }
-  if (brideThreadActive && treasureIndex >= 0 && nightmareIndex >= 0) {
-    const transferredWeight = weights[treasureIndex] / 2;
-    weights[treasureIndex] -= transferredWeight;
-    weights[nightmareIndex] += transferredWeight;
+  // 最终顺序：花嫁连乘 → 骷髅诅咒转移全部宝藏 → 怪物诱饵加权 → 雾灯归零。
+  if (nightmareIndex >= 0) {
+    const multiplier = Math.max(1, Number(nightmareWeightMultiplier) || 1);
+    weights[nightmareIndex] *= multiplier;
   }
   if (hasDebuff && treasureIndex >= 0 && nightmareIndex >= 0) {
     weights[nightmareIndex] += weights[treasureIndex];
     weights[treasureIndex] = 0;
+  }
+  if (nightmareIndex >= 0 && Number.isFinite(Number(nightmareBonus))) {
+    weights[nightmareIndex] = Math.max(
+      0.5,
+      weights[nightmareIndex] + Number(nightmareBonus),
+    );
+  }
+  // 雾灯等最终覆盖效果最后结算：环境、怪物诱饵、诅咒和花嫁都算完后，
+  // 指定品质的权重仍会被强制清零。
+  for (const rarity of Array.isArray(zeroWeightRarities) ? zeroWeightRarities : []) {
+    const index = pool.indexOf(rarity);
+    if (index >= 0) weights[index] = 0;
   }
   return { pool, weights };
 }
@@ -652,10 +833,10 @@ function selectFishCandidate(candidates, rarity, location, random) {
       Array.isArray(fish?.locations) && fish.locations.includes(location)
     ));
     const otherNightmares = candidates.filter((fish) => (
-      !Array.isArray(fish?.locations) || fish.locations.length === 0
+      !Array.isArray(fish?.locations) || !fish.locations.includes(location)
     ));
 
-    // 当前钓点怪谈与通用噩梦各占整个噩梦池的一半；任一侧为空时退回现有候选池。
+    // 当地怪谈固定占 40%；其余 60% 在所有其他噩梦（含其他地点怪谈）之间均分。
     if (localNightmares.length > 0 && otherNightmares.length > 0) {
       const roll = Math.max(0, Math.min(0.999999999999, Number(random()) || 0));
       candidatePool = roll < LOCAL_NIGHTMARE_CHANCE ? localNightmares : otherNightmares;
@@ -676,7 +857,8 @@ export function selectFishFromData(
     hasDebuff = false,
     treasureBonus = 0,
     nightmareBonus = 0,
-    brideThreadActive = false,
+    nightmareWeightMultiplier = 1,
+    zeroWeightRarities = [],
     forceRarity = null,
     hour = new Date().getHours(),
     weather = getWeatherByTime().name,
@@ -689,7 +871,8 @@ export function selectFishFromData(
     hasDebuff,
     treasureBonus,
     nightmareBonus,
-    brideThreadActive,
+    nightmareWeightMultiplier,
+    zeroWeightRarities,
   );
   // 星愿瓶等道具可强制指定本次稀有度，跳过权重摇取
   const rarity = forceRarity && RARITY_CONFIG[forceRarity]
@@ -698,7 +881,7 @@ export function selectFishFromData(
   let candidates = fishData.filter((fish) => (
     !isBossFish(fish) &&
     fish.rarity === rarity &&
-    isFishAtLocation(fish, location) &&
+    (rarity === "噩梦" || isFishAtLocation(fish, location)) &&
     isFishActiveAtHour(fish, hour) &&
     isFishActiveInWeather(fish, weather)
   ));
@@ -708,7 +891,7 @@ export function selectFishFromData(
     candidates = fishData.filter((fish) => (
       !isBossFish(fish) &&
       fish.rarity === rarity &&
-      isFishAtLocation(fish, location) &&
+      (rarity === "噩梦" || isFishAtLocation(fish, location)) &&
       isFishActiveAtHour(fish, hour)
     ));
   }
@@ -732,6 +915,22 @@ export function calculateLegacyFishPrice(fish, globalMultiplier = 1) {
   const [minWeight, maxWeight] = fish?.weight || [weight, weight];
   const progress = maxWeight === minWeight ? 0.5 : Math.max(0, Math.min(1, (weight - minWeight) / (maxWeight - minWeight)));
   return Math.round(basePrice * (0.5 + progress) * Math.max(0, Number(globalMultiplier) || 0));
+}
+
+// 首领的金币、经验和当地宝箱组成独立奖励包；异色是唯一收益倍率例外。
+export function calculateBossCatchReward(fish) {
+  if (!isBossFish(fish)) throw new TypeError("只能结算首领渔获奖励");
+  const shiny = Boolean(fish.isShiny);
+  return {
+    earnings: Math.round(
+      calculateLegacyFishPrice(fish) * (shiny ? SHINY_PRICE_MULTIPLIER : 1),
+    ),
+    expGain: Math.max(1, Math.floor(
+      (Number(fish.boss_exp) || 1) * (shiny ? SHINY_EXP_MULTIPLIER : 1),
+    )),
+    rewardItemId: String(fish.reward_chest_id || "").trim(),
+    rewardItemCount: 1,
+  };
 }
 
 export function validateLegacyFishData(fishData) {
@@ -778,6 +977,12 @@ export function validateLegacyFishData(fishData) {
       } else if (fish.attack < BOSS_MIN_ATTACK) {
         errors.push(`${label}: 首领攻击力低于传说级下限`);
       }
+      if (!Number.isSafeInteger(fish.boss_exp) || fish.boss_exp <= 0) {
+        errors.push(`${label}: 首领固定经验无效`);
+      }
+      if (typeof fish.reward_chest_id !== "string" || !fish.reward_chest_id.trim()) {
+        errors.push(`${label}: 首领当地宝箱奖励无效`);
+      }
       if (
         fish.fight_timeout_seconds != null &&
         (!Number.isFinite(fish.fight_timeout_seconds) || fish.fight_timeout_seconds < 30)
@@ -819,7 +1024,9 @@ export function validateLegacyFishData(fishData) {
       fish?.hp != null ||
       fish?.attack != null ||
       fish?.boss_mechanic != null ||
-      fish?.fight_timeout_seconds != null
+      fish?.fight_timeout_seconds != null ||
+      fish?.boss_exp != null ||
+      fish?.reward_chest_id != null
     ) {
       errors.push(`${label}: 非首领渔获不能配置首领战斗数值`);
     }
@@ -892,6 +1099,8 @@ export function validateLegacyFishData(fishData) {
     ));
     if (localBosses.length !== 1 || localBosses[0].locations.length !== 1) {
       errors.push(`${locationConfig.name}: 须配置且只配置一个单钓点首领`);
+    } else if (localBosses[0].reward_chest_id !== `chest_${locationId}`) {
+      errors.push(`${locationConfig.name}: 首领须奖励当地宝箱 chest_${locationId}`);
     }
   }
 
