@@ -855,6 +855,9 @@ export default class Fishing extends plugin {
       }
       const fishingLevel = fishingManager.getUserFishingLevel(userId);
       const waitTime = rollFishingBiteWaitMs(fishingLevel);
+      const displayedCurseLayers = curseResult.consumed
+        ? fishingManager.getNightmareCurseStatus(userId).displayedLayers
+        : 0;
 
       const buffNotes = [
         buffFlags.hasLucky ? "\n🍀 好运护符生效：跳过本次重量与困难度判断。" : "",
@@ -869,10 +872,10 @@ export default class Fishing extends plugin {
         buffFlags.hasDoubleExp ? "\n📚 双倍经验卡生效中。" : "",
         buffFlags.hasTimeSand ? "\n⏳ 时之沙生效：本次钓鱼冷却减半。" : "",
         nightmareStatus.brideNightmareMultiplier > 1
-          ? `\n💍 花嫁印记生效：净化前噩梦权重 ×${nightmareStatus.brideNightmareMultiplier}。`
+          ? `\n💍 花嫁印记生效：噩梦权重 ×${nightmareStatus.brideNightmareMultiplier}。`
           : "",
         curseResult.consumed
-          ? `\n☠️ 花嫁倍率结算后，骷髅诅咒再将本竿全部宝藏权重转为噩梦（剩余 ${curseResult.remaining} 层）。`
+          ? `\n☠️ 诅咒生效中，剩余 ${displayedCurseLayers} 层。`
           : "",
         staminaResult.deepPressureConsumed
           ? `\n🔔 深压回响令本竿控制力减半（剩余 ${staminaResult.deepPressureLayers} 层）。`
@@ -1661,7 +1664,7 @@ export default class Fishing extends plugin {
           e.user_id,
           effect.multiplier || 2,
         );
-        message = `💍 溺水花嫁的印记再次连乘：噩梦权重 ×${result.before} → ×${result.total}，直至被净化！`;
+        message = `💍 获得一层溺水花嫁的印记：噩梦权重 ×${result.before} → ×${result.total}。`;
         break;
       }
 

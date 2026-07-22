@@ -2414,7 +2414,7 @@
     "id": "nightmare_pond_drowned_bride",
     "name": "溺水花嫁",
     "rarity": "噩梦",
-    "description": "樱花池塘的怪谈。她的印记会让噩梦权重乘2，重复遇见还会继续连乘，直至被净化。",
+    "description": "樱花池塘的怪谈。她的印记会让噩梦权重乘2，重复遇见还会继续连乘。",
     "base_price": 0,
     "difficulty": 80,
     "nightmare_effect": {
