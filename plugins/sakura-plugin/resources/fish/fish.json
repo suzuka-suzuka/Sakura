@@ -2299,7 +2299,7 @@
     "id": "monster_mimic",
     "name": "拟态怪",
     "rarity": "噩梦",
-    "description": "它伪装成宝箱，咬钩后却猛然张开利齿啃噬鱼竿。",
+    "description": "腐朽宝箱般的怪物，箱缝间挤满利齿。",
     "base_price": 0,
     "difficulty": 85,
     "nightmare_effect": {
@@ -2321,7 +2321,7 @@
     "id": "nightmare_bone_shark",
     "name": "骸骨鲨",
     "rarity": "噩梦",
-    "description": "只剩骨架的鲨鱼用骨刺磨损鱼竿，还会永久破坏竿身的控制力。",
+    "description": "无血无肉的鲨鱼，森白骨刺划过水底。",
     "base_price": 0,
     "difficulty": 100,
     "nightmare_effect": {
@@ -2344,7 +2344,7 @@
     "id": "nightmare_thief_murloc",
     "name": "水鬼",
     "rarity": "噩梦",
-    "description": "湿漉漉的水鬼会随机摸走少量樱花币；无钱可偷时便转而袭击鱼竿。",
+    "description": "浑身滴水的矮小怪物，手里攥着陌生钱袋。",
     "base_price": 0,
     "difficulty": 80,
     "nightmare_effect": {
@@ -2368,7 +2368,7 @@
     "id": "nightmare_void_devourer",
     "name": "虚空吞噬者",
     "rarity": "噩梦",
-    "description": "来自虚空的恐怖生物，它的出现意味着财富的大量流失...",
+    "description": "水面裂隙中的无形巨口，连光也能吞没。",
     "base_price": 0,
     "difficulty": 110,
     "nightmare_effect": {
@@ -2392,7 +2392,7 @@
     "id": "nightmare_cursed_skull",
     "name": "诅咒骷髅",
     "rarity": "噩梦",
-    "description": "散发着不祥气息的骷髅头，接触它会让你厄运缠身！",
+    "description": "眼窝燃着幽火的骷髅，低语招来厄运。",
     "base_price": 0,
     "difficulty": 75,
     "nightmare_effect": {
@@ -2414,7 +2414,7 @@
     "id": "nightmare_pond_drowned_bride",
     "name": "溺水花嫁",
     "rarity": "噩梦",
-    "description": "樱花池塘的怪谈。她的印记会让噩梦权重乘2，重复遇见还会继续连乘。",
+    "description": "泡烂的嫁衣沉在池底，黑发间浮着樱花。",
     "base_price": 0,
     "difficulty": 80,
     "nightmare_effect": {
@@ -2439,7 +2439,7 @@
     "id": "nightmare_river_water_monkey",
     "name": "河童水猴",
     "rarity": "噩梦",
-    "description": "青柳河湾的怪谈。它专挑背包里价值最高的鱼饵下手，无饵可偷便抓伤鱼竿。",
+    "description": "披着水草伏在桥下，怀里藏满捡来的物件。",
     "base_price": 0,
     "difficulty": 85,
     "nightmare_effect": {
@@ -2464,7 +2464,7 @@
     "id": "nightmare_lake_corpse_fisher",
     "name": "雾中捞尸人",
     "rarity": "噩梦",
-    "description": "雾隐湖的怪谈。它以钓客的当前体力重创鱼竿，最多造成20点损耗，并将体力强制压到1点。",
+    "description": "雾中撑着无影旧船，长钩拖过寂静湖底。",
     "base_price": 0,
     "difficulty": 90,
     "nightmare_effect": {
@@ -2490,7 +2490,7 @@
     "id": "nightmare_coast_ghost_ship",
     "name": "暮潮幽灵船",
     "rarity": "噩梦",
-    "description": "落日海岸的怪谈。它留下100樱花币债务；债清前每笔钓鱼金币先减半，再用于还债。",
+    "description": "退潮后逆浪而来的破船，甲板上催债铃长鸣。",
     "base_price": 0,
     "difficulty": 105,
     "nightmare_effect": {
@@ -2515,7 +2515,7 @@
     "id": "nightmare_abyss_diving_bell",
     "name": "叩舱潜水钟",
     "rarity": "噩梦",
-    "description": "深渊海沟的怪谈。每次敲响都会叠加3层深压，使之后受影响的鱼竿控制力减半。",
+    "description": "悬在无光深海的锈钟，舱门内满是抓痕。",
     "base_price": 0,
     "difficulty": 115,
     "nightmare_effect": {
@@ -2540,7 +2540,7 @@
     "id": "nightmare_mystic_star_eater",
     "name": "食星之影",
     "rarity": "噩梦",
-    "description": "星辉秘境的怪谈。它会随机吞掉背包中的一个物品，但无法吞噬当前鱼竿。",
+    "description": "游荡在群星倒影间的黑影，所过之处微光尽失。",
     "base_price": 0,
     "difficulty": 100,
     "nightmare_effect": {
