@@ -213,7 +213,7 @@ async function selectRandomFish(
 ) {
   // 星愿强制稀有度时跳过鱼雷拦截，保证“必中传说”兑现
   if (!forceRarity && fishingManager && userId) {
-    const torpedoCount = fishingManager.getAvailableTorpedoCount(userId);
+    const torpedoCount = fishingManager.getAvailableTorpedoCount(userId, location);
     if (torpedoCount > 0) {
       const torpedoWeight = torpedoCount * TORPEDO_HOOK_WEIGHT_PER_ITEM;
       const totalWeight = 100 + torpedoWeight;
@@ -228,6 +228,7 @@ async function selectRandomFish(
           actualWeight: 0,
           weight: [0, 0],
           base_price: 0,
+          torpedoLocation: location,
           description: "💥 轰！！！"
         };
       }
@@ -253,13 +254,18 @@ async function selectRandomFish(
   });
 }
 
-async function calculateFishPrice(fish, fishingManager = null, environmentMultiplier = 1) {
+async function calculateFishPrice(
+  fish,
+  fishingManager = null,
+  environmentMultiplier = 1,
+  locationId = null,
+) {
   let torpedoMultiplier = 1;
   if (fishingManager) {
     try {
-      torpedoMultiplier = await fishingManager.getFishPriceMultiplier();
+      torpedoMultiplier = await fishingManager.getFishPriceMultiplier(locationId);
     } catch (err) {
-      logger.warn(`[钓鱼] 获取全局鱼价加成失败，按原价结算: ${err.message}`);
+      logger.warn(`[钓鱼] 获取钓点鱼价加成失败，按原价结算: ${err.message}`);
     }
   }
   return calculateLegacyFishPrice(
@@ -1077,7 +1083,9 @@ export default class Fishing extends plugin {
       }
 
       if (fish.isTorpedo) {
-        const ownerId = fishingManager.triggerTorpedo(userId);
+        const torpedoLocationId = fish.torpedoLocation || state.locationId;
+        const torpedoLocation = getFishingLocationConfig(torpedoLocationId);
+        const ownerId = fishingManager.triggerTorpedo(userId, torpedoLocationId);
 
         if (!ownerId) {
           await this.finishFailedAttempt(e, state);
@@ -1088,7 +1096,7 @@ export default class Fishing extends plugin {
         fishingManager.recordTorpedoHit(userId);
         let priceBoostApplied = true;
         try {
-          await fishingManager.setFishPriceBoost();
+          await fishingManager.setFishPriceBoost(torpedoLocationId);
         } catch (err) {
           priceBoostApplied = false;
           logger.warn(`[钓鱼] 鱼雷鱼价加成写入失败: ${err.message}`);
@@ -1115,7 +1123,7 @@ export default class Fishing extends plugin {
             : `🧵 鱼线被炸断了！`,
           `${damageResult.msg}\n`,
           priceBoostApplied
-            ? `😱 鱼雷爆炸引发恐慌！接下来${Math.round(FISHING_BENEFIT_DURATION_SECONDS / 60)}分钟内鱼价×${TORPEDO_PRICE_BOOST_MULTIPLIER}！`
+            ? `😱 鱼雷爆炸引发恐慌！${torpedoLocation?.emoji || ""}【${torpedoLocation?.name || "当前钓点"}】接下来${Math.round(FISHING_BENEFIT_DURATION_SECONDS / 60)}分钟内鱼价×${TORPEDO_PRICE_BOOST_MULTIPLIER}！`
             : `😱 鱼雷爆炸了，但鱼价加成暂时没有生效。`,
         ]);
 
@@ -1887,6 +1895,7 @@ export default class Fishing extends plugin {
           fish,
           fishingManager,
           state.environment?.priceMultiplier || 1,
+          state.locationId,
         );
 
       const buffMultiplier = bossVictory
@@ -1917,7 +1926,7 @@ export default class Fishing extends plugin {
       let priceBoostMsg = "";
       if (!bossVictory) {
         try {
-          if (await fishingManager.isFishPriceBoostActive()) {
+          if (await fishingManager.isFishPriceBoostActive(state.locationId)) {
             priceBoostMsg = `😱 鱼雷恐慌中，鱼价×${TORPEDO_PRICE_BOOST_MULTIPLIER}！\n`;
           }
         } catch (err) {
@@ -2181,7 +2190,8 @@ export default class Fishing extends plugin {
     const groupId = e.group_id;
     const userId = e.user_id;
     const fishingManager = new FishingManager(groupId);
-    const locationConfig = getFishingLocationConfig(fishingManager.getFishingLocation(userId));
+    const locationId = fishingManager.getFishingLocation(userId);
+    const locationConfig = getFishingLocationConfig(locationId);
     const weather = getWeatherByTime();
     const staminaStatus = fishingManager.getFishingStaminaStatus(userId);
     const equippedRodId = fishingManager.getEquippedRod(userId);
@@ -2344,18 +2354,18 @@ export default class Fishing extends plugin {
     const economyManager = new EconomyManager(e);
     const balance = economyManager.getCoins(e);
 
-    const dangerousTorpedoes = fishingManager.getAvailableTorpedoCount(userId);
-    const deployedTorpedo = fishingManager.getUserTorpedoCount(userId) > 0;
-    const torpedoRemainingMinutes = deployedTorpedo
-      ? fishingManager.getUserTorpedoRemainingMinutes(userId)
-      : 0;
-    const totalTorpedoes = fishingManager.getTotalTorpedoCount();
+    const dangerousTorpedoes = fishingManager.getAvailableTorpedoCount(userId, locationId);
+    const deployedTorpedo = fishingManager.getUserTorpedo(userId);
+    const deployedTorpedoLocation = deployedTorpedo
+      ? getFishingLocationConfig(deployedTorpedo.location)
+      : null;
+    const locationTorpedoes = fishingManager.getTotalTorpedoCount(locationId);
     let priceBoostActive = false;
     let priceBoostRemainingMinutes = 0;
     try {
-      priceBoostActive = await fishingManager.isFishPriceBoostActive();
+      priceBoostActive = await fishingManager.isFishPriceBoostActive(locationId);
       priceBoostRemainingMinutes = priceBoostActive
-        ? await fishingManager.getFishPriceBoostRemainingMinutes()
+        ? await fishingManager.getFishPriceBoostRemainingMinutes(locationId)
         : 0;
     } catch (err) {
       logger.warn(`[钓鱼状态] 读取鱼价加成失败: ${err.message}`);
@@ -2388,9 +2398,10 @@ export default class Fishing extends plugin {
         effects,
         torpedo: {
           dangerousCount: dangerousTorpedoes,
-          deployed: deployedTorpedo,
-          remainingMinutes: torpedoRemainingMinutes,
-          totalCount: totalTorpedoes,
+          deployed: Boolean(deployedTorpedo),
+          deployedLocation: deployedTorpedoLocation,
+          currentLocationName: locationConfig?.name || "当前钓点",
+          locationCount: locationTorpedoes,
           priceBoostActive,
           priceBoostRemainingMinutes,
         },
@@ -2549,21 +2560,26 @@ export default class Fishing extends plugin {
     const userId = e.user_id;
 
     const fishingManager = new FishingManager(groupId);
-    const result = fishingManager.deployTorpedo(userId);
+    const locationId = fishingManager.getFishingLocation(userId);
+    const location = getFishingLocationConfig(locationId);
+    const result = fishingManager.deployTorpedo(userId, locationId);
 
     if (result.success) {
-      const totalTorpedoes = fishingManager.getTotalTorpedoCount();
-      const durationHours = Math.ceil(fishingManager.getTorpedoDurationSeconds() / 3600);
+      const locationTorpedoes = fishingManager.getTotalTorpedoCount(locationId);
       await e.reply([
-        `💣 嘿嘿嘿... 鱼雷已悄悄投放到鱼塘中！\n`,
+        `💣 嘿嘿嘿... 鱼雷已悄悄投放到${location.emoji}【${location.name}】！\n`,
         `🎯 静待猎物上钩...\n`,
-        `⏳ ${durationHours} 小时后未触发将自动失效\n`,
-        `📊 当前鱼塘共有 ${totalTorpedoes} 个鱼雷潜伏中~`
+        `📊 当前钓点共有 ${locationTorpedoes} 个鱼雷潜伏中~`
       ]);
     } else {
-      const message = result.reason === "not_owned"
-        ? "💣 你背包里没有鱼雷！\n快去「商店」购买吧~"
-        : "💣 你已经在鱼塘里投放了一个鱼雷！\n一个人最多只能投放一个鱼雷哦~";
+      let message;
+      if (result.reason === "not_owned") {
+        message = "💣 你背包里没有鱼雷！\n快去「商店」购买吧~";
+      } else {
+        const existingLocation = getFishingLocationConfig(result.location);
+        message = `💣 你已经在${existingLocation?.emoji || ""}【${existingLocation?.name || "某个钓点"}】投放了一个鱼雷！\n` +
+          "鱼雷触发前，一个人最多只能投放一个哦~";
+      }
       await e.reply(message, 10);
     }
 

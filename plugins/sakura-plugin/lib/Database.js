@@ -152,6 +152,7 @@ class DB {
         group_id TEXT NOT NULL,
         user_id TEXT NOT NULL,
         timestamp INTEGER,
+        location TEXT NOT NULL DEFAULT 'pond',
         PRIMARY KEY (group_id, user_id)
       );
 
@@ -281,6 +282,21 @@ class DB {
     if (!rodStatsColumns.some((column) => column.name === 'control_loss')) {
       this.db.exec('ALTER TABLE rod_stats ADD COLUMN control_loss INTEGER DEFAULT 0');
     }
+
+    const torpedoColumns = this.db.prepare('PRAGMA table_info(pond_torpedoes)').all();
+    if (!torpedoColumns.some((column) => column.name === 'location')) {
+      // 旧版鱼雷没有钓点概念，统一迁移到初始钓点樱花池塘。
+      this.db.exec("ALTER TABLE pond_torpedoes ADD COLUMN location TEXT NOT NULL DEFAULT 'pond'");
+    }
+    this.db.exec(`
+      UPDATE pond_torpedoes
+      SET location = 'pond'
+      WHERE location IS NULL
+         OR location NOT IN ('pond', 'river', 'lake', 'coast', 'abyss', 'mystic');
+
+      CREATE INDEX IF NOT EXISTS idx_pond_torpedoes_group_location
+      ON pond_torpedoes (group_id, location);
+    `);
 
     // 新道具体系不兼容已删除物品：启动迁移时直接从所有旧背包和旧Buff表清掉。
     const removedItemPlaceholders = REMOVED_FISHING_ITEMS.map(() => '?').join(', ');

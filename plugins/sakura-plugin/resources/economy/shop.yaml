@@ -156,5 +156,4 @@ categories:
         name: 鱼雷
         price: 400
         type: consumable
-        duration: 86400
-        description: 一种恶作剧道具，投放后可能被其他钓鱼者钓到，24小时未触发会自动失效。
+        description: 一种恶作剧道具，爆炸会损伤鱼竿并令该钓点普通鱼价在35分钟内×1.5。

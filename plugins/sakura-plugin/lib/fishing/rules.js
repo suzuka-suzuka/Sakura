@@ -402,8 +402,8 @@ export const NORMAL_TUG_PRESSURE_RANGE = (
   FORCE_PULL_DIFFICULTY_RANGE / NORMAL_TUG_SUCCESS_MULTIPLIER
 );
 export const TORPEDO_HOOK_WEIGHT_PER_ITEM = 3;
-export const TORPEDO_ROD_DAMAGE = 18;
-export const TORPEDO_PRICE_BOOST_MULTIPLIER = 1.1;
+export const TORPEDO_ROD_DAMAGE = 20;
+export const TORPEDO_PRICE_BOOST_MULTIPLIER = 1.5;
 
 export function getFishingBiteWaitMaxMs(level) {
   const safeLevel = Math.max(1, Math.floor(Number(level) || 1));

@@ -138,7 +138,7 @@ export const menuGroups = [
       { name: "钓点列表", command: "#钓点", desc: "查看全部钓点与解锁条件。" },
       { name: "前往钓点", command: "#前往钓点 [钓点名]", desc: "切换垂钓地点，钓点随钓鱼等级逐步解锁。" },
       { name: "开宝箱", command: "#开宝箱 [宝箱名]", desc: "开启钓点宝箱；宝箱可能产出必定召唤首领的鱼饵。", costNote: "消耗宝箱" },
-      { name: "投放鱼雷", command: "#投放鱼雷", desc: "在鱼塘投放鱼雷制造特殊事件。", costNote: "消耗鱼雷" },
+      { name: "投放鱼雷", command: "#投放鱼雷", desc: "在当前钓点永久投放鱼雷，直到被其他玩家钓中。", costNote: "消耗鱼雷" },
       { name: "钓鱼排行", command: "#钓鱼排行", desc: "查看钓鱼排行榜。" },
       { name: "职业列表", command: "#职业列表", desc: "查看钓鱼职业说明。" },
       { name: "选择职业", command: "#选择职业 <名称>", desc: "达到要求的钓鱼等级后选择职业。", costNote: "需达到钓鱼等级" },

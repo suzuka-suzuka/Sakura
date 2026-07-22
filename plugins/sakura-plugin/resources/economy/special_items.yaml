@@ -10,7 +10,7 @@ categories:
         icon: 🍀
         type: buff
         duration: 2100
-        description: 使用后35分钟内，普通渔获跳过重量与困难度判断。
+        description: 使用后35分钟内，普通钓鱼必能起竿。
         activation_message: "🍀 好运护符已激活！\n🎣 接下来35分钟内，普通渔获将跳过重量与困难度判断！"
 
       - id: item_toolkit_repair
@@ -59,7 +59,7 @@ categories:
         icon: 🌫️
         type: buff
         duration: 2100
-        description: 雾隐湖专属道具。使用后35分钟内个人天气固定为雾，不会钓到垃圾或噩梦。
+        description: 雾隐湖专属道具。使用后35分钟内个人天气固定为雾，且不会钓到垃圾或噩梦。
         activation_message: "🌫️ 雾灯亮起！\n🎣 接下来35分钟内个人天气固定为雾，不会钓到垃圾或噩梦！"
 
       - id: item_card_double_coin
@@ -88,7 +88,7 @@ categories:
 
   treasures:
     name: "💎 钓点藏品"
-    description: "各钓点宝箱的专属藏品，均可出售666樱花币"
+    description: "各钓点宝箱的专属藏品"
     handler: fishing_special
     items:
       - id: treasure_pond_sakura_amber
@@ -96,42 +96,42 @@ categories:
         icon: 🟠
         type: treasure
         sell_price: 666
-        description: 樱花池塘沉积百年形成的花瓣琥珀，可出售666樱花币。
+        description: 樱花池塘沉积百年形成的花瓣琥珀。
 
       - id: treasure_river_golden_scale
         name: 河神金鳞
         icon: 🟡
         type: treasure
         sell_price: 666
-        description: 青柳河湾逆流而来的金色鳞片，可出售666樱花币。
+        description: 青柳河湾逆流而来的金色鳞片。
 
       - id: treasure_lake_bronze_mirror
         name: 雾湖古镜
         icon: 🪞
         type: treasure
         sell_price: 666
-        description: 从雾隐湖底捞出的古老铜镜，可出售666樱花币。
+        description: 从雾隐湖底捞出的古老铜镜。
 
       - id: treasure_coast_black_pearl
         name: 暮潮黑珍珠
         icon: ⚫
         type: treasure
         sell_price: 666
-        description: 落日海岸暮潮孕育的黑珍珠，可出售666樱花币。
+        description: 落日海岸暮潮孕育的黑珍珠。
 
       - id: treasure_abyss_dragon_ambergris
         name: 深海龙涎香
         icon: 🐋
         type: treasure
         sell_price: 666
-        description: 深渊巨兽遗留的奇香结晶，可出售666樱花币。
+        description: 深渊巨兽遗留的奇香结晶。
 
       - id: treasure_mystic_star_fragment
         name: 星河碎片
         icon: ✨
         type: treasure
         sell_price: 666
-        description: 星辉秘境中凝固的一小片星河，可出售666樱花币。
+        description: 星辉秘境中凝固的一小片星河。
 
   chests:
     name: "🗝️ 钓点宝箱"

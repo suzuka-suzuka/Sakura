@@ -689,26 +689,31 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
     ctx.font = `18px ${this.fontFamily}`
     ctx.fillText(
       torpedo.dangerousCount > 0
-        ? `威胁鱼雷 ${torpedo.dangerousCount} 个，请小心` 
-        : "当前没有威胁你的鱼雷",
+        ? `当前钓点有 ${torpedo.dangerousCount} 个鱼雷威胁你`
+        : "当前钓点没有威胁你的鱼雷",
       178,
       infoTop + 81,
     )
     ctx.fillStyle = COLORS.secondary
+    const deployedLocation = torpedo.deployedLocation || {}
     ctx.fillText(
       torpedo.deployed
-        ? `已投放 1 个 · 剩余约 ${torpedo.remainingMinutes} 分钟`
+        ? `已投放：${deployedLocation.emoji || ""}${deployedLocation.name || "未知钓点"} · 不会过期`
         : "你尚未投放鱼雷",
       178,
       infoTop + 116,
     )
-    ctx.fillText(`鱼塘共潜伏 ${torpedo.totalCount || 0} 个鱼雷`, 178, infoTop + 151)
+    ctx.fillText(
+      `【${torpedo.currentLocationName || "当前钓点"}】共潜伏 ${torpedo.locationCount || 0} 个鱼雷`,
+      178,
+      infoTop + 151,
+    )
     ctx.fillStyle = torpedo.priceBoostActive ? COLORS.warning : COLORS.secondary
     ctx.font = `bold 18px ${this.fontFamily}`
     ctx.fillText(
       torpedo.priceBoostActive
-        ? `鱼价 ×${TORPEDO_PRICE_BOOST_MULTIPLIER} · 剩余 ${torpedo.priceBoostRemainingMinutes} 分钟`
-        : "当前鱼价正常",
+        ? `本钓点鱼价 ×${TORPEDO_PRICE_BOOST_MULTIPLIER} · 剩余 ${torpedo.priceBoostRemainingMinutes} 分钟`
+        : "当前钓点鱼价正常",
       178,
       infoTop + 190,
     )

@@ -1354,72 +1354,79 @@ export default class FishingManager {
     return allLines.filter(l => inventory[l.id]).map(l => l.id);
   }
 
-  getTorpedoConfig() {
-    const shopConfig = Setting.getEconomy('shop');
-    return shopConfig?.categories?.torpedoes?.items?.find(t => t.id === 'torpedo');
-  }
-
-  getTorpedoDurationSeconds() {
-    const configuredDuration = Number(this.getTorpedoConfig()?.duration);
-    return Number.isFinite(configuredDuration) && configuredDuration > 0
-      ? Math.floor(configuredDuration)
-      : 24 * 60 * 60;
-  }
-
-  cleanupExpiredTorpedoes(now = Date.now()) {
-    const expiresBefore = Number(now) - this.getTorpedoDurationSeconds() * 1000;
-    const result = db.prepare(`
-        DELETE FROM pond_torpedoes
-        WHERE group_id = ? AND (timestamp IS NULL OR timestamp <= ?)
-    `).run(this.groupId, expiresBefore);
-    return result.changes || 0;
-  }
-
-  getPondTorpedoes() {
-    this.cleanupExpiredTorpedoes();
-    const rows = db.prepare('SELECT user_id, timestamp FROM pond_torpedoes WHERE group_id = ?').all(this.groupId);
+  getPondTorpedoes(locationId = null) {
+    const normalizedLocation = locationId == null
+      ? null
+      : normalizeFishingLocation(locationId);
+    const rows = normalizedLocation
+      ? db.prepare(`
+          SELECT user_id, timestamp, location
+          FROM pond_torpedoes
+          WHERE group_id = ? AND location = ?
+        `).all(this.groupId, normalizedLocation)
+      : db.prepare(`
+          SELECT user_id, timestamp, location
+          FROM pond_torpedoes
+          WHERE group_id = ?
+        `).all(this.groupId);
     const result = {};
     for (const row of rows) {
-      result[row.user_id] = row.timestamp;
+      result[row.user_id] = {
+        timestamp: Number(row.timestamp) || 0,
+        location: normalizeFishingLocation(row.location),
+      };
     }
     return result;
   }
 
-  getUserTorpedoCount(userId) {
+  getUserTorpedo(userId) {
     userId = String(userId);
-    this.cleanupExpiredTorpedoes();
-    const row = db.prepare('SELECT 1 FROM pond_torpedoes WHERE group_id = ? AND user_id = ?').get(this.groupId, userId);
-    return row ? 1 : 0;
-  }
-
-  getUserTorpedoRemainingMinutes(userId) {
-    userId = String(userId);
-    this.cleanupExpiredTorpedoes();
     const row = db.prepare(`
-        SELECT timestamp FROM pond_torpedoes
+        SELECT timestamp, location
+        FROM pond_torpedoes
         WHERE group_id = ? AND user_id = ?
     `).get(this.groupId, userId);
-    if (!row) return 0;
-    const expiresAt = Number(row.timestamp) + this.getTorpedoDurationSeconds() * 1000;
-    return Math.max(0, Math.ceil((expiresAt - Date.now()) / 60000));
+    if (!row) return null;
+    return {
+      timestamp: Number(row.timestamp) || 0,
+      location: normalizeFishingLocation(row.location),
+    };
   }
 
-  getTotalTorpedoCount() {
-    this.cleanupExpiredTorpedoes();
-    const row = db.prepare('SELECT COUNT(*) as count FROM pond_torpedoes WHERE group_id = ?').get(this.groupId);
+  getUserTorpedoCount(userId) {
+    return this.getUserTorpedo(userId) ? 1 : 0;
+  }
+
+  getTotalTorpedoCount(locationId = null) {
+    const row = locationId == null
+      ? db.prepare(`
+          SELECT COUNT(*) AS count
+          FROM pond_torpedoes
+          WHERE group_id = ?
+        `).get(this.groupId)
+      : db.prepare(`
+          SELECT COUNT(*) AS count
+          FROM pond_torpedoes
+          WHERE group_id = ? AND location = ?
+        `).get(this.groupId, normalizeFishingLocation(locationId));
     return row ? row.count : 0;
   }
 
-  deployTorpedo(userId) {
+  deployTorpedo(userId, locationId) {
     userId = String(userId);
+    const location = normalizeFishingLocation(locationId);
     const transaction = db.transaction(() => {
-      this.cleanupExpiredTorpedoes();
       const existing = db.prepare(`
-          SELECT 1 FROM pond_torpedoes
+          SELECT location FROM pond_torpedoes
           WHERE group_id = ? AND user_id = ?
       `).get(this.groupId, userId);
       if (existing) {
-        return { success: false, reason: "already_deployed", msg: "你在鱼塘中已有一个鱼雷了！" };
+        return {
+          success: false,
+          reason: "already_deployed",
+          location: normalizeFishingLocation(existing.location),
+          msg: "你已经投放过一个尚未触发的鱼雷了！",
+        };
       }
 
       const removed = db.prepare(`
@@ -1435,57 +1442,66 @@ export default class FishingManager {
           WHERE group_id = ? AND user_id = ? AND item_id = 'torpedo' AND count <= 0
       `).run(this.groupId, userId);
       db.prepare(`
-          INSERT INTO pond_torpedoes (group_id, user_id, timestamp)
-          VALUES (?, ?, ?)
-      `).run(this.groupId, userId, Date.now());
-      return { success: true, msg: "鱼雷投放成功！" };
+          INSERT INTO pond_torpedoes (group_id, user_id, timestamp, location)
+          VALUES (?, ?, ?, ?)
+      `).run(this.groupId, userId, Date.now(), location);
+      return { success: true, location, msg: "鱼雷投放成功！" };
     });
 
     return transaction.immediate();
   }
 
-  getAvailableTorpedoCount(excludeUserId) {
+  getAvailableTorpedoCount(excludeUserId, locationId) {
     excludeUserId = String(excludeUserId);
-    this.cleanupExpiredTorpedoes();
-    const row = db.prepare('SELECT COUNT(*) as count FROM pond_torpedoes WHERE group_id = ? AND user_id != ?').get(this.groupId, excludeUserId);
+    const location = normalizeFishingLocation(locationId);
+    const row = db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM pond_torpedoes
+        WHERE group_id = ? AND user_id != ? AND location = ?
+    `).get(this.groupId, excludeUserId, location);
     return row ? row.count : 0;
   }
 
-  triggerTorpedo(fisherId) {
+  triggerTorpedo(fisherId, locationId) {
     fisherId = String(fisherId);
-    this.cleanupExpiredTorpedoes();
+    const location = normalizeFishingLocation(locationId);
     const row = db.prepare(`
         DELETE FROM pond_torpedoes
-        WHERE group_id = ? AND user_id = (
-          SELECT user_id
+        WHERE rowid = (
+          SELECT rowid
           FROM pond_torpedoes
-          WHERE group_id = ? AND user_id != ?
+          WHERE group_id = ? AND user_id != ? AND location = ?
           ORDER BY RANDOM()
           LIMIT 1
         )
-        RETURNING user_id
-    `).get(this.groupId, this.groupId, fisherId);
+        RETURNING user_id, location
+    `).get(this.groupId, fisherId, location);
     return row?.user_id || null;
   }
 
-  async setFishPriceBoost() {
-    const key = `sakura:fishing:torpedo_explosion:${this.groupId}`;
+  getFishPriceBoostKey(locationId) {
+    const location = normalizeFishingLocation(locationId);
+    return `sakura:fishing:torpedo_explosion:${this.groupId}:${location}`;
+  }
+
+  async setFishPriceBoost(locationId) {
+    const key = this.getFishPriceBoostKey(locationId);
     await redis.set(key, String(Date.now()), "EX", FISHING_BENEFIT_DURATION_SECONDS);
   }
 
-  async isFishPriceBoostActive() {
-    const key = `sakura:fishing:torpedo_explosion:${this.groupId}`;
+  async isFishPriceBoostActive(locationId) {
+    const key = this.getFishPriceBoostKey(locationId);
     const value = await redis.get(key);
     return value !== null;
   }
 
-  async getFishPriceMultiplier() {
-    const isActive = await this.isFishPriceBoostActive();
+  async getFishPriceMultiplier(locationId) {
+    const isActive = await this.isFishPriceBoostActive(locationId);
     return isActive ? TORPEDO_PRICE_BOOST_MULTIPLIER : 1;
   }
 
-  async getFishPriceBoostRemainingMinutes() {
-    const key = `sakura:fishing:torpedo_explosion:${this.groupId}`;
+  async getFishPriceBoostRemainingMinutes(locationId) {
+    const key = this.getFishPriceBoostKey(locationId);
     const ttl = await redis.ttl(key);
     return ttl > 0 ? Math.ceil(ttl / 60) : 0;
   }
