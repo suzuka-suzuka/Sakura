@@ -2163,10 +2163,7 @@ export default class Fishing extends plugin {
     }
 
     fishingManager.equipLine(e.user_id, line.id);
-    await e.reply(
-      `🧵 鱼线换好啦！当前使用【${line.name}】。\n` +
-      `承重：${line.capacity}`,
-    );
+    await e.reply(`🧵 鱼线换好啦！当前使用【${line.name}】。`);
     return true;
   });
 
