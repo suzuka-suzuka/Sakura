@@ -876,13 +876,13 @@ export default class Fishing extends plugin {
         buffFlags.hasDoubleExp ? "\n📚 双倍经验卡生效中。" : "",
         buffFlags.hasTimeSand ? "\n⏳ 时之沙生效中" : "",
         nightmareStatus.brideNightmareMultiplier > 1
-          ? `\n💍 花嫁印记生效中：${brideMarkLayers} 层，更容易遭遇噩梦。`
+          ? `\n💍 ${brideMarkLayers} 层花嫁印记生效中，噩梦出现概率变为 ${nightmareStatus.brideNightmareMultiplier} 倍。`
           : "",
         curseResult.consumed
           ? `\n☠️ 诅咒生效中，剩余 ${displayedCurseLayers} 层。`
           : "",
         staminaResult.deepPressureConsumed
-          ? `\n🔔 深压回响生效：这一竿会更加吃力（剩余 ${staminaResult.deepPressureLayers} 层）。`
+          ? `\n🔔 深压回响生效中，这一竿会更加吃力（剩余 ${staminaResult.deepPressureLayers} 层）。`
           : "",
         wishRarity ? `\n🌠 星愿闪耀！这一竿将迎来【${wishRarity}】品质！` : "",
         isBossBait ? `\n👑 首领鱼饵的气息正在水中扩散，当地首领正向鱼钩逼近……` : "",
@@ -1668,8 +1668,8 @@ export default class Fishing extends plugin {
           e.user_id,
           effect.multiplier || 2,
         );
-        message = `💍 溺水花嫁留下了印记，当前 ${getBrideMarkLayers(result.total)} 层：` +
-          "更容易遭遇噩梦。";
+        message = `💍 溺水花嫁留下了印记，当前 ${getBrideMarkLayers(result.total)} 层，` +
+          `噩梦出现概率变为 ${result.total} 倍。`;
         break;
       }
 
@@ -2299,7 +2299,7 @@ export default class Fishing extends plugin {
         icon: "💍",
         name: "花嫁印记",
         detail: `${getBrideMarkLayers(nightmareStatus.brideNightmareMultiplier)} 层` +
-          " · 更容易遭遇噩梦",
+          ` · 噩梦出现概率变为 ${nightmareStatus.brideNightmareMultiplier} 倍`,
         tone: "danger",
       });
     }
