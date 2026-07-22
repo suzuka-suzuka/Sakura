@@ -92,6 +92,7 @@ class DB {
         rod TEXT,
         line TEXT,
         bait TEXT,
+        total_attempts INTEGER DEFAULT 0,
         total_catch INTEGER DEFAULT 0,
         total_earnings INTEGER DEFAULT 0,
         torpedo_hits INTEGER DEFAULT 0,
@@ -194,6 +195,32 @@ class DB {
     }
 
     const fishingStatsColumns = this.db.prepare('PRAGMA table_info(fishing_stats)').all();
+    if (!fishingStatsColumns.some((column) => column.name === 'total_catch')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN total_catch INTEGER DEFAULT 0');
+    }
+    if (!fishingStatsColumns.some((column) => column.name === 'total_attempts')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN total_attempts INTEGER DEFAULT 0');
+      // 旧 total_catch 混合了成功渔获和部分失败遭遇：尽可能保留为历史总垂钓下限，
+      // 再用逐鱼 success_count 校正“成功渔获”的准确口径。
+      this.db.exec(`
+        UPDATE fishing_stats
+        SET total_attempts = MAX(
+              COALESCE(total_catch, 0),
+              COALESCE((
+                SELECT SUM(fc.count)
+                FROM fishing_counts AS fc
+                WHERE fc.group_id = fishing_stats.group_id
+                  AND fc.user_id = fishing_stats.user_id
+              ), 0)
+            ),
+            total_catch = COALESCE((
+              SELECT SUM(fc.success_count)
+              FROM fishing_counts AS fc
+              WHERE fc.group_id = fishing_stats.group_id
+                AND fc.user_id = fishing_stats.user_id
+            ), 0)
+      `);
+    }
     if (!fishingStatsColumns.some((column) => column.name === 'fishing_exp')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN fishing_exp INTEGER DEFAULT 0');
     }

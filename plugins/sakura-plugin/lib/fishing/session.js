@@ -37,6 +37,16 @@ export function parseFishingAction(phase, message) {
   return null;
 }
 
+// 图鉴“遭遇”从鱼咬钩后开始计算；等待咬钩阶段与鱼雷事件不归入鱼类图鉴。
+export function shouldRecordFishEncounter(state) {
+  if (!state?.fish?.id || state.fish.isTorpedo) return false;
+  return [
+    FISHING_PHASE.weightCheck,
+    FISHING_PHASE.difficultyCheck,
+    FISHING_PHASE.fighting,
+  ].includes(state.phase);
+}
+
 export class FishingSessionStore {
   constructor({ clearTimer = clearTimeout } = {}) {
     this.clearTimer = clearTimer;

@@ -58,22 +58,28 @@ export default class FishingSettlementService {
       earnings,
       Date.now(),
     );
-    return result.changes === 1;
+    if (result.changes !== 1) return false;
+    db.prepare(`
+        UPDATE fishing_stats
+        SET total_attempts = total_attempts + 1
+        WHERE group_id = ? AND user_id = ?
+    `).run(this.groupId, this.userId);
+    return true;
   }
 
   _recordCatch({ fishId, success, earnings, rodId, masteryGain, recordCatch, weight, shiny = false }) {
     let newlyRecorded = false;
     let newlyShiny = false;
     if (recordCatch) {
+      const successIncrement = success ? 1 : 0;
       db.prepare(`
           UPDATE fishing_stats
-          SET total_catch = total_catch + 1,
+          SET total_catch = total_catch + ?,
               total_earnings = total_earnings + ?
           WHERE group_id = ? AND user_id = ?
-      `).run(earnings, this.groupId, this.userId);
+      `).run(successIncrement, earnings, this.groupId, this.userId);
 
       if (fishId) {
-        const successIncrement = success ? 1 : 0;
         // 异色只在成功捕获时计入图鉴
         const shinyIncrement = success && shiny ? 1 : 0;
         // 图鉴口径：仅成功渔获刷新最大重量；新收录 = success_count 首次由 0 变正

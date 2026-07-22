@@ -564,7 +564,7 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
   async generateFishingStatusImage(data) {
     const effects = Array.isArray(data.effects) ? data.effects : []
     const effectRows = Math.max(1, Math.ceil(effects.length / 2))
-    const effectsTop = 1040
+    const effectsTop = 1102
     const height = effectsTop + effectRows * 78 + 48
     const { canvas, ctx } = this.createBaseCanvas(height)
 
@@ -680,7 +680,7 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
 
     const infoTop = 758
     const infoWidth = 459
-    this.drawPanel(ctx, 32, infoTop, infoWidth, 238, {
+    this.drawPanel(ctx, 32, infoTop, infoWidth, 300, {
       fill: "rgba(255, 246, 247, 0.94)",
       border: "rgba(196, 86, 99, 0.3)",
     })
@@ -717,14 +717,15 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
       infoTop + 190,
     )
 
-    this.drawPanel(ctx, 509, infoTop, infoWidth, 238, { fill: COLORS.panelSoft })
+    this.drawPanel(ctx, 509, infoTop, infoWidth, 300, { fill: COLORS.panelSoft })
     ctx.fillStyle = COLORS.text
     ctx.font = `bold 25px ${this.fontFamily}`
     ctx.fillText("垂钓统计", 535, infoTop + 43)
     const stats = data.stats || {}
     const statEntries = [
       ["今日垂钓", `${this.formatNumber(stats.todayCount)} 次`],
-      ["累计渔获", `${this.formatNumber(stats.totalCatch)} 次`],
+      ["总垂钓", `${this.formatNumber(stats.totalAttempts)} 次`],
+      ["成功渔获", `${this.formatNumber(stats.totalCatch)} 次`],
       ["累计收益", `${this.formatNumber(stats.totalEarnings)} 币`],
       ["被鱼雷炸中", `${this.formatNumber(stats.torpedoHits)} 次`],
     ]
@@ -743,7 +744,7 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
 
     ctx.fillStyle = COLORS.text
     ctx.font = `bold 28px ${this.fontFamily}`
-    ctx.fillText("生效中的状态", 38, 1030)
+    ctx.fillText("生效中的状态", 38, 1092)
     const visibleEffects = effects.length > 0
       ? effects
       : [{ icon: "🌸", name: "状态良好", detail: "暂无额外效果", tone: "neutral" }]

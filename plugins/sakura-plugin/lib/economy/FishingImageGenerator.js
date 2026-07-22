@@ -143,7 +143,7 @@ export default class FishingImageGenerator extends EconomyImageGenerator {
     const cellWidth = (width - padding * 2 - cellGap * (columns - 1)) / columns
     const cellHeight = 180
     const sectionTitleHeight = 56
-    const headerHeight = 240
+    const headerHeight = 270
 
     let contentHeight = 0
     for (const section of sections) {
@@ -197,11 +197,16 @@ export default class FishingImageGenerator extends EconomyImageGenerator {
     }
 
     ctx.fillStyle = '#795548'
-    ctx.font = `22px ${this.fontFamily}`
+    ctx.font = `21px ${this.fontFamily}`
     ctx.fillText(
-      `🎣 总钓鱼 ${userData.total_catch || 0} 次 · 💰 总收益 ${userData.total_earnings || 0} · 💥 被炸 ${userData.torpedo_hits || 0} 次`,
+      `🎣 总垂钓 ${userData.total_attempts || 0} 次 · 🐟 成功渔获 ${userData.total_catch || 0} 次`,
       200,
-      205
+      202
+    )
+    ctx.fillText(
+      `💰 总收益 ${userData.total_earnings || 0} · 💥 被鱼雷炸中 ${userData.torpedo_hits || 0} 次`,
+      200,
+      235
     )
 
     let cursorY = headerHeight
@@ -286,7 +291,12 @@ export default class FishingImageGenerator extends EconomyImageGenerator {
           ctx.fillStyle = '#795548'
           ctx.font = `16px ${this.fontFamily}`
           if (entry.status === 'collected') {
-            ctx.fillText(`捕获 ×${entry.successCount}`, centerX, y + 155)
+            const shinySuffix = entry.shinyCount > 0 ? ` · 异色 ×${entry.shinyCount}` : ''
+            ctx.fillText(
+              this.truncateText(ctx, `捕获 ×${entry.successCount}${shinySuffix}`, cellWidth - 12),
+              centerX,
+              y + 155,
+            )
             if (entry.maxWeight > 0) {
               ctx.fillText(`最大 ${Math.round(entry.maxWeight * 100) / 100}`, centerX, y + 174)
             }

@@ -1294,14 +1294,16 @@ export default class FishingManager {
     this._ensureUser(userId);
 
     db.transaction(() => {
+      const successIncrement = isSuccess ? 1 : 0;
       db.prepare(`
             UPDATE fishing_stats 
-            SET total_catch = total_catch + 1, total_earnings = total_earnings + ?
+            SET total_attempts = total_attempts + 1,
+                total_catch = total_catch + ?,
+                total_earnings = total_earnings + ?
             WHERE group_id = ? AND user_id = ?
-        `).run(earnings, this.groupId, userId);
+        `).run(successIncrement, earnings, this.groupId, userId);
 
       if (fishId) {
-        const successIncrement = isSuccess ? 1 : 0;
         db.prepare(`
                 INSERT INTO fishing_counts (group_id, user_id, fish_id, count, success_count)
                 VALUES (?, ?, ?, 1, ?)

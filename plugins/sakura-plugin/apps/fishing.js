@@ -16,6 +16,7 @@ import {
   FishingSessionStore,
   FISHING_PHASE,
   parseFishingAction,
+  shouldRecordFishEncounter,
 } from "../lib/fishing/session.js";
 import {
   BOSS_ATTACK_INTERVAL_MS,
@@ -1485,10 +1486,13 @@ export default class Fishing extends plugin {
     }
   }
 
-  async finishFailedAttempt(e, state, { recordCatch = false, masteryGain = 0 } = {}) {
+  async finishFailedAttempt(e, state, { recordCatch = null, masteryGain = 0 } = {}) {
     const groupId = e.group_id;
     const userId = e.user_id;
     const stateKey = this.buildFishingStateKey(groupId, userId);
+    const recordEncounter = recordCatch == null
+      ? shouldRecordFishEncounter(state)
+      : Boolean(recordCatch);
     if (!fishingSessions.beginSettlement(stateKey, state.id)) return false;
 
     try {
@@ -1500,7 +1504,7 @@ export default class Fishing extends plugin {
         earnings: 0,
         rodId: state.rodConfig?.id,
         masteryGain,
-        recordCatch,
+        recordCatch: recordEncounter,
       });
       if (!result.success && result.reason !== "duplicate") {
         logger.warn(`[钓鱼] 失败结算未完成: ${result.reason}`);
@@ -2387,6 +2391,7 @@ export default class Fishing extends plugin {
         },
         stats: {
           todayCount,
+          totalAttempts: userData.total_attempts || 0,
           totalCatch: userData.total_catch || 0,
           totalEarnings: userData.total_earnings || 0,
           torpedoHits: userData.torpedo_hits || 0,
