@@ -18,7 +18,7 @@ categories:
         icon: 🔧
         type: consumable
         instant_effect: repair_rod
-        description: 完全修复当前鱼竿的耐久损耗，并恢复骨鲨造成的永久控制力损失。
+        description: 完全修复当前鱼竿的耐久损耗，以及骸骨鲨留下的暗伤。
 
       - id: item_holy_water
         name: 净化圣水
@@ -59,8 +59,8 @@ categories:
         icon: 🌫️
         type: buff
         duration: 2100
-        description: 雾隐湖专属道具。使用后35分钟内个人天气固定为雾，垃圾与噩梦权重归零。
-        activation_message: "🌫️ 雾灯亮起！\n🎣 接下来35分钟内个人天气固定为雾，垃圾与噩梦权重归零！"
+        description: 雾隐湖专属道具。使用后35分钟内个人天气固定为雾，不会钓到垃圾或噩梦。
+        activation_message: "🌫️ 雾灯亮起！\n🎣 接下来35分钟内个人天气固定为雾，不会钓到垃圾或噩梦！"
 
       - id: item_card_double_coin
         name: 双倍金币卡
@@ -75,8 +75,8 @@ categories:
         icon: 🩸
         type: buff
         duration: 2100
-        description: 深渊海沟专属道具。使用后35分钟内噩梦权重+50，钓鱼金币与经验均变为3倍。
-        activation_message: "🩸 怪物诱饵撒入水中！\n💀 接下来35分钟内噩梦权重 +50，钓鱼金币与经验 ×3！"
+        description: 深渊海沟专属道具。使用后35分钟内更容易遭遇噩梦，钓鱼金币与经验均变为3倍。
+        activation_message: "🩸 怪物诱饵撒入水中！\n💀 接下来35分钟内更容易遭遇噩梦，钓鱼金币与经验 ×3！"
 
       - id: item_bottle_wish
         name: 星愿瓶

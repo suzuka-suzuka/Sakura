@@ -18,7 +18,7 @@ categories:
         type: equipment
         control: 60
         durability: 60
-        description: 轻便耐用的玻璃纤维鱼竿，控制力有所提升。
+        description: 轻便耐用的玻璃纤维鱼竿，握持稳定，适合进阶垂钓。
 
       - id: rod_carbon
         name: 碳素鱼竿
@@ -42,7 +42,7 @@ categories:
         type: equipment
         control: 200
         durability: 200
-        description: 传说中的神器，拥有顶尖控制力，能征服绝大多数鱼类！
+        description: 传说中的神器，手感无可挑剔，能征服绝大多数鱼类！
 
       - id: rod_astral
         name: 星穹御灵竿
@@ -158,4 +158,3 @@ categories:
         type: consumable
         duration: 86400
         description: 一种恶作剧道具，投放后可能被其他钓鱼者钓到，24小时未触发会自动失效。
-

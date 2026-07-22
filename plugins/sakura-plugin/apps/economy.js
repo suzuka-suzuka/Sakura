@@ -21,6 +21,7 @@ import {
 import {
   FISHING_BENEFIT_DURATION_SECONDS,
   RARITY_CONFIG,
+  getBrideMarkLayers,
 } from "../lib/fishing/rules.js";
 import _ from "lodash";
 import Setting from "../lib/setting.js";
@@ -700,7 +701,7 @@ export default class Economy extends plugin {
         const durability = fishingManager.getRodDurabilityInfo(userId, rodId);
         const rodStats = fishingManager.getRodStats(userId, rodId);
         if (durability.damage <= 0 && rodStats.controlLoss <= 0) {
-          await e.reply(`🔧 【${rodConfig.name}】耐久与控制力都完好，不需要修理~`, 10);
+          await e.reply(`🔧 【${rodConfig.name}】耐久完好，也没有需要修复的暗伤~`, 10);
           return true;
         }
         if (!inventoryManager.removeItem(item.id, 1)) {
@@ -713,7 +714,7 @@ export default class Economy extends plugin {
             ? `耐久损耗 -${repaired.durabilityRepaired}`
             : "",
           repaired.controlRestored > 0
-            ? `永久控制力损失 -${repaired.controlRestored}`
+            ? "骸骨鲨留下的暗伤已修复"
             : "",
         ].filter(Boolean).join("，");
         await e.reply(
@@ -736,13 +737,15 @@ export default class Economy extends plugin {
         const result = fishingManager.clearNightmareDebuffs(userId);
         const cleared = [
           result.curseLayers > 0 ? `${result.curseLayers} 层骷髅诅咒` : "",
-          result.brideMarked ? `花嫁印记（原噩梦权重 ×${result.brideNightmareMultiplier}）` : "",
+          result.brideMarked
+            ? `${getBrideMarkLayers(result.brideNightmareMultiplier)} 层花嫁印记`
+            : "",
           result.ghostDebt > 0 ? `${result.ghostDebt} 樱花币幽灵船债务` : "",
           result.deepPressureLayers > 0 ? `${result.deepPressureLayers} 层深压` : "",
         ].filter(Boolean).join("、");
         await e.reply(
           `💧 使用了【${item.name}】！\n☀️ 已彻底洗净：${cleared}。\n` +
-          `🎣 鱼竿的永久控制力损失不受影响。`,
+          `🎣 鱼竿上由骸骨鲨留下的暗伤不受影响。`,
         );
         return true;
       }

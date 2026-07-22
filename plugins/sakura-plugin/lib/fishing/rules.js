@@ -722,6 +722,15 @@ export function getNightmareCurseDisplay(actualLayers, prankRevealed = false) {
   };
 }
 
+// 花嫁状态沿用旧版累计倍率存储；对玩家展示时换算回每次遭遇增加的一层印记。
+export function getBrideMarkLayers(multiplier) {
+  const numericMultiplier = Number(multiplier);
+  const safeMultiplier = Number.isFinite(numericMultiplier)
+    ? Math.max(1, numericMultiplier)
+    : 1;
+  return safeMultiplier > 1 ? Math.max(1, Math.round(Math.log2(safeMultiplier))) : 0;
+}
+
 export function createProgressBar(current, max, length = 10, fillChar = "█", emptyChar = "░") {
   const safeMax = Number(max);
   const percentage = safeMax > 0

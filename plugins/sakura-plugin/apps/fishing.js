@@ -42,6 +42,7 @@ import {
   calculateLegacyFishPrice,
   calculateNormalTugActionEffects,
   createProgressBar,
+  getBrideMarkLayers,
   getBossAttackCooldownRemaining,
   getBossFightTimeoutMs,
   getFishFightStateChangeDelay,
@@ -577,7 +578,7 @@ export default class Fishing extends plugin {
         `👑 首领战开始！【${state.fish.name}】现身！\n`,
         `🌀 特殊机制【${state.fish.boss_mechanic.name}】：${state.fish.boss_mechanic.description}\n\n`,
         `${formatBossCombatStatus(state, fishingManager, e.user_id)}\n\n`,
-        `📝 指令：\n  「拉」拉近距离并增加张力\n  「溜」降低张力但会拉远距离\n  「攻」按当前鱼竿控制力造成伤害（5秒冷却）\n`,
+        `📝 指令：\n  「拉」拉近距离并增加张力\n  「溜」降低张力但会拉远距离\n  「攻」发起攻击（5秒冷却）\n`,
         `🏆 必须同时把首领生命与距离降到 0；首领每5秒反击一次！\n`,
         `🧵 鱼线按承重生成本场临时耐久，归零立即断线；战斗结束后不保留损伤！\n`,
         `⚠️ 限时 ${Math.floor(timeoutMs / 1000)} 秒，当前为单人挑战。`,
@@ -858,27 +859,30 @@ export default class Fishing extends plugin {
       const displayedCurseLayers = curseResult.consumed
         ? fishingManager.getNightmareCurseStatus(userId).displayedLayers
         : 0;
+      const brideMarkLayers = getBrideMarkLayers(
+        nightmareStatus.brideNightmareMultiplier,
+      );
 
       const buffNotes = [
-        buffFlags.hasLucky ? "\n🍀 好运护符生效：跳过本次重量与困难度判断。" : "",
+        buffFlags.hasLucky ? "\n🍀 好运护符生效中" : "",
         buffFlags.hasFogLamp
-          ? "\n🌫️ 雾灯生效：个人天气固定为雾，垃圾与噩梦权重最终归零。"
+          ? "\n🌫️ 雾灯生效中"
           : "",
         buffFlags.hasMonsterBait
-          ? "\n🩸 怪物诱饵生效：噩梦权重 +50，金币与经验 ×3。"
+          ? "\n🩸 怪物诱饵生效中"
           : "",
         buffFlags.hasRiverBless ? "\n🌊 河神注视着你的鱼线。" : "",
         buffFlags.hasDoubleCoin ? "\n💰 双倍金币卡生效中。" : "",
         buffFlags.hasDoubleExp ? "\n📚 双倍经验卡生效中。" : "",
-        buffFlags.hasTimeSand ? "\n⏳ 时之沙生效：本次钓鱼冷却减半。" : "",
+        buffFlags.hasTimeSand ? "\n⏳ 时之沙生效中" : "",
         nightmareStatus.brideNightmareMultiplier > 1
-          ? `\n💍 花嫁印记生效：噩梦权重 ×${nightmareStatus.brideNightmareMultiplier}。`
+          ? `\n💍 花嫁印记生效中：${brideMarkLayers} 层，更容易遭遇噩梦。`
           : "",
         curseResult.consumed
           ? `\n☠️ 诅咒生效中，剩余 ${displayedCurseLayers} 层。`
           : "",
         staminaResult.deepPressureConsumed
-          ? `\n🔔 深压回响令本竿控制力减半（剩余 ${staminaResult.deepPressureLayers} 层）。`
+          ? `\n🔔 深压回响生效：这一竿会更加吃力（剩余 ${staminaResult.deepPressureLayers} 层）。`
           : "",
         wishRarity ? `\n🌠 星愿闪耀！这一竿将迎来【${wishRarity}】品质！` : "",
         isBossBait ? `\n👑 首领鱼饵的气息正在水中扩散，当地首领正向鱼钩逼近……` : "",
@@ -1603,9 +1607,9 @@ export default class Fishing extends plugin {
         );
         rodBroken ||= damageResult.isBroken;
         const controlMessage = controlResult.applied && !damageResult.isBroken
-          ? `\n🎛️ 当前控制力永久 -${controlResult.lost}，剩余 ${controlResult.currentControl}`
+          ? "\n🕸️ 鱼竿内部留下了一处难以修复的暗伤。"
           : "";
-        message = `🦈 骨刺同时撕磨竿身与操控结构！${damageResult.msg}${controlMessage}`;
+        message = `🦈 骨刺狠狠撕磨着竿身！${damageResult.msg}${controlMessage}`;
         break;
       }
 
@@ -1664,7 +1668,8 @@ export default class Fishing extends plugin {
           e.user_id,
           effect.multiplier || 2,
         );
-        message = `💍 获得一层溺水花嫁的印记：噩梦权重 ×${result.before} → ×${result.total}。`;
+        message = `💍 溺水花嫁留下了印记，当前 ${getBrideMarkLayers(result.total)} 层：` +
+          "更容易遭遇噩梦。";
         break;
       }
 
@@ -1711,7 +1716,7 @@ export default class Fishing extends plugin {
         const layers = normalizePenalty(effect.layers || 3);
         const result = fishingManager.addDeepPressureLayers(e.user_id, layers);
         message = `🔔 潜水钟敲响，深压 +${result.added} 层，当前 ${result.total} 层！` +
-          "之后每层影响一竿，使当前鱼竿控制力减半。";
+          "接下来的垂钓会更加吃力。";
         break;
       }
 
@@ -2293,9 +2298,8 @@ export default class Fishing extends plugin {
       effects.push({
         icon: "💍",
         name: "花嫁印记",
-        detail: `净化前噩梦权重 ×${nightmareStatus.brideNightmareMultiplier}` +
-          (curseStatus.actualLayers > 0 ? " · 花嫁先乘、骷髅诅咒后转移" : "") +
-          " · 再次钓到继续×2",
+        detail: `${getBrideMarkLayers(nightmareStatus.brideNightmareMultiplier)} 层` +
+          " · 更容易遭遇噩梦",
         tone: "danger",
       });
     }
@@ -2311,7 +2315,7 @@ export default class Fishing extends plugin {
       effects.push({
         icon: "🔔",
         name: "深压回响",
-        detail: `${nightmareStatus.deepPressureLayers} 层 · 每层使一竿控制力减半`,
+        detail: `剩余 ${nightmareStatus.deepPressureLayers} 层 · 接下来的垂钓会更吃力`,
         tone: "warning",
       });
     }
