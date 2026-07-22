@@ -765,7 +765,7 @@ export function isPerfectCatch({
 export function getRarityPoolByBaitQuality(
   quality,
   hasDebuff = false,
-  treasureBonus = 0,
+  treasureWeightMultiplier = 1,
   nightmareBonus = 0,
   nightmareWeightMultiplier = 1,
   zeroWeightRarities = [],
@@ -776,10 +776,14 @@ export function getRarityPoolByBaitQuality(
   const treasureIndex = pool.indexOf("宝藏");
   const nightmareIndex = pool.indexOf("噩梦");
 
-  if (treasureIndex >= 0 && Number.isFinite(Number(treasureBonus))) {
-    weights[treasureIndex] = Math.max(0.5, weights[treasureIndex] + Number(treasureBonus));
+  if (treasureIndex >= 0) {
+    const numericMultiplier = Number(treasureWeightMultiplier);
+    const multiplier = Number.isFinite(numericMultiplier)
+      ? Math.max(1, numericMultiplier)
+      : 1;
+    weights[treasureIndex] *= multiplier;
   }
-  // 最终顺序：花嫁连乘 → 骷髅诅咒转移全部宝藏 → 怪物诱饵加权 → 雾灯归零。
+  // 最终顺序：宝藏猎人倍率 → 花嫁连乘 → 骷髅诅咒转移全部宝藏 → 怪物诱饵加权 → 雾灯归零。
   if (nightmareIndex >= 0) {
     const multiplier = Math.max(1, Number(nightmareWeightMultiplier) || 1);
     weights[nightmareIndex] *= multiplier;
@@ -864,7 +868,7 @@ export function selectFishFromData(
   {
     baitQuality = 1,
     hasDebuff = false,
-    treasureBonus = 0,
+    treasureWeightMultiplier = 1,
     nightmareBonus = 0,
     nightmareWeightMultiplier = 1,
     zeroWeightRarities = [],
@@ -878,7 +882,7 @@ export function selectFishFromData(
   const { pool, weights } = getRarityPoolByBaitQuality(
     baitQuality,
     hasDebuff,
-    treasureBonus,
+    treasureWeightMultiplier,
     nightmareBonus,
     nightmareWeightMultiplier,
     zeroWeightRarities,

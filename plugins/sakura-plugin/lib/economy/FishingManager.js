@@ -422,16 +422,19 @@ export default class FishingManager {
     };
   }
 
-  getTreasureBonus(userId) {
+  getTreasureWeightMultiplier(userId) {
     const userData = this.getUserData(userId);
     if (userData.profession !== 'treasure_hunter' || userData.profession_level <= 0) {
-      return 0;
+      return 1;
     }
     const config = FishingManager.getProfessionConfig('treasure_hunter');
     if (!config || !config.levels || !config.levels[userData.profession_level]) {
-      return 0;
+      return 1;
     }
-    return config.levels[userData.profession_level].treasure_bonus || 0;
+    const multiplier = Number(
+      config.levels[userData.profession_level].treasure_weight_multiplier,
+    );
+    return Number.isFinite(multiplier) ? Math.max(1, multiplier) : 1;
   }
 
   getLineBonusFromMastery(userId, rodId) {

@@ -11,17 +11,17 @@ professions:
   treasure_hunter:
     name: "宝藏猎人"
     icon: "💎"
-    description: "提升钓到宝藏的概率"
-    effect_type: "treasure_bonus"  # 效果类型
+    description: "按倍率提高宝藏抽取权重"
+    effect_type: "treasure_weight_multiplier"  # 效果类型
     levels:
       1:
         title: "寻宝新手"
-        treasure_bonus: 2
-        description: "宝藏概率权重+2"
+        treasure_weight_multiplier: 1.5
+        description: "宝藏抽取权重×1.5"
       2:
         title: "寻宝大师"
-        treasure_bonus: 4
-        description: "宝藏概率权重+4"
+        treasure_weight_multiplier: 2
+        description: "宝藏抽取权重×2"
 
   fishing_master:
     name: "钓鱼大师"

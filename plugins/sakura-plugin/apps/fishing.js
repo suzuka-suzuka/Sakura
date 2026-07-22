@@ -234,15 +234,15 @@ async function selectRandomFish(
     }
   }
 
-  let treasureBonus = 0;
+  let treasureWeightMultiplier = 1;
   if (fishingManager && userId) {
-    treasureBonus = fishingManager.getTreasureBonus(userId);
+    treasureWeightMultiplier = fishingManager.getTreasureWeightMultiplier(userId);
   }
 
   return selectFishFromData(fishData, {
     baitQuality,
     hasDebuff,
-    treasureBonus,
+    treasureWeightMultiplier,
     nightmareBonus,
     nightmareWeightMultiplier,
     zeroWeightRarities,
@@ -797,7 +797,7 @@ export default class Fishing extends plugin {
       const nightmareStatus = fishingManager.getNightmareStatus(userId);
 
       // 骷髅诅咒与深压按实际抛竿消耗；即使随后钓到鱼雷也照常减少一层。
-      // 权重严格按花嫁连乘 → 骷髅诅咒 → 怪物诱饵 → 雾灯结算。
+      // 权重严格按宝藏猎人倍率 → 花嫁连乘 → 骷髅诅咒 → 怪物诱饵 → 雾灯结算。
       const rarityAfflictions = isBossBait
         ? { consumeCurse: false }
         : resolveNightmareRarityAfflictions(nightmareStatus.curse.actualLayers);
@@ -877,7 +877,7 @@ export default class Fishing extends plugin {
         buffFlags.hasDoubleExp ? "\n📚 双倍经验卡生效中。" : "",
         buffFlags.hasTimeSand ? "\n⏳ 时之沙生效中" : "",
         nightmareStatus.brideNightmareMultiplier > 1
-          ? `\n💍 ${brideMarkLayers} 层花嫁印记生效中，噩梦出现概率变为 ${nightmareStatus.brideNightmareMultiplier} 倍。`
+          ? `\n💍 ${brideMarkLayers} 层花嫁印记生效中，噩梦抽取权重变为 ${nightmareStatus.brideNightmareMultiplier} 倍。`
           : "",
         curseResult.consumed
           ? `\n☠️ 诅咒生效中，剩余 ${displayedCurseLayers} 层。`
@@ -1670,7 +1670,7 @@ export default class Fishing extends plugin {
           effect.multiplier || 2,
         );
         message = `💍 溺水花嫁留下了印记，当前 ${getBrideMarkLayers(result.total)} 层，` +
-          `噩梦出现概率变为 ${result.total} 倍。`;
+          `噩梦抽取权重变为 ${result.total} 倍。`;
         break;
       }
 
@@ -2300,7 +2300,7 @@ export default class Fishing extends plugin {
         icon: "💍",
         name: "花嫁印记",
         detail: `${getBrideMarkLayers(nightmareStatus.brideNightmareMultiplier)} 层` +
-          ` · 噩梦出现概率变为 ${nightmareStatus.brideNightmareMultiplier} 倍`,
+          ` · 噩梦抽取权重变为 ${nightmareStatus.brideNightmareMultiplier} 倍`,
         tone: "danger",
       });
     }
@@ -2667,8 +2667,8 @@ export default class Fishing extends plugin {
       let bonusInfo = "";
       switch (professionInfo.profession) {
         case 'treasure_hunter':
-          const treasureBonus = fishingManager.getTreasureBonus(e.user_id);
-          bonusInfo = `\n💎 当前宝藏概率加成: +${treasureBonus}权重`;
+          const treasureWeightMultiplier = fishingManager.getTreasureWeightMultiplier(e.user_id);
+          bonusInfo = `\n💎 当前宝藏抽取权重倍率: ×${treasureWeightMultiplier}`;
           break;
         case 'fishing_master':
           const equippedRod = fishingManager.getEquippedRod(e.user_id);
