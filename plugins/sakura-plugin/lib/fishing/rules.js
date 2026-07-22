@@ -93,7 +93,7 @@ export const SHINY_CHANCE = 0.01;
 export const SHINY_PRICE_MULTIPLIER = 4;
 export const SHINY_EXP_MULTIPLIER = 4;
 // 异色个体搏斗难度提升，会触及更多“拉不动/溜鱼”判定，也更难完美收竿
-export const SHINY_DIFFICULTY_MULTIPLIER = 1.35;
+export const SHINY_DIFFICULTY_MULTIPLIER = 1.25;
 const SHINY_EXCLUDED_RARITIES = new Set(["宝藏", "噩梦"]);
 
 export function isShinyEligible(fish) {
