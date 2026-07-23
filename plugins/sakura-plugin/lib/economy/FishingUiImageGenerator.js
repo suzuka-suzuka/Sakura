@@ -266,8 +266,7 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
       return item.boss_bait ? "首领挑战专用" : `品质 ${Math.max(1, Math.floor(toFiniteNumber(item.quality, 1)))}`
     }
     if (handler === "fishing_torpedo") {
-      const hours = Math.max(1, Math.round(toFiniteNumber(item.duration, 86400) / 3600))
-      return `投放有效期 ${hours} 小时`
+      return ""
     }
     return item.type === "equipment" ? "永久装备" : "消耗物品"
   }
@@ -354,10 +353,13 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
         ctx.font = `bold 21px ${this.fontFamily}`
         ctx.fillText(price > 0 ? `${this.formatNumber(price)} 樱花币` : "非卖品", textX, y + 80)
 
-        ctx.fillStyle = meta.color
-        ctx.font = `18px ${this.fontFamily}`
-        ctx.fillText(this.getShopItemDetail(item, category.handler), textX, y + 108)
-        this.drawWrappedText(ctx, item.description, textX, y + 138, textWidth, {
+        const detail = this.getShopItemDetail(item, category.handler)
+        if (detail) {
+          ctx.fillStyle = meta.color
+          ctx.font = `18px ${this.fontFamily}`
+          ctx.fillText(detail, textX, y + 108)
+        }
+        this.drawWrappedText(ctx, item.description, textX, y + (detail ? 138 : 108), textWidth, {
           font: `16px ${this.fontFamily}`,
           color: COLORS.secondary,
           lineHeight: 22,
