@@ -518,7 +518,7 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
           font: `14px ${this.fontFamily}`,
           color: COLORS.muted,
           lineHeight: 19,
-          maxLines: 1,
+          maxLines: 2,
         })
       }
 

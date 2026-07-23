@@ -10,8 +10,8 @@ categories:
         icon: 🍀
         type: buff
         duration: 2100
-        description: 使用后35分钟内，普通钓鱼必能起竿。
-        activation_message: "🍀 好运护符已激活！\n🎣 接下来35分钟内，普通渔获鱼必定上钩！"
+        description: 使用后35分钟内，钓鱼必定上钩。
+        activation_message: "🍀 好运护符已激活！\n🎣 接下来35分钟内，钓鱼必定上钩！"
 
       - id: item_toolkit_repair
         name: 修理工具箱
@@ -44,7 +44,7 @@ categories:
         type: consumable
         duration: 2100
         instant_effect: koi_wish
-        description: 樱花池塘专属道具。使用后35分钟内，下一次普通咬钩必定异色。
+        description: 樱花池塘专属道具。使用后35分钟内，下一次咬钩必定异色。
 
       - id: item_charm_river
         name: 河神垂青
@@ -84,7 +84,7 @@ categories:
         type: consumable
         duration: 2100
         instant_effect: star_wish
-        description: 星辉秘境专属道具。使用时指定品质，35分钟内下一次普通咬钩必定为该品质。
+        description: 星辉秘境专属道具。使用时指定品质，35分钟内下一次咬钩必定为该品质。
 
   treasures:
     name: "💎 钓点藏品"
