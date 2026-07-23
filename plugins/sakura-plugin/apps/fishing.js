@@ -1174,7 +1174,7 @@ export default class Fishing extends plugin {
 
           await e.reply([
             `🌊 巨大的力量传来！\n`,
-            `😱 有效拉力竟然达到了 ${fishWeight}！\n`,
+            `😱 这到底是个什么庞然大物！？(${fishWeight})\n`,
             lineBreak.saved
               ? `💥 鱼线发出濒死的悲鸣，却奇迹般撑住了！\n🌊 河神的祝福护住了【${lineConfig.name}】，但鱼还是跑了...${damageResult.msg}`
               : `💥 啪！鱼线瞬间崩断了！\n🧵 【${lineConfig.name}】牺牲了...${damageResult.msg}`,
@@ -1196,7 +1196,7 @@ export default class Fishing extends plugin {
           await e.reply([
             `💥 崩！\n`,
             `😫 还是没能坚持住，鱼脱钩了...\n`,
-            `👋 鱼大摇大摆地游走了（鱼重 ${fish.actualWeight}，有效拉力 ${fishWeight}）\n`,
+            `👋 鱼大摇大摆地游走了(${fishWeight})\n`,
             lineBreak.saved
               ? `🌊 河神的祝福护住了【${lineConfig.name}】！${damageResult.msg}`
               : `🧵 失去了【${lineConfig.name}】${damageResult.msg}`,
