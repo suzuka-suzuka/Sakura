@@ -95,7 +95,7 @@ export const SHINY_EXP_MULTIPLIER = 4;
 // 异色个体搏斗难度提升，会触及更多“拉不动/溜鱼”判定，也更难完美收竿
 export const SHINY_DIFFICULTY_MULTIPLIER = 1.25;
 const SHINY_EXCLUDED_RARITIES = new Set(["宝藏", "噩梦"]);
-const KOI_WISH_RARITIES = new Set(["普通", "精品", "稀有", "史诗", "传说"]);
+const KOI_WISH_RARITIES = new Set(["垃圾", "普通", "精品", "稀有", "史诗", "传说"]);
 
 export function isShinyEligible(fish) {
   if (!fish || fish.isTorpedo) return false;
@@ -108,8 +108,8 @@ export function rollShiny(fish, random = Math.random) {
   return Math.max(0, Math.min(0.999999999999, Number(random()) || 0)) < SHINY_CHANCE;
 }
 
-// 锦鲤许愿签会被下一次咬钩无条件消耗，但只对普通至传说的非首领鱼生效。
-// 垃圾、宝藏、噩梦、鱼雷和首领仍按原本规则判定，不会被许愿签强制为异色。
+// 锦鲤许愿签会被下一次咬钩无条件消耗，但只对垃圾至传说的非首领鱼生效。
+// 宝藏、噩梦、鱼雷和首领仍按原本规则判定，不会被许愿签强制为异色。
 export function resolveKoiWishShiny(fish, hasKoiWish = false, random = Math.random) {
   const koiWishConsumed = Boolean(hasKoiWish);
   const koiWishApplied = koiWishConsumed &&

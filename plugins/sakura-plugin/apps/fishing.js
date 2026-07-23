@@ -859,7 +859,7 @@ export default class Fishing extends plugin {
           Math.round(selectedFish.difficulty * environment.difficultyMultiplier),
         );
       }
-      // 许愿签由本次咬钩无条件消耗；只有普通至传说的非首领鱼会被强制为异色。
+      // 许愿签由本次咬钩无条件消耗；只有垃圾至传说的非首领鱼会被强制为异色。
       // 抛竿阶段先原子占用许愿，使其与其他Buff一起进入本次会话快照。
       let koiWishConsumed = false;
       try {
@@ -2316,7 +2316,7 @@ export default class Fishing extends plugin {
       effects.push({
         icon: "🎏",
         name: "锦鲤许愿",
-        detail: `下一次咬钩消耗，普通至传说必定异色 · 剩余 ${formatEffectTime(koiWishTtl)}`,
+        detail: `下一次咬钩消耗，非宝藏/噩梦/鱼雷/首领必定异色 · 剩余 ${formatEffectTime(koiWishTtl)}`,
         tone: "positive",
       });
     }

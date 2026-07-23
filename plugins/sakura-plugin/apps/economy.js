@@ -779,7 +779,7 @@ export default class Economy extends plugin {
         await e.reply(
           `🎏 你将【${item.name}】系在了樱枝上……\n` +
           `🌸 ${Math.round(duration / 60)}分钟内，下一次咬钩` +
-          `若是普通至传说鱼类，则必定为异色！`,
+          `只要不是宝藏、噩梦、鱼雷或首领，则必定为异色！`,
         );
         return true;
       }
