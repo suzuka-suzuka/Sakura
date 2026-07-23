@@ -744,8 +744,7 @@ export default class Economy extends plugin {
           result.deepPressureLayers > 0 ? `${result.deepPressureLayers} 层深压` : "",
         ].filter(Boolean).join("、");
         await e.reply(
-          `💧 使用了【${item.name}】！\n☀️ 已彻底洗净：${cleared}。\n` +
-          `🎣 鱼竿上由骸骨鲨留下的暗伤不受影响。`,
+          `💧 使用了【${item.name}】！\n☀️ 已彻底洗净：${cleared}。\n` 
         );
         return true;
       }
@@ -779,7 +778,7 @@ export default class Economy extends plugin {
         }
         await e.reply(
           `🎏 你将【${item.name}】系在了樱枝上……\n` +
-          `🌸 ${Math.round(duration / 60)}分钟内，下一次咬钩必定消耗许愿；` +
+          `🌸 ${Math.round(duration / 60)}分钟内，下一次咬钩` +
           `若是普通至传说鱼类，则必定为异色！`,
         );
         return true;
