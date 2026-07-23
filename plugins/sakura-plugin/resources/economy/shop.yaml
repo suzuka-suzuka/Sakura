@@ -6,7 +6,7 @@ categories:
     items:
       - id: rod_bamboo
         name: 竹竿
-        price: 100
+        price: 160
         type: equipment
         control: 10
         durability: 10
@@ -14,7 +14,7 @@ categories:
 
       - id: rod_fiberglass
         name: 玻璃纤维竿
-        price: 300
+        price: 440
         type: equipment
         control: 60
         durability: 60
@@ -22,34 +22,34 @@ categories:
 
       - id: rod_carbon
         name: 碳素鱼竿
-        price: 900
+        price: 1100
         type: equipment
-        control: 100
+        control: 110
         durability: 100
         description: 轻盈强韧的碳素纤维打造，能应对大多数普通鱼类。
 
       - id: rod_titanium
         name: 钛合金鱼竿
-        price: 2200
+        price: 2620
         type: equipment
-        control: 150
-        durability: 150
+        control: 160
+        durability: 160
         description: 泛着冷光的钛合金鱼竿，即使是凶猛的大鱼也能驾驭。
 
       - id: rod_legendary
         name: 传说之竿
-        price: 4400
+        price: 4800
         type: equipment
-        control: 200
-        durability: 200
+        control: 190
+        durability: 190
         description: 传说中的神器，手感无可挑剔，能征服绝大多数鱼类！
 
       - id: rod_astral
         name: 星穹御灵竿
-        price: 22000
+        price: 24000
         type: equipment
-        control: 200
-        durability: 1000
+        control: 190
+        durability: 950
         description: 以星辉秘境坠落的星核锻成，竿身流转着星河。
 
   lines:
@@ -59,37 +59,37 @@ categories:
     items:
       - id: line_basic
         name: 尼龙线
-        price: 10
+        price: 16
         type: equipment
         capacity: 5
         description: 最基础的尼龙鱼线，只能承受较小的拉力。
 
       - id: line_braided
         name: 编织线
-        price: 30
+        price: 44
         type: equipment
-        capacity: 24
+        capacity: 25
         description: 多股材料紧密编织，承重相较普通鱼线有所提升。
 
       - id: line_fluorocarbon
         name: 碳氟线
-        price: 90
+        price: 110
         type: equipment
         capacity: 55
         description: 几乎隐形的碳氟材质鱼线，拥有不错的承重能力。
 
       - id: line_steel
         name: 钢丝线
-        price: 220
+        price: 262
         type: equipment
         capacity: 115
         description: 不锈钢打造的超强鱼线，坚固无比，能应对大部分体型巨大的鱼类。
 
       - id: line_mythril
         name: 秘银线
-        price: 440
+        price: 480
         type: equipment
-        capacity: 215
+        capacity: 210
         description: 传说中的秘银材质，承重极强，但仍需谨慎使用。
 
   baits:
@@ -99,35 +99,35 @@ categories:
     items:
       - id: bait_worm
         name: 蚯蚓
-        price: 5
+        price: 8
         type: consumable
         quality: 1
         description: 刚挖出来的鲜活蚯蚓，新手钓鱼的入门之选。
 
       - id: bait_shrimp
         name: 鲜虾饵
-        price: 15
+        price: 22
         type: consumable
         quality: 2
         description: 鲜嫩多汁的虾肉，散发着诱人的气息。
 
       - id: bait_premium
         name: 秘制鱼饵
-        price: 45
+        price: 55
         type: consumable
         quality: 3
         description: 秘方调制的鱼饵，据说效果比普通鱼饵好得多。
 
       - id: bait_magic
         name: 魔法鱼饵
-        price: 110
+        price: 131
         type: consumable
         quality: 4
         description: 注入了魔法的鱼饵，散发着神秘的魔力光芒。
 
       - id: bait_divine
         name: 神之诱饵
-        price: 220
+        price: 240
         type: consumable
         quality: 5
         description: 传说中的神之诱饵，没有鱼能抗拒它的诱惑！
