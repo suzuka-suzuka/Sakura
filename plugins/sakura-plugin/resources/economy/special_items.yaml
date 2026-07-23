@@ -38,13 +38,13 @@ categories:
       # 首领鱼饵沿用 shop.yaml 中的 bait_boss，由所有钓点宝箱共同掉落。
 
       # ===== 钓点专属道具（均持续35分钟） =====
-      - id: item_card_double_exp
-        name: 双倍经验卡
-        icon: 📚
-        type: buff
+      - id: item_sign_koi
+        name: 锦鲤许愿签
+        icon: 🎏
+        type: consumable
         duration: 2100
-        description: 樱花池塘专属道具。使用后35分钟内钓鱼经验翻倍。
-        activation_message: "📚 双倍经验卡已激活！\n✨ 接下来35分钟内钓鱼经验 ×2！"
+        instant_effect: koi_wish
+        description: 樱花池塘专属道具。使用后35分钟内，下一次普通咬钩必定异色。
 
       - id: item_charm_river
         name: 河神垂青
@@ -141,7 +141,7 @@ categories:
       - id: chest_pond
         name: 花瓣木箱
         type: chest
-        description: 樱花池塘专属宝箱，可开出通用道具、双倍经验卡与百年樱珀。
+        description: 樱花池塘专属宝箱，可开出通用道具、锦鲤许愿签与百年樱珀。
 
       - id: chest_river
         name: 柳木匣

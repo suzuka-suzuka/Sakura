@@ -10,7 +10,7 @@ chests:
       - { weight: 8, type: item, item_id: item_holy_water, count: 1 }
       - { weight: 8, type: item, item_id: item_sand_time, count: 1 }
       - { weight: 8, type: item, item_id: bait_boss, count: 1 }
-      - { weight: 15, type: item, item_id: item_card_double_exp, count: 1 }
+      - { weight: 15, type: item, item_id: item_sign_koi, count: 1 }
       - { weight: 20, type: random_bait, count: 3 }
       - { weight: 10, type: item, item_id: torpedo, count: 2 }
       - { weight: 15, type: item, item_id: treasure_pond_sakura_amber, count: 1 }

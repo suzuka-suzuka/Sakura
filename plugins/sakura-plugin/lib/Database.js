@@ -3,9 +3,13 @@ import path from 'path';
 import fs from 'fs';
 import { plugindata } from './path.js';
 
-const REMOVED_FISHING_ITEMS = Object.freeze([
-  'item_sign_koi',
+const KOI_WISH_ITEM_ID = 'item_sign_koi';
+const LEGACY_KOI_WISH_INVENTORY_ITEMS = Object.freeze([
+  'item_card_double_exp',
+  '双倍经验卡',
   '锦鲤许愿签',
+]);
+const REMOVED_FISHING_ITEMS = Object.freeze([
   'item_charm_starlight',
   '星光护符',
   'item_card_star_double',
@@ -14,6 +18,13 @@ const REMOVED_FISHING_ITEMS = Object.freeze([
   '利维坦的逆鳞',
   'item_snack_petal',
   '花瓣小鱼干',
+]);
+const RETIRED_FISHING_BUFFS = Object.freeze([
+  ...new Set([
+    ...REMOVED_FISHING_ITEMS,
+    ...LEGACY_KOI_WISH_INVENTORY_ITEMS,
+    KOI_WISH_ITEM_ID,
+  ]),
 ]);
 
 class DB {
@@ -298,16 +309,51 @@ class DB {
       ON pond_torpedoes (group_id, location);
     `);
 
-    // 新道具体系不兼容已删除物品：启动迁移时直接从所有旧背包和旧Buff表清掉。
+    // 双倍经验卡已替换为锦鲤许愿签：初始化时按玩家等量合并，迁移后删除旧ID。
+    // 事务保证进程若在迁移中途退出，下次启动不会把同一批旧卡重复折算。
+    const legacyKoiWishPlaceholders = LEGACY_KOI_WISH_INVENTORY_ITEMS
+      .map(() => '?')
+      .join(', ');
+    const migrateKoiWishInventory = this.db.transaction(() => {
+      const legacyRows = this.db.prepare(`
+        SELECT
+          group_id,
+          user_id,
+          SUM(CASE WHEN count > 0 THEN count ELSE 0 END) AS count
+        FROM inventory
+        WHERE item_id IN (${legacyKoiWishPlaceholders})
+        GROUP BY group_id, user_id
+      `).all(...LEGACY_KOI_WISH_INVENTORY_ITEMS);
+      const mergeKoiWish = this.db.prepare(`
+        INSERT INTO inventory (group_id, user_id, item_id, count)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(group_id, user_id, item_id)
+        DO UPDATE SET count = COALESCE(inventory.count, 0) + excluded.count
+      `);
+      for (const row of legacyRows) {
+        const count = Math.max(0, Math.floor(Number(row.count) || 0));
+        if (count > 0) {
+          mergeKoiWish.run(row.group_id, row.user_id, KOI_WISH_ITEM_ID, count);
+        }
+      }
+      this.db.prepare(`
+        DELETE FROM inventory
+        WHERE item_id IN (${legacyKoiWishPlaceholders})
+      `).run(...LEGACY_KOI_WISH_INVENTORY_ITEMS);
+    });
+    migrateKoiWishInventory();
+
+    // 新道具体系不兼容的其余旧物品直接清理；旧版限时Buff也不再保留。
     const removedItemPlaceholders = REMOVED_FISHING_ITEMS.map(() => '?').join(', ');
     this.db.prepare(`
       DELETE FROM inventory
       WHERE item_id IN (${removedItemPlaceholders})
     `).run(...REMOVED_FISHING_ITEMS);
+    const retiredBuffPlaceholders = RETIRED_FISHING_BUFFS.map(() => '?').join(', ');
     this.db.prepare(`
       DELETE FROM user_buffs
-      WHERE buff_id IN (${removedItemPlaceholders})
-    `).run(...REMOVED_FISHING_ITEMS);
+      WHERE buff_id IN (${retiredBuffPlaceholders})
+    `).run(...RETIRED_FISHING_BUFFS);
   }
 
   prepare(sql) {

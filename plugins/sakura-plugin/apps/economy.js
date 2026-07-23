@@ -750,6 +750,41 @@ export default class Economy extends plugin {
         return true;
       }
 
+      case "koi_wish": {
+        const koiWishKey = `sakura:fishing:koi-wish:${e.group_id}:${userId}`;
+        let existingWish;
+        try {
+          existingWish = await redis.get(koiWishKey);
+        } catch (err) {
+          logger.error(`[经济系统] 读取锦鲤许愿失败: ${err.stack || err}`);
+          await e.reply("暂时听不清锦鲤的回应，道具没有消耗，请稍后再试。", 10);
+          return true;
+        }
+        if (existingWish) {
+          await e.reply("🎏 已有一枚锦鲤许愿签在等待下一次咬钩~", 10);
+          return true;
+        }
+        if (!inventoryManager.removeItem(item.id, 1)) {
+          await e.reply(`你没有【${item.name}】，无法使用~`, 10);
+          return true;
+        }
+        const duration = item.duration || FISHING_BENEFIT_DURATION_SECONDS;
+        try {
+          await redis.set(koiWishKey, String(Date.now()), "EX", duration);
+        } catch (err) {
+          await inventoryManager.forceAddItem(item.id, 1);
+          logger.error(`[经济系统] 写入锦鲤许愿失败，已返还物品: ${err.stack || err}`);
+          await e.reply("许愿失败，物品已经返还，请稍后重试。", 10);
+          return true;
+        }
+        await e.reply(
+          `🎏 你将【${item.name}】系在了樱枝上……\n` +
+          `🌸 ${Math.round(duration / 60)}分钟内，下一次咬钩必定消耗许愿；` +
+          `若是普通至传说鱼类，则必定为异色！`,
+        );
+        return true;
+      }
+
       case "star_wish": {
         const rarity = String(argument || "").trim();
         const availableRarities = Object.keys(RARITY_CONFIG);

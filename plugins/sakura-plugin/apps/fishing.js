@@ -57,12 +57,12 @@ import {
   isPerfectCatch,
   resolveBossAttack,
   resolveBossLineDamage,
+  resolveKoiWishShiny,
   resolveNightmareRarityAfflictions,
   rollFishExp,
   rollFishingBiteWaitMs,
   rollBossPlayerDamage,
   rollNormalTugPressure,
-  rollShiny,
   selectNextFishFightState,
   selectBossFromData,
   selectFishFromData,
@@ -660,7 +660,6 @@ export default class Fishing extends plugin {
       "item_bait_monster",
       "item_charm_river",
       "item_card_double_coin",
-      "item_card_double_exp",
       "item_sand_time",
     ];
     let values;
@@ -672,14 +671,13 @@ export default class Fishing extends plugin {
       logger.warn(`[钓鱼] 读取Buff状态失败: ${err.message}`);
       values = buffIds.map(() => null);
     }
-    const [lucky, fog, monster, river, doubleCoin, doubleExp, timeSand] = values.map(Boolean);
+    const [lucky, fog, monster, river, doubleCoin, timeSand] = values.map(Boolean);
     return {
       hasLucky: lucky,
       hasFogLamp: fog,
       hasMonsterBait: monster,
       hasRiverBless: river,
       hasDoubleCoin: doubleCoin,
-      hasDoubleExp: doubleExp,
       hasTimeSand: timeSand,
     };
   }
@@ -861,11 +859,25 @@ export default class Fishing extends plugin {
           Math.round(selectedFish.difficulty * environment.difficultyMultiplier),
         );
       }
-      // 异色判定在选鱼时完成并随会话流转；溜掉即失去，咬钩提示会预告虹光。
-      // selectedFish 是浅拷贝副本，直接抬高难度不会污染 fish.json，且下游搏斗判定与展示统一读它。
-      selectedFish.isShiny = rollShiny(selectedFish);
+      // 许愿签由本次咬钩无条件消耗；只有普通至传说的非首领鱼会被强制为异色。
+      // 抛竿阶段先原子占用许愿，使其与其他Buff一起进入本次会话快照。
+      let koiWishConsumed = false;
+      try {
+        koiWishConsumed = (
+          await redis.del(`sakura:fishing:koi-wish:${groupId}:${userId}`)
+        ) > 0;
+      } catch (err) {
+        logger.warn(`[钓鱼] 消耗锦鲤许愿失败，本次按未许愿处理: ${err.message}`);
+      }
+      state.koiWishConsumed = koiWishConsumed;
+      const shinyResult = resolveKoiWishShiny(selectedFish, koiWishConsumed);
+      selectedFish.isShiny = shinyResult.isShiny;
+      state.koiWishApplied = shinyResult.koiWishApplied;
       if (selectedFish.isShiny) {
-        selectedFish.difficulty = Math.round(selectedFish.difficulty * SHINY_DIFFICULTY_MULTIPLIER);
+        // selectedFish 是本次会话的浅拷贝，抬高难度不会污染 fish.json。
+        selectedFish.difficulty = Math.round(
+          selectedFish.difficulty * SHINY_DIFFICULTY_MULTIPLIER,
+        );
       }
       const fishingLevel = fishingManager.getUserFishingLevel(userId);
       const waitTime = rollFishingBiteWaitMs(fishingLevel);
@@ -884,9 +896,9 @@ export default class Fishing extends plugin {
         buffFlags.hasMonsterBait
           ? "\n🩸 怪物诱饵生效中"
           : "",
+        koiWishConsumed ? "\n🎏 锦鲤许愿签生效中。" : "",
         buffFlags.hasRiverBless ? "\n🌊 河神注视着你的鱼线。" : "",
         buffFlags.hasDoubleCoin ? "\n💰 双倍金币卡生效中。" : "",
-        buffFlags.hasDoubleExp ? "\n📚 双倍经验卡生效中。" : "",
         buffFlags.hasTimeSand ? "\n⏳ 时之沙生效中" : "",
         nightmareStatus.brideNightmareMultiplier > 1
           ? `\n💍 ${brideMarkLayers} 层花嫁印记生效中，噩梦抽取权重变为 ${nightmareStatus.brideNightmareMultiplier} 倍。`
@@ -912,7 +924,6 @@ export default class Fishing extends plugin {
         hasMonsterBait: buffFlags.hasMonsterBait,
         hasRiverBless: buffFlags.hasRiverBless,
         hasDoubleCoin: buffFlags.hasDoubleCoin,
-        hasDoubleExp: buffFlags.hasDoubleExp,
         hasTimeSand: buffFlags.hasTimeSand,
         deepPressureActive: Boolean(staminaResult.deepPressureConsumed),
         locationId,
@@ -1028,6 +1039,19 @@ export default class Fishing extends plugin {
           state.wishConsumed = false;
         } catch (refundErr) {
           logger.error(`[钓鱼] 启动失败后退还星愿异常: ${refundErr.stack || refundErr}`);
+        }
+      }
+      if (state.koiWishConsumed) {
+        try {
+          await redis.set(
+            `sakura:fishing:koi-wish:${groupId}:${userId}`,
+            String(Date.now()),
+            "EX",
+            FISHING_BENEFIT_DURATION_SECONDS,
+          );
+          state.koiWishConsumed = false;
+        } catch (refundErr) {
+          logger.error(`[钓鱼] 启动失败后退还锦鲤许愿异常: ${refundErr.stack || refundErr}`);
         }
       }
       state.cleanup();
@@ -1795,7 +1819,6 @@ export default class Fishing extends plugin {
       : Math.max(1, Math.round(
         rollFishExp(fish.rarity) *
         (isPerfect ? PERFECT_EXP_MULTIPLIER : 1) *
-        (state.hasDoubleExp ? 2 : 1) *
         (state.hasMonsterBait ? 3 : 1) *
         (isShiny ? SHINY_EXP_MULTIPLIER : 1) *
         (state.environment?.expMultiplier || 1),
@@ -2282,11 +2305,21 @@ export default class Fishing extends plugin {
       ? { name: "雾（雾灯）", emoji: WEATHER_CONFIG["雾"].emoji }
       : weather;
 
+    const koiWishKey = `sakura:fishing:koi-wish:${groupId}:${userId}`;
     const wishKey = `sakura:fishing:wish:${groupId}:${userId}`;
-    const [wishTtl, wishRarity] = await Promise.all([
+    const [koiWishTtl, wishTtl, wishRarity] = await Promise.all([
+      redis.ttl(koiWishKey).catch(() => 0),
       redis.ttl(wishKey).catch(() => 0),
       redis.get(wishKey).catch(() => null),
     ]);
+    if (koiWishTtl > 0) {
+      effects.push({
+        icon: "🎏",
+        name: "锦鲤许愿",
+        detail: `下一次咬钩消耗，普通至传说必定异色 · 剩余 ${formatEffectTime(koiWishTtl)}`,
+        tone: "positive",
+      });
+    }
     if (wishTtl > 0 && RARITY_CONFIG[wishRarity]) {
       effects.push({
         icon: "🌠",
