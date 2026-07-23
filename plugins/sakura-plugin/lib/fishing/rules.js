@@ -133,6 +133,15 @@ export function getFishingEnvironmentModifiers(
   };
 }
 
+export function calculateEffectiveFishWeight(actualWeight, multiplier = 1) {
+  const weight = Math.max(0, Number(actualWeight) || 0);
+  const numericMultiplier = Number(multiplier);
+  const safeMultiplier = Number.isFinite(numericMultiplier)
+    ? Math.max(0, numericMultiplier)
+    : 1;
+  return Math.round(weight * safeMultiplier * 100) / 100;
+}
+
 export function isBossFish(fish) {
   return fish?.is_boss === true;
 }
@@ -166,7 +175,12 @@ export function selectBossFromData(
   const actualWeight = Math.round(
     (minWeight + (maxWeight - minWeight) * weightRoll) * 100,
   ) / 100;
-  return { ...selected, actualWeight, isBoss: true };
+  return {
+    ...selected,
+    actualWeight,
+    effectiveWeight: actualWeight,
+    isBoss: true,
+  };
 }
 
 export function calculateBossLineDurability(lineCapacity) {
@@ -918,6 +932,7 @@ export function selectFishFromData(
   return {
     ...selected,
     actualWeight,
+    effectiveWeight: actualWeight,
     isTreasure: selected.rarity === "宝藏",
   };
 }

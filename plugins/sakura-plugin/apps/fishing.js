@@ -39,6 +39,7 @@ import {
   calculateBossLineDurability,
   calculateBossCatchReward,
   calculateCorpseFisherRodDamage,
+  calculateEffectiveFishWeight,
   calculateForcePullSuccessRate,
   calculateLegacyFishPrice,
   calculateNormalTugActionEffects,
@@ -226,6 +227,7 @@ async function selectRandomFish(
           rarity: "危险",
           isTorpedo: true,
           actualWeight: 0,
+          effectiveWeight: 0,
           weight: [0, 0],
           base_price: 0,
           torpedoLocation: location,
@@ -845,11 +847,15 @@ export default class Fishing extends plugin {
             zeroWeightRarities: buffFlags.hasFogLamp ? ["垃圾", "噩梦"] : [],
           },
         );
-      // 首领保持固定的传说级基准，天气不改变其重量与困难度。
+      // 真实鱼重用于展示、出售和记录；天气只把它换算为本竿承受的有效拉力。
+      // 首领保持固定的传说级基准，天气不改变其有效拉力与困难度。
+      selectedFish.effectiveWeight = calculateEffectiveFishWeight(
+        selectedFish.actualWeight,
+        !selectedFish.isTorpedo && !isBossFish(selectedFish)
+          ? environment.weightMultiplier
+          : 1,
+      );
       if (!selectedFish.isTorpedo && !isBossFish(selectedFish)) {
-        selectedFish.actualWeight = Math.round(
-          selectedFish.actualWeight * environment.weightMultiplier * 100,
-        ) / 100;
         selectedFish.difficulty = Math.max(
           0,
           Math.round(selectedFish.difficulty * environment.difficultyMultiplier),
@@ -938,7 +944,7 @@ export default class Fishing extends plugin {
         }
 
         const fish = currentState.fish;
-        const fishWeight = fish.actualWeight;
+        const fishWeight = fish.effectiveWeight;
         const lineBonus = fishingManager.getLineBonusFromMastery(userId, rodConfig.id);
         const lineCapacity = lineConfig.capacity + lineBonus;
 
@@ -963,7 +969,7 @@ export default class Fishing extends plugin {
           await e.reply([
             shinyHint,
             `🌊 浮漂猛地沉下去了！\n`,
-            `😨 这条鱼太大了！鱼线可能撑不住...\n`,
+            `😨 这股有效拉力太大了！鱼线可能撑不住...\n`,
             `📝 回复「收竿」拼了，回复「放弃」保平安`,
           ], false, true);
         } else {
@@ -1137,7 +1143,7 @@ export default class Fishing extends plugin {
       const effectiveControl = getEffectiveRodControl(fishingManager, userId, state, rodMastery);
       const qualifiesForPerfect = !isBossFish(fish) && isPerfectCatch({
         reelDelayMs: state.biteTime ? Date.now() - state.biteTime : Number.NaN,
-        fishWeight: fish.actualWeight,
+        fishWeight: fish.effectiveWeight,
         fishDifficulty,
         lineCapacity,
         effectiveControl,
@@ -1157,7 +1163,7 @@ export default class Fishing extends plugin {
       }
 
       if (state.isOverweight) {
-        const fishWeight = fish.actualWeight;
+        const fishWeight = fish.effectiveWeight;
 
         if (fishWeight > lineCapacity * 2) {
           const lineBreak = this.breakLineWithBlessing(state, fishingManager, userId, lineConfig);
@@ -1168,7 +1174,7 @@ export default class Fishing extends plugin {
 
           await e.reply([
             `🌊 巨大的力量传来！\n`,
-            `😱 这到底是个什么庞然大物！？(${fishWeight})\n`,
+            `😱 有效拉力竟然达到了 ${fishWeight}！\n`,
             lineBreak.saved
               ? `💥 鱼线发出濒死的悲鸣，却奇迹般撑住了！\n🌊 河神的祝福护住了【${lineConfig.name}】，但鱼还是跑了...${damageResult.msg}`
               : `💥 啪！鱼线瞬间崩断了！\n🧵 【${lineConfig.name}】牺牲了...${damageResult.msg}`,
@@ -1190,7 +1196,7 @@ export default class Fishing extends plugin {
           await e.reply([
             `💥 崩！\n`,
             `😫 还是没能坚持住，鱼脱钩了...\n`,
-            `👋 鱼大摇大摆地游走了(${fishWeight})\n`,
+            `👋 鱼大摇大摆地游走了（鱼重 ${fish.actualWeight}，有效拉力 ${fishWeight}）\n`,
             lineBreak.saved
               ? `🌊 河神的祝福护住了【${lineConfig.name}】！${damageResult.msg}`
               : `🧵 失去了【${lineConfig.name}】${damageResult.msg}`,

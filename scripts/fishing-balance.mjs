@@ -13,6 +13,7 @@ import {
   NORMAL_TUG_SUCCESS_MULTIPLIER,
   WEATHER_CONFIG,
   calculateBossLineDurability,
+  calculateEffectiveFishWeight,
   calculateLegacyFishPrice,
   calculateNormalTugActionEffects,
   getBossFightTimeoutMs,
@@ -600,10 +601,12 @@ export function getFishCoinExpectation(
   let expectedRevenue = 0;
 
   for (const sample of getRoundedWeightSamples(fish.weight)) {
-    const actualWeight = Math.round(
-      sample.weight * weather.weightMultiplier * 100,
-    ) / 100;
-    const weightPass = linePassAtWeight(actualWeight, equipment.capacity);
+    const actualWeight = sample.weight;
+    const effectiveWeight = calculateEffectiveFishWeight(
+      actualWeight,
+      weather.weightMultiplier,
+    );
+    const weightPass = linePassAtWeight(effectiveWeight, equipment.capacity);
     const caughtSampleProbability = (
       sample.probability * weightPass * difficultyPass
     );
