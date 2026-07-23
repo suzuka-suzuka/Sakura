@@ -11,6 +11,8 @@ Sakura 是一个基于 Node.js 的 QQ 机器人框架，支持 OneBot 正向/反
 - Redis 状态：会话、上下文、定时任务、插件状态等依赖 Redis。
 - PM2 运行：提供生产环境启动、停止和日志脚本。
 
+内置综合功能插件的配置、指令与玩法说明见 [Sakura Plugin README](plugins/sakura-plugin/README.md)。
+
 ## 环境要求
 
 - Node.js 20 或更高版本，建议使用当前 LTS。
