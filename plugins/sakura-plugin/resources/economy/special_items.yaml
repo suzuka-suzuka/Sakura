@@ -11,7 +11,7 @@ categories:
         type: buff
         duration: 2100
         description: 使用后35分钟内，普通钓鱼必能起竿。
-        activation_message: "🍀 好运护符已激活！\n🎣 接下来35分钟内，普通渔获将跳过重量与困难度判断！"
+        activation_message: "🍀 好运护符已激活！\n🎣 接下来35分钟内，普通渔获鱼必定上钩！"
 
       - id: item_toolkit_repair
         name: 修理工具箱
