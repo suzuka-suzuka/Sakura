@@ -51,8 +51,8 @@ categories:
         icon: 🌊
         type: buff
         duration: 2100
-        description: 青柳河湾专属道具。使用后35分钟内鱼线永不断裂，成功抵挡有额外奖励！
-        activation_message: "🌊 河神垂青！\n🧵 接下来35分钟内鱼线永不断裂，成功抵挡有额外奖励！"
+        description: 青柳河湾专属道具。使用后35分钟内鱼线永不断裂，成功抵挡获得额外奖励！
+        activation_message: "🌊 河神垂青！\n🧵 接下来35分钟内鱼线永不断裂，成功抵挡获得额外奖励！"
 
       - id: item_lamp_fog
         name: 雾灯
