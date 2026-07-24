@@ -65,6 +65,12 @@ export const BOSS_MECHANIC_TYPES = Object.freeze([
   "regenerate",
 ]);
 export const LOCAL_NIGHTMARE_CHANCE = 0.4;
+// 深压回响以「层」为单位持久累加：每层把鱼竿实际控制力再乘一次 0.8，只减不增。
+export const DEEP_PRESSURE_CONTROL_FACTOR = 0.8;
+export function deepPressureMultiplierFromLayers(layers) {
+  const safeLayers = Math.max(0, Math.floor(Number(layers) || 0));
+  return DEEP_PRESSURE_CONTROL_FACTOR ** safeLayers;
+}
 export const NIGHTMARE_EFFECT_TYPES = Object.freeze([
   "rod_damage",
   "rod_control_loss",

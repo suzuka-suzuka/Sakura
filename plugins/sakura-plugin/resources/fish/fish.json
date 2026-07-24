@@ -2519,7 +2519,7 @@
     "difficulty": 85,
     "nightmare_effect": {
       "type": "deep_pressure",
-      "multiplier": 0.8
+      "layers": 1
     },
     "weight": [
       38,

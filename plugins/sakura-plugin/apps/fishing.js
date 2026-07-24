@@ -962,7 +962,7 @@ export default class Fishing extends plugin {
         buffFlags.hasDoubleCoin ? "\n💰 双倍金币卡生效中" : "",
         buffFlags.hasTimeSand ? "\n⏳ 时之沙生效中" : "",
         nightmareStatus.brideNightmareMultiplier > 1
-          ? `\n💍 ${brideMarkLayers} 层花嫁印记生效中，噩梦抽取权重变为 ${nightmareStatus.brideNightmareMultiplier} 倍。`
+          ? `\n💍 ${brideMarkLayers} 层花嫁印记生效中`
           : "",
         // 诅咒逐竿累加：报当前层数与对噩梦权重的加成，压迫感来自越钓越深。
         curseActive
@@ -977,8 +977,8 @@ export default class Fishing extends plugin {
         nightmareStatus.ghostMarked
           ? `\n🩸 亡者抽成印记生效中，垂钓所得 -${Math.round(GHOST_DEBT_MARK_PENALTY_RATE * 100)}%`
           : "",
-        nightmareStatus.deepPressureMultiplier < 1
-          ? `\n🔔 深压回响生效中，鱼竿实际控制力 ×${Number(nightmareStatus.deepPressureMultiplier.toFixed(3))}`
+        nightmareStatus.deepPressureLayers > 0
+          ? `\n🔔 ${nightmareStatus.deepPressureLayers} 层深压回响生效中`
           : "",
         wishRarity ? `\n🌠 星愿闪耀！这一竿将迎来【${wishRarity}】品质！` : "",
         isBossBait ? `\n👑 首领鱼饵的气息正在水中扩散，当地首领正向鱼钩逼近……` : "",
@@ -1842,14 +1842,9 @@ export default class Fishing extends plugin {
       }
 
       case "deep_pressure": {
-        const factor = (() => {
-          const numeric = Number(effect.multiplier);
-          if (!Number.isFinite(numeric) || numeric <= 0 || numeric >= 1) return 0.8;
-          return numeric;
-        })();
-        const result = fishingManager.applyDeepPressureMultiplier(e.user_id, factor);
-        message = `🔔 潜水钟敲响，深压连乘 ×${factor}，` +
-          `鱼竿实际控制力已降为原本的 ×${Number(result.total.toFixed(3))}！` 
+        const layers = normalizePenalty(effect.layers || 1);
+        const result = fishingManager.addDeepPressureLayers(e.user_id, layers);
+        message = `🔔 潜水钟敲响，施加 ${result.added} 层深压，当前 ${result.total} 层！`;
         break;
       }
 
@@ -1993,7 +1988,12 @@ export default class Fishing extends plugin {
           `📊 稀有度：${rarity.color}${fish.rarity}${weatherTag}\n`,
           lineResultMsg,
           professionBonusMsg,
-          punishmentMsg + "\n" + formatGhostDebtSettlement(settleResult) +
+          // 高利贷结算段自带尾换行、formatCatchTail 自带首换行，若无结算段直接相接会多出空行。
+          punishmentMsg +
+            (() => {
+              const ghostSettle = formatGhostDebtSettlement(settleResult).replace(/\n+$/, "");
+              return ghostSettle ? "\n" + ghostSettle : "";
+            })() +
             formatCatchTail(expGain, isPerfect, settleResult, dexProgress),
         ]);
         return true;
@@ -2471,11 +2471,11 @@ export default class Fishing extends plugin {
         tone: "danger",
       });
     }
-    if (nightmareStatus.deepPressureMultiplier < 1) {
+    if (nightmareStatus.deepPressureLayers > 0) {
       effects.push({
         icon: "🔔",
         name: "深压回响",
-        detail: `鱼竿实际控制力 ×${Number(nightmareStatus.deepPressureMultiplier.toFixed(3))} · `,
+        detail: `${nightmareStatus.deepPressureLayers} 层 · 鱼竿实际控制力 ×${Number(nightmareStatus.deepPressureMultiplier.toFixed(3))}`,
         tone: "warning",
       });
     }

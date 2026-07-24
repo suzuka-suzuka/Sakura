@@ -699,8 +699,8 @@ export default class Economy extends plugin {
         }
         const durability = fishingManager.getRodDurabilityInfo(userId, rodId);
         const rodStats = fishingManager.getRodStats(userId, rodId);
-        const deepPressureMultiplier = fishingManager.getDeepPressureMultiplier(userId);
-        const hasDeepPressure = deepPressureMultiplier < 1;
+        const deepPressureLayers = fishingManager.getDeepPressureLayers(userId);
+        const hasDeepPressure = deepPressureLayers > 0;
         if (durability.damage <= 0 && rodStats.controlLoss <= 0 && !hasDeepPressure) {
           await e.reply(
             `🔧 【${rodConfig.name}】耐久完好，没有暗伤，也没有深压回响需要修复~`,
@@ -722,7 +722,7 @@ export default class Economy extends plugin {
             ? "骸骨鲨留下的暗伤已修复"
             : "",
           deepPressureCleared.cleared
-            ? `深压回响已解除（控制力 ×${Number(deepPressureCleared.before.toFixed(3))} → ×1）`
+            ? `深压回响 ${deepPressureCleared.before} 层已解除（控制力 ×${Number(deepPressureCleared.beforeMultiplier.toFixed(3))} → ×1）`
             : "",
         ].filter(Boolean).join("，");
         await e.reply(
@@ -751,7 +751,7 @@ export default class Economy extends plugin {
           result.ghostDebt > 0 ? `${result.ghostDebt} 樱花币亡者高利贷` : "",
           result.ghostMarked ? "亡者抽成印记" : "",
           result.deepPressureMarked
-            ? `深压回响（控制力 ×${Number(result.deepPressureMultiplier.toFixed(3))}）`
+            ? `${result.deepPressureLayers} 层深压回响（控制力 ×${Number(result.deepPressureMultiplier.toFixed(3))}）`
             : "",
         ].filter(Boolean).join("、");
         await e.reply(

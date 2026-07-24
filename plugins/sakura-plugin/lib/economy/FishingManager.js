@@ -12,6 +12,7 @@ import {
   getFishingLevelByExp,
   getFishingStaminaMax,
   getNightmareCurseDisplay,
+  deepPressureMultiplierFromLayers,
   normalizeFishingLocation,
   TORPEDO_PRICE_BOOST_MULTIPLIER,
 } from "../fishing/rules.js";
@@ -615,17 +616,9 @@ export default class FishingManager {
       ),
       ghostDebt: Math.max(0, Math.floor(Number(userData.ghost_debt) || 0)),
       ghostMarked: Boolean(userData.ghost_debt_mark),
-      deepPressureMultiplier: this._normalizeDeepPressureMultiplier(
-        userData.deep_pressure_multiplier,
-      ),
+      deepPressureLayers: Math.max(0, Math.floor(Number(userData.deep_pressure_layers) || 0)),
+      deepPressureMultiplier: deepPressureMultiplierFromLayers(userData.deep_pressure_layers),
     };
-  }
-
-  // 深压连乘只降不升，钳制在 (0, 1]；空值按无减益的 1 处理。
-  _normalizeDeepPressureMultiplier(value) {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric) || numeric <= 0) return 1;
-    return Math.min(1, numeric);
   }
 
   applyBrideNightmareMultiplier(userId, multiplier = 2) {
@@ -666,54 +659,60 @@ export default class FishingManager {
     return { added: Math.max(0, total - before), total };
   }
 
+  getDeepPressureLayers(userId) {
+    return this.getNightmareStatus(userId).deepPressureLayers;
+  }
+
   getDeepPressureMultiplier(userId) {
     return this.getNightmareStatus(userId).deepPressureMultiplier;
   }
 
-  // 深压回响：每次命中在已有减益上再连乘一次（默认 ×0.8），持久生效直到净化。
-  applyDeepPressureMultiplier(userId, factor = 0.8) {
+  // 深压回响：每次命中累加若干层（默认 1 层），持久生效、只减不增，直到净化或修理工具箱清除。
+  // 每层把鱼竿实际控制力再乘一次 0.8，倍率由层数派生。
+  addDeepPressureLayers(userId, layers = 1) {
     userId = String(userId);
-    const safeFactor = (() => {
-      const numeric = Number(factor);
-      if (!Number.isFinite(numeric) || numeric <= 0) return 0.8;
-      return Math.min(1, numeric);
-    })();
+    const safeLayers = Math.max(0, Math.floor(Number(layers) || 0));
     this._ensureUser(userId);
-    const before = this.getDeepPressureMultiplier(userId);
+    const before = this.getDeepPressureLayers(userId);
+    if (safeLayers <= 0) {
+      return { added: 0, total: before, multiplier: deepPressureMultiplierFromLayers(before) };
+    }
     const row = db.prepare(`
         UPDATE fishing_stats
-        SET deep_pressure_multiplier = MIN(
-          1,
-          CASE
-            WHEN COALESCE(deep_pressure_multiplier, 1) <= 0 THEN 1
-            ELSE COALESCE(deep_pressure_multiplier, 1)
-          END
-        ) * ?
+        SET deep_pressure_layers = COALESCE(deep_pressure_layers, 0) + ?
         WHERE group_id = ? AND user_id = ?
-        RETURNING deep_pressure_multiplier
-    `).get(safeFactor, this.groupId, userId);
-    const total = this._normalizeDeepPressureMultiplier(row?.deep_pressure_multiplier);
-    return { applied: total < before, before, total, factor: safeFactor };
+        RETURNING deep_pressure_layers
+    `).get(safeLayers, this.groupId, userId);
+    const total = Math.max(0, Number(row?.deep_pressure_layers) || 0);
+    return {
+      added: Math.max(0, total - before),
+      total,
+      multiplier: deepPressureMultiplierFromLayers(total),
+    };
   }
 
   // 修理工具箱可单独解除深压回响（与骨鱼暗伤一样属于「鱼竿控制」范畴的修复）。
   clearDeepPressure(userId) {
     userId = String(userId);
     this._ensureUser(userId);
-    const before = this.getDeepPressureMultiplier(userId);
-    if (before >= 1) return { cleared: false, before };
+    const before = this.getDeepPressureLayers(userId);
+    if (before <= 0) return { cleared: false, before, beforeMultiplier: 1 };
     db.prepare(`
         UPDATE fishing_stats
-        SET deep_pressure_multiplier = 1
+        SET deep_pressure_layers = 0
         WHERE group_id = ? AND user_id = ?
     `).run(this.groupId, userId);
-    return { cleared: true, before };
+    return {
+      cleared: true,
+      before,
+      beforeMultiplier: deepPressureMultiplierFromLayers(before),
+    };
   }
 
   getCleansableNightmareAfflictions(userId) {
     const status = this.getNightmareStatus(userId);
     const brideMarked = status.brideNightmareMultiplier > 1;
-    const deepPressureMarked = status.deepPressureMultiplier < 1;
+    const deepPressureMarked = status.deepPressureLayers > 0;
     return {
       curseLayers: status.curse.actualLayers,
       brideMarked,
@@ -721,6 +720,7 @@ export default class FishingManager {
       ghostDebt: status.ghostDebt,
       ghostMarked: status.ghostMarked,
       deepPressureMarked,
+      deepPressureLayers: status.deepPressureLayers,
       deepPressureMultiplier: status.deepPressureMultiplier,
       total: Number(status.curse.actualLayers > 0) +
         Number(brideMarked) +
@@ -809,8 +809,7 @@ export default class FishingManager {
               bride_nightmare_multiplier = 1,
               ghost_debt = 0,
               ghost_debt_mark = 0,
-              deep_pressure_layers = 0,
-              deep_pressure_multiplier = 1
+              deep_pressure_layers = 0
           WHERE group_id = ? AND user_id = ?
       `).run(this.groupId, userId);
       return { cleared: status.total, ...status };
