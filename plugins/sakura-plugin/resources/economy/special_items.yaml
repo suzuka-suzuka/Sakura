@@ -25,7 +25,7 @@ categories:
         icon: 💧
         type: consumable
         instant_effect: clear_debuffs
-        description: 清除骷髅诅咒、花嫁印记、幽灵船债务与深压诅咒等负面状态。
+        description: 清除骷髅诅咒、花嫁印记、亡者高利贷（含抽成印记）与深压诅咒等负面状态。
 
       - id: item_sand_time
         name: 时之沙

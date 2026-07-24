@@ -125,6 +125,41 @@ export default class FishingSettlementService {
     return { newlyRecorded, newlyShiny };
   }
 
+  // 亡者船票结算：抽成印记压低收益、收益全额抵债、未清部分利滚利，滚到上限则勾销并留下印记。
+  // 每条抛竿结算路径都要走这里，空军竿同样计息，否则玩家可以靠钓不上鱼躲利息。
+  // 算与写分开：重复结算会在 _claimSession 处被挡下，此时不能已经把利息写进去。
+  _calcGhostDebt(earnings, { accrueInterest = true } = {}) {
+    const row = db.prepare(`
+        SELECT ghost_debt, ghost_debt_mark FROM fishing_stats
+        WHERE group_id = ? AND user_id = ?
+    `).get(this.groupId, this.userId);
+    const debtBefore = Math.max(0, Number(row?.ghost_debt) || 0);
+    const hasGhostMark = Boolean(row?.ghost_debt_mark);
+    return {
+      ...calculateGhostDebtPayment(earnings, debtBefore, {
+        hasGhostMark,
+        accrueInterest,
+      }),
+      debtBefore,
+      hasGhostMark,
+    };
+  }
+
+  _persistGhostDebt(result) {
+    if (result.remainingDebt === result.debtBefore && !result.writtenOff) return;
+    db.prepare(`
+        UPDATE fishing_stats
+        SET ghost_debt = ?,
+            ghost_debt_mark = CASE WHEN ? = 1 THEN 1 ELSE ghost_debt_mark END
+        WHERE group_id = ? AND user_id = ?
+    `).run(
+      result.remainingDebt,
+      result.writtenOff ? 1 : 0,
+      this.groupId,
+      this.userId,
+    );
+  }
+
   // 发放钓鱼经验并检测升级，仅在成功渔获时由结算方法调用
   _grantExp(expGain) {
     if (!(expGain > 0)) return null;
@@ -164,6 +199,7 @@ export default class FishingSettlementService {
     expGain = 0,
     weight = 0,
     shiny = false,
+    accrueGhostInterest = true,
   }) {
     const safeEarnings = normalizeNonNegativeInteger(earnings);
     const safeMastery = normalizeNonNegativeInteger(masteryGain);
@@ -177,6 +213,11 @@ export default class FishingSettlementService {
       if (!this._claimSession({ sessionId, fishId, success, earnings: safeEarnings })) {
         return { success: false, reason: "duplicate" };
       }
+      // 这条路径不发放金币，只让债务照常计息。
+      const debtResult = this._calcGhostDebt(0, {
+        accrueInterest: accrueGhostInterest,
+      });
+      this._persistGhostDebt(debtResult);
       const { newlyRecorded, newlyShiny } = this._recordCatch({
         fishId,
         success,
@@ -188,7 +229,7 @@ export default class FishingSettlementService {
         shiny: Boolean(shiny),
       });
       const levelUp = this._grantExp(safeExpGain);
-      return { success: true, levelUp, newlyRecorded, newlyShiny };
+      return { success: true, ...debtResult, levelUp, newlyRecorded, newlyShiny };
     })();
   }
 
@@ -222,11 +263,7 @@ export default class FishingSettlementService {
 
     return db.transaction(() => {
       this._ensureRows();
-      const ghostDebt = db.prepare(`
-          SELECT ghost_debt FROM fishing_stats
-          WHERE group_id = ? AND user_id = ?
-      `).get(this.groupId, this.userId)?.ghost_debt || 0;
-      const debtResult = calculateGhostDebtPayment(safeEarnings, ghostDebt);
+      const debtResult = this._calcGhostDebt(safeEarnings);
       if (!this._claimSession({
         sessionId,
         fishId,
@@ -235,14 +272,7 @@ export default class FishingSettlementService {
       })) {
         return { success: false, reason: "duplicate" };
       }
-
-      if (debtResult.debtPaid > 0) {
-        db.prepare(`
-            UPDATE fishing_stats
-            SET ghost_debt = ?
-            WHERE group_id = ? AND user_id = ?
-        `).run(debtResult.remainingDebt, this.groupId, this.userId);
-      }
+      this._persistGhostDebt(debtResult);
 
       if (debtResult.earnings > 0) {
         db.prepare(`
@@ -321,6 +351,10 @@ export default class FishingSettlementService {
           DO UPDATE SET count = count + 1
       `).run(this.groupId, this.userId, fishId);
 
+      // 宝箱不产生金币，但这一竿同样让债务计息。
+      const debtResult = this._calcGhostDebt(0);
+      this._persistGhostDebt(debtResult);
+
       const { newlyRecorded, newlyShiny } = this._recordCatch({
         fishId,
         success: true,
@@ -331,7 +365,7 @@ export default class FishingSettlementService {
         weight,
       });
       const levelUp = this._grantExp(safeExpGain);
-      return { success: true, added: true, levelUp, newlyRecorded, newlyShiny };
+      return { success: true, added: true, ...debtResult, levelUp, newlyRecorded, newlyShiny };
     })();
   }
 }

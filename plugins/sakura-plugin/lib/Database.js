@@ -118,6 +118,7 @@ class DB {
         bride_nightmare_multiplier REAL DEFAULT 1,
         lost_soul INTEGER DEFAULT 0,
         ghost_debt INTEGER DEFAULT 0,
+        ghost_debt_mark INTEGER DEFAULT 0,
         deep_pressure_layers INTEGER DEFAULT 0,
         nightmare_immunity_charges INTEGER DEFAULT 0,
         nightmare_immunity_updated_at INTEGER DEFAULT 0,
@@ -266,6 +267,9 @@ class DB {
     }
     if (!fishingStatsColumns.some((column) => column.name === 'ghost_debt')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN ghost_debt INTEGER DEFAULT 0');
+    }
+    if (!fishingStatsColumns.some((column) => column.name === 'ghost_debt_mark')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN ghost_debt_mark INTEGER DEFAULT 0');
     }
     if (!fishingStatsColumns.some((column) => column.name === 'deep_pressure_layers')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN deep_pressure_layers INTEGER DEFAULT 0');

@@ -413,6 +413,11 @@ const FISHING_LEVEL_EXP_BASE = 24;
 export const PERFECT_CATCH_WINDOW_MS = 5000;
 export const PERFECT_EXP_MULTIPLIER = 2;
 export const NIGHTMARE_CURSE_HIDDEN_LAYERS = 2;
+// 亡者船票：放款额＝初始债务，每竿未清部分按利率滚一次，滚到上限即勾销并留下抽成印记。
+export const GHOST_DEBT_PRINCIPAL = 400;
+export const GHOST_DEBT_INTEREST_RATE = 1.25;
+export const GHOST_DEBT_WRITE_OFF_THRESHOLD = 800;
+export const GHOST_DEBT_MARK_PENALTY_RATE = 0.25;
 export const FISHING_COOLDOWN_SECONDS = 5 * 60;
 export const FISHING_TIME_SAND_COOLDOWN_SECONDS = FISHING_COOLDOWN_SECONDS / 2;
 export const FISHING_BENEFIT_DURATION_SECONDS = 35 * 60;
@@ -468,18 +473,45 @@ export function resolveNightmareRarityAfflictions(curseLayers = 0) {
   };
 }
 
-export function calculateGhostDebtPayment(earnings, debt) {
-  const safeEarnings = Math.max(0, Math.floor(Number(earnings) || 0));
+// 亡者船票＝高利贷：当场放款 400 并欠下等额本金，之后每抛一竿，未还清的部分
+// 就利滚利一次；滚到上限即一笔勾销，改为留下永久抽成印记，避免债务发散到还不完。
+export function calculateGhostDebtPayment(earnings, debt, {
+  hasGhostMark = false,
+  accrueInterest = false,
+} = {}) {
+  const grossEarnings = Math.max(0, Math.floor(Number(earnings) || 0));
   const safeDebt = Math.max(0, Math.floor(Number(debt) || 0));
-  const earningsAfterPenalty = safeDebt > 0 ? Math.floor(safeEarnings / 2) : safeEarnings;
-  const debtPaid = Math.min(earningsAfterPenalty, safeDebt);
+  // 印记先抽成，债务再从抽成后的收益里全额扣除。
+  const earningsAfterMark = hasGhostMark
+    ? Math.floor(grossEarnings * (1 - GHOST_DEBT_MARK_PENALTY_RATE))
+    : grossEarnings;
+  const debtPaid = Math.min(earningsAfterMark, safeDebt);
+  const debtAfterPayment = safeDebt - debtPaid;
+  // 勾销只能由「真的滚了一次利息、且滚动值触及上限」触发：放贷当竿不计息、
+  // 或已还清，都不撕借条——否则二次借贷把债务叠到上限会被误判为当场勾销。
+  let remainingDebt = debtAfterPayment;
+  let interestAdded = 0;
+  let writtenOff = false;
+  if (accrueInterest && debtAfterPayment > 0) {
+    const rolled = Math.ceil(debtAfterPayment * GHOST_DEBT_INTEREST_RATE);
+    if (rolled >= GHOST_DEBT_WRITE_OFF_THRESHOLD) {
+      writtenOff = true;
+      remainingDebt = 0;
+    } else {
+      remainingDebt = rolled;
+      interestAdded = rolled - debtAfterPayment;
+    }
+  }
   return {
-    grossEarnings: safeEarnings,
-    earningsAfterPenalty,
-    penaltyDeducted: safeEarnings - earningsAfterPenalty,
-    earnings: earningsAfterPenalty - debtPaid,
+    grossEarnings,
+    markDeducted: grossEarnings - earningsAfterMark,
+    earningsAfterMark,
+    earnings: earningsAfterMark - debtPaid,
     debtPaid,
-    remainingDebt: safeDebt - debtPaid,
+    debtAfterPayment,
+    interestAdded,
+    remainingDebt,
+    writtenOff,
   };
 }
 

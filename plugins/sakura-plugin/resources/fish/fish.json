@@ -2494,7 +2494,7 @@
     "difficulty": 75,
     "nightmare_effect": {
       "type": "ghost_debt",
-      "amount": 100
+      "amount": 400
     },
     "weight": [
       28,

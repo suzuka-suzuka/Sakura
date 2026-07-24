@@ -624,13 +624,8 @@ export default class Economy extends plugin {
       return true;
     }
 
-    const debtSettlement = result.penaltyDeducted > 0 || result.debtPaid > 0
-      ? `\n🚢 幽灵船先将收益减半：${result.grossEarnings} → ${result.earningsAfterPenalty}` +
-        `\n👻 再偿还 ${result.debtPaid} 樱花币债务，剩余 ${result.remainingDebt}` +
-        `\n💵 实际到账 ${result.earnings} 樱花币`
-      : `\n💵 获得 ${sellPrice} 樱花币`;
     await e.reply(
-      `💰 成功出售【${item.name}】${durabilityMsg}！${debtSettlement}`,
+      `💰 成功出售【${item.name}】${durabilityMsg}！\n💵 获得 ${sellPrice} 樱花币`,
     );
     return true;
   });
@@ -744,7 +739,8 @@ export default class Economy extends plugin {
           result.brideMarked
             ? `${getBrideMarkLayers(result.brideNightmareMultiplier)} 层花嫁印记`
             : "",
-          result.ghostDebt > 0 ? `${result.ghostDebt} 樱花币幽灵船债务` : "",
+          result.ghostDebt > 0 ? `${result.ghostDebt} 樱花币亡者高利贷` : "",
+          result.ghostMarked ? "亡者抽成印记" : "",
           result.deepPressureLayers > 0 ? `${result.deepPressureLayers} 层深压` : "",
         ].filter(Boolean).join("、");
         await e.reply(

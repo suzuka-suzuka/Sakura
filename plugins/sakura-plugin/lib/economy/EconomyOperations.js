@@ -2,7 +2,6 @@ import db from "../Database.js";
 import EconomyManager from "./EconomyManager.js";
 import InventoryManager from "./InventoryManager.js";
 import ShopManager from "./ShopManager.js";
-import { calculateGhostDebtPayment } from "../fishing/rules.js";
 
 const FISHING_NEWBIE_GIFT_CLAIM_TYPE = "fishing_newbie_gift";
 const FISHING_NEWBIE_GIFT_REQUIRED_SPACE = 5;
@@ -188,33 +187,21 @@ export default class EconomyOperations {
         `).run(itemId, this.groupId, this.userId);
       }
 
-      const ghostDebt = db.prepare(`
-          SELECT ghost_debt FROM fishing_stats
-          WHERE group_id = ? AND user_id = ?
-      `).get(this.groupId, this.userId)?.ghost_debt || 0;
-      const debtResult = calculateGhostDebtPayment(safePrice, ghostDebt);
-      if (debtResult.debtPaid > 0) {
-        db.prepare(`
-            UPDATE fishing_stats
-            SET ghost_debt = ?
-            WHERE group_id = ? AND user_id = ?
-        `).run(debtResult.remainingDebt, this.groupId, this.userId);
-      }
-
-      if (debtResult.earnings > 0) {
+      // 亡者高利贷与抽成印记都只作用于垂钓所得，出售收入原封不动进账。
+      if (safePrice > 0) {
         db.prepare(`
             UPDATE economy
             SET coins = coins + ?
             WHERE group_id = ? AND user_id = ?
-        `).run(debtResult.earnings, this.groupId, this.userId);
+        `).run(safePrice, this.groupId, this.userId);
         this.economyManager.recordTransaction(this.e, {
           type: "收入",
-          amount: debtResult.earnings,
+          amount: safePrice,
           note: `出售 ${itemName || itemId}`,
         });
       }
 
-      return { success: true, price: safePrice, ...debtResult };
+      return { success: true, price: safePrice, earnings: safePrice };
     });
 
     return transaction();

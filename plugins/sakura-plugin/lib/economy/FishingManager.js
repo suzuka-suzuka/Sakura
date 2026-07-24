@@ -633,6 +633,7 @@ export default class FishingManager {
         Number(userData.bride_nightmare_multiplier) || 1,
       ),
       ghostDebt: Math.max(0, Math.floor(Number(userData.ghost_debt) || 0)),
+      ghostMarked: Boolean(userData.ghost_debt_mark),
       deepPressureLayers: Math.max(0, Math.floor(Number(userData.deep_pressure_layers) || 0)),
     };
   }
@@ -703,10 +704,12 @@ export default class FishingManager {
       brideMarked,
       brideNightmareMultiplier: status.brideNightmareMultiplier,
       ghostDebt: status.ghostDebt,
+      ghostMarked: status.ghostMarked,
       deepPressureLayers: status.deepPressureLayers,
       total: Number(status.curse.actualLayers > 0) +
         Number(brideMarked) +
         Number(status.ghostDebt > 0) +
+        Number(status.ghostMarked) +
         Number(status.deepPressureLayers > 0),
     };
   }
@@ -778,6 +781,7 @@ export default class FishingManager {
               nightmare_curse_prank_revealed = 0,
               bride_nightmare_multiplier = 1,
               ghost_debt = 0,
+              ghost_debt_mark = 0,
               deep_pressure_layers = 0
           WHERE group_id = ? AND user_id = ?
       `).run(this.groupId, userId);
