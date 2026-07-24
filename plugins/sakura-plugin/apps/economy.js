@@ -699,8 +699,13 @@ export default class Economy extends plugin {
         }
         const durability = fishingManager.getRodDurabilityInfo(userId, rodId);
         const rodStats = fishingManager.getRodStats(userId, rodId);
-        if (durability.damage <= 0 && rodStats.controlLoss <= 0) {
-          await e.reply(`🔧 【${rodConfig.name}】耐久完好，也没有需要修复的暗伤~`, 10);
+        const deepPressureMultiplier = fishingManager.getDeepPressureMultiplier(userId);
+        const hasDeepPressure = deepPressureMultiplier < 1;
+        if (durability.damage <= 0 && rodStats.controlLoss <= 0 && !hasDeepPressure) {
+          await e.reply(
+            `🔧 【${rodConfig.name}】耐久完好，没有暗伤，也没有深压回响需要修复~`,
+            10,
+          );
           return true;
         }
         if (!inventoryManager.removeItem(item.id, 1)) {
@@ -708,12 +713,16 @@ export default class Economy extends plugin {
           return true;
         }
         const repaired = fishingManager.repairRod(userId, rodId);
+        const deepPressureCleared = fishingManager.clearDeepPressure(userId);
         const repairDetails = [
           repaired.durabilityRepaired > 0
             ? `耐久损耗 -${repaired.durabilityRepaired}`
             : "",
           repaired.controlRestored > 0
             ? "骸骨鲨留下的暗伤已修复"
+            : "",
+          deepPressureCleared.cleared
+            ? `深压回响已解除（控制力 ×${Number(deepPressureCleared.before.toFixed(3))} → ×1）`
             : "",
         ].filter(Boolean).join("，");
         await e.reply(

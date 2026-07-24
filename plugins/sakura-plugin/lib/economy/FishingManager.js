@@ -696,6 +696,20 @@ export default class FishingManager {
     return { applied: total < before, before, total, factor: safeFactor };
   }
 
+  // 修理工具箱可单独解除深压回响（与骨鱼暗伤一样属于「鱼竿控制」范畴的修复）。
+  clearDeepPressure(userId) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    const before = this.getDeepPressureMultiplier(userId);
+    if (before >= 1) return { cleared: false, before };
+    db.prepare(`
+        UPDATE fishing_stats
+        SET deep_pressure_multiplier = 1
+        WHERE group_id = ? AND user_id = ?
+    `).run(this.groupId, userId);
+    return { cleared: true, before };
+  }
+
   getCleansableNightmareAfflictions(userId) {
     const status = this.getNightmareStatus(userId);
     const brideMarked = status.brideNightmareMultiplier > 1;

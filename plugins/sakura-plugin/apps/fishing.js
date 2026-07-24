@@ -197,6 +197,24 @@ function formatGhostDebtSettlement(settleResult) {
   return paidMsg + "🎉 高利贷已经还清，亡者船票化作灰烬\n";
 }
 
+// 河神折现改按「本次所用鱼饵」的市价计算；首领鱼饵没有市价，按寻宝鱼饵同价折算。
+const TREASURE_BAIT_ID = "bait_treasure";
+
+function computeRiverBlessRefundValue(state, fishingManager) {
+  const baitConfig = state?.baitConfig;
+  const isBoss = Boolean(state?.isBossBait) ||
+    baitConfig?.boss_bait === true ||
+    baitConfig?.id === BOSS_BAIT_ID;
+  const priceSource = isBoss
+    ? fishingManager?.getBaitConfig(TREASURE_BAIT_ID)
+    : baitConfig;
+  return {
+    value: Math.max(0, Math.floor(Number(priceSource?.price) || 0)),
+    baitName: baitConfig?.name || "鱼饵",
+    valuedAsTreasure: isBoss,
+  };
+}
+
 function getEffectiveRodControl(fishingManager, userId, state, rodMastery = 0) {
   // 深压回响是持久连乘减益，作用于「基础控制力（已减骨鱼暗伤）+ 熟练度」之后的实际控制力。
   const deepPressureMultiplier = Number(state.deepPressureMultiplier) || 1;
@@ -538,7 +556,7 @@ export default class Fishing extends plugin {
 
       // 河神在首领战中保住鱼线（本场耐久归零被挡下，或张力崩断被挡下）同样折现补偿。
       const refundMsg = lineBreak?.saved
-        ? this.grantRiverBlessRefund(e, state.lineConfig)
+        ? this.grantRiverBlessRefund(e, state, fishingManager)
         : "";
 
       await this.finishFailedAttempt(e, state, {
@@ -721,17 +739,21 @@ export default class Fishing extends plugin {
     return { saved: false };
   }
 
-  // 河神成功保住鱼线时，按当前鱼线市价折算等额樱花币补偿给玩家。
-  // 失败仍旧失败——这笔钱只是把「本该报废的线」折现，让保线的收益方差拉大，
-  // 与好运护符（无视判定直接钓上）、雾灯（回避噩梦）区分开。
-  grantRiverBlessRefund(e, lineConfig) {
-    const value = Math.max(0, Math.floor(Number(lineConfig?.price) || 0));
+  // 河神成功保住鱼线时，按玩家本次所用鱼饵的市价折算等额樱花币补偿。
+  // 首领鱼饵没有市价，按寻宝鱼饵同价折算。失败仍旧失败——这笔钱只是把
+  // 「这一竿的鱼饵成本」折现，让保线的收益方差拉大，与好运护符、雾灯区分开。
+  grantRiverBlessRefund(e, state, fishingManager) {
+    const { value, baitName, valuedAsTreasure } = computeRiverBlessRefundValue(
+      state,
+      fishingManager,
+    );
     if (value <= 0) return "";
     new EconomyManager(e).addCoins(e, value, {
       type: "收入",
-      note: `河神垂青折现：${lineConfig?.name || "鱼线"}`,
+      note: `河神垂青折现：${baitName}`,
     });
-    return `\n💰 河神将【${lineConfig?.name || "鱼线"}】折算成 ${value} 樱花币补偿给你！`;
+    const valuedNote = valuedAsTreasure ? "（按寻宝鱼饵同价）" : "";
+    return `\n💰 河神将本次鱼饵【${baitName}】${valuedNote}折算成 ${value} 樱花币补偿给你！`;
   }
 
   startFishing = Command(/^#?钓鱼$/, async (e) => {
@@ -1187,7 +1209,7 @@ export default class Fishing extends plugin {
         }
 
         const lineBreak = this.breakLineWithBlessing(state, fishingManager, userId, lineConfig);
-        const refundMsg = lineBreak.saved ? this.grantRiverBlessRefund(e, lineConfig) : "";
+        const refundMsg = lineBreak.saved ? this.grantRiverBlessRefund(e, state, fishingManager) : "";
 
         const damageResult = applyRodDamage(
           fishingManager,
@@ -1246,7 +1268,7 @@ export default class Fishing extends plugin {
 
         if (fishWeight > lineCapacity * 2) {
           const lineBreak = this.breakLineWithBlessing(state, fishingManager, userId, lineConfig);
-          const refundMsg = lineBreak.saved ? this.grantRiverBlessRefund(e, lineConfig) : "";
+          const refundMsg = lineBreak.saved ? this.grantRiverBlessRefund(e, state, fishingManager) : "";
 
           const damageResult = applyRodDamage(fishingManager, userId, rodConfig, 10);
 
@@ -1268,7 +1290,7 @@ export default class Fishing extends plugin {
 
         if (!isSuccess) {
           const lineBreak = this.breakLineWithBlessing(state, fishingManager, userId, lineConfig);
-          const refundMsg = lineBreak.saved ? this.grantRiverBlessRefund(e, lineConfig) : "";
+          const refundMsg = lineBreak.saved ? this.grantRiverBlessRefund(e, state, fishingManager) : "";
 
           const damageResult = applyRodDamage(fishingManager, userId, rodConfig, 5);
 
@@ -1936,7 +1958,7 @@ export default class Fishing extends plugin {
         // 河神（而非猎魔守护）挡下噩梦断线时，同样把鱼线折现补偿——噩梦的惩罚照旧生效。
         const riverBlessSaved = !immunityTriggered && Boolean(state.hasRiverBless);
         const refundMsg = riverBlessSaved
-          ? this.grantRiverBlessRefund(e, lineConfig)
+          ? this.grantRiverBlessRefund(e, state, fishingManager)
           : "";
         const lineResultMsg = lineSaved
           ? (immunityTriggered
