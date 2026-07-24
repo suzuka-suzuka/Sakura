@@ -1695,7 +1695,10 @@ export default class Fishing extends plugin {
       case "curse": {
         const layers = normalizePenalty(effect.layers || 5);
         fishingManager.addNightmareCurseLayers(e.user_id, layers);
-        message = `☠️ 诅咒附身！噩梦诅咒增加了 ${layers} 层。`;
+        // 与抛竿提示、钓鱼状态保持同一口径：只报少两层的表面层数。
+        const displayedLayers =
+          fishingManager.getNightmareCurseStatus(e.user_id).displayedLayers;
+        message = `☠️ 诅咒附身！噩梦诅咒缠上了你，剩余 ${displayedLayers} 层。`;
         break;
       }
 
