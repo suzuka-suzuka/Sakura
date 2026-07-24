@@ -901,7 +901,7 @@ export default class Fishing extends plugin {
           ? `\n💍 ${brideMarkLayers} 层花嫁印记生效中，噩梦抽取权重变为 ${nightmareStatus.brideNightmareMultiplier} 倍。`
           : "",
         // 抛竿只说诅咒还在、不报层数；层数只在「钓鱼状态」里露面，恶作剧才有落差。
-        curseResult.consumed ? "\n☠️ 诅咒生效中。" : "",
+        curseResult.consumed ? "\n☠️ 诅咒生效中" : "",
         staminaResult.deepPressureConsumed
           ? `\n🔔 深压回响生效中，这一竿会更加吃力（剩余 ${staminaResult.deepPressureLayers} 层）。`
           : "",
