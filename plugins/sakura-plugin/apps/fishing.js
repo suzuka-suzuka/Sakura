@@ -190,7 +190,7 @@ function formatGhostDebtSettlement(settleResult) {
   if (writtenOff) {
     return paidMsg +
       `🚢 债务滚到了 ${GHOST_DEBT_WRITE_OFF_THRESHOLD} 上限，幽灵船撕掉了借条——` +
-      `代价是此后垂钓所得被永久抽走 ${Math.round(GHOST_DEBT_MARK_PENALTY_RATE * 100)}%，直到被净化\n`;
+      `代价是此后垂钓所得被永久抽走 ${Math.round(GHOST_DEBT_MARK_PENALTY_RATE * 100)}%\n`;
   }
   if (interestAdded > 0) {
     return paidMsg + `📈 利滚利 +${interestAdded}，现在欠 ${settleResult.remainingDebt}\n`;
