@@ -120,6 +120,7 @@ class DB {
         ghost_debt INTEGER DEFAULT 0,
         ghost_debt_mark INTEGER DEFAULT 0,
         deep_pressure_layers INTEGER DEFAULT 0,
+        deep_pressure_multiplier REAL DEFAULT 1,
         nightmare_immunity_charges INTEGER DEFAULT 0,
         nightmare_immunity_updated_at INTEGER DEFAULT 0,
         location TEXT,
@@ -273,6 +274,16 @@ class DB {
     }
     if (!fishingStatsColumns.some((column) => column.name === 'deep_pressure_layers')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN deep_pressure_layers INTEGER DEFAULT 0');
+    }
+    if (!fishingStatsColumns.some((column) => column.name === 'deep_pressure_multiplier')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN deep_pressure_multiplier REAL DEFAULT 1');
+      // 旧版深压按层数逐竿消耗；改为持久连乘后，仍有残留层数的玩家迁移为一层 0.8 减益。
+      this.db.exec(`
+        UPDATE fishing_stats
+        SET deep_pressure_multiplier = 0.8,
+            deep_pressure_layers = 0
+        WHERE COALESCE(deep_pressure_layers, 0) > 0
+      `);
     }
     if (!fishingStatsColumns.some((column) => column.name === 'nightmare_immunity_charges')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN nightmare_immunity_charges INTEGER DEFAULT 0');

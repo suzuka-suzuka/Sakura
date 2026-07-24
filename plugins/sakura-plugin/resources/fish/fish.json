@@ -2396,7 +2396,7 @@
     "difficulty": 132,
     "nightmare_effect": {
       "type": "curse",
-      "layers": 5
+      "layers": 1
     },
     "weight": [
       12,
@@ -2519,7 +2519,7 @@
     "difficulty": 85,
     "nightmare_effect": {
       "type": "deep_pressure",
-      "layers": 3
+      "multiplier": 0.8
     },
     "weight": [
       38,

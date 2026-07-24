@@ -12,7 +12,6 @@ import {
   getFishingLevelByExp,
   getFishingStaminaMax,
   getNightmareCurseDisplay,
-  NIGHTMARE_CURSE_HIDDEN_LAYERS,
   normalizeFishingLocation,
   TORPEDO_PRICE_BOOST_MULTIPLIER,
 } from "../fishing/rules.js";
@@ -139,7 +138,7 @@ export default class FishingManager {
 
   _readFishingStamina(userId, now) {
     const row = db.prepare(`
-        SELECT fishing_exp, fishing_stamina, fishing_stamina_updated_at, deep_pressure_layers
+        SELECT fishing_exp, fishing_stamina, fishing_stamina_updated_at
         FROM fishing_stats
         WHERE group_id = ? AND user_id = ?
     `).get(this.groupId, userId);
@@ -154,7 +153,6 @@ export default class FishingManager {
     return {
       ...snapshot,
       max: maxStamina,
-      deepPressureLayers: Math.max(0, Math.floor(Number(row?.deep_pressure_layers) || 0)),
     };
   }
 
@@ -173,7 +171,6 @@ export default class FishingManager {
       max: snapshot.max,
       cost,
       canFish: snapshot.stamina >= cost,
-      deepPressureLayers: Math.max(0, Math.floor(Number(snapshot.deepPressureLayers) || 0)),
       recovered: snapshot.recovered || 0,
       nextRecoveryMs: snapshot.nextRecoveryMs || 0,
       nextRecoveryMinutes: snapshot.nextRecoveryMs > 0
@@ -208,22 +205,10 @@ export default class FishingManager {
       }
 
       const remaining = snapshot.stamina - cost;
-      const deepPressureConsumed = snapshot.deepPressureLayers > 0;
-      const remainingDeepPressure = deepPressureConsumed
-        ? snapshot.deepPressureLayers - 1
-        : 0;
       this._writeFishingStamina(userId, remaining, snapshot.updatedAt);
-      if (deepPressureConsumed) {
-        db.prepare(`
-            UPDATE fishing_stats
-            SET deep_pressure_layers = MAX(0, COALESCE(deep_pressure_layers, 0) - 1)
-            WHERE group_id = ? AND user_id = ?
-        `).run(this.groupId, userId);
-      }
       const formatted = this._formatFishingStaminaStatus({
         ...snapshot,
         stamina: remaining,
-        deepPressureLayers: remainingDeepPressure,
         recovered: 0,
         nextRecoveryMs: remaining < snapshot.max
           ? (snapshot.nextRecoveryMs || FISHING_STAMINA_RECOVERY_MS)
@@ -234,7 +219,6 @@ export default class FishingManager {
         ...formatted,
         cost,
         nextCost: formatted.cost,
-        deepPressureConsumed,
       };
     });
     return transaction.immediate();
@@ -624,18 +608,24 @@ export default class FishingManager {
   getNightmareStatus(userId) {
     const userData = this.getUserData(userId);
     return {
-      curse: getNightmareCurseDisplay(
-        userData.nightmare_curse_layers,
-        userData.nightmare_curse_prank_revealed,
-      ),
+      curse: getNightmareCurseDisplay(userData.nightmare_curse_layers),
       brideNightmareMultiplier: Math.max(
         1,
         Number(userData.bride_nightmare_multiplier) || 1,
       ),
       ghostDebt: Math.max(0, Math.floor(Number(userData.ghost_debt) || 0)),
       ghostMarked: Boolean(userData.ghost_debt_mark),
-      deepPressureLayers: Math.max(0, Math.floor(Number(userData.deep_pressure_layers) || 0)),
+      deepPressureMultiplier: this._normalizeDeepPressureMultiplier(
+        userData.deep_pressure_multiplier,
+      ),
     };
+  }
+
+  // 深压连乘只降不升，钳制在 (0, 1]；空值按无减益的 1 处理。
+  _normalizeDeepPressureMultiplier(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return 1;
+    return Math.min(1, numeric);
   }
 
   applyBrideNightmareMultiplier(userId, multiplier = 2) {
@@ -676,41 +666,53 @@ export default class FishingManager {
     return { added: Math.max(0, total - before), total };
   }
 
-  addDeepPressureLayers(userId, layers) {
-    userId = String(userId);
-    const safeLayers = Math.max(0, Math.floor(Number(layers) || 0));
-    this._ensureUser(userId);
-    const before = this.getNightmareStatus(userId).deepPressureLayers;
-    if (safeLayers <= 0) return { added: 0, total: before };
-    const row = db.prepare(`
-        UPDATE fishing_stats
-        SET deep_pressure_layers = COALESCE(deep_pressure_layers, 0) + ?
-        WHERE group_id = ? AND user_id = ?
-        RETURNING deep_pressure_layers
-    `).get(safeLayers, this.groupId, userId);
-    const total = Math.max(0, Number(row?.deep_pressure_layers) || 0);
-    return { added: Math.max(0, total - before), total };
+  getDeepPressureMultiplier(userId) {
+    return this.getNightmareStatus(userId).deepPressureMultiplier;
   }
 
-  restoreDeepPressureLayer(userId) {
-    return this.addDeepPressureLayers(userId, 1);
+  // 深压回响：每次命中在已有减益上再连乘一次（默认 ×0.8），持久生效直到净化。
+  applyDeepPressureMultiplier(userId, factor = 0.8) {
+    userId = String(userId);
+    const safeFactor = (() => {
+      const numeric = Number(factor);
+      if (!Number.isFinite(numeric) || numeric <= 0) return 0.8;
+      return Math.min(1, numeric);
+    })();
+    this._ensureUser(userId);
+    const before = this.getDeepPressureMultiplier(userId);
+    const row = db.prepare(`
+        UPDATE fishing_stats
+        SET deep_pressure_multiplier = MIN(
+          1,
+          CASE
+            WHEN COALESCE(deep_pressure_multiplier, 1) <= 0 THEN 1
+            ELSE COALESCE(deep_pressure_multiplier, 1)
+          END
+        ) * ?
+        WHERE group_id = ? AND user_id = ?
+        RETURNING deep_pressure_multiplier
+    `).get(safeFactor, this.groupId, userId);
+    const total = this._normalizeDeepPressureMultiplier(row?.deep_pressure_multiplier);
+    return { applied: total < before, before, total, factor: safeFactor };
   }
 
   getCleansableNightmareAfflictions(userId) {
     const status = this.getNightmareStatus(userId);
     const brideMarked = status.brideNightmareMultiplier > 1;
+    const deepPressureMarked = status.deepPressureMultiplier < 1;
     return {
       curseLayers: status.curse.actualLayers,
       brideMarked,
       brideNightmareMultiplier: status.brideNightmareMultiplier,
       ghostDebt: status.ghostDebt,
       ghostMarked: status.ghostMarked,
-      deepPressureLayers: status.deepPressureLayers,
+      deepPressureMarked,
+      deepPressureMultiplier: status.deepPressureMultiplier,
       total: Number(status.curse.actualLayers > 0) +
         Number(brideMarked) +
         Number(status.ghostDebt > 0) +
         Number(status.ghostMarked) +
-        Number(status.deepPressureLayers > 0),
+        Number(deepPressureMarked),
     };
   }
 
@@ -727,45 +729,56 @@ export default class FishingManager {
 
     const row = db.prepare(`
         UPDATE fishing_stats
-        SET nightmare_curse_layers = COALESCE(nightmare_curse_layers, 0) + ?,
-            nightmare_curse_prank_revealed = CASE
-              WHEN COALESCE(nightmare_curse_layers, 0) <= 0 THEN 0
-              ELSE COALESCE(nightmare_curse_prank_revealed, 0)
-            END
+        SET nightmare_curse_layers = COALESCE(nightmare_curse_layers, 0) + ?
         WHERE group_id = ? AND user_id = ?
-        RETURNING nightmare_curse_layers, nightmare_curse_prank_revealed
+        RETURNING nightmare_curse_layers
     `).get(safeLayers, this.groupId, userId);
     return Math.max(0, Number(row?.nightmare_curse_layers) || 0);
   }
 
-  consumeNightmareCurseLayer(userId) {
+  // 每抛一竿在诅咒生效期累加一层；返回累加后的层数用于本竿噩梦权重加成。
+  accrueNightmareCurseLayer(userId) {
     userId = String(userId);
     this._ensureUser(userId);
     const row = db.prepare(`
         UPDATE fishing_stats
-        SET nightmare_curse_layers = COALESCE(nightmare_curse_layers, 0) - 1,
-            nightmare_curse_prank_revealed = CASE
-              WHEN COALESCE(nightmare_curse_layers, 0) - 1 <= 0 THEN 0
-              WHEN COALESCE(nightmare_curse_prank_revealed, 0) > 0 THEN 1
-              WHEN COALESCE(nightmare_curse_layers, 0) - 1 <= ? THEN 1
-              ELSE 0
-            END
+        SET nightmare_curse_layers = COALESCE(nightmare_curse_layers, 0) + 1
         WHERE group_id = ? AND user_id = ? AND COALESCE(nightmare_curse_layers, 0) > 0
-        RETURNING nightmare_curse_layers, nightmare_curse_prank_revealed
-    `).get(NIGHTMARE_CURSE_HIDDEN_LAYERS, this.groupId, userId);
-    return {
-      consumed: Boolean(row),
-      remaining: Math.max(0, Number(row?.nightmare_curse_layers) || 0),
-      prankRevealed: Boolean(row?.nightmare_curse_prank_revealed),
-    };
+        RETURNING nightmare_curse_layers
+    `).get(this.groupId, userId);
+    return Math.max(0, Number(row?.nightmare_curse_layers) || 0);
+  }
+
+  // 启动失败时回滚本竿累加的那一层诅咒。
+  rollbackNightmareCurseLayer(userId) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    const row = db.prepare(`
+        UPDATE fishing_stats
+        SET nightmare_curse_layers = COALESCE(nightmare_curse_layers, 0) - 1
+        WHERE group_id = ? AND user_id = ? AND COALESCE(nightmare_curse_layers, 0) > 0
+        RETURNING nightmare_curse_layers
+    `).get(this.groupId, userId);
+    return Math.max(0, Number(row?.nightmare_curse_layers) || 0);
+  }
+
+  // 钓到任意噩梦即清空诅咒；若该噩梦本身是诅咒骷髅，其效果会随后重新 +1。
+  resetNightmareCurse(userId) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    const before = this.getNightmareCurseLayers(userId);
+    if (before <= 0) return { cleared: 0 };
+    db.prepare(`
+        UPDATE fishing_stats
+        SET nightmare_curse_layers = 0
+        WHERE group_id = ? AND user_id = ?
+    `).run(this.groupId, userId);
+    return { cleared: before };
   }
 
   getNightmareCurseStatus(userId) {
     const userData = this.getUserData(userId);
-    return getNightmareCurseDisplay(
-      userData.nightmare_curse_layers,
-      userData.nightmare_curse_prank_revealed,
-    );
+    return getNightmareCurseDisplay(userData.nightmare_curse_layers);
   }
 
   // 净化圣水清除所有仍会影响后续垂钓的噩梦减益；鱼竿控制力损失属于鱼竿状态，另由工具箱修复。
@@ -782,7 +795,8 @@ export default class FishingManager {
               bride_nightmare_multiplier = 1,
               ghost_debt = 0,
               ghost_debt_mark = 0,
-              deep_pressure_layers = 0
+              deep_pressure_layers = 0,
+              deep_pressure_multiplier = 1
           WHERE group_id = ? AND user_id = ?
       `).run(this.groupId, userId);
       return { cleared: status.total, ...status };

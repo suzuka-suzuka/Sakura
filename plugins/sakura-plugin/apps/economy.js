@@ -741,7 +741,9 @@ export default class Economy extends plugin {
             : "",
           result.ghostDebt > 0 ? `${result.ghostDebt} 樱花币亡者高利贷` : "",
           result.ghostMarked ? "亡者抽成印记" : "",
-          result.deepPressureLayers > 0 ? `${result.deepPressureLayers} 层深压` : "",
+          result.deepPressureMarked
+            ? `深压回响（控制力 ×${Number(result.deepPressureMultiplier.toFixed(3))}）`
+            : "",
         ].filter(Boolean).join("、");
         await e.reply(
           `💧 使用了【${item.name}】！\n☀️ 已彻底洗净：${cleared}。\n` 

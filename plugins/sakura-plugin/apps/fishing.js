@@ -62,7 +62,6 @@ import {
   resolveBossAttack,
   resolveBossLineDamage,
   resolveKoiWishShiny,
-  resolveNightmareRarityAfflictions,
   rollFishExp,
   rollFishingBiteWaitMs,
   rollBossPlayerDamage,
@@ -199,8 +198,10 @@ function formatGhostDebtSettlement(settleResult) {
 }
 
 function getEffectiveRodControl(fishingManager, userId, state, rodMastery = 0) {
-  const multiplier = state.deepPressureActive ? 0.5 : 1;
-  return fishingManager.getRodControl(userId, state.rodConfig.id) * multiplier + rodMastery;
+  // 深压回响是持久连乘减益，作用于「基础控制力（已减骨鱼暗伤）+ 熟练度」之后的实际控制力。
+  const deepPressureMultiplier = Number(state.deepPressureMultiplier) || 1;
+  const baseControl = fishingManager.getRodControl(userId, state.rodConfig.id) + rodMastery;
+  return baseControl * deepPressureMultiplier;
 }
 
 function formatBossCombatStatus(state, fishingManager, userId) {
@@ -230,7 +231,7 @@ async function selectRandomFish(
   {
     forceRarity = null,
     nightmareBonus = 0,
-    hasDebuff = false,
+    curseLayers = 0,
     nightmareWeightMultiplier = 1,
     zeroWeightRarities = [],
   } = {},
@@ -267,7 +268,7 @@ async function selectRandomFish(
 
   return selectFishFromData(fishData, {
     baitQuality,
-    hasDebuff,
+    curseLayers,
     treasureWeightMultiplier,
     nightmareBonus,
     nightmareWeightMultiplier,
@@ -830,7 +831,6 @@ export default class Fishing extends plugin {
       }
       state.staminaReserved = true;
       state.staminaCost = staminaResult.cost;
-      state.deepPressureConsumed = staminaResult.deepPressureConsumed;
 
       if (!fishingManager.consumeBait(userId)) {
         throw new Error("鱼饵已被消耗或装备状态发生变化");
@@ -844,14 +844,14 @@ export default class Fishing extends plugin {
 
       const nightmareStatus = fishingManager.getNightmareStatus(userId);
 
-      // 骷髅诅咒与深压按实际抛竿消耗；即使随后钓到鱼雷也照常减少一层。
-      // 权重严格按宝藏猎人倍率 → 花嫁连乘 → 骷髅诅咒 → 怪物诱饵 → 雾灯结算。
-      const rarityAfflictions = isBossBait
-        ? { consumeCurse: false }
-        : resolveNightmareRarityAfflictions(nightmareStatus.curse.actualLayers);
-      const curseResult = rarityAfflictions.consumeCurse
-        ? fishingManager.consumeNightmareCurseLayer(userId)
-        : { consumed: false, remaining: nightmareStatus.curse.actualLayers };
+      // 骷髅诅咒：生效期每抛一竿累加一层，每层给噩梦权重 +1，且在花嫁倍率之前结算（先加后乘）。
+      // 首领鱼饵不参与诅咒累加。诅咒会在本竿钓到任意噩梦时清空（见结算处）。
+      const curseAccrued = !isBossBait && nightmareStatus.curse.actualLayers > 0
+        ? fishingManager.accrueNightmareCurseLayer(userId)
+        : 0;
+      const curseActive = curseAccrued > 0;
+      // 记录本竿是否累加过诅咒，便于启动失败时回滚这一层。
+      state.curseAccrued = curseActive;
 
       // 星愿一次性生效：抛竿即消耗所选品质；启动失败会在 catch 中原样退还。
       let wishRarity = null;
@@ -881,7 +881,7 @@ export default class Fishing extends plugin {
           {
             forceRarity: wishRarity,
             nightmareBonus: buffFlags.hasMonsterBait ? 50 : 0,
-            hasDebuff: curseResult.consumed,
+            curseLayers: curseAccrued,
             nightmareWeightMultiplier: nightmareStatus.brideNightmareMultiplier,
             // 最后判定雾灯：即使花嫁、诅咒与怪物诱饵先抬高噩梦，最终仍归零。
             zeroWeightRarities: buffFlags.hasFogLamp ? ["垃圾", "噩梦"] : [],
@@ -942,8 +942,10 @@ export default class Fishing extends plugin {
         nightmareStatus.brideNightmareMultiplier > 1
           ? `\n💍 ${brideMarkLayers} 层花嫁印记生效中，噩梦抽取权重变为 ${nightmareStatus.brideNightmareMultiplier} 倍。`
           : "",
-        // 抛竿只说诅咒还在、不报层数；层数只在「钓鱼状态」里露面，恶作剧才有落差。
-        curseResult.consumed ? "\n☠️ 诅咒生效中" : "",
+        // 诅咒逐竿累加：报当前层数与对噩梦权重的加成，压迫感来自越钓越深。
+        curseActive
+          ? `\n☠️ 诅咒缠身，当前 ${curseAccrued} 层（噩梦权重 +${curseAccrued}，钓到任意噩梦才会消散）`
+          : "",
         // 高利贷相反：必须在动手前把利滚利摆出来，压迫感才成立。
         // 利息以还款后的剩余债务为基准，抛竿时还不知道渔获，所以只报欠款和倍率。
         nightmareStatus.ghostDebt > 0
@@ -953,8 +955,8 @@ export default class Fishing extends plugin {
         nightmareStatus.ghostMarked
           ? `\n🩸 亡者抽成印记生效中，垂钓所得 -${Math.round(GHOST_DEBT_MARK_PENALTY_RATE * 100)}%`
           : "",
-        staminaResult.deepPressureConsumed
-          ? `\n🔔 深压回响生效中，这一竿会更加吃力（剩余 ${staminaResult.deepPressureLayers} 层）`
+        nightmareStatus.deepPressureMultiplier < 1
+          ? `\n🔔 深压回响生效中，鱼竿实际控制力 ×${Number(nightmareStatus.deepPressureMultiplier.toFixed(3))}`
           : "",
         wishRarity ? `\n🌠 星愿闪耀！这一竿将迎来【${wishRarity}】品质！` : "",
         isBossBait ? `\n👑 首领鱼饵的气息正在水中扩散，当地首领正向鱼钩逼近……` : "",
@@ -972,7 +974,7 @@ export default class Fishing extends plugin {
         hasRiverBless: buffFlags.hasRiverBless,
         hasDoubleCoin: buffFlags.hasDoubleCoin,
         hasTimeSand: buffFlags.hasTimeSand,
-        deepPressureActive: Boolean(staminaResult.deepPressureConsumed),
+        deepPressureMultiplier: nightmareStatus.deepPressureMultiplier,
         locationId,
         environment,
         isBossBait,
@@ -1067,12 +1069,17 @@ export default class Fishing extends plugin {
       if (state.staminaReserved) {
         try {
           fishingManager.restoreFishingStamina(userId, state.staminaCost || 1);
-          if (state.deepPressureConsumed) {
-            fishingManager.restoreDeepPressureLayer(userId);
-          }
           state.staminaReserved = false;
         } catch (refundErr) {
           logger.error(`[钓鱼] 启动失败后退还体力异常: ${refundErr.stack || refundErr}`);
+        }
+      }
+      if (state.curseAccrued) {
+        try {
+          fishingManager.rollbackNightmareCurseLayer(userId);
+          state.curseAccrued = false;
+        } catch (refundErr) {
+          logger.error(`[钓鱼] 启动失败后回滚诅咒层数异常: ${refundErr.stack || refundErr}`);
         }
       }
       if (state.wishConsumed) {
@@ -1745,10 +1752,11 @@ export default class Fishing extends plugin {
       }
 
       case "curse": {
-        const layers = normalizePenalty(effect.layers || 5);
-        fishingManager.addNightmareCurseLayers(e.user_id, layers);
-        // 层数同样不在这里报，让玩家自己去「钓鱼状态」里数。
-        message = "☠️ 诅咒附身！噩梦诅咒缠上了你。";
+        // 命中诅咒骷髅固定 +1 层。此前的 resetNightmareCurse 已把旧层清零，
+        // 因此再遇诅咒等于「重新计算」，从 1 层起累加。
+        const total = fishingManager.addNightmareCurseLayers(e.user_id, 1);
+        message = `☠️ 诅咒附身！噩梦诅咒缠上了你，当前 ${total} 层。` +
+          "\n此后每抛一竿层数 +1、噩梦权重随之 +1，直到你钓到任意噩梦";
         break;
       }
 
@@ -1812,10 +1820,14 @@ export default class Fishing extends plugin {
       }
 
       case "deep_pressure": {
-        const layers = normalizePenalty(effect.layers || 3);
-        const result = fishingManager.addDeepPressureLayers(e.user_id, layers);
-        message = `🔔 潜水钟敲响，深压 +${result.added} 层，当前 ${result.total} 层！` +
-          "接下来的垂钓会更加吃力。";
+        const factor = (() => {
+          const numeric = Number(effect.multiplier);
+          if (!Number.isFinite(numeric) || numeric <= 0 || numeric >= 1) return 0.8;
+          return numeric;
+        })();
+        const result = fishingManager.applyDeepPressureMultiplier(e.user_id, factor);
+        message = `🔔 潜水钟敲响，深压连乘 ×${factor}，` +
+          `鱼竿实际控制力已降为原本的 ×${Number(result.total.toFixed(3))}！` 
         break;
       }
 
@@ -1892,6 +1904,9 @@ export default class Fishing extends plugin {
 
     try {
       if (fish.rarity === "噩梦") {
+        // 钓到任意噩梦即清空诅咒（无论是否被免疫挡下）；若这条噩梦本身是诅咒骷髅，
+        // 其效果会在下面重新从 1 层起累加，实现「重新计算」。
+        fishingManager.resetNightmareCurse(userId);
         // 深渊猎手先消耗一次完整免疫；没有充能时才进入断线与噩梦效果结算。
         const immunity = fishingManager.consumeNightmareImmunity(userId);
         const immunityTriggered = Boolean(immunity.immune);
@@ -2404,9 +2419,7 @@ export default class Fishing extends plugin {
       effects.push({
         icon: "☠️",
         name: "诅咒",
-        detail: curseStatus.isPranked
-          ? `杂鱼~不会以为诅咒真的消失吧 · 剩余 ${curseStatus.displayedLayers} 层`
-          : `剩余 ${curseStatus.displayedLayers} 层`,
+        detail: `${curseStatus.actualLayers} 层 · 噩梦权重 +${curseStatus.actualLayers}` ,
         tone: "danger",
       });
     }
@@ -2436,11 +2449,11 @@ export default class Fishing extends plugin {
         tone: "danger",
       });
     }
-    if (nightmareStatus.deepPressureLayers > 0) {
+    if (nightmareStatus.deepPressureMultiplier < 1) {
       effects.push({
         icon: "🔔",
         name: "深压回响",
-        detail: `剩余 ${nightmareStatus.deepPressureLayers} 层 · 接下来的垂钓会更吃力`,
+        detail: `鱼竿实际控制力 ×${Number(nightmareStatus.deepPressureMultiplier.toFixed(3))} · `,
         tone: "warning",
       });
     }

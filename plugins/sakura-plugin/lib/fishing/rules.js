@@ -412,7 +412,6 @@ const QUALITY_WEIGHTS = Object.freeze({
 const FISHING_LEVEL_EXP_BASE = 24;
 export const PERFECT_CATCH_WINDOW_MS = 5000;
 export const PERFECT_EXP_MULTIPLIER = 2;
-export const NIGHTMARE_CURSE_HIDDEN_LAYERS = 2;
 // 亡者船票：放款额＝初始债务，每竿未清部分按利率滚一次，滚到上限即勾销并留下抽成印记。
 export const GHOST_DEBT_PRINCIPAL = 400;
 export const GHOST_DEBT_INTEREST_RATE = 1.25;
@@ -464,13 +463,6 @@ export function getFishingStaminaMax(level) {
 
 export function getFishingStaminaCost() {
   return FISHING_STAMINA_COST;
-}
-
-export function resolveNightmareRarityAfflictions(curseLayers = 0) {
-  const curseActive = Math.max(0, Math.floor(Number(curseLayers) || 0)) > 0;
-  return {
-    consumeCurse: curseActive,
-  };
 }
 
 // 亡者船票＝高利贷：当场放款 400 并欠下等额本金，之后每抛一竿，未还清的部分
@@ -765,23 +757,13 @@ export function getFishingLevelByExp(exp) {
   return Math.floor(Math.sqrt(safeExp / FISHING_LEVEL_EXP_BASE)) + 1;
 }
 
-// 玩家看到的诅咒层数会少报两层，但真实诅咒未清零时至少显示 1 层：
-// 表面会卡在 1 层连续三竿，让玩家以为下一竿就解脱。
-export function getNightmareCurseDisplay(actualLayers, prankRevealed = false) {
+// 诅咒改为逐竿累加、钓到任意噩梦即清空，不再逐层递减，因此如实展示当前层数。
+export function getNightmareCurseDisplay(actualLayers) {
   const safeActualLayers = Math.max(0, Math.floor(Number(actualLayers) || 0));
-  if (safeActualLayers === 0) {
-    return {
-      actualLayers: 0,
-      displayedLayers: 0,
-      isPranked: false,
-    };
-  }
-
-  const displayedLayers = Math.max(1, safeActualLayers - NIGHTMARE_CURSE_HIDDEN_LAYERS);
   return {
     actualLayers: safeActualLayers,
-    displayedLayers,
-    isPranked: Boolean(prankRevealed),
+    displayedLayers: safeActualLayers,
+    isPranked: false,
   };
 }
 
@@ -827,7 +809,7 @@ export function isPerfectCatch({
 
 export function getRarityPoolByBaitQuality(
   quality,
-  hasDebuff = false,
+  curseLayers = 0,
   treasureWeightMultiplier = 1,
   nightmareBonus = 0,
   nightmareWeightMultiplier = 1,
@@ -846,14 +828,15 @@ export function getRarityPoolByBaitQuality(
       : 1;
     weights[treasureIndex] *= multiplier;
   }
-  // 最终顺序：宝藏猎人倍率 → 花嫁连乘 → 骷髅诅咒转移全部宝藏 → 怪物诱饵加权 → 雾灯归零。
+  // 最终顺序：宝藏猎人倍率 → 骷髅诅咒逐层加噩梦（先加）→ 花嫁连乘（后乘）→ 怪物诱饵加权 → 雾灯归零。
+  // 诅咒每层给噩梦权重 +1，且必须在花嫁倍率之前结算，实现「先加后乘」。
+  if (nightmareIndex >= 0) {
+    const safeCurseLayers = Math.max(0, Math.floor(Number(curseLayers) || 0));
+    if (safeCurseLayers > 0) weights[nightmareIndex] += safeCurseLayers;
+  }
   if (nightmareIndex >= 0) {
     const multiplier = Math.max(1, Number(nightmareWeightMultiplier) || 1);
     weights[nightmareIndex] *= multiplier;
-  }
-  if (hasDebuff && treasureIndex >= 0 && nightmareIndex >= 0) {
-    weights[nightmareIndex] += weights[treasureIndex];
-    weights[treasureIndex] = 0;
   }
   if (nightmareIndex >= 0 && Number.isFinite(Number(nightmareBonus))) {
     weights[nightmareIndex] = Math.max(
@@ -930,7 +913,7 @@ export function selectFishFromData(
   fishData,
   {
     baitQuality = 1,
-    hasDebuff = false,
+    curseLayers = 0,
     treasureWeightMultiplier = 1,
     nightmareBonus = 0,
     nightmareWeightMultiplier = 1,
@@ -944,7 +927,7 @@ export function selectFishFromData(
 ) {
   const { pool, weights } = getRarityPoolByBaitQuality(
     baitQuality,
-    hasDebuff,
+    curseLayers,
     treasureWeightMultiplier,
     nightmareBonus,
     nightmareWeightMultiplier,
