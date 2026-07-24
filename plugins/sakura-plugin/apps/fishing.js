@@ -535,6 +535,11 @@ export default class Fishing extends plugin {
         );
       }
 
+      // 河神在首领战中保住鱼线（本场耐久归零被挡下，或张力崩断被挡下）同样折现补偿。
+      const refundMsg = lineBreak?.saved
+        ? this.grantRiverBlessRefund(e, state.lineConfig)
+        : "";
+
       await this.finishFailedAttempt(e, state, {
         recordCatch: true,
         masteryGain: rodBroken ? 0 : 1,
@@ -555,6 +560,7 @@ export default class Fishing extends plugin {
         if (lineBreak?.saved) reasons.push(`🌊 河神保住了【${state.lineConfig.name}】`);
         else if (lineBreak) reasons.push(`💔 失去了【${state.lineConfig.name}】`);
       }
+      if (refundMsg) reasons.push(refundMsg.trim());
 
       await e.reply([
         `👑 【${state.fish.name}】发动了【${mechanic.name}】！\n`,
@@ -712,6 +718,19 @@ export default class Fishing extends plugin {
     }
     fishingManager.breakLine(userId, lineConfig.id);
     return { saved: false };
+  }
+
+  // 河神成功保住鱼线时，按当前鱼线市价折算等额樱花币补偿给玩家。
+  // 失败仍旧失败——这笔钱只是把「本该报废的线」折现，让保线的收益方差拉大，
+  // 与好运护符（无视判定直接钓上）、雾灯（回避噩梦）区分开。
+  grantRiverBlessRefund(e, lineConfig) {
+    const value = Math.max(0, Math.floor(Number(lineConfig?.price) || 0));
+    if (value <= 0) return "";
+    new EconomyManager(e).addCoins(e, value, {
+      type: "收入",
+      note: `河神垂青折现：${lineConfig?.name || "鱼线"}`,
+    });
+    return `\n💰 河神将【${lineConfig?.name || "鱼线"}】折算成 ${value} 樱花币补偿给你！`;
   }
 
   startFishing = Command(/^#?钓鱼$/, async (e) => {
@@ -916,9 +935,9 @@ export default class Fishing extends plugin {
         buffFlags.hasMonsterBait
           ? "\n🩸 怪物诱饵生效中"
           : "",
-        koiWishConsumed ? "\n🎏 锦鲤许愿签生效中。" : "",
-        buffFlags.hasRiverBless ? "\n🌊 河神注视着你的鱼线。" : "",
-        buffFlags.hasDoubleCoin ? "\n💰 双倍金币卡生效中。" : "",
+        koiWishConsumed ? "\n🎏 锦鲤许愿签生效中" : "",
+        buffFlags.hasRiverBless ? "\n🌊 河神注视着你的鱼线" : "",
+        buffFlags.hasDoubleCoin ? "\n💰 双倍金币卡生效中" : "",
         buffFlags.hasTimeSand ? "\n⏳ 时之沙生效中" : "",
         nightmareStatus.brideNightmareMultiplier > 1
           ? `\n💍 ${brideMarkLayers} 层花嫁印记生效中，噩梦抽取权重变为 ${nightmareStatus.brideNightmareMultiplier} 倍。`
@@ -929,13 +948,13 @@ export default class Fishing extends plugin {
         // 利息以还款后的剩余债务为基准，抛竿时还不知道渔获，所以只报欠款和倍率。
         nightmareStatus.ghostDebt > 0
           ? `\n🚢 亡者高利贷欠款 ${nightmareStatus.ghostDebt}，这一竿没还上的部分会涨到 ` +
-            `${GHOST_DEBT_INTEREST_RATE} 倍。`
+            `${GHOST_DEBT_INTEREST_RATE} 倍`
           : "",
         nightmareStatus.ghostMarked
-          ? `\n🩸 亡者抽成印记生效中，垂钓所得 -${Math.round(GHOST_DEBT_MARK_PENALTY_RATE * 100)}%。`
+          ? `\n🩸 亡者抽成印记生效中，垂钓所得 -${Math.round(GHOST_DEBT_MARK_PENALTY_RATE * 100)}%`
           : "",
         staminaResult.deepPressureConsumed
-          ? `\n🔔 深压回响生效中，这一竿会更加吃力（剩余 ${staminaResult.deepPressureLayers} 层）。`
+          ? `\n🔔 深压回响生效中，这一竿会更加吃力（剩余 ${staminaResult.deepPressureLayers} 层）`
           : "",
         wishRarity ? `\n🌠 星愿闪耀！这一竿将迎来【${wishRarity}】品质！` : "",
         isBossBait ? `\n👑 首领鱼饵的气息正在水中扩散，当地首领正向鱼钩逼近……` : "",
@@ -1161,6 +1180,7 @@ export default class Fishing extends plugin {
         }
 
         const lineBreak = this.breakLineWithBlessing(state, fishingManager, userId, lineConfig);
+        const refundMsg = lineBreak.saved ? this.grantRiverBlessRefund(e, lineConfig) : "";
 
         const damageResult = applyRodDamage(
           fishingManager,
@@ -1177,7 +1197,7 @@ export default class Fishing extends plugin {
           segment.at(ownerId),
           `的鱼雷！\n`,
           lineBreak.saved
-            ? `🌊 河神的祝福护住了鱼线，只有耳朵嗡嗡作响！`
+            ? `🌊 河神的祝福护住了鱼线，只有耳朵嗡嗡作响！${refundMsg}`
             : `🧵 鱼线被炸断了！`,
           `${damageResult.msg}\n`,
           priceBoostApplied
@@ -1219,6 +1239,7 @@ export default class Fishing extends plugin {
 
         if (fishWeight > lineCapacity * 2) {
           const lineBreak = this.breakLineWithBlessing(state, fishingManager, userId, lineConfig);
+          const refundMsg = lineBreak.saved ? this.grantRiverBlessRefund(e, lineConfig) : "";
 
           const damageResult = applyRodDamage(fishingManager, userId, rodConfig, 10);
 
@@ -1228,7 +1249,7 @@ export default class Fishing extends plugin {
             `🌊 巨大的力量传来！\n`,
             `😱 这到底是个什么庞然大物！？(${fishWeight})\n`,
             lineBreak.saved
-              ? `💥 鱼线发出濒死的悲鸣，却奇迹般撑住了！\n🌊 河神的祝福护住了【${lineConfig.name}】，但鱼还是跑了...${damageResult.msg}`
+              ? `💥 鱼线发出濒死的悲鸣，却奇迹般撑住了！\n🌊 河神的祝福护住了【${lineConfig.name}】，但鱼还是跑了...${damageResult.msg}${refundMsg}`
               : `💥 啪！鱼线瞬间崩断了！\n🧵 【${lineConfig.name}】牺牲了...${damageResult.msg}`,
           ]);
 
@@ -1240,6 +1261,7 @@ export default class Fishing extends plugin {
 
         if (!isSuccess) {
           const lineBreak = this.breakLineWithBlessing(state, fishingManager, userId, lineConfig);
+          const refundMsg = lineBreak.saved ? this.grantRiverBlessRefund(e, lineConfig) : "";
 
           const damageResult = applyRodDamage(fishingManager, userId, rodConfig, 5);
 
@@ -1250,7 +1272,7 @@ export default class Fishing extends plugin {
             `😫 还是没能坚持住，鱼脱钩了...\n`,
             `👋 鱼大摇大摆地游走了(${fishWeight})\n`,
             lineBreak.saved
-              ? `🌊 河神的祝福护住了【${lineConfig.name}】！${damageResult.msg}`
+              ? `🌊 河神的祝福护住了【${lineConfig.name}】！${damageResult.msg}${refundMsg}`
               : `🧵 失去了【${lineConfig.name}】${damageResult.msg}`,
             formatShinyEscape(fish),
           ]);
@@ -1896,10 +1918,15 @@ export default class Fishing extends plugin {
         const punishmentMsg = effectResult.message;
         expGain = effectResult.expGain;
 
+        // 河神（而非猎魔守护）挡下噩梦断线时，同样把鱼线折现补偿——噩梦的惩罚照旧生效。
+        const riverBlessSaved = !immunityTriggered && Boolean(state.hasRiverBless);
+        const refundMsg = riverBlessSaved
+          ? this.grantRiverBlessRefund(e, lineConfig)
+          : "";
         const lineResultMsg = lineSaved
           ? (immunityTriggered
             ? `🗡️ 猎魔守护完全隔绝了这次噩梦，鱼线安然无恙！\n`
-            : `🌊 河神的祝福护住了鱼线！\n`)
+            : `🌊 河神的祝福护住了鱼线！${refundMsg}\n`)
           : `💥 崩！鱼线被扯断了！\n🧵 失去了【${lineConfig.name}】\n`;
         const professionBonusMsg = immunity.active
           ? `🛡️ 噩梦免疫储存：${formatNightmareImmunityDetail(immunity)}\n`

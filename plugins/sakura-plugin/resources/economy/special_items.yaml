@@ -51,8 +51,8 @@ categories:
         icon: 🌊
         type: buff
         duration: 2100
-        description: 青柳河湾专属道具。使用后35分钟内，任何原因都不会让鱼线断裂。
-        activation_message: "🌊 河神垂青！\n🧵 接下来35分钟内你的鱼线坚不可摧！"
+        description: 青柳河湾专属道具。使用后35分钟内，任何原因都不会让鱼线断裂；每次成功保住鱼线，还会按当前鱼线的市价折算等额樱花币补偿给你。
+        activation_message: "🌊 河神垂青！\n🧵 接下来35分钟内你的鱼线坚不可摧，每次挡下断裂都会把鱼线价值折算成樱花币补偿给你！"
 
       - id: item_lamp_fog
         name: 雾灯
