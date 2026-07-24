@@ -2333,7 +2333,7 @@ export default class Fishing extends plugin {
         icon: "☠️",
         name: "诅咒",
         detail: curseStatus.isPranked
-          ? `不会以为诅咒真的消失吧 · 剩余 ${curseStatus.displayedLayers} 层`
+          ? `杂鱼~不会以为诅咒真的消失吧 · 剩余 ${curseStatus.displayedLayers} 层`
           : `剩余 ${curseStatus.displayedLayers} 层`,
         tone: "danger",
       });
