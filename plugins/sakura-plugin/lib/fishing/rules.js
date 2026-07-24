@@ -733,7 +733,8 @@ export function getFishingLevelByExp(exp) {
   return Math.floor(Math.sqrt(safeExp / FISHING_LEVEL_EXP_BASE)) + 1;
 }
 
-// 玩家看到的诅咒层数会少报两层，但真实诅咒未清零时至少显示 1 层。
+// 玩家看到的诅咒层数会少报两层，但真实诅咒未清零时至少显示 1 层：
+// 表面会卡在 1 层连续三竿，让玩家以为下一竿就解脱。
 export function getNightmareCurseDisplay(actualLayers, prankRevealed = false) {
   const safeActualLayers = Math.max(0, Math.floor(Number(actualLayers) || 0));
   if (safeActualLayers === 0) {

@@ -881,9 +881,6 @@ export default class Fishing extends plugin {
       }
       const fishingLevel = fishingManager.getUserFishingLevel(userId);
       const waitTime = rollFishingBiteWaitMs(fishingLevel);
-      const displayedCurseLayers = curseResult.consumed
-        ? fishingManager.getNightmareCurseStatus(userId).displayedLayers
-        : 0;
       const brideMarkLayers = getBrideMarkLayers(
         nightmareStatus.brideNightmareMultiplier,
       );
@@ -903,9 +900,8 @@ export default class Fishing extends plugin {
         nightmareStatus.brideNightmareMultiplier > 1
           ? `\n💍 ${brideMarkLayers} 层花嫁印记生效中，噩梦抽取权重变为 ${nightmareStatus.brideNightmareMultiplier} 倍。`
           : "",
-        curseResult.consumed
-          ? `\n☠️ 诅咒生效中，剩余 ${displayedCurseLayers} 层。`
-          : "",
+        // 抛竿只说诅咒还在、不报层数；层数只在「钓鱼状态」里露面，恶作剧才有落差。
+        curseResult.consumed ? "\n☠️ 诅咒生效中。" : "",
         staminaResult.deepPressureConsumed
           ? `\n🔔 深压回响生效中，这一竿会更加吃力（剩余 ${staminaResult.deepPressureLayers} 层）。`
           : "",
@@ -1695,10 +1691,8 @@ export default class Fishing extends plugin {
       case "curse": {
         const layers = normalizePenalty(effect.layers || 5);
         fishingManager.addNightmareCurseLayers(e.user_id, layers);
-        // 与抛竿提示、钓鱼状态保持同一口径：只报少两层的表面层数。
-        const displayedLayers =
-          fishingManager.getNightmareCurseStatus(e.user_id).displayedLayers;
-        message = `☠️ 诅咒附身！噩梦诅咒缠上了你，剩余 ${displayedLayers} 层。`;
+        // 层数同样不在这里报，让玩家自己去「钓鱼状态」里数。
+        message = "☠️ 诅咒附身！噩梦诅咒缠上了你。";
         break;
       }
 
@@ -2339,7 +2333,7 @@ export default class Fishing extends plugin {
         icon: "☠️",
         name: "诅咒",
         detail: curseStatus.isPranked
-          ? `显示 ${curseStatus.displayedLayers} 层 · 诅咒其实还在`
+          ? `不会以为诅咒真的消失吧 · 剩余 ${curseStatus.displayedLayers} 层`
           : `剩余 ${curseStatus.displayedLayers} 层`,
         tone: "danger",
       });
