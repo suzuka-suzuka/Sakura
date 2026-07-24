@@ -980,7 +980,7 @@ export default class Fishing extends plugin {
           await e.reply([
             shinyHint,
             `🌊 浮漂猛地沉下去了！\n`,
-            `😨 这股有效拉力太大了！鱼线可能撑不住...\n`,
+            `😨 这股力量太大了！鱼线可能撑不住...\n`,
             `📝 回复「收竿」拼了，回复「放弃」保平安`,
           ], false, true);
         } else {

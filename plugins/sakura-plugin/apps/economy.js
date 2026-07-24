@@ -86,8 +86,12 @@ export default class Economy extends plugin {
 
   transactionLog = Command(/^#?(?:查)?流水(?:.*)$/i, async (e) => {
     if (!this.checkWhitelist(e)) return false;
-    const targetId = e.at && e.isMaster ? String(e.at) : String(e.user_id);
     const text = String(e.msg || "").replace(/\[CQ:at[^\]]+\]/g, "").trim();
+    const rest = text.replace(/^#?(?:查)?流水/i, "").trim();
+    if (rest && !/^(?:第)?\d+(?:页)?$/.test(rest)) {
+      return false;
+    }
+    const targetId = e.at && e.isMaster ? String(e.at) : String(e.user_id);
     const pageMatch = text.match(/(?:第)?(\d+)(?:页)?\s*$/);
     const page = Math.max(1, Number(pageMatch?.[1]) || 1);
     const pageSize = 20;
