@@ -12,12 +12,20 @@ import {
   getStartOfShanghaiWeek,
   secondsUntilNextShanghaiDay,
 } from "../lib/economy/time.js";
+import RedPacketManager from "../lib/economy/RedPacketManager.js";
 import {
   canUseTransfer,
   calculateEquipmentSellPrice,
   getReviveCoinPolicy,
+  RED_PACKET_EXPIRE_SECONDS,
+  RED_PACKET_MAX_ACTIVE_PER_USER,
+  RED_PACKET_MAX_AMOUNT,
+  RED_PACKET_MAX_COUNT,
+  RED_PACKET_MIN_AMOUNT,
+  RED_PACKET_MODES,
   TRANSFER_UNLOCK_FISHING_LEVEL,
 } from "../lib/economy/rules.js";
+import { getBot, getCurrentBotSelfId } from "../../../src/api/client.js";
 import {
   FISHING_BENEFIT_DURATION_SECONDS,
   RARITY_CONFIG,
@@ -55,6 +63,10 @@ export default class Economy extends plugin {
     const deletedClaims = EconomyManager.cleanupDailyClaims(30);
     if (deletedClaims > 0) {
       logger.info(`[经济系统] 已清理 ${deletedClaims} 条过期每日领取记录`);
+    }
+    const deletedPackets = RedPacketManager.cleanupFinished(7);
+    if (deletedPackets > 0) {
+      logger.info(`[经济系统] 已清理 ${deletedPackets} 个 7 天前的红包记录`);
     }
   });
 
@@ -567,6 +579,201 @@ export default class Economy extends plugin {
       await e.reply(`💰 转账${actualTransfer > 0 ? '成功' : '失败'}！\n实际转账：${actualTransfer} 樱花币\n手续费：${actualFee} 樱花币`);
     }
     return true;
+  });
+
+  // #发红包 金额 [个数] [拼手气|均等] [祝福语]
+  // 关键字位置不限，前面连续的数字依次当作金额与个数，剩下的算祝福语。
+  parseRedPacketArgs(text) {
+    let rest = String(text || "").trim();
+    let mode = "lucky";
+    const equalKeyword = rest.match(/均等|平均|平分|均分/);
+    const luckyKeyword = rest.match(/拼手气|手气|随机/);
+    if (equalKeyword) {
+      mode = "equal";
+      rest = rest.replace(equalKeyword[0], " ");
+    } else if (luckyKeyword) {
+      rest = rest.replace(luckyKeyword[0], " ");
+    }
+
+    const tokens = rest.split(/\s+/).filter(Boolean);
+    const numbers = [];
+    while (tokens.length > 0 && numbers.length < 2) {
+      const matched = tokens[0].match(/^(\d+)(?:个|份|人)?$/);
+      if (!matched) break;
+      numbers.push(Number(matched[1]));
+      tokens.shift();
+    }
+
+    return {
+      mode,
+      amount: numbers[0],
+      count: numbers.length > 1 ? numbers[1] : 1,
+      blessing: tokens.join(" ").slice(0, 30),
+    };
+  }
+
+  async resolveMemberName(e, userId) {
+    try {
+      const info = await e.getInfo(userId);
+      if (info) return info.card || info.nickname || String(userId);
+    } catch (err) {}
+    return String(userId);
+  }
+
+  sendRedPacket = Command(/^#?发红包\s*(.*)$/, async (e) => {
+    if (!this.checkWhitelist(e)) return false;
+    const { mode, amount, count, blessing } = this.parseRedPacketArgs(e.match[1]);
+
+    if (!amount) {
+      await e.reply(
+        "🧧 用法：#发红包 金额 个数 [拼手气|均等] [祝福语]\n" +
+        "例：#发红包 1000 5 拼手气 新年快乐\n" +
+        `金额 ${RED_PACKET_MIN_AMOUNT}~${RED_PACKET_MAX_AMOUNT}，个数 1~${RED_PACKET_MAX_COUNT}，不写模式默认拼手气。`,
+        10,
+      );
+      return true;
+    }
+
+    // 主人的红包是神明恩赐：不看等级，樱花币一律凭空产生，不动主人自己的余额。
+    const isMaster = Boolean(e.isMaster);
+    if (!isMaster) {
+      // 红包和转账一样是玩家之间搬钱的通道，用同一个等级门槛挡住小号搬运。
+      const fishingManager = new FishingManager(e.group_id);
+      const fishingLevel = fishingManager.getUserFishingLevel(e.user_id);
+      if (!canUseTransfer(fishingLevel)) {
+        await e.reply(
+          `红包功能将在钓鱼 Lv.${TRANSFER_UNLOCK_FISHING_LEVEL} 开放，你当前为 Lv.${fishingLevel}。`,
+          10,
+        );
+        return true;
+      }
+    }
+
+    let result;
+    try {
+      result = new RedPacketManager(e).send({
+        amount,
+        count,
+        mode,
+        blessing,
+        mint: isMaster,
+      });
+    } catch (err) {
+      logger.error(`[红包] 发红包失败: ${err.stack || err}`);
+      await e.reply("红包发送失败，请稍后再试~", 10);
+      return true;
+    }
+
+    if (!result.success) {
+      const reasonMsg = {
+        amount_range: `红包总额需要在 ${RED_PACKET_MIN_AMOUNT}~${RED_PACKET_MAX_AMOUNT} 樱花币之间~`,
+        count_range: `红包个数需要在 1~${RED_PACKET_MAX_COUNT} 之间~`,
+        too_thin: `${count} 个红包至少要 ${count} 樱花币，每份不能少于 1~`,
+        too_many_active: `你还有 ${RED_PACKET_MAX_ACTIVE_PER_USER} 个红包没被领完，等它们领完或过期再发吧~`,
+        insufficient: "余额不足，发不出这个红包~",
+      }[result.reason] || "红包参数有误，发送失败~";
+      await e.reply(reasonMsg, 10);
+      return true;
+    }
+
+    const nickname = e.sender?.card || e.sender?.nickname || String(e.user_id);
+    await e.reply(
+      (result.minted
+        ? `🌸 神明 ${nickname} 降下一个${RED_PACKET_MODES[result.mode]}红包！\n`
+        : `🧧 ${nickname} 发出一个${RED_PACKET_MODES[result.mode]}红包！\n`) +
+      `💰 ${result.amount} 樱花币 · ${result.count} 个\n` +
+      (blessing ? `💌 ${blessing}\n` : "") +
+      `⏳ ${Math.round(RED_PACKET_EXPIRE_SECONDS / 60)} 分钟内发送「#抢红包」来抢，` +
+      (result.minted ? "过期未领完的部分随风散去。" : "过期未领完的部分自动退回。"),
+    );
+    return true;
+  });
+
+  grabRedPacket = Command(/^#?(?:抢|领|拆)红包$/, async (e) => {
+    if (!this.checkWhitelist(e)) return false;
+
+    let result;
+    try {
+      result = new RedPacketManager(e).claim();
+    } catch (err) {
+      logger.error(`[红包] 抢红包失败: ${err.stack || err}`);
+      await e.reply("手滑了，没抢到，请稍后再试~", 10);
+      return true;
+    }
+
+    if (!result.success) {
+      const reasonMsg = {
+        no_packet: "🧧 现在群里没有能抢的红包~",
+        already_claimed: "🧧 剩下的红包你都抢过啦，等下一个吧~",
+        only_own: "🧧 群里只剩你自己发的红包，不能抢自己的~",
+        retry: "手慢了半步，红包状态刚好变了，再试一次~",
+        bad_shares: "这个红包的数据异常，请联系管理员。",
+      }[result.reason] || "没抢到，请稍后再试~";
+      await e.reply(reasonMsg, 10);
+      return true;
+    }
+
+    const nickname = e.sender?.card || e.sender?.nickname || String(e.user_id);
+    let message = `🧧 ${nickname} 抢到了 ${result.amount} 樱花币！` +
+      `（${result.claimedCount}/${result.totalCount}）`;
+    if (result.blessing) {
+      message += `\n💌 ${result.blessing}`;
+    }
+
+    if (result.finished) {
+      const senderName = await this.resolveMemberName(e, result.senderId);
+      const names = await Promise.all(
+        result.claims.map((claim) => this.resolveMemberName(e, claim.userId)),
+      );
+      const detail = result.claims
+        .map((claim, index) => `${index + 1}. ${names[index]} ${claim.amount} 樱花币`)
+        .join("\n");
+      const luckiest = RedPacketManager.getLuckiest(result.claims);
+      const luckiestName = luckiest
+        ? names[result.claims.findIndex((claim) => claim === luckiest)]
+        : "";
+      message += `\n\n🎉 ${senderName} 的红包已被抢光！\n${detail}`;
+      if (luckiest && result.mode !== "equal" && result.totalCount > 1) {
+        message += `\n👑 手气最佳：${luckiestName}（${luckiest.amount} 樱花币）`;
+      }
+    }
+
+    await e.reply(message);
+    return true;
+  });
+
+  // 过期红包按分钟回收：把没领完的份额退回发红包的人，并在群里说明去向。
+  expireRedPackets = Cron("* * * * *", async () => {
+    let expired;
+    try {
+      expired = RedPacketManager.expireOverdue();
+    } catch (err) {
+      logger.error(`[红包] 回收过期红包失败: ${err.stack || err}`);
+      return;
+    }
+    if (!expired || expired.length === 0) return;
+
+    const currentBot = getBot(getCurrentBotSelfId());
+    for (const packet of expired) {
+      logger.info(
+        `[红包] 群 ${packet.groupId} 的红包 ${packet.packetId} 已过期，剩余 ` +
+        `${packet.unclaimed} 樱花币${packet.minted ? "作废" : `退回 ${packet.userId}`}`,
+      );
+      if (!currentBot) continue;
+      try {
+        await currentBot.sendGroupMsg(Number(packet.groupId), [
+          segment.at(packet.userId),
+          segment.text(
+            ` 的红包超时了，已领 ${packet.claimedCount}/${packet.totalCount} 个，` +
+            (packet.minted
+              ? `剩余 ${packet.unclaimed} 樱花币随风散去。`
+              : `剩余 ${packet.refund} 樱花币已退回。`),
+          ),
+        ]);
+      } catch (err) {
+        logger.warn(`[红包] 群 ${packet.groupId} 过期通知发送失败: ${err.message}`);
+      }
+    }
   });
 
   sell = Command(/^#?出售\s*(\S+).*$/, async (e) => {

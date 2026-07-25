@@ -89,6 +89,37 @@ class DB {
         PRIMARY KEY (group_id, user_id, claim_type)
       );
 
+      CREATE TABLE IF NOT EXISTS red_packets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        mode TEXT NOT NULL DEFAULT 'lucky',
+        total_amount INTEGER NOT NULL,
+        total_count INTEGER NOT NULL,
+        claimed_count INTEGER NOT NULL DEFAULT 0,
+        shares TEXT NOT NULL,
+        blessing TEXT,
+        minted INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_red_packets_group_status
+      ON red_packets (group_id, status, created_at);
+
+      CREATE INDEX IF NOT EXISTS idx_red_packets_status_expire
+      ON red_packets (status, expires_at);
+
+      CREATE TABLE IF NOT EXISTS red_packet_claims (
+        packet_id INTEGER NOT NULL,
+        group_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (packet_id, user_id)
+      );
+
       CREATE TABLE IF NOT EXISTS inventory (
         group_id TEXT NOT NULL,
         user_id TEXT NOT NULL,
@@ -279,6 +310,12 @@ class DB {
     }
     if (!fishingStatsColumns.some((column) => column.name === 'nightmare_immunity_updated_at')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN nightmare_immunity_updated_at INTEGER DEFAULT 0');
+    }
+
+    // 主人红包是凭空发放的，过期不退款，需要单独标记。
+    const redPacketColumns = this.db.prepare('PRAGMA table_info(red_packets)').all();
+    if (!redPacketColumns.some((column) => column.name === 'minted')) {
+      this.db.exec('ALTER TABLE red_packets ADD COLUMN minted INTEGER NOT NULL DEFAULT 0');
     }
 
     const fishingCountsColumns = this.db.prepare('PRAGMA table_info(fishing_counts)').all();
