@@ -436,10 +436,10 @@ const FISHING_LEVEL_EXP_BASE = 24;
 export const PERFECT_CATCH_WINDOW_MS = 5000;
 export const PERFECT_EXP_MULTIPLIER = 2;
 // 亡者船票：放款额＝初始债务，每竿未清部分按利率滚一次，滚到上限即勾销并留下抽成印记。
-export const GHOST_DEBT_PRINCIPAL = 400;
+export const GHOST_DEBT_PRINCIPAL = 200;
 export const GHOST_DEBT_INTEREST_RATE = 1.25;
-export const GHOST_DEBT_WRITE_OFF_THRESHOLD = 800;
-export const GHOST_DEBT_MARK_PENALTY_RATE = 0.25;
+export const GHOST_DEBT_WRITE_OFF_THRESHOLD = 400;
+export const GHOST_DEBT_MARK_PENALTY_RATE = 0.1;
 export const FISHING_COOLDOWN_SECONDS = 5 * 60;
 export const FISHING_TIME_SAND_COOLDOWN_SECONDS = FISHING_COOLDOWN_SECONDS / 2;
 export const FISHING_BENEFIT_DURATION_SECONDS = 35 * 60;
@@ -488,7 +488,7 @@ export function getFishingStaminaCost() {
   return FISHING_STAMINA_COST;
 }
 
-// 亡者船票＝高利贷：当场放款 400 并欠下等额本金，之后每抛一竿，未还清的部分
+// 亡者船票＝高利贷：当场放款 200 并欠下等额本金，之后每抛一竿，未还清的部分
 // 就利滚利一次；滚到上限即一笔勾销，改为留下永久抽成印记，避免债务发散到还不完。
 export function calculateGhostDebtPayment(earnings, debt, {
   hasGhostMark = false,
