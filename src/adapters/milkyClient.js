@@ -58,7 +58,7 @@ const ACTION_MAP = {
   // 群公告
   _send_group_notice:      "send_group_announcement",
   _get_group_notice:       "get_group_announcements",
-  del_group_notice:        "delete_group_announcement",
+  _del_group_notice:       "delete_group_announcement",
 
   // 文件
   upload_group_file:       "upload_group_file",
@@ -864,7 +864,7 @@ export class MilkyClient extends EventEmitter {
       case "_get_group_notice":
         return { group_id: params.group_id };
 
-      case "del_group_notice":
+      case "_del_group_notice":
         return {
           group_id:        params.group_id,
           announcement_id: params.notice_id,

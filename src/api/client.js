@@ -982,6 +982,23 @@ export class OneBotApi {
       if (info?.nickname) {
         this.nickname = info.nickname;
       }
+
+      // 部分实现（如 SnowLuma）在昵称缺失时会回退成 QQ 号，改查资料接口补全
+      if (
+        !this.nickname ||
+        this.nickname === "Bot" ||
+        this.nickname === String(this._selfId)
+      ) {
+        const profile = await this.sendRequest("get_stranger_info", {
+          user_id: this._selfId,
+        });
+        const realNickname = profile?.nickname;
+        if (realNickname && realNickname !== String(this._selfId)) {
+          this.nickname = realNickname;
+          if (info) info.nickname = realNickname;
+        }
+      }
+
       updateBotDirectory(this._selfId, {
         loginInfo: info,
         nickname: this.nickname,
@@ -1235,5 +1252,10 @@ export class OneBotApi {
   /** 获取群公告 */
   async getGroupNotice(params) {
     return this.sendRequest("_get_group_notice", params);
+  }
+
+  /** 删除群公告（action 名带下划线前缀，对齐 NapCat/go-cqhttp） */
+  async delGroupNotice(params) {
+    return this.sendRequest("_del_group_notice", params);
   }
 }
