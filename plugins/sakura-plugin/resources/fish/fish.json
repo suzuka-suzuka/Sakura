@@ -2349,7 +2349,7 @@
     "nightmare_effect": {
       "type": "steal_coins_flat",
       "min": 1,
-      "max": 100,
+      "max": 200,
       "fallback_rod_damage": 20
     },
     "weight": [
@@ -2373,7 +2373,7 @@
     "nightmare_effect": {
       "type": "steal_coins_percent",
       "min_percent": 1,
-      "max_percent": 12,
+      "max_percent": 10,
       "fallback_rod_damage": 20
     },
     "weight": [
