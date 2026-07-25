@@ -236,11 +236,11 @@ function formatBossCombatStatus(state, fishingManager, userId) {
   const rod = fishingManager.getRodDurabilityInfo(userId, state.rodConfig.id);
   const rodBar = createProgressBar(rod.currentDurability, rod.maxDurability, 10);
   return [
-    `👑 生命：${hpBar} ${state.bossHp}/${state.bossMaxHp}`,
-    `📏 距离：${distanceBar} ${Math.max(0, Math.round(state.distance))}/100`,
-    `⚡ 张力：${tensionBar} ${Math.max(0, Math.round(state.tension))}/100`,
-    `🧵 鱼线：${lineBar} ${lineCurrent}/${lineMax}`,
-    `🎣 鱼竿：${rodBar} ${rod.currentDurability}/${rod.maxDurability}`,
+    `👑 生命\n${hpBar} ${state.bossHp}/${state.bossMaxHp}`,
+    `📏 距离\n${distanceBar} ${Math.max(0, Math.round(state.distance))}/100`,
+    `⚡ 张力\n${tensionBar} ${Math.max(0, Math.round(state.tension))}/100`,
+    `🧵 鱼线\n${lineBar} ${lineCurrent}/${lineMax}`,
+    `🎣 鱼竿\n${rodBar} ${rod.currentDurability}/${rod.maxDurability}`,
   ].join("\n");
 }
 
