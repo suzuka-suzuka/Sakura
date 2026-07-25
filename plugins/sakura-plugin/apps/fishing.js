@@ -765,17 +765,14 @@ export default class Fishing extends plugin {
   // 首领鱼饵没有市价，按寻宝鱼饵同价折算。失败仍旧失败——这笔钱只是把
   // 「这一竿的鱼饵成本」折现，让保线的收益方差拉大，与好运护符、雾灯区分开。
   grantRiverBlessRefund(e, state, fishingManager) {
-    const { value, baitName, valuedAsTreasure } = computeRiverBlessRefundValue(
-      state,
-      fishingManager,
-    );
+    const { value } = computeRiverBlessRefundValue(state, fishingManager);
     if (value <= 0) return "";
     new EconomyManager(e).addCoins(e, value, {
       type: "收入",
-      note: `河神垂青折现：${baitName}`,
+      note: "河神垂青赐福",
     });
-    const valuedNote = valuedAsTreasure ? "（按寻宝鱼饵同价）" : "";
-    return `\n💰 河神将本次鱼饵【${baitName}】${valuedNote}折算成 ${value} 樱花币补偿给你！`;
+    // 对玩家只报「河神保线成功 → 得到多少钱」，鱼饵折算只是定价口径，不必摊开讲。
+    return `\n💰 河神垂青应验，赐下 ${value} 樱花币！`;
   }
 
   startFishing = Command(/^#?钓鱼$/, async (e) => {
