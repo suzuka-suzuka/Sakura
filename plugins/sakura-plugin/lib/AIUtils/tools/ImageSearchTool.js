@@ -1,4 +1,5 @@
 import { AbstractTool } from './AbstractTool.js'
+import { fetchMessageByIdentifier } from '../messageLookup.js'
 import {
   SEARCH_CHANNELS,
   getSearchImageConfig,
@@ -29,13 +30,13 @@ export class ImageSearchTool extends AbstractTool {
 
     let imageUrl
     try {
-      const targetMsg = await e.getMsg(seq)
+      const targetMsg = await fetchMessageByIdentifier(e, seq)
       const image = targetMsg?.message?.find((m) => m.type === 'image')
       if (!image?.data?.url) {
         return '未能从该消息中提取到图片。'
       }
       imageUrl = image.data.url
-      await e.react(128076, seq)
+      await e.react(128076, targetMsg.message_id ?? seq)
     } catch (err) {
       logger.error(`[ImageSearchTool] 获取消息 seq: ${seq} 失败:`, err)
       return `获取消息失败: ${err.message}`

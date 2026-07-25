@@ -1,4 +1,5 @@
 import { AbstractTool } from "./AbstractTool.js";
+import { fetchMessageByIdentifier } from "../messageLookup.js";
 import Setting from "../../setting.js";
 import { urlToBase64 } from "../../utils.js";
 import { createToolFollowUpResult } from "../toolResultProtocol.js";
@@ -255,12 +256,15 @@ export class MessageContentAnalyzerTool extends AbstractTool {
 
       for (const s of seq) {
         try {
+          // AI 可能传真实 seq，撤回/加精只认 message_id，先解析
+          const resolved = await fetchMessageByIdentifier(e, s);
+          const targetId = resolved?.message_id ?? s;
           if (type === "recall") {
-            await e.recall(s);
+            await e.recall(targetId);
           } else if (type === "essence") {
-            await e.bot.setEssenceMsg({ message_id: s });
+            await e.bot.setEssenceMsg({ message_id: targetId });
           } else if (type === "unessence") {
-            await e.bot.deleteEssenceMsg({ message_id: s });
+            await e.bot.deleteEssenceMsg({ message_id: targetId });
           }
           successCount++;
           await new Promise((resolve) => setTimeout(resolve, 500));
@@ -275,7 +279,7 @@ export class MessageContentAnalyzerTool extends AbstractTool {
     let targetMsgs = [];
     for (const s of seq) {
       try {
-        const msg = await e.getMsg(s);
+        const msg = await fetchMessageByIdentifier(e, s);
         if (msg) {
           targetMsgs.push(msg);
         } else {

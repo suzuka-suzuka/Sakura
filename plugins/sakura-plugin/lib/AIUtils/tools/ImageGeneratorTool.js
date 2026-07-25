@@ -1,5 +1,6 @@
 import { generateImagesWithProvider } from "../imageProvider.js";
 import { AbstractTool } from "./AbstractTool.js";
+import { fetchMessageByIdentifier } from "../messageLookup.js";
 import Setting from "../../setting.js";
 
 export class ImageGeneratorTool extends AbstractTool {
@@ -53,7 +54,7 @@ export class ImageGeneratorTool extends AbstractTool {
       const seqList = Array.isArray(seq) ? seq : [seq];
       for (const currentSeq of seqList) {
         try {
-          const targetMsg = await e.getMsg(currentSeq);
+          const targetMsg = await fetchMessageByIdentifier(e, currentSeq);
           if (!targetMsg?.message) {
             continue;
           }
@@ -65,7 +66,7 @@ export class ImageGeneratorTool extends AbstractTool {
 
           if (images.length > 0) {
             imageUrls.push(...images);
-            await e.react(128076, currentSeq);
+            await e.react(128076, targetMsg.message_id ?? currentSeq);
           }
         } catch (error) {
           logger.error(

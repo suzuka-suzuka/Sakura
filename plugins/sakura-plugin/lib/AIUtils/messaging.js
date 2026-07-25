@@ -219,9 +219,11 @@ export async function getQuoteContent(e) {
     const originalMessageContent = fullOriginalMessage.replace(/\n/g, " ")
 
     quoteText = ` 引用了${originalSenderName}(QQ:${originalSenderId})的消息"${originalMessageContent}"`
+    // seq 标签必须用 message_id：SnowLuma 等协议端的 get_msg 只认 message_id，
+    // 真实 message_seq 反查会 miss（NapCat/Milky 下两者同值）
     const originalSeq = getMessageIdentifier(
-      originalMsg.message_seq,
       originalMsg.message_id,
+      originalMsg.message_seq,
       originalMsg.seq
     )
     if (originalSeq) {

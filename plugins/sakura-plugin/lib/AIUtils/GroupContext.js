@@ -35,8 +35,8 @@ async function getChatHistoryGroup(group, num) {
     const processChats = (rawChats) => {
       return rawChats.filter((chat) => {
         const messageId = getMessageIdentifier(
-          chat.message_seq,
           chat.message_id,
+          chat.message_seq,
           chat.seq
         );
         if (seenMessageIds.has(messageId)) {
@@ -74,9 +74,11 @@ async function getChatHistoryGroup(group, num) {
       totalScanned += rawChats.length;
       chats.push(...processChats(rawChats));
 
+      // 翻页锚点用 message_id：NapCat/SnowLuma 的 get_group_msg_history
+      // 都按 message_id 反查内部 seq，传真实 seq 会查不到锚点
       const oldestSeq = getMessageIdentifier(
-        rawChats[0]?.message_seq,
         rawChats[0]?.message_id,
+        rawChats[0]?.message_seq,
         rawChats[0]?.seq
       );
       const pageNextSeq = res?.next_message_seq ?? oldestSeq;
@@ -89,6 +91,10 @@ async function getChatHistoryGroup(group, num) {
     }
 
     chats.sort((a, b) => {
+      // message_id 可能是哈希值，数值大小无时序含义，排序以时间为主
+      const timeA = Number(a?.time || 0);
+      const timeB = Number(b?.time || 0);
+      if (timeA !== timeB) return timeA - timeB;
       const seqA = Number(getMessageIdentifier(a?.message_seq, a?.message_id, a?.seq) || 0);
       const seqB = Number(getMessageIdentifier(b?.message_seq, b?.message_id, b?.seq) || 0);
       return seqA - seqB;
@@ -120,7 +126,7 @@ async function formatChatMessageContent(group, chat) {
     messageHeader += `, 头衔:${sender.title}`;
   }
   messageHeader += `, 时间:${formatDate(chatTime)}`;
-  const seq = getMessageIdentifier(chat.message_seq, chat.message_id, chat.seq);
+  const seq = getMessageIdentifier(chat.message_id, chat.message_seq, chat.seq);
   if (seq) {
     messageHeader += `, seq:${seq}`;
   }
@@ -129,10 +135,10 @@ async function formatChatMessageContent(group, chat) {
   const replyPart = chat.message?.find((msg) => msg.type === "reply");
   if (replyPart && replyPart.id) {
     try {
-      const message_id = replyPart.id;
-      const res = await group.getMsgHistory(message_id);
-      const originalMsgArray = res?.messages || [];
-      originalMsg = originalMsgArray.length > 0 ? originalMsgArray[0] : null;
+      originalMsg = await group.bot.getMsg({
+        message_id: replyPart.id,
+        group_id: group.group_id,
+      });
     } catch (error) {
       logger.error("获取被回复的原始消息时出错:", error);
     }
@@ -193,8 +199,8 @@ async function formatChatMessageContent(group, chat) {
 
     messageHeader += `， 引用了${originalSenderName}(QQ:${originalSenderId})的消息"${originalMessageContent}"`;
     const originalSeq = getMessageIdentifier(
-      originalMsg.message_seq,
       originalMsg.message_id,
+      originalMsg.message_seq,
       originalMsg.seq
     );
     if (originalSeq) {
@@ -264,7 +270,7 @@ function formatStoredChatMessage(record) {
   }
   messageHeader += `, 时间:${formatDate(record.time)}`;
 
-  const seq = record.messageSeq || record.messageId;
+  const seq = record.messageId || record.messageSeq;
   if (seq) {
     messageHeader += `, seq:${seq}`;
   }
@@ -279,7 +285,7 @@ function formatStoredChatMessage(record) {
       .replace(/\n/g, " ");
 
     messageHeader += `， 引用了${originalSenderName}(QQ:${originalSenderId})的消息"${originalContent}"`;
-    const originalSeq = repliedMessage.messageSeq || repliedMessage.messageId;
+    const originalSeq = repliedMessage.messageId || repliedMessage.messageSeq;
     if (originalSeq) {
       messageHeader += `(seq:${originalSeq})`;
     }

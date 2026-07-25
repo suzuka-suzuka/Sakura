@@ -109,7 +109,7 @@ export class Mimic extends plugin {
     if (e.message && Array.isArray(e.message) && e.message.length > 0) {
       e.message.forEach((msgPart) => {
         if (msgPart.type === "file") {
-          const seq = getMessageIdentifier(e.message_seq, e.message_id, e.seq);
+          const seq = getMessageIdentifier(e.message_id, e.message_seq, e.seq);
           const fileName = msgPart.data?.name || "未命名文件";
           contentParts.push(`[文件:${fileName}]${seq ? `(seq:${seq})` : ""}`);
           return;
@@ -123,7 +123,7 @@ export class Mimic extends plugin {
             contentParts.push(`@${msgPart.data?.qq}`);
             break;
           case "image": {
-            const seq = getMessageIdentifier(e.message_seq, e.message_id, e.seq);
+            const seq = getMessageIdentifier(e.message_id, e.message_seq, e.seq);
             contentParts.push(`[图片]${seq ? `(seq:${seq})` : ""}`);
             break;
           }
