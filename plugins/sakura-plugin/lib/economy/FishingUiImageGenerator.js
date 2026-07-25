@@ -698,19 +698,22 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
     )
     ctx.fillStyle = COLORS.secondary
     const deployedCount = torpedo.deployedCount || 0
-    ctx.fillText(
-      torpedo.deployedHere
-        ? `本钓点已投放 · 你共有 ${deployedCount} 枚潜伏中`
-        : deployedCount > 0
-          ? `本钓点未投放 · 其他钓点有 ${deployedCount} 枚潜伏中`
-          : "你尚未投放鱼雷",
-      178,
-      infoTop + 116,
-    )
+    // 「本钓点未投放 + 其他钓点数量」一行会超出面板宽度，拆成两行，后续内容随之下移。
+    const deployedLines = torpedo.deployedHere
+      ? [`本钓点已投放 · 共 ${deployedCount} 枚潜伏中`]
+      : deployedCount > 0
+        ? ["本钓点未投放", `其他钓点还有 ${deployedCount} 枚潜伏中`]
+        : ["你尚未投放鱼雷"]
+    let torpedoLineY = infoTop + 116
+    for (const line of deployedLines) {
+      ctx.fillText(line, 178, torpedoLineY)
+      torpedoLineY += 30
+    }
+    torpedoLineY += 5
     ctx.fillText(
       `【${torpedo.currentLocationName || "当前钓点"}】共潜伏 ${torpedo.locationCount || 0} 个鱼雷`,
       178,
-      infoTop + 151,
+      torpedoLineY,
     )
     ctx.fillStyle = torpedo.priceBoostActive ? COLORS.warning : COLORS.secondary
     ctx.font = `bold 18px ${this.fontFamily}`
@@ -719,7 +722,7 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
         ? `本钓点鱼价 ×${TORPEDO_PRICE_BOOST_MULTIPLIER} · 剩余 ${torpedo.priceBoostRemainingMinutes} 分钟`
         : "当前钓点鱼价正常",
       178,
-      infoTop + 190,
+      torpedoLineY + 39,
     )
 
     this.drawPanel(ctx, 509, infoTop, infoWidth, 300, { fill: COLORS.panelSoft })
