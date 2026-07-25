@@ -14,6 +14,7 @@ import {
   getNightmareCurseDisplay,
   deepPressureMultiplierFromLayers,
   normalizeFishingLocation,
+  TORPEDO_ARM_DURATION_MS,
   TORPEDO_PRICE_BOOST_MULTIPLIER,
 } from "../fishing/rules.js";
 
@@ -1443,7 +1444,7 @@ export default class FishingManager {
     }));
   }
 
-  // 每人每个钓点最多一枚，所以同一玩家可能同时在多个钓点有鱼雷。
+  // 每人同时只能有一枚未引爆的鱼雷，不限钓点；返回数组是为了兼容既有的状态面板。
   getUserTorpedoes(userId) {
     userId = String(userId);
     const rows = db.prepare(`
@@ -1457,18 +1458,19 @@ export default class FishingManager {
     }));
   }
 
-  getUserTorpedo(userId, locationId) {
+  getUserTorpedo(userId) {
     userId = String(userId);
-    const location = normalizeFishingLocation(locationId);
     const row = db.prepare(`
         SELECT timestamp, location
         FROM pond_torpedoes
-        WHERE group_id = ? AND user_id = ? AND location = ?
-    `).get(this.groupId, userId, location);
+        WHERE group_id = ? AND user_id = ?
+    `).get(this.groupId, userId);
     if (!row) return null;
+    const timestamp = Number(row.timestamp) || 0;
     return {
-      timestamp: Number(row.timestamp) || 0,
+      timestamp,
       location: normalizeFishingLocation(row.location),
+      readyAt: timestamp + TORPEDO_ARM_DURATION_MS,
     };
   }
 
@@ -1495,16 +1497,18 @@ export default class FishingManager {
     userId = String(userId);
     const location = normalizeFishingLocation(locationId);
     const transaction = db.transaction(() => {
+      // 每人同时只能有一枚，不看钓点：多枚并存会让「埋一天再引爆」变成流水线。
       const existing = db.prepare(`
-          SELECT location FROM pond_torpedoes
-          WHERE group_id = ? AND user_id = ? AND location = ?
-      `).get(this.groupId, userId, location);
+          SELECT timestamp, location FROM pond_torpedoes
+          WHERE group_id = ? AND user_id = ?
+      `).get(this.groupId, userId);
       if (existing) {
         return {
           success: false,
           reason: "already_deployed",
           location: normalizeFishingLocation(existing.location),
-          msg: "你在这个钓点已经有一个尚未触发的鱼雷了！",
+          readyAt: (Number(existing.timestamp) || 0) + TORPEDO_ARM_DURATION_MS,
+          msg: "你已经有一枚尚未引爆的鱼雷了！",
         };
       }
 
@@ -1520,11 +1524,48 @@ export default class FishingManager {
           DELETE FROM inventory
           WHERE group_id = ? AND user_id = ? AND item_id = 'torpedo' AND count <= 0
       `).run(this.groupId, userId);
+      const now = Date.now();
       db.prepare(`
           INSERT INTO pond_torpedoes (group_id, user_id, timestamp, location)
           VALUES (?, ?, ?, ?)
-      `).run(this.groupId, userId, Date.now(), location);
-      return { success: true, location, msg: "鱼雷投放成功！" };
+      `).run(this.groupId, userId, now, location);
+      return {
+        success: true,
+        location,
+        readyAt: now + TORPEDO_ARM_DURATION_MS,
+        msg: "鱼雷投放成功！",
+      };
+    });
+
+    return transaction.immediate();
+  }
+
+  // 引爆：删掉鱼雷这一步就是幂等锁——删不到就说明它已经被引爆或被别人钓走了，
+  // 结算回调只在删除成功后、同一个事务里执行，不会出现「雷没了钱也没到账」。
+  detonateTorpedo(userId, { now = Date.now(), settle = null } = {}) {
+    userId = String(userId);
+    const transaction = db.transaction(() => {
+      const existing = db.prepare(`
+          SELECT timestamp, location FROM pond_torpedoes
+          WHERE group_id = ? AND user_id = ?
+      `).get(this.groupId, userId);
+      if (!existing) return { success: false, reason: "not_deployed" };
+
+      const armedAt = Number(existing.timestamp) || 0;
+      const readyAt = armedAt + TORPEDO_ARM_DURATION_MS;
+      const location = normalizeFishingLocation(existing.location);
+      if (now < readyAt) {
+        return { success: false, reason: "not_armed", readyAt, location };
+      }
+
+      const removed = db.prepare(`
+          DELETE FROM pond_torpedoes
+          WHERE group_id = ? AND user_id = ?
+      `).run(this.groupId, userId);
+      if (removed.changes !== 1) return { success: false, reason: "gone" };
+
+      const settlement = typeof settle === "function" ? settle({ location }) : null;
+      return { success: true, location, armedAt, settlement };
     });
 
     return transaction.immediate();
@@ -1563,9 +1604,11 @@ export default class FishingManager {
     return `sakura:fishing:torpedo_explosion:${this.groupId}:${location}`;
   }
 
-  async setFishPriceBoost(locationId) {
+  // 倍率直接存进值里：被钓中是 1.5，手动引爆是 1.25，两种爆炸共用同一个键。
+  async setFishPriceBoost(locationId, multiplier = TORPEDO_PRICE_BOOST_MULTIPLIER) {
     const key = this.getFishPriceBoostKey(locationId);
-    await redis.set(key, String(Date.now()), "EX", FISHING_BENEFIT_DURATION_SECONDS);
+    const safeMultiplier = Number(multiplier) > 1 ? Number(multiplier) : TORPEDO_PRICE_BOOST_MULTIPLIER;
+    await redis.set(key, String(safeMultiplier), "EX", FISHING_BENEFIT_DURATION_SECONDS);
   }
 
   async isFishPriceBoostActive(locationId) {
@@ -1575,8 +1618,15 @@ export default class FishingManager {
   }
 
   async getFishPriceMultiplier(locationId) {
-    const isActive = await this.isFishPriceBoostActive(locationId);
-    return isActive ? TORPEDO_PRICE_BOOST_MULTIPLIER : 1;
+    const key = this.getFishPriceBoostKey(locationId);
+    const value = await redis.get(key);
+    if (value === null) return 1;
+    const parsed = Number(value);
+    // 旧版把时间戳写进了值里，读到不像倍率的数就按旧的被钓中加成处理。
+    if (!Number.isFinite(parsed) || parsed <= 1 || parsed > 10) {
+      return TORPEDO_PRICE_BOOST_MULTIPLIER;
+    }
+    return parsed;
   }
 
   async getFishPriceBoostRemainingMinutes(locationId) {

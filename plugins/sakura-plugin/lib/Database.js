@@ -377,6 +377,48 @@ class DB {
       ON pond_torpedoes (group_id, location);
     `);
 
+    // 鱼雷从「每人每钓点一枚」收紧回「每人一枚、不限钓点」：
+    // 保留时间戳最早的那枚（离引爆最近，玩家不亏），多出来的按物品退回背包，
+    // 再用唯一索引把约束落到库层，避免并发投放绕过应用层检查。
+    const hasTorpedoUniqueIndex = this.db.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'index' AND name = 'idx_pond_torpedoes_user_unique'
+    `).get();
+    if (!hasTorpedoUniqueIndex) {
+      const dedupeTorpedoes = this.db.transaction(() => {
+        const duplicates = this.db.prepare(`
+          SELECT group_id, user_id, COUNT(*) - 1 AS extra
+          FROM pond_torpedoes
+          GROUP BY group_id, user_id
+          HAVING COUNT(*) > 1
+        `).all();
+        const refund = this.db.prepare(`
+          INSERT INTO inventory (group_id, user_id, item_id, count)
+          VALUES (?, ?, 'torpedo', ?)
+          ON CONFLICT(group_id, user_id, item_id)
+          DO UPDATE SET count = COALESCE(inventory.count, 0) + excluded.count
+        `);
+        const trim = this.db.prepare(`
+          DELETE FROM pond_torpedoes
+          WHERE group_id = ? AND user_id = ? AND rowid NOT IN (
+            SELECT rowid FROM pond_torpedoes
+            WHERE group_id = ? AND user_id = ?
+            ORDER BY timestamp ASC, rowid ASC
+            LIMIT 1
+          )
+        `);
+        for (const row of duplicates) {
+          refund.run(row.group_id, row.user_id, row.extra);
+          trim.run(row.group_id, row.user_id, row.group_id, row.user_id);
+        }
+        this.db.exec(`
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_pond_torpedoes_user_unique
+          ON pond_torpedoes (group_id, user_id);
+        `);
+      });
+      dedupeTorpedoes.immediate();
+    }
+
     // 双倍经验卡已替换为锦鲤许愿签：初始化时按玩家等量合并，迁移后删除旧ID。
     // 事务保证进程若在迁移中途退出，下次启动不会把同一批旧卡重复折算。
     const legacyKoiWishPlaceholders = LEGACY_KOI_WISH_INVENTORY_ITEMS

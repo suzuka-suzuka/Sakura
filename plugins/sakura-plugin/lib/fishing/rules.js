@@ -460,7 +460,17 @@ export const NORMAL_TUG_PRESSURE_RANGE = (
 );
 export const TORPEDO_HOOK_WEIGHT_PER_ITEM = 3;
 export const TORPEDO_ROD_DAMAGE = 20;
+// 被别人钓中的加成高于自己引爆：踩雷是运气，引爆者却能自己挑时机，
+// 能挑时机的那一档就该弱一些。
 export const TORPEDO_PRICE_BOOST_MULTIPLIER = 1.5;
+export const TORPEDO_DETONATE_PRICE_MULTIPLIER = 1.25;
+// 投放满 24 小时才能手动引爆；在此之前它仍是会被别人钓中的陷阱。
+export const TORPEDO_ARM_DURATION_MS = 24 * 60 * 60 * 1000;
+// 引爆者独得的爆破收获：当地随机 3 条鱼的基准售价。
+// 稀有度按固定的中档饵口径摇取——炸弹震晕的鱼不挑饵，也就不该受玩家装备影响；
+// 垃圾照常参与，宝藏和噩梦不是鱼，排除在外。
+export const TORPEDO_BLAST_CATCH_COUNT = 3;
+export const TORPEDO_BLAST_BAIT_QUALITY = 3;
 
 export function getFishingBiteWaitMaxMs(level) {
   const safeLevel = Math.max(1, Math.floor(Number(level) || 1));
@@ -998,6 +1008,36 @@ export function calculateLegacyFishPrice(fish, globalMultiplier = 1) {
   const [minWeight, maxWeight] = fish?.weight || [weight, weight];
   const progress = maxWeight === minWeight ? 0.5 : Math.max(0, Math.min(1, (weight - minWeight) / (maxWeight - minWeight)));
   return Math.round(basePrice * (0.5 + progress) * Math.max(0, Number(globalMultiplier) || 0));
+}
+
+// 鱼雷爆破收获：炸出来的是当地鱼，宝藏和噩梦不参与，也不做异色判定。
+// 价格一律按基准倍率算——引爆时机完全由玩家掌握，若吃卡片、鱼饵、天气等增益，
+// 最优解就永远是叠满 buff 再点火。
+export function rollTorpedoBlastCatch(
+  fishData,
+  { location, count = TORPEDO_BLAST_CATCH_COUNT, random = Math.random } = {},
+) {
+  const safeCount = Math.max(1, Math.floor(Number(count) || 0));
+  const catches = [];
+  for (let index = 0; index < safeCount; index += 1) {
+    const fish = selectFishFromData(fishData, {
+      location,
+      baitQuality: TORPEDO_BLAST_BAIT_QUALITY,
+      zeroWeightRarities: ["宝藏", "噩梦"],
+      random,
+    });
+    catches.push({
+      id: fish.id,
+      name: fish.name,
+      rarity: fish.rarity,
+      weight: fish.actualWeight,
+      price: calculateLegacyFishPrice(fish, 1),
+    });
+  }
+  return {
+    catches,
+    earnings: catches.reduce((total, item) => total + item.price, 0),
+  };
 }
 
 // 首领的金币、经验和当地宝箱组成独立奖励包；异色是唯一收益倍率例外。

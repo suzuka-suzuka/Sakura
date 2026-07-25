@@ -331,6 +331,45 @@ export default class FishingSettlementService {
     })();
   }
 
+  // 鱼雷爆破收获：不是一次抛竿，所以不占 fishing_attempts、不进图鉴、不给经验，
+  // 也不让高利贷滚一次利息（利息按竿计）。但它属于垂钓所得，抽成印记与抵债照常吃。
+  settleTorpedoBlast({ earnings, note, relatedId = null }) {
+    const safeEarnings = normalizeNonNegativeInteger(earnings);
+    if (safeEarnings == null) return { success: false, reason: "invalid" };
+
+    return db.transaction(() => {
+      this._ensureRows();
+      const debtResult = this._calcGhostDebt(safeEarnings, { accrueInterest: false });
+      this._persistGhostDebt(debtResult);
+
+      if (debtResult.earnings > 0) {
+        db.prepare(`
+            UPDATE economy
+            SET coins = coins + ?
+            WHERE group_id = ? AND user_id = ?
+        `).run(debtResult.earnings, this.groupId, this.userId);
+        const balance = db.prepare(`
+            SELECT coins FROM economy WHERE group_id = ? AND user_id = ?
+        `).get(this.groupId, this.userId).coins;
+        db.prepare(`
+            INSERT INTO economy_transactions
+            (group_id, user_id, target_user_id, type, amount, balance_after, note, related_id, created_at)
+            VALUES (?, ?, NULL, '收入', ?, ?, ?, ?, ?)
+        `).run(
+          this.groupId,
+          this.userId,
+          debtResult.earnings,
+          balance,
+          note || "鱼雷爆破收获",
+          relatedId,
+          Date.now(),
+        );
+      }
+
+      return { success: true, ...debtResult };
+    })();
+  }
+
   settleInventoryCatch({ sessionId, fishId, rodId, expGain = 0, weight = 0 }) {
     const safeExpGain = normalizeNonNegativeInteger(expGain);
     if (!sessionId || !fishId || safeExpGain == null) {
