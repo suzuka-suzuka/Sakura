@@ -1258,7 +1258,7 @@ export default class Fishing extends plugin {
       }
 
       if (!isBossFish(fish) && state.hasLucky) {
-        await e.reply(`🍀 好运护符跳过了重量与困难度判断，轻松把鱼拉了上来！`);
+        await e.reply(`🍀 好运护符发挥了作用，轻松把鱼拉了上来！`);
         await this.finishSuccess(e, state, fishingManager);
         return;
       }
