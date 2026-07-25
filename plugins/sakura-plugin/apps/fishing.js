@@ -239,7 +239,7 @@ function formatBossCombatStatus(state, fishingManager, userId) {
     `👑 生命：${hpBar} ${state.bossHp}/${state.bossMaxHp}`,
     `📏 距离：${distanceBar} ${Math.max(0, Math.round(state.distance))}/100`,
     `⚡ 张力：${tensionBar} ${Math.max(0, Math.round(state.tension))}/100`,
-    `🧵 鱼线（本场）：${lineBar} ${lineCurrent}/${lineMax}`,
+    `🧵 鱼线：${lineBar} ${lineCurrent}/${lineMax}`,
     `🎣 鱼竿：${rodBar} ${rod.currentDurability}/${rod.maxDurability}`,
   ].join("\n");
 }
