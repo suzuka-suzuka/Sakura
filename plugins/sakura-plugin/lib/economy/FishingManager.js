@@ -1436,23 +1436,35 @@ export default class FishingManager {
           FROM pond_torpedoes
           WHERE group_id = ?
         `).all(this.groupId);
-    const result = {};
-    for (const row of rows) {
-      result[row.user_id] = {
-        timestamp: Number(row.timestamp) || 0,
-        location: normalizeFishingLocation(row.location),
-      };
-    }
-    return result;
+    return rows.map((row) => ({
+      userId: String(row.user_id),
+      timestamp: Number(row.timestamp) || 0,
+      location: normalizeFishingLocation(row.location),
+    }));
   }
 
-  getUserTorpedo(userId) {
+  // 每人每个钓点最多一枚，所以同一玩家可能同时在多个钓点有鱼雷。
+  getUserTorpedoes(userId) {
     userId = String(userId);
-    const row = db.prepare(`
+    const rows = db.prepare(`
         SELECT timestamp, location
         FROM pond_torpedoes
         WHERE group_id = ? AND user_id = ?
-    `).get(this.groupId, userId);
+    `).all(this.groupId, userId);
+    return rows.map((row) => ({
+      timestamp: Number(row.timestamp) || 0,
+      location: normalizeFishingLocation(row.location),
+    }));
+  }
+
+  getUserTorpedo(userId, locationId) {
+    userId = String(userId);
+    const location = normalizeFishingLocation(locationId);
+    const row = db.prepare(`
+        SELECT timestamp, location
+        FROM pond_torpedoes
+        WHERE group_id = ? AND user_id = ? AND location = ?
+    `).get(this.groupId, userId, location);
     if (!row) return null;
     return {
       timestamp: Number(row.timestamp) || 0,
@@ -1461,7 +1473,7 @@ export default class FishingManager {
   }
 
   getUserTorpedoCount(userId) {
-    return this.getUserTorpedo(userId) ? 1 : 0;
+    return this.getUserTorpedoes(userId).length;
   }
 
   getTotalTorpedoCount(locationId = null) {
@@ -1485,14 +1497,14 @@ export default class FishingManager {
     const transaction = db.transaction(() => {
       const existing = db.prepare(`
           SELECT location FROM pond_torpedoes
-          WHERE group_id = ? AND user_id = ?
-      `).get(this.groupId, userId);
+          WHERE group_id = ? AND user_id = ? AND location = ?
+      `).get(this.groupId, userId, location);
       if (existing) {
         return {
           success: false,
           reason: "already_deployed",
           location: normalizeFishingLocation(existing.location),
-          msg: "你已经投放过一个尚未触发的鱼雷了！",
+          msg: "你在这个钓点已经有一个尚未触发的鱼雷了！",
         };
       }
 

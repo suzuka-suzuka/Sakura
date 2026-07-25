@@ -165,7 +165,7 @@ class DB {
         user_id TEXT NOT NULL,
         timestamp INTEGER,
         location TEXT NOT NULL DEFAULT 'pond',
-        PRIMARY KEY (group_id, user_id)
+        PRIMARY KEY (group_id, user_id, location)
       );
 
       CREATE TABLE IF NOT EXISTS favorability (
@@ -308,7 +308,34 @@ class DB {
       SET location = 'pond'
       WHERE location IS NULL
          OR location NOT IN ('pond', 'river', 'lake', 'coast', 'abyss', 'mystic');
+    `);
 
+    // 鱼雷限制由“每人一枚”放宽为“每人每个钓点一枚”，旧表主键 (group_id, user_id) 需要重建。
+    const torpedoKeyColumns = this.db.prepare('PRAGMA table_info(pond_torpedoes)').all();
+    if (!torpedoKeyColumns.some((column) => column.name === 'location' && column.pk > 0)) {
+      const rebuildTorpedoes = this.db.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE pond_torpedoes_new (
+            group_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            timestamp INTEGER,
+            location TEXT NOT NULL DEFAULT 'pond',
+            PRIMARY KEY (group_id, user_id, location)
+          );
+
+          INSERT OR IGNORE INTO pond_torpedoes_new (group_id, user_id, timestamp, location)
+          SELECT group_id, user_id, timestamp, location FROM pond_torpedoes;
+
+          DROP TABLE pond_torpedoes;
+
+          ALTER TABLE pond_torpedoes_new RENAME TO pond_torpedoes;
+        `);
+      });
+      rebuildTorpedoes.immediate();
+    }
+
+    // 索引必须在可能的重建之后创建：DROP TABLE 会一并删掉旧索引。
+    this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_pond_torpedoes_group_location
       ON pond_torpedoes (group_id, location);
     `);

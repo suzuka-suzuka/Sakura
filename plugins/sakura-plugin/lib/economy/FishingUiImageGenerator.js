@@ -697,11 +697,13 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
       infoTop + 81,
     )
     ctx.fillStyle = COLORS.secondary
-    const deployedLocation = torpedo.deployedLocation || {}
+    const deployedCount = torpedo.deployedCount || 0
     ctx.fillText(
-      torpedo.deployed
-        ? `已投放：${deployedLocation.emoji || ""}${deployedLocation.name || "未知钓点"} · 不会过期`
-        : "你尚未投放鱼雷",
+      torpedo.deployedHere
+        ? `本钓点已投放 · 你共有 ${deployedCount} 枚潜伏中`
+        : deployedCount > 0
+          ? `本钓点未投放 · 其他钓点有 ${deployedCount} 枚潜伏中`
+          : "你尚未投放鱼雷",
       178,
       infoTop + 116,
     )

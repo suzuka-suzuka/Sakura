@@ -2504,10 +2504,8 @@ export default class Fishing extends plugin {
     const balance = economyManager.getCoins(e);
 
     const dangerousTorpedoes = fishingManager.getAvailableTorpedoCount(userId, locationId);
-    const deployedTorpedo = fishingManager.getUserTorpedo(userId);
-    const deployedTorpedoLocation = deployedTorpedo
-      ? getFishingLocationConfig(deployedTorpedo.location)
-      : null;
+    const deployedTorpedoes = fishingManager.getUserTorpedoes(userId);
+    const deployedHere = deployedTorpedoes.some((torpedo) => torpedo.location === locationId);
     const locationTorpedoes = fishingManager.getTotalTorpedoCount(locationId);
     let priceBoostActive = false;
     let priceBoostRemainingMinutes = 0;
@@ -2547,8 +2545,8 @@ export default class Fishing extends plugin {
         effects,
         torpedo: {
           dangerousCount: dangerousTorpedoes,
-          deployed: Boolean(deployedTorpedo),
-          deployedLocation: deployedTorpedoLocation,
+          deployedHere,
+          deployedCount: deployedTorpedoes.length,
           currentLocationName: locationConfig?.name || "当前钓点",
           locationCount: locationTorpedoes,
           priceBoostActive,
@@ -2726,8 +2724,8 @@ export default class Fishing extends plugin {
         message = "💣 你背包里没有鱼雷！\n快去「商店」购买吧~";
       } else {
         const existingLocation = getFishingLocationConfig(result.location);
-        message = `💣 你已经在${existingLocation?.emoji || ""}【${existingLocation?.name || "某个钓点"}】投放了一个鱼雷！\n` +
-          "鱼雷触发前，一个人最多只能投放一个哦~";
+        message = `💣 你在${existingLocation?.emoji || ""}【${existingLocation?.name || "某个钓点"}】投放的鱼雷还没被触发！\n` +
+          "同一个钓点最多只能投放一个，换个钓点再来吧~";
       }
       await e.reply(message, 10);
     }
