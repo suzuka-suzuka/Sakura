@@ -2839,7 +2839,11 @@ export default class Fishing extends plugin {
 
     const settlement = result.settlement || {};
     const catchList = blast.catches
-      .map((item) => `${item.name}（${item.weight}kg）${item.price}`)
+      .map((item) => {
+        const rarity = RARITY_CONFIG[item.rarity] || { color: "⚪" };
+        return `${item.name} ${rarity.color}${item.rarity}` +
+          `（${item.weight}）${item.price}樱花币`;
+      })
       .join("\n");
     const markMsg = settlement.markDeducted > 0
       ? `\n🩸 亡者抽成印记扣走 ${settlement.markDeducted}`
