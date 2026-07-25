@@ -56,6 +56,9 @@ export const BOSS_FIGHT_TIMEOUT_MS = 60 * 1000;
 export const BOSS_MIN_DIFFICULTY = 220;
 export const BOSS_MIN_HP = 150;
 export const BOSS_MIN_ATTACK = 8;
+// 偷钱首领碰上零余额时，机制不能空过一回合，改判为砸鱼竿：基础鱼竿伤害 × 该倍率。
+// 走倍率而不是固定值，是为了跟 line_rend / rod_crush 一样随首领攻击力自动缩放。
+export const BOSS_STEAL_FALLBACK_ROD_MULTIPLIER = 2;
 export const BOSS_MECHANIC_TYPES = Object.freeze([
   "stamina_drain",
   "steal_coins",
@@ -282,7 +285,9 @@ export function getBossAttackCooldownRemaining(
   return Math.max(0, Math.ceil(cooldown - (current - last)));
 }
 
-export function resolveBossAttack(boss, random = Math.random) {
+// context.coinBalance 为调用方读到的玩家余额；不传则维持原有偷钱行为，
+// 由调用方自己去 clamp（保证纯函数在没有经济数据时也能用）。
+export function resolveBossAttack(boss, random = Math.random, context = {}) {
   const attack = Math.max(1, Math.floor(Number(boss?.attack) || 1));
   const mechanic = boss?.boss_mechanic || {};
   const baseGearDamage = Math.max(1, Math.ceil(attack / 2));
@@ -294,6 +299,7 @@ export function resolveBossAttack(boss, random = Math.random) {
     coinSteal: 0,
     tensionGain: 0,
     heal: 0,
+    stealFallback: false,
   };
 
   switch (mechanic.type) {
@@ -301,6 +307,17 @@ export function resolveBossAttack(boss, random = Math.random) {
       result.staminaDrain = Math.max(1, Math.floor(Number(mechanic.amount) || 1));
       break;
     case "steal_coins": {
+      const balance = Number(context?.coinBalance);
+      if (Number.isFinite(balance) && balance <= 0) {
+        // 身无分文：偷不到东西，转而砸鱼竿，免得穷玩家白拿一回合。
+        const multiplier = Math.max(
+          1,
+          Number(mechanic.fallback_rod_multiplier) || BOSS_STEAL_FALLBACK_ROD_MULTIPLIER,
+        );
+        result.rodDamage = Math.max(1, Math.round(baseGearDamage * multiplier));
+        result.stealFallback = true;
+        break;
+      }
       const min = Math.max(1, Math.floor(Number(mechanic.min) || 1));
       const max = Math.max(min, Math.floor(Number(mechanic.max) || min));
       const roll = Math.max(0, Math.min(0.999999999999, Number(random()) || 0));
@@ -1080,6 +1097,12 @@ export function validateLegacyFishData(fishData) {
         )
       ) {
         errors.push(`${label}: 首领偷钱区间无效`);
+      } else if (
+        mechanic.type === "steal_coins" &&
+        mechanic.fallback_rod_multiplier != null &&
+        (!Number.isFinite(mechanic.fallback_rod_multiplier) || mechanic.fallback_rod_multiplier < 1)
+      ) {
+        errors.push(`${label}: 首领偷钱兜底鱼竿倍率无效`);
       } else if (
         ["line_rend", "rod_crush"].includes(mechanic.type) &&
         (!Number.isFinite(mechanic.multiplier) || mechanic.multiplier < 1)

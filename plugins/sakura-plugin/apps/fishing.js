@@ -459,7 +459,9 @@ export default class Fishing extends plugin {
   async executeBossAttack(e, state) {
     const fishingManager = new FishingManager(e.group_id);
     const economyManager = new EconomyManager(e);
-    const attackResult = resolveBossAttack(state.fish);
+    const attackResult = resolveBossAttack(state.fish, Math.random, {
+      coinBalance: economyManager.getCoins(e),
+    });
     const mechanic = state.fish.boss_mechanic;
     const effectMessages = [];
 
@@ -502,7 +504,11 @@ export default class Fishing extends plugin {
       );
     }
 
-    if (attackResult.coinSteal > 0) {
+    if (attackResult.stealFallback) {
+      effectMessages.push(
+        `💸 ${mechanic.name}摸了个空——你身无分文，它恼羞成怒地砸向鱼竿！`,
+      );
+    } else if (attackResult.coinSteal > 0) {
       const balance = economyManager.getCoins(e);
       const stolen = Math.min(balance, attackResult.coinSteal);
       if (stolen > 0) {
@@ -511,8 +517,8 @@ export default class Fishing extends plugin {
           note: `首领战：${state.fish.name}偷窃`,
           relatedId: state.id,
         });
+        effectMessages.push(`💸 ${mechanic.name}偷走 ${stolen} 樱花币`);
       }
-      effectMessages.push(`💸 ${mechanic.name}偷走 ${stolen} 樱花币`);
     }
 
     if (attackResult.tensionGain > 0) {
@@ -528,7 +534,8 @@ export default class Fishing extends plugin {
     if (attackResult.lineDamage > Math.ceil(state.fish.attack / 2)) {
       effectMessages.push(`🪚 ${mechanic.name}强化了本次鱼线伤害`);
     }
-    if (attackResult.rodDamage > Math.ceil(state.fish.attack / 2)) {
+    // 偷钱兜底本身就已经在上面说明了鱼竿挨打的缘由，这里不再重复提示。
+    if (!attackResult.stealFallback && attackResult.rodDamage > Math.ceil(state.fish.attack / 2)) {
       effectMessages.push(`💥 ${mechanic.name}强化了本次鱼竿伤害`);
     }
 

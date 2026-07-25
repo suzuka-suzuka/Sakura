@@ -4894,7 +4894,8 @@
       "name": "探囊鬼手",
       "min": 30,
       "max": 70,
-      "description": "每次首领攻击持续偷走30～70樱花币，余额不足时偷到0为止。"
+      "fallback_rod_multiplier": 2,
+      "description": "每次首领攻击持续偷走30～70樱花币，余额不足时偷到0为止；若身无分文，则改为对鱼竿造成双倍伤害。"
     },
     "locations": [
       "river"
