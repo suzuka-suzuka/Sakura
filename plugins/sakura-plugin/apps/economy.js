@@ -22,6 +22,7 @@ import {
   RED_PACKET_MAX_AMOUNT,
   RED_PACKET_MAX_COUNT,
   RED_PACKET_MIN_AMOUNT,
+  RED_PACKET_MIN_COUNT,
   RED_PACKET_MODES,
   TRANSFER_UNLOCK_FISHING_LEVEL,
 } from "../lib/economy/rules.js";
@@ -581,17 +582,18 @@ export default class Economy extends plugin {
     return true;
   });
 
-  // #发红包 金额 [个数] [拼手气|均等] [祝福语]
-  // 关键字位置不限，前面连续的数字依次当作金额与个数，剩下的算祝福语。
+  // #发红包 金额 个数 [拼手气|均等] [祝福语]
+  // 金额和个数都是必填且必须打头（见指令正则），模式关键字与祝福语的位置不限。
   parseRedPacketArgs(text) {
     let rest = String(text || "").trim();
-    let mode = "lucky";
+    // 不写模式就按均等发，祝福语可写可不写。
+    let mode = "equal";
     const equalKeyword = rest.match(/均等|平均|平分|均分/);
     const luckyKeyword = rest.match(/拼手气|手气|随机/);
     if (equalKeyword) {
-      mode = "equal";
       rest = rest.replace(equalKeyword[0], " ");
     } else if (luckyKeyword) {
+      mode = "lucky";
       rest = rest.replace(luckyKeyword[0], " ");
     }
 
@@ -607,7 +609,7 @@ export default class Economy extends plugin {
     return {
       mode,
       amount: numbers[0],
-      count: numbers.length > 1 ? numbers[1] : 1,
+      count: numbers[1],
       blessing: tokens.join(" ").slice(0, 30),
     };
   }
@@ -620,19 +622,12 @@ export default class Economy extends plugin {
     return String(userId);
   }
 
-  sendRedPacket = Command(/^#?发红包\s*(.*)$/, async (e) => {
+  // 金额和个数两个数字都写全才会触发，「发红包」「发红包啊」「发红包 1000」
+  // 都不匹配，直接落给后面的处理器，机器人不出声——用法看菜单即可。
+  sendRedPacket = Command(/^#?发红包\s*(\d+(?:个|份|人)?\s+\d+.*)$/, async (e) => {
     if (!this.checkWhitelist(e)) return false;
     const { mode, amount, count, blessing } = this.parseRedPacketArgs(e.match[1]);
-
-    if (!amount) {
-      await e.reply(
-        "🧧 用法：#发红包 金额 个数 [拼手气|均等] [祝福语]\n" +
-        "例：#发红包 1000 5 拼手气 新年快乐\n" +
-        `金额 ${RED_PACKET_MIN_AMOUNT}~${RED_PACKET_MAX_AMOUNT}，个数 1~${RED_PACKET_MAX_COUNT}，不写模式默认拼手气。`,
-        10,
-      );
-      return true;
-    }
+    if (!amount || !count) return false;
 
     // 主人的红包是神明恩赐：不看等级，樱花币一律凭空产生，不动主人自己的余额。
     const isMaster = Boolean(e.isMaster);
@@ -667,10 +662,12 @@ export default class Economy extends plugin {
     if (!result.success) {
       const reasonMsg = {
         amount_range: `红包总额需要在 ${RED_PACKET_MIN_AMOUNT}~${RED_PACKET_MAX_AMOUNT} 樱花币之间~`,
-        count_range: `红包个数需要在 1~${RED_PACKET_MAX_COUNT} 之间~`,
+        count_range: `红包个数需要在 ${RED_PACKET_MIN_COUNT}~${RED_PACKET_MAX_COUNT} 之间，` +
+          `至少要发 ${RED_PACKET_MIN_COUNT} 份~`,
         too_thin: `${count} 个红包至少要 ${count} 樱花币，每份不能少于 1~`,
         too_many_active: `你还有 ${RED_PACKET_MAX_ACTIVE_PER_USER} 个红包没被领完，等它们领完或过期再发吧~`,
-        insufficient: "余额不足，发不出这个红包~",
+        insufficient: `余额不足，这个红包要 ${result.required} 樱花币` +
+          `（本金 ${amount} ＋ 手续费 ${result.fee}）~`,
       }[result.reason] || "红包参数有误，发送失败~";
       await e.reply(reasonMsg, 10);
       return true;
@@ -682,6 +679,7 @@ export default class Economy extends plugin {
         ? `🌸 神明 ${nickname} 降下一个${RED_PACKET_MODES[result.mode]}红包！\n`
         : `🧧 ${nickname} 发出一个${RED_PACKET_MODES[result.mode]}红包！\n`) +
       `💰 ${result.amount} 樱花币 · ${result.count} 个\n` +
+      (result.fee > 0 ? `🧾 手续费 ${result.fee} 樱花币，共扣 ${result.totalCost}\n` : "") +
       (blessing ? `💌 ${blessing}\n` : "") +
       `⏳ ${Math.round(RED_PACKET_EXPIRE_SECONDS / 60)} 分钟内发送「#抢红包」来抢，` +
       (result.minted ? "过期未领完的部分随风散去。" : "过期未领完的部分自动退回。"),

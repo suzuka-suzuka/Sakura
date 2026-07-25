@@ -1,6 +1,7 @@
 import db from "../Database.js";
 import EconomyManager from "./EconomyManager.js";
 import {
+  calculateRedPacketFee,
   RED_PACKET_EXPIRE_SECONDS,
   RED_PACKET_MAX_ACTIVE_PER_USER,
   RED_PACKET_MODES,
@@ -46,8 +47,9 @@ export default class RedPacketManager {
     return Number(row?.count) || 0;
   }
 
-  // mint=true 走主人通道：樱花币凭空产生，不动发红包者的余额，过期也不退款。
-  send({ amount, count, mode = "lucky", blessing = "", mint = false } = {}) {
+  // mint=true 走主人通道：樱花币凭空产生，不动发红包者的余额，过期也不退款，
+  // 也没有可收的手续费——钱不是从谁的账上出来的。
+  send({ amount, count, mode = "equal", blessing = "", mint = false } = {}) {
     const safeMode = RED_PACKET_MODES[mode] ? mode : "lucky";
     const validation = validateRedPacket(amount, count);
     if (!validation.valid) return { success: false, reason: validation.reason };
@@ -60,6 +62,8 @@ export default class RedPacketManager {
     this.economyManager.ensureUser(this.e);
     const now = Date.now();
     const expiresAt = now + RED_PACKET_EXPIRE_SECONDS * 1000;
+    const fee = mint ? 0 : calculateRedPacketFee(validation.amount, validation.count);
+    const totalCost = validation.amount + fee;
 
     const transaction = db.transaction(() => {
       if (this.getActiveCount() >= RED_PACKET_MAX_ACTIVE_PER_USER) {
@@ -71,9 +75,9 @@ export default class RedPacketManager {
             UPDATE economy
             SET coins = coins - ?
             WHERE group_id = ? AND user_id = ? AND coins >= ?
-        `).run(validation.amount, this.groupId, this.userId, validation.amount);
+        `).run(totalCost, this.groupId, this.userId, totalCost);
         if (deducted.changes !== 1) {
-          return { success: false, reason: "insufficient" };
+          return { success: false, reason: "insufficient", fee, required: totalCost };
         }
       }
 
@@ -105,10 +109,13 @@ export default class RedPacketManager {
       } else {
         this.economyManager.recordTransaction(this.e, {
           type: "红包支出",
-          amount: -validation.amount,
-          note: `发${RED_PACKET_MODES[safeMode]}红包 ${validation.count} 个`,
+          amount: -totalCost,
+          note: fee > 0
+            ? `发${RED_PACKET_MODES[safeMode]}红包 ${validation.count} 个，手续费 ${fee}`
+            : `发${RED_PACKET_MODES[safeMode]}红包 ${validation.count} 个`,
           relatedId: `red_packet:${packetId}`,
         });
+        this._collectFee(fee, packetId);
       }
 
       return {
@@ -117,12 +124,37 @@ export default class RedPacketManager {
         mode: safeMode,
         amount: validation.amount,
         count: validation.count,
+        fee,
+        totalCost,
         minted: Boolean(mint),
         expiresAt,
       };
     });
 
     return transaction.immediate();
+  }
+
+  // 手续费和转账一样进 Bot 账户；拿不到 self_id 时就直接销毁，
+  // 无论如何都不会留在发红包的人手上。
+  _collectFee(fee, packetId) {
+    if (fee <= 0) return;
+    const selfId = this.e?.self_id ? String(this.e.self_id) : null;
+    if (!selfId) return;
+
+    const botE = { group_id: this.groupId, user_id: selfId };
+    this.economyManager.ensureUser(botE);
+    db.prepare(`
+        UPDATE economy
+        SET coins = coins + ?
+        WHERE group_id = ? AND user_id = ?
+    `).run(fee, this.groupId, selfId);
+    this.economyManager.recordTransaction(botE, {
+      type: "手续费收入",
+      amount: fee,
+      targetUserId: this.userId,
+      note: "红包手续费",
+      relatedId: `red_packet:${packetId}`,
+    });
   }
 
   // 抢最早发出、自己还没抢过、且不是自己发的那一个：

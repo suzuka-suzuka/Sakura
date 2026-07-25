@@ -40,7 +40,14 @@ export function canUseTransfer(fishingLevel) {
 export const RED_PACKET_MIN_SHARE = 1;
 export const RED_PACKET_MIN_AMOUNT = 10;
 export const RED_PACKET_MAX_AMOUNT = 100000;
+// 至少两份：单份红包等于一条可以指定收款人的通道，会绕开转账手续费；
+// 两份起步时发红包的人无法控制另一份落到谁手上，抢不走的还会原路退回。
+export const RED_PACKET_MIN_COUNT = 2;
 export const RED_PACKET_MAX_COUNT = 20;
+// 手续费与转账对齐：固定 10 ＋ 金额的 5%（转账 0~10% 随机的期望值），
+// 但百分比部分按份数摊薄——份数越少越接近定向转账，就该按转账的价码收。
+export const RED_PACKET_FEE_BASE = 10;
+export const RED_PACKET_FEE_RATE = 0.05;
 export const RED_PACKET_EXPIRE_SECONDS = 5 * 60;
 // 同一个人同时挂着的未领完红包上限，避免刷屏和一次性锁死大量余额。
 export const RED_PACKET_MAX_ACTIVE_PER_USER = 3;
@@ -75,13 +82,20 @@ function splitEqualShares(amount, count) {
   return Array.from({ length: count }, (_, index) => base + (index < remainder ? 1 : 0));
 }
 
-export function splitRedPacket(amount, count, mode = "lucky", random = Math.random) {
+export function splitRedPacket(amount, count, mode = "equal", random = Math.random) {
   const safeAmount = Math.floor(Number(amount) || 0);
   const safeCount = Math.floor(Number(count) || 0);
   if (safeCount < 1 || safeAmount < safeCount * RED_PACKET_MIN_SHARE) return null;
-  return mode === "equal"
-    ? splitEqualShares(safeAmount, safeCount)
-    : splitLuckyShares(safeAmount, safeCount, random);
+  return mode === "lucky"
+    ? splitLuckyShares(safeAmount, safeCount, random)
+    : splitEqualShares(safeAmount, safeCount);
+}
+
+// 手续费在本金之外另收：播报出去的金额就是真正会被抢走的金额。
+export function calculateRedPacketFee(amount, count) {
+  const safeAmount = Math.max(0, Math.floor(Number(amount) || 0));
+  const safeCount = Math.max(1, Math.floor(Number(count) || 0));
+  return RED_PACKET_FEE_BASE + Math.floor(safeAmount * RED_PACKET_FEE_RATE / safeCount);
 }
 
 export function validateRedPacket(amount, count) {
@@ -93,7 +107,7 @@ export function validateRedPacket(amount, count) {
   if (safeAmount < RED_PACKET_MIN_AMOUNT || safeAmount > RED_PACKET_MAX_AMOUNT) {
     return { valid: false, reason: "amount_range" };
   }
-  if (safeCount < 1 || safeCount > RED_PACKET_MAX_COUNT) {
+  if (safeCount < RED_PACKET_MIN_COUNT || safeCount > RED_PACKET_MAX_COUNT) {
     return { valid: false, reason: "count_range" };
   }
   if (safeAmount < safeCount * RED_PACKET_MIN_SHARE) {
