@@ -8,6 +8,7 @@ import _ from "lodash";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import { pluginresources } from "../lib/path.js";
 import Setting from "../lib/setting.js";
 import FishingSettlementService from "../lib/fishing/SettlementService.js";
@@ -328,6 +329,21 @@ function formatDetonateCountdown(readyAt, now = Date.now()) {
 
 function getFishImagePath(fishId) {
   return path.join(pluginresources, "fish", "img", `${fishId}.png`);
+}
+
+const FISHING_GUIDE_IMAGES = Object.freeze([
+  Object.freeze({ title: "① 限定出没时间总览", filename: "01-fish-time.jpg" }),
+  Object.freeze({ title: "② 限定出没地点总览", filename: "02-fish-location.jpg" }),
+  Object.freeze({ title: "③ 天气倍率说明", filename: "03-weather-multipliers.jpg" }),
+  Object.freeze({ title: "④ 钓点首领通用说明", filename: "04-boss-guide.jpg" }),
+  Object.freeze({ title: "⑤ 噩梦效果与反制", filename: "05-nightmare-effects.jpg" }),
+  Object.freeze({ title: "⑥ 钓鱼道具效果总览", filename: "06-item-effects.jpg" }),
+  Object.freeze({ title: "⑦ 钓点解锁等级", filename: "07-location-unlocks.jpg" }),
+  Object.freeze({ title: "⑧ 图鉴与等级奖励", filename: "08-dex-level-rewards.jpg" }),
+]);
+
+function getFishingGuideImagePath(filename) {
+  return path.join(pluginresources, "fish", "guide", filename);
 }
 
 export default class Fishing extends plugin {
@@ -2172,6 +2188,47 @@ export default class Fishing extends plugin {
     }
     return 1;
   }
+
+  fishingGuide = Command(/^#?钓鱼攻略$/, async (e) => {
+    if (!this.checkWhitelist(e)) return false;
+
+    const guideEntries = FISHING_GUIDE_IMAGES.map((entry) => ({
+      ...entry,
+      imagePath: getFishingGuideImagePath(entry.filename),
+    }));
+    const missing = guideEntries.filter((entry) => !fs.existsSync(entry.imagePath));
+    if (missing.length > 0) {
+      logger.error(
+        `[钓鱼攻略] 缺少攻略图：${missing.map((entry) => entry.imagePath).join("、")}`,
+      );
+      await e.reply("钓鱼攻略图片暂不完整，请联系管理员重新生成。", 10);
+      return true;
+    }
+
+    try {
+      await e.sendForwardMsg(
+        guideEntries.map((entry) => [
+          `${entry.title}\n`,
+          segment.image(pathToFileURL(entry.imagePath).href),
+        ]),
+        {
+          source: "樱神社 · 钓鱼攻略",
+          prompt: `🎣 点击查看钓鱼攻略（共 ${guideEntries.length} 张）`,
+          summary: `共 ${guideEntries.length} 张钓鱼攻略图`,
+          news: [
+            { text: "⏰ 出没时间与地点" },
+            { text: "🌤️ 天气、首领与噩梦" },
+            { text: "🎁 道具、钓点与奖励" },
+            { text: "📚 数据以当前游戏配置为准" },
+          ],
+        },
+      );
+    } catch (err) {
+      logger.error(`[钓鱼攻略] 合并转发失败: ${err.stack || err}`);
+      await e.reply("钓鱼攻略发送失败，请稍后再试。", 10);
+    }
+    return true;
+  });
 
 
   pondWeatherForecast = Command(/^#?(鱼塘|钓鱼)天气$/, async (e) => {

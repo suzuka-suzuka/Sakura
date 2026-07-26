@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "author": "suzuka",
+  "scripts": {
+    "generate:fishing-guides": "node scripts/generate-fishing-guides.mjs"
+  },
   "dependencies": {
     "@book000/pixivts": "^0.45.69",
     "@google-cloud/storage": "^7.19.0",
