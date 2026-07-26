@@ -73,8 +73,12 @@ import {
   selectNextFishFightState,
   selectBossFromData,
   selectFishFromData,
-  validateLegacyFishData,
 } from "../lib/fishing/rules.js";
+import {
+  getFishData,
+  getFishIdSet,
+  getLocationExclusiveFish,
+} from "../lib/fishing/fishData.js";
 import { getShinyFishImagePath } from "../lib/fishing/shinyImage.js";
 import {
   acquireRedisLock,
@@ -85,18 +89,7 @@ import { getShanghaiHour, secondsUntilNextShanghaiDay } from "../lib/economy/tim
 
 const fishingSessions = new FishingSessionStore();
 
-let fishData = [];
-try {
-  const fishJsonPath = path.join(pluginresources, "fish", "fish.json");
-  fishData = JSON.parse(fs.readFileSync(fishJsonPath, "utf8"));
-  const validationErrors = validateLegacyFishData(fishData);
-  if (validationErrors.length > 0) {
-    throw new Error(validationErrors.slice(0, 5).join("；"));
-  }
-} catch (err) {
-  logger.error(`[钓鱼] 加载鱼类数据失败: ${err.message}`);
-  fishData = [];
-}
+const fishData = getFishData();
 
 function applyRodDamage(fishingManager, userId, rodConfig, damage) {
   const result = fishingManager.damageRod(userId, rodConfig.id, damage);
@@ -114,7 +107,7 @@ function applyRodDamage(fishingManager, userId, rodConfig, damage) {
   };
 }
 
-const fishIdSet = new Set(fishData.map((fish) => fish.id));
+const fishIdSet = getFishIdSet();
 
 // 新收录时统计图鉴进度；只认仍存在于 fish.json 的鱼种，保证分母与图鉴一致
 function getDexProgress(fishingManager, userId, settleResult) {
@@ -2624,9 +2617,8 @@ export default class Fishing extends plugin {
       dexLocationId = entry[0];
     }
     const dexLocationConfig = dexLocationId ? getFishingLocationConfig(dexLocationId) : null;
-    const dexFishData = dexLocationId
-      ? fishData.filter((fish) => !fish.locations?.length || fish.locations.includes(dexLocationId))
-      : fishData;
+    // 指定钓点时只列该钓点专属鱼（含跨钓点鱼），通用鱼哪儿都能钓到，不占钓点图鉴的分母。
+    const dexFishData = dexLocationId ? getLocationExclusiveFish(dexLocationId) : fishData;
 
     const targetId = e.user_id;
     const fishingManager = new FishingManager(e.group_id);

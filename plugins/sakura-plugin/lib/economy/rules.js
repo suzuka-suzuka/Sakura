@@ -36,6 +36,110 @@ export function canUseTransfer(fishingLevel) {
   return normalizeFishingLevel(fishingLevel) >= TRANSFER_UNLOCK_FISHING_LEVEL;
 }
 
+// 钓鱼等级里程碑奖励：每 5 级一档、不设上限，每档发一套自救耗材，
+// 保证断竿和中诅咒时不至于卡死。发的是消耗品而非金币，档位无限也不会推高收益基线。
+export const FISHING_LEVEL_REWARD_STEP = 5;
+export const FISHING_LEVEL_REWARD_ITEMS = Object.freeze([
+  Object.freeze({ itemId: "item_toolkit_repair", count: 1 }),
+  Object.freeze({ itemId: "item_holy_water", count: 1 }),
+]);
+
+export function getReachedFishingLevelRewardMilestones(fishingLevel) {
+  const level = normalizeFishingLevel(fishingLevel);
+  const milestones = [];
+  for (
+    let milestone = FISHING_LEVEL_REWARD_STEP;
+    milestone <= level;
+    milestone += FISHING_LEVEL_REWARD_STEP
+  ) {
+    milestones.push(milestone);
+  }
+  return milestones;
+}
+
+export function getFishingLevelRewardClaimType(milestone) {
+  return `fishing_level_reward_${milestone}`;
+}
+
+export function getNextFishingLevelRewardMilestone(fishingLevel) {
+  const level = normalizeFishingLevel(fishingLevel);
+  return (Math.floor(level / FISHING_LEVEL_REWARD_STEP) + 1) * FISHING_LEVEL_REWARD_STEP;
+}
+
+export function getFishingLevelRewardSlotCost() {
+  return FISHING_LEVEL_REWARD_ITEMS.reduce((total, reward) => total + reward.count, 0);
+}
+
+// 钓点专属图鉴奖励：按「该钓点专属鱼」的收录数发档，每个钓点各自一条进度线。
+// 奖励全部取自该钓点已有的宝箱/道具/藏品，不引入新内容；只有全收录档给一次性金币。
+export const DEX_LOCATION_REWARD_THRESHOLDS = Object.freeze([10, 20, 30]);
+export const DEX_LOCATION_FULL_TIER_KEY = "full";
+export const DEX_LOCATION_FULL_COIN_REWARD = 1000;
+
+const DEX_LOCATION_SIGNATURE_ITEMS = Object.freeze({
+  pond: "item_sign_koi",
+  river: "item_charm_river",
+  lake: "item_lamp_fog",
+  coast: "item_card_double_coin",
+  abyss: "item_bait_monster",
+  mystic: "item_bottle_wish",
+});
+
+const DEX_LOCATION_TREASURE_ITEMS = Object.freeze({
+  pond: "treasure_pond_sakura_amber",
+  river: "treasure_river_golden_scale",
+  lake: "treasure_lake_bronze_mirror",
+  coast: "treasure_coast_black_pearl",
+  abyss: "treasure_abyss_dragon_ambergris",
+  mystic: "treasure_mystic_star_fragment",
+});
+
+export function getDexLocationChestId(locationId) {
+  return `chest_${locationId}`;
+}
+
+export function getDexLocationRewardClaimType(locationId, tierKey) {
+  return `dex_loc_${locationId}_${tierKey}`;
+}
+
+// 全收录档用 "full" 而不是具体条数做记账键：以后 fish.json 增删鱼种时，
+// 分母变化不会凭空造出一个没领过的新档位。
+export function getDexLocationRewardTiers(locationId, exclusiveTotal) {
+  const total = Math.max(0, Math.floor(Number(exclusiveTotal) || 0));
+  const chestId = getDexLocationChestId(locationId);
+  const signatureItemId = DEX_LOCATION_SIGNATURE_ITEMS[locationId];
+  const treasureItemId = DEX_LOCATION_TREASURE_ITEMS[locationId];
+  if (total <= 0 || !signatureItemId || !treasureItemId) return [];
+
+  const tierRewards = {
+    10: [{ itemId: chestId, count: 1 }],
+    20: [{ itemId: chestId, count: 2 }],
+    30: [{ itemId: signatureItemId, count: 1 }, { itemId: chestId, count: 1 }],
+  };
+
+  const tiers = DEX_LOCATION_REWARD_THRESHOLDS
+    // 门槛必须严格小于全收录数，否则会和全收录档重叠成两次领取
+    .filter((threshold) => threshold < total)
+    .map((threshold) => ({
+      key: String(threshold),
+      threshold,
+      items: tierRewards[threshold],
+      coins: 0,
+    }));
+
+  tiers.push({
+    key: DEX_LOCATION_FULL_TIER_KEY,
+    threshold: total,
+    items: [
+      { itemId: "bait_boss", count: 2 },
+      { itemId: treasureItemId, count: 1 },
+    ],
+    coins: DEX_LOCATION_FULL_COIN_REWARD,
+  });
+
+  return tiers;
+}
+
 // 红包：每份至少 1 樱花币，所以总额必须不小于份数。
 export const RED_PACKET_MIN_SHARE = 1;
 export const RED_PACKET_MIN_AMOUNT = 10;

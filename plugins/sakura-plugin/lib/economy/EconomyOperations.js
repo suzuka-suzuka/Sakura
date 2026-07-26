@@ -2,6 +2,15 @@ import db from "../Database.js";
 import EconomyManager from "./EconomyManager.js";
 import InventoryManager from "./InventoryManager.js";
 import ShopManager from "./ShopManager.js";
+import {
+  FISHING_LEVEL_REWARD_ITEMS,
+  getDexLocationRewardClaimType,
+  getDexLocationRewardTiers,
+  getFishingLevelRewardClaimType,
+  getFishingLevelRewardSlotCost,
+  getNextFishingLevelRewardMilestone,
+  getReachedFishingLevelRewardMilestones,
+} from "./rules.js";
 
 const FISHING_NEWBIE_GIFT_CLAIM_TYPE = "fishing_newbie_gift";
 const FISHING_NEWBIE_GIFT_REQUIRED_SPACE = 5;
@@ -132,6 +141,215 @@ export default class EconomyOperations {
         grantedItems: eligibleItems,
         skippedItems,
       };
+    });
+
+    return transaction.immediate();
+  }
+
+  // 等级奖励按档位分别记账，跨档补领时一次性把欠着的档位全部结清。
+  claimFishingLevelRewards(fishingLevel) {
+    const safeLevel = Math.max(1, Math.floor(Number(fishingLevel) || 1));
+    const shopManager = new ShopManager();
+    const rewardItems = FISHING_LEVEL_REWARD_ITEMS.map((reward) => {
+      const item = shopManager.findItemById(reward.itemId);
+      return item ? { ...reward, item } : null;
+    });
+    if (rewardItems.some((reward) => reward == null)) {
+      return { success: false, reason: "invalid_config" };
+    }
+
+    const nextLevel = getNextFishingLevelRewardMilestone(safeLevel);
+    const reachedLevels = getReachedFishingLevelRewardMilestones(safeLevel);
+    if (reachedLevels.length === 0) {
+      return { success: false, reason: "level_not_reached", fishingLevel: safeLevel, nextLevel };
+    }
+
+    const inventoryManager = new InventoryManager(this.e);
+    this.economyManager.ensureUser(this.e);
+    const transaction = db.transaction(() => {
+      const claimTypes = reachedLevels.map((milestone) => getFishingLevelRewardClaimType(milestone));
+      const claimedRows = db.prepare(`
+          SELECT claim_type
+          FROM economy_one_time_claims
+          WHERE group_id = ? AND user_id = ?
+            AND claim_type IN (${claimTypes.map(() => "?").join(", ")})
+      `).all(this.groupId, this.userId, ...claimTypes);
+      const claimed = new Set(claimedRows.map((row) => row.claim_type));
+      const pendingLevels = reachedLevels.filter(
+        (milestone) => !claimed.has(getFishingLevelRewardClaimType(milestone)),
+      );
+      if (pendingLevels.length === 0) {
+        return { success: false, reason: "already_claimed", fishingLevel: safeLevel, nextLevel };
+      }
+
+      // 背包不够就整体不发，避免记了账却只发出半套道具。
+      const requiredSpace = getFishingLevelRewardSlotCost() * pendingLevels.length;
+      const capacity = this.economyManager.getBagCapacity(this.e);
+      const freeCapacity = Math.max(0, capacity - inventoryManager.getCurrentSize());
+      if (freeCapacity < requiredSpace) {
+        return {
+          success: false,
+          reason: "no_space",
+          fishingLevel: safeLevel,
+          freeCapacity,
+          requiredSpace,
+          pendingLevels,
+        };
+      }
+
+      for (const milestone of pendingLevels) {
+        const claim = db.prepare(`
+            INSERT OR IGNORE INTO economy_one_time_claims
+            (group_id, user_id, claim_type, created_at)
+            VALUES (?, ?, ?, ?)
+        `).run(
+          this.groupId,
+          this.userId,
+          getFishingLevelRewardClaimType(milestone),
+          Date.now(),
+        );
+        if (claim.changes !== 1) {
+          throw new Error(`钓鱼等级奖励重复领取: Lv.${milestone}`);
+        }
+      }
+
+      const grantedItems = rewardItems.map((reward) => {
+        const totalCount = reward.count * pendingLevels.length;
+        db.prepare(`
+            INSERT INTO inventory (group_id, user_id, item_id, count)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(group_id, user_id, item_id)
+            DO UPDATE SET count = count + ?
+        `).run(this.groupId, this.userId, reward.itemId, totalCount, totalCount);
+        return { item: reward.item, count: totalCount };
+      });
+
+      return {
+        success: true,
+        fishingLevel: safeLevel,
+        grantedLevels: pendingLevels,
+        grantedItems,
+        nextLevel,
+      };
+    });
+
+    return transaction.immediate();
+  }
+
+  /**
+   * 钓点专属图鉴奖励。progressList 由指令层给出，每项为
+   * { locationId, locationName, collected, total }（collected/total 只统计该钓点专属鱼）。
+   * 多个钓点的待领档位一次性结清，任一钓点空间不够就整体不发。
+   */
+  claimDexLocationRewards(progressList) {
+    const shopManager = new ShopManager();
+    const itemCache = new Map();
+    const resolveItem = (itemId) => {
+      if (!itemCache.has(itemId)) itemCache.set(itemId, shopManager.findItemById(itemId));
+      return itemCache.get(itemId);
+    };
+
+    const candidateTiers = [];
+    for (const progress of Array.isArray(progressList) ? progressList : []) {
+      const collected = Math.max(0, Math.floor(Number(progress?.collected) || 0));
+      const total = Math.max(0, Math.floor(Number(progress?.total) || 0));
+      for (const tier of getDexLocationRewardTiers(progress?.locationId, total)) {
+        if (collected < tier.threshold) continue;
+        const items = tier.items.map((reward) => {
+          const item = resolveItem(reward.itemId);
+          return item ? { ...reward, item } : null;
+        });
+        if (items.some((item) => item == null)) {
+          return { success: false, reason: "invalid_config" };
+        }
+        candidateTiers.push({
+          locationId: progress.locationId,
+          locationName: progress.locationName || progress.locationId,
+          tierKey: tier.key,
+          threshold: tier.threshold,
+          coins: Math.max(0, Math.floor(Number(tier.coins) || 0)),
+          items,
+        });
+      }
+    }
+    if (candidateTiers.length === 0) {
+      return { success: false, reason: "nothing_to_claim" };
+    }
+
+    const inventoryManager = new InventoryManager(this.e);
+    this.economyManager.ensureUser(this.e);
+    const transaction = db.transaction(() => {
+      const claimTypes = candidateTiers.map(
+        (tier) => getDexLocationRewardClaimType(tier.locationId, tier.tierKey),
+      );
+      const claimedRows = db.prepare(`
+          SELECT claim_type
+          FROM economy_one_time_claims
+          WHERE group_id = ? AND user_id = ?
+            AND claim_type IN (${claimTypes.map(() => "?").join(", ")})
+      `).all(this.groupId, this.userId, ...claimTypes);
+      const claimed = new Set(claimedRows.map((row) => row.claim_type));
+      const pendingTiers = candidateTiers.filter(
+        (tier) => !claimed.has(getDexLocationRewardClaimType(tier.locationId, tier.tierKey)),
+      );
+      if (pendingTiers.length === 0) {
+        return { success: false, reason: "nothing_to_claim" };
+      }
+
+      const requiredSpace = pendingTiers.reduce(
+        (total, tier) => total + tier.items.reduce((sum, reward) => sum + reward.count, 0),
+        0,
+      );
+      const capacity = this.economyManager.getBagCapacity(this.e);
+      const freeCapacity = Math.max(0, capacity - inventoryManager.getCurrentSize());
+      if (freeCapacity < requiredSpace) {
+        return { success: false, reason: "no_space", freeCapacity, requiredSpace, pendingTiers };
+      }
+
+      for (const tier of pendingTiers) {
+        const claim = db.prepare(`
+            INSERT OR IGNORE INTO economy_one_time_claims
+            (group_id, user_id, claim_type, created_at)
+            VALUES (?, ?, ?, ?)
+        `).run(
+          this.groupId,
+          this.userId,
+          getDexLocationRewardClaimType(tier.locationId, tier.tierKey),
+          Date.now(),
+        );
+        if (claim.changes !== 1) {
+          throw new Error(`图鉴奖励重复领取: ${tier.locationId} ${tier.tierKey}`);
+        }
+
+        for (const reward of tier.items) {
+          db.prepare(`
+              INSERT INTO inventory (group_id, user_id, item_id, count)
+              VALUES (?, ?, ?, ?)
+              ON CONFLICT(group_id, user_id, item_id)
+              DO UPDATE SET count = count + ?
+          `).run(this.groupId, this.userId, reward.itemId, reward.count, reward.count);
+        }
+      }
+
+      const totalCoins = pendingTiers.reduce((sum, tier) => sum + tier.coins, 0);
+      if (totalCoins > 0) {
+        const credited = db.prepare(`
+            UPDATE economy
+            SET coins = coins + ?
+            WHERE group_id = ? AND user_id = ?
+        `).run(totalCoins, this.groupId, this.userId);
+        if (credited.changes !== 1) {
+          throw new Error("图鉴奖励金币入账失败");
+        }
+        this.economyManager.recordTransaction(this.e, {
+          type: "收入",
+          amount: totalCoins,
+          note: "领取钓点图鉴全收录奖励",
+          relatedId: "dex_location_reward",
+        });
+      }
+
+      return { success: true, grantedTiers: pendingTiers, totalCoins };
     });
 
     return transaction.immediate();

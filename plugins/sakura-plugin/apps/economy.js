@@ -16,6 +16,8 @@ import RedPacketManager from "../lib/economy/RedPacketManager.js";
 import {
   canUseTransfer,
   calculateEquipmentSellPrice,
+  FISHING_LEVEL_REWARD_STEP,
+  getDexLocationRewardTiers,
   getReviveCoinPolicy,
   RED_PACKET_EXPIRE_SECONDS,
   RED_PACKET_MAX_ACTIVE_PER_USER,
@@ -29,9 +31,11 @@ import {
 import { getBot, getCurrentBotSelfId } from "../../../src/api/client.js";
 import {
   FISHING_BENEFIT_DURATION_SECONDS,
+  FISHING_LOCATIONS,
   RARITY_CONFIG,
   getBrideMarkLayers,
 } from "../lib/fishing/rules.js";
+import { getLocationExclusiveFish } from "../lib/fishing/fishData.js";
 import _ from "lodash";
 import Setting from "../lib/setting.js";
 
@@ -439,6 +443,155 @@ export default class Economy extends plugin {
       `🎒 获得：${rewards}` +
       skippedMsg +
       "\n🎣 对应装备栏为空时已自动装备。",
+    );
+    return true;
+  });
+
+  fishingLevelReward = Command(/^#?领取(钓鱼)?等级奖励$/, async (e) => {
+    if (!this.checkWhitelist(e)) return false;
+
+    const fishingManager = new FishingManager(e.group_id);
+    const fishingLevel = fishingManager.getUserFishingLevel(e.user_id);
+
+    let result;
+    try {
+      result = new EconomyOperations(e).claimFishingLevelRewards(fishingLevel);
+    } catch (err) {
+      logger.error(`[钓鱼等级奖励] 领取失败: ${err.stack || err}`);
+      await e.reply("等级奖励领取失败，请稍后再试~", 10);
+      return true;
+    }
+
+    if (!result.success) {
+      switch (result.reason) {
+        case "level_not_reached":
+          await e.reply(
+            `🎣 当前钓鱼 Lv.${fishingLevel}\n` +
+            `🔒 每 ${FISHING_LEVEL_REWARD_STEP} 级可领一档奖励，还差 ${result.nextLevel - fishingLevel} 级到 Lv.${result.nextLevel}~`,
+            10,
+          );
+          break;
+        case "already_claimed":
+          await e.reply(`🎁 已达成的等级奖励都领过啦，下一档在 Lv.${result.nextLevel}~`, 10);
+          break;
+        case "no_space":
+          await e.reply(
+            `🎒 背包剩余 ${result.freeCapacity} 格，领取 ${result.pendingLevels.length} 档奖励需要 ${result.requiredSpace} 格。\n` +
+            `📦 清理背包或升级背包后再来领吧~`,
+            10,
+          );
+          break;
+        default:
+          await e.reply("等级奖励配置异常，请联系管理员。", 10);
+      }
+      return true;
+    }
+
+    const levels = result.grantedLevels.map((level) => `Lv.${level}`).join("、");
+    const rewards = result.grantedItems
+      .map(({ item, count }) => `【${item.name}】×${count}`)
+      .join("、");
+    await e.reply(
+      `🎁 钓鱼等级奖励领取成功！\n` +
+      `🏅 结算档位：${levels}\n` +
+      `🎒 获得：${rewards}\n` +
+      `📈 下一档：Lv.${result.nextLevel}`,
+    );
+    return true;
+  });
+
+  // 钓点图鉴进度只统计该钓点专属鱼，和「#钓鱼图鉴 <钓点>」的口径保持一致
+  buildDexLocationProgress(e, locationIds) {
+    const fishingManager = new FishingManager(e.group_id);
+    const collectedIds = new Set(
+      fishingManager
+        .getUserCatchHistory(e.user_id)
+        .filter((row) => row.successCount > 0)
+        .map((row) => row.fishId),
+    );
+
+    return locationIds.map((locationId) => {
+      const exclusiveFish = getLocationExclusiveFish(locationId);
+      return {
+        locationId,
+        locationName: FISHING_LOCATIONS[locationId]?.name || locationId,
+        emoji: FISHING_LOCATIONS[locationId]?.emoji || "🎣",
+        collected: exclusiveFish.filter((fish) => collectedIds.has(fish.id)).length,
+        total: exclusiveFish.length,
+      };
+    });
+  }
+
+  dexLocationReward = Command(/^#?领取图鉴奖励\s*(.*)$/, async (e) => {
+    if (!this.checkWhitelist(e)) return false;
+
+    const locationArg = (e.match[1] || "").trim();
+    let locationIds = Object.keys(FISHING_LOCATIONS);
+    if (locationArg) {
+      const entry = Object.entries(FISHING_LOCATIONS).find(
+        ([, config]) => config.name === locationArg,
+      );
+      if (!entry) {
+        const validNames = Object.values(FISHING_LOCATIONS).map((config) => config.name).join("、");
+        await e.reply(`找不到钓点【${locationArg}】\n可选钓点：${validNames}`, 10);
+        return true;
+      }
+      locationIds = [entry[0]];
+    }
+
+    const progressList = this.buildDexLocationProgress(e, locationIds);
+
+    let result;
+    try {
+      result = new EconomyOperations(e).claimDexLocationRewards(progressList);
+    } catch (err) {
+      logger.error(`[图鉴奖励] 领取失败: ${err.stack || err}`);
+      await e.reply("图鉴奖励领取失败，请稍后再试~", 10);
+      return true;
+    }
+
+    if (!result.success) {
+      switch (result.reason) {
+        case "nothing_to_claim": {
+          const lines = progressList.map((progress) => {
+            const tiers = getDexLocationRewardTiers(progress.locationId, progress.total);
+            const nextTier = tiers.find((tier) => tier.threshold > progress.collected);
+            const suffix = nextTier
+              ? `下一档 ${nextTier.threshold}`
+              : "已全收录";
+            return `${progress.emoji}${progress.locationName} ${progress.collected}/${progress.total}（${suffix}）`;
+          });
+          await e.reply(
+            `📖 暂时没有可领取的图鉴奖励~\n` +
+            `${lines.join("\n")}\n` +
+            `ℹ️ 进度只统计各钓点专属鱼，通用鱼不计入。`,
+            10,
+          );
+          break;
+        }
+        case "no_space":
+          await e.reply(
+            `🎒 背包剩余 ${result.freeCapacity} 格，领取 ${result.pendingTiers.length} 档图鉴奖励需要 ${result.requiredSpace} 格。\n` +
+            `📦 清理背包或升级背包后再来领吧~`,
+            10,
+          );
+          break;
+        default:
+          await e.reply("图鉴奖励配置异常，请联系管理员。", 10);
+      }
+      return true;
+    }
+
+    const lines = result.grantedTiers.map((tier) => {
+      const rewards = tier.items.map(({ item, count }) => `【${item.name}】×${count}`).join("、");
+      const label = tier.tierKey === "full" ? "全收录" : `${tier.threshold} 条`;
+      const coins = tier.coins > 0 ? ` + ${tier.coins} 樱花币` : "";
+      return `🏅 ${tier.locationName}·${label}：${rewards}${coins}`;
+    });
+    await e.reply(
+      `📖 钓点图鉴奖励领取成功！\n` +
+      `${lines.join("\n")}` +
+      (result.totalCoins > 0 ? `\n💰 共入账 ${result.totalCoins} 樱花币` : ""),
     );
     return true;
   });
