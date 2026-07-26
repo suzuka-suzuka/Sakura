@@ -355,7 +355,7 @@ export function normalizeFishingLocation(locationId) {
 const WEATHER_ROTATION_MS = 60 * 60 * 1000;
 const WEATHER_BY_HOUR = new Map();
 
-// 每个小时首次读取时随机生成并缓存；同一进程、同一小时内全局一致，但未来天气无法提前计算。
+// 每个小时首次读取时随机生成并缓存；状态页读取下一时段时也会提前锁定该小时的天气。
 export function getWeatherByTime(timestamp = Date.now()) {
   const hourIndex = Math.floor((Number(timestamp) || 0) / WEATHER_ROTATION_MS);
   if (!WEATHER_BY_HOUR.has(hourIndex)) {
@@ -369,6 +369,13 @@ export function getWeatherByTime(timestamp = Date.now()) {
   }
   const name = WEATHER_BY_HOUR.get(hourIndex);
   return { name, emoji: WEATHER_CONFIG[name].emoji };
+}
+
+export function getNextWeatherByTime(timestamp = Date.now()) {
+  const numericTimestamp = Number(timestamp);
+  const safeTimestamp = Number.isFinite(numericTimestamp) ? numericTimestamp : Date.now();
+  const nextHourIndex = Math.floor(safeTimestamp / WEATHER_ROTATION_MS) + 1;
+  return getWeatherByTime(nextHourIndex * WEATHER_ROTATION_MS);
 }
 
 const REGULAR_RARITIES = Object.freeze(["垃圾", "普通", "精品", "稀有", "史诗", "传说"]);

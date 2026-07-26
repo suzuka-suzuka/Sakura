@@ -579,14 +579,28 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
       91,
     )
     ctx.fillStyle = COLORS.secondary
-    ctx.font = `20px ${this.fontFamily}`
+    ctx.font = `18px ${this.fontFamily}`
     ctx.fillText(
-      `📍 ${data.location?.emoji || ""}${data.location?.name || "未知钓点"}  ·  ${data.weather?.emoji || ""}${data.weather?.name || "未知天气"}`,
+      this.truncateText(
+        ctx,
+        `📍 ${data.location?.emoji || ""}${data.location?.name || "未知钓点"}`,
+        450,
+      ),
       234,
-      132,
+      126,
     )
     ctx.fillStyle = COLORS.accentDark
-    ctx.font = `bold 21px ${this.fontFamily}`
+    ctx.fillText(
+      this.truncateText(
+        ctx,
+        `🌤️ 当前 ${data.weather?.emoji || ""}${data.weather?.name || "未知天气"}  →  下时段 ${data.nextWeather?.emoji || ""}${data.nextWeather?.name || "未知天气"}`,
+        450,
+      ),
+      234,
+      156,
+    )
+    ctx.fillStyle = COLORS.accentDark
+    ctx.font = `bold 19px ${this.fontFamily}`
     ctx.fillText(
       this.truncateText(
         ctx,
@@ -594,7 +608,7 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
         450,
       ),
       234,
-      174,
+      196,
     )
 
     this.drawPanel(ctx, 706, 65, 226, 112, {

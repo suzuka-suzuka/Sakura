@@ -60,6 +60,7 @@ import {
   getFishingLocationConfig,
   getFishingEnvironmentModifiers,
   getFishingLevelExp,
+  getNextWeatherByTime,
   getWeatherByTime,
   isBossFish,
   isPerfectCatch,
@@ -333,13 +334,9 @@ function getFishImagePath(fishId) {
 
 const FISHING_GUIDE_IMAGES = Object.freeze([
   Object.freeze({ title: "① 限定出没时间总览", filename: "01-fish-time.jpg" }),
-  Object.freeze({ title: "② 限定出没地点总览", filename: "02-fish-location.jpg" }),
-  Object.freeze({ title: "③ 天气倍率说明", filename: "03-weather-multipliers.jpg" }),
-  Object.freeze({ title: "④ 钓点首领通用说明", filename: "04-boss-guide.jpg" }),
-  Object.freeze({ title: "⑤ 噩梦效果与反制", filename: "05-nightmare-effects.jpg" }),
-  Object.freeze({ title: "⑥ 钓鱼道具效果总览", filename: "06-item-effects.jpg" }),
-  Object.freeze({ title: "⑦ 钓点解锁等级", filename: "07-location-unlocks.jpg" }),
-  Object.freeze({ title: "⑧ 图鉴与等级奖励", filename: "08-dex-level-rewards.jpg" }),
+  Object.freeze({ title: "② 限定出没地点与天气", filename: "02-fish-location-weather.jpg" }),
+  Object.freeze({ title: "③ 钓点解锁等级", filename: "03-location-unlocks.jpg" }),
+  Object.freeze({ title: "④ 图鉴与等级奖励", filename: "04-dex-level-rewards.jpg" }),
 ]);
 const FISHING_GUIDE_LOCK_TTL_SECONDS = 5 * 60;
 
@@ -2191,7 +2188,6 @@ export default class Fishing extends plugin {
   }
 
   fishingGuide = Command(/^#?钓鱼攻略$/, async (e) => {
-    if (!e.isMaster) return false;
     if (!this.checkWhitelist(e)) return false;
 
     const lockKey = `sakura:fishing:guide:send:${e.group_id}`;
@@ -2237,10 +2233,10 @@ export default class Fishing extends plugin {
           prompt: `🎣 点击查看钓鱼攻略（共 ${guideEntries.length} 张）`,
           summary: `共 ${guideEntries.length} 张钓鱼攻略图`,
           news: [
-            { text: "⏰ 出没时间与地点" },
-            { text: "🌤️ 天气、首领与噩梦" },
-            { text: "🎁 道具、钓点与奖励" },
-            { text: "📚 数据以当前游戏配置为准" },
+            { text: "⏰ 限定出没时间" },
+            { text: "📍 限定出没地点与天气" },
+            { text: "🗺️ 钓点解锁等级" },
+            { text: "🎁 图鉴与等级奖励" },
           ],
         },
       );
@@ -2260,7 +2256,9 @@ export default class Fishing extends plugin {
 
   pondWeatherForecast = Command(/^#?(鱼塘|钓鱼)天气$/, async (e) => {
     if (!this.checkWhitelist(e)) return false;
-    const current = getWeatherByTime();
+    const now = Date.now();
+    const current = getWeatherByTime(now);
+    const next = getNextWeatherByTime(now);
     const fishingManager = new FishingManager(e.group_id);
     const locationId = fishingManager.getFishingLocation(e.user_id);
     const location = getFishingLocationConfig(locationId);
@@ -2269,7 +2267,7 @@ export default class Fishing extends plugin {
       `🌤️ 当前天气观测\n`,
       `📍 当前钓点：${location.emoji}【${location.name}】\n`,
       `现在：${current.emoji}${current.name}\n`,
-      `🔭 水域变化无常，无法预报下一时段天气。`,
+      `下一时段：${next.emoji}${next.name}`,
     ]);
     return true;
   });
@@ -2422,7 +2420,9 @@ export default class Fishing extends plugin {
     const fishingManager = new FishingManager(groupId);
     const locationId = fishingManager.getFishingLocation(userId);
     const locationConfig = getFishingLocationConfig(locationId);
-    const weather = getWeatherByTime();
+    const now = Date.now();
+    const weather = getWeatherByTime(now);
+    const nextWeather = getNextWeatherByTime(now);
     const staminaStatus = fishingManager.getFishingStaminaStatus(userId);
     const equippedRodId = fishingManager.getEquippedRod(userId);
     const equippedLineId = fishingManager.getEquippedLine(userId);
@@ -2631,6 +2631,7 @@ export default class Fishing extends plugin {
         balance,
         location: locationConfig,
         weather: statusWeather,
+        nextWeather,
         level: fishingLevel,
         exp: {
           current: fishingExp,

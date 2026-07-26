@@ -629,7 +629,7 @@ async function generateTimeGuide() {
   });
   drawTextBlock(
     ctx,
-    "提示：跨午夜时段已合并成“当日–次日”写法；首领没有普通出没时段，使用首领鱼饵单独触发。",
+    "提示：跨午夜时段已合并成“当日–次日”写法；本图仅列非全天出没的渔获。",
     150,
     height - 153,
     WIDTH - 300,
@@ -639,11 +639,15 @@ async function generateTimeGuide() {
   return savePoster(canvas, "01-fish-time.jpg");
 }
 
-async function generateLocationGuide() {
-  const height = 2400;
+async function generateLocationWeatherGuide() {
+  const height = 3000;
   const { canvas, ctx } = await createPoster(height, "light");
   const limitedFish = fishData.filter(
-    (fish) => Array.isArray(fish.locations) && fish.locations.length > 0,
+    (fish) => (
+      fish.rarity !== "噩梦" &&
+      Array.isArray(fish.locations) &&
+      fish.locations.length > 0
+    ),
   );
   const grouped = new Map();
   for (const fish of limitedFish) {
@@ -659,16 +663,29 @@ async function generateLocationGuide() {
     .filter(([key]) => key.includes("+"))
     .map(([key, entries]) => ({ key, entries }))
     .sort((left, right) => left.key.localeCompare(right.key));
+  const weatherLimited = fishData.filter(
+    (fish) => (
+      fish.is_boss !== true &&
+      Array.isArray(fish.weather) &&
+      fish.weather.length > 0
+    ),
+  );
+  const weatherGroups = new Map();
+  for (const fish of weatherLimited) {
+    const key = [...fish.weather].sort().join("/");
+    if (!weatherGroups.has(key)) weatherGroups.set(key, []);
+    weatherGroups.get(key).push(fish);
+  }
 
   drawHeader(
     ctx,
-    "限定出没地点总览",
-    `共 ${limitedFish.length} 种带地点标记的渔获 · 未列出的全钓点通用`,
-    { tag: "地点篇", accent: PALETTE.blue },
+    "限定出没地点与天气",
+    `地点限定 ${limitedFish.length} 种 · 天气限定 ${weatherLimited.length} 种`,
+    { tag: "条件篇", accent: PALETTE.blue },
   );
   drawSectionTitle(ctx, "单钓点限定", 96, 294, WIDTH - 192, {
     color: PALETTE.blue,
-    subtitle: "包含当地宝箱、当地怪谈与当地首领",
+    subtitle: "仅列严格受钓点限制的渔获",
   });
 
   const columns = 3;
@@ -735,20 +752,58 @@ async function generateLocationGuide() {
     );
   }
 
-  drawPanel(ctx, 110, height - 250, WIDTH - 220, 132, {
-    fill: "rgba(232, 241, 249, 0.94)",
-    border: "rgba(68, 110, 157, 0.3)",
+  const weatherSectionY = crossTop +
+    Math.ceil(crossGroups.length / columns) * (crossHeight + 20) +
+    52;
+  drawSectionTitle(ctx, "天气限定出没", 96, weatherSectionY, WIDTH - 192, {
+    color: PALETTE.violet,
+    subtitle: "只展示出没条件，不展示天气概率与倍率",
+  });
+  const weatherTop = weatherSectionY + 80;
+  const weatherCardHeight = 190;
+  for (const [index, [weather, entries]] of [...weatherGroups.entries()].entries()) {
+    const x = 96 + (index % columns) * (cardWidth + gap);
+    const y = weatherTop + Math.floor(index / columns) * (weatherCardHeight + 20);
+    drawFishCard(
+      ctx,
+      {
+        title: `${WEATHER_CONFIG[weather]?.emoji || ""} ${weather}限定`,
+        entries,
+      },
+      x,
+      y,
+      cardWidth,
+      {
+        accent: PALETTE.violet,
+        tokenOptions: {
+          fontSize: 18,
+          tokenHeight: 34,
+          horizontalGap: 7,
+          verticalGap: 7,
+          paddingX: 10,
+        },
+        minHeight: weatherCardHeight,
+      },
+    );
+  }
+
+  const noteY = weatherTop +
+    Math.ceil(weatherGroups.size / columns) * (weatherCardHeight + 20) +
+    36;
+  drawPanel(ctx, 110, noteY, WIDTH - 220, 150, {
+    fill: "rgba(238, 232, 247, 0.94)",
+    border: "rgba(117, 80, 142, 0.28)",
   });
   drawTextBlock(
     ctx,
-    "噩梦例外：地点标记代表“当地怪谈”。抽到噩梦品质后，当地怪谈占 40%，其余 60% 仍可能出现其他噩梦；首领与普通渔获继续严格受地点限制。",
+    "同一渔获可能同时受时间、天气与地点限制，请与“限定出没时间”图交叉查看；未列出的渔获不受对应条件限制。",
     150,
-    height - 196,
+    noteY + 55,
     WIDTH - 300,
-    { fontSize: 23, lineHeight: 33, color: PALETTE.blue, bold: true, maxLines: 3 },
+    { fontSize: 23, lineHeight: 35, color: PALETTE.violet, bold: true, maxLines: 2 },
   );
-  drawFooter(ctx, height);
-  return savePoster(canvas, "02-fish-location.jpg");
+  drawFooter(ctx, height, "数据以当前游戏配置为准 · 本图不公开天气概率与倍率");
+  return savePoster(canvas, "02-fish-location-weather.jpg");
 }
 
 async function generateWeatherGuide() {
@@ -1481,7 +1536,7 @@ async function generateUnlockGuide() {
     { fontSize: 24, lineHeight: 38, color: PALETTE.secondary, maxLines: 4 },
   );
   drawFooter(ctx, height);
-  return savePoster(canvas, "07-location-unlocks.jpg");
+  return savePoster(canvas, "03-location-unlocks.jpg");
 }
 
 async function generateRewardsGuide() {
@@ -1660,16 +1715,28 @@ async function generateRewardsGuide() {
     throw new Error("地点图鉴全收录奖励配置异常");
   }
   drawFooter(ctx, height, "图鉴奖励与等级奖励都需要手动领取 · 背包空间不足时不会消耗领取资格");
-  return savePoster(canvas, "08-dex-level-rewards.jpg");
+  return savePoster(canvas, "04-dex-level-rewards.jpg");
+}
+
+const obsoleteGuideImages = [
+  "02-fish-location.jpg",
+  "03-weather-multipliers.jpg",
+  "04-boss-guide.jpg",
+  "05-nightmare-effects.jpg",
+  "06-item-effects.jpg",
+  "07-location-unlocks.jpg",
+  "08-dex-level-rewards.jpg",
+];
+for (const filename of obsoleteGuideImages) {
+  const obsoletePath = path.join(guideRoot, filename);
+  if (!fs.existsSync(obsoletePath)) continue;
+  fs.rmSync(obsoletePath);
+  console.log(`removed ${path.relative(pluginRoot, obsoletePath)}`);
 }
 
 const outputs = [];
 outputs.push(await generateTimeGuide());
-outputs.push(await generateLocationGuide());
-outputs.push(await generateWeatherGuide());
-outputs.push(await generateBossGuide());
-outputs.push(await generateNightmareGuide());
-outputs.push(await generateItemGuide());
+outputs.push(await generateLocationWeatherGuide());
 outputs.push(await generateUnlockGuide());
 outputs.push(await generateRewardsGuide());
 
