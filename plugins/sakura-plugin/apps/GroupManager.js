@@ -580,7 +580,7 @@ export class GroupManager extends plugin {
   );
 
   handleGroupNotice = Command(
-    /^#?发群公告.*$/,
+    /^#?发群公告[\s\S]*$/,
     "message.group",
     1135,
     async (e) => {
@@ -593,11 +593,10 @@ export class GroupManager extends plugin {
         return false;
       }
 
-      const match = e.msg.match(/^#?发群公告(.*)$/);
+      const match = e.msg.match(/^#?发群公告([\s\S]*)$/);
       if (!match) return false;
 
-      const paramsStr = match[1];
-      let content = match[2].trim();
+      let content = match[1].trim();
 
       let image = null;
       const imgList = await getImg(e, false);
