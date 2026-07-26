@@ -341,6 +341,7 @@ const FISHING_GUIDE_IMAGES = Object.freeze([
   Object.freeze({ title: "⑦ 钓点解锁等级", filename: "07-location-unlocks.jpg" }),
   Object.freeze({ title: "⑧ 图鉴与等级奖励", filename: "08-dex-level-rewards.jpg" }),
 ]);
+const FISHING_GUIDE_LOCK_TTL_SECONDS = 5 * 60;
 
 function getFishingGuideImagePath(filename) {
   return path.join(pluginresources, "fish", "guide", filename);
@@ -2192,20 +2193,39 @@ export default class Fishing extends plugin {
   fishingGuide = Command(/^#?钓鱼攻略$/, async (e) => {
     if (!this.checkWhitelist(e)) return false;
 
+    const lockKey = `sakura:fishing:guide:send:${e.group_id}`;
+    const lockToken = randomUUID();
+    let lockAcquired = false;
     const guideEntries = FISHING_GUIDE_IMAGES.map((entry) => ({
       ...entry,
       imagePath: getFishingGuideImagePath(entry.filename),
     }));
-    const missing = guideEntries.filter((entry) => !fs.existsSync(entry.imagePath));
-    if (missing.length > 0) {
-      logger.error(
-        `[钓鱼攻略] 缺少攻略图：${missing.map((entry) => entry.imagePath).join("、")}`,
-      );
-      await e.reply("钓鱼攻略图片暂不完整，请联系管理员重新生成。", 10);
-      return true;
-    }
 
     try {
+      lockAcquired = await acquireRedisLock(
+        redis,
+        lockKey,
+        lockToken,
+        FISHING_GUIDE_LOCK_TTL_SECONDS,
+      );
+      if (!lockAcquired) {
+        logger.info(`[钓鱼攻略] 群 ${e.group_id} 正在发送攻略，本次重复指令已忽略`);
+        return true;
+      }
+
+      await e.react(124).catch((err) => {
+        logger.warn(`[钓鱼攻略] 指令表情回应失败: ${err.message}`);
+      });
+
+      const missing = guideEntries.filter((entry) => !fs.existsSync(entry.imagePath));
+      if (missing.length > 0) {
+        logger.error(
+          `[钓鱼攻略] 缺少攻略图：${missing.map((entry) => entry.imagePath).join("、")}`,
+        );
+        await e.reply("钓鱼攻略图片暂不完整，请联系管理员重新生成。", 10);
+        return true;
+      }
+
       await e.sendForwardMsg(
         guideEntries.map((entry) => [
           `${entry.title}\n`,
@@ -2226,6 +2246,12 @@ export default class Fishing extends plugin {
     } catch (err) {
       logger.error(`[钓鱼攻略] 合并转发失败: ${err.stack || err}`);
       await e.reply("钓鱼攻略发送失败，请稍后再试。", 10);
+    } finally {
+      if (lockAcquired) {
+        await releaseRedisLock(redis, lockKey, lockToken).catch((err) => {
+          logger.warn(`[钓鱼攻略] 释放发送锁失败: ${err.message}`);
+        });
+      }
     }
     return true;
   });
