@@ -2544,7 +2544,7 @@
     "difficulty": 81,
     "nightmare_effect": {
       "type": "devour_inventory",
-      "fallback_rod_damage": 2
+      "fallback_rod_damage": 20
     },
     "weight": [
       35,

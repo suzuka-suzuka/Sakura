@@ -1085,7 +1085,7 @@ const NIGHTMARE_TEXT = Object.freeze({
     counter: "修理工具箱或净化圣水都能清除全部深压。",
   },
   devour_inventory: {
-    effect: "按背包物品数量随机吞掉 1 件（当前装备鱼竿除外）；空背包时鱼竿 -2。",
+    effect: "按背包物品件数随机吞掉 1 件（当前装备鱼竿除外）；没有可吞噽物品时鱼竿 -20 耐久。",
     counter: "整理贵重库存可降风险；完整免疫可完全挡下。",
   },
 });

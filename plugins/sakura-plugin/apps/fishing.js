@@ -1889,7 +1889,7 @@ export default class Fishing extends plugin {
           message = `🌑 食星之影吞掉了【${item?.name || result.itemId}】×1！`;
         } else {
           message = fallbackRodDamage(
-            effect.fallback_rod_damage || 2,
+            effect.fallback_rod_damage || 20,
             "🌑 背包里没有可吞噬的物品，它转而啃噬鱼竿！",
           );
         }
@@ -2191,6 +2191,7 @@ export default class Fishing extends plugin {
   }
 
   fishingGuide = Command(/^#?钓鱼攻略$/, async (e) => {
+    if (!e.isMaster) return false;
     if (!this.checkWhitelist(e)) return false;
 
     const lockKey = `sakura:fishing:guide:send:${e.group_id}`;
