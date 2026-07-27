@@ -1065,13 +1065,13 @@ export default class Fishing extends plugin {
           await e.reply([
             shinyHint,
             `👑 水面轰然炸开，【${fish.name}】吞下了首领鱼饵！\n`,
-            `⚖️ 这股力量远超鱼线承重……回复「收竿」迎战，回复「放弃」保住装备！`,
+            `⚖️ 这股力量太大了！鱼线可能撑不住……回复「收竿」迎战，回复「放弃」保平安！`,
           ], false, true);
         } else if (isBossFish(fish)) {
           await e.reply([
             shinyHint,
             `👑 水面轰然炸开，【${fish.name}】吞下了首领鱼饵！\n`,
-            `⚔️ 快回复「收竿」完成重量判定并进入首领战！`,
+            `⚔️ 快回复「收竿」进入首领战！`,
           ], false, true);
         } else if (currentState.isOverweight) {
           await e.reply([
