@@ -1,6 +1,6 @@
 import { FlipImage } from "../lib/ImageUtils/ImageUtils.js";
 import setting from "../lib/setting.js";
-const DEFAULT_PROXY = "pixiv.manbomanbo.asia";
+import { DEFAULT_IMAGE_PROXY } from "../lib/pixiv/constants.js";
 
 export class setuPlugin extends plugin {
   constructor() {
@@ -133,7 +133,7 @@ export class setuPlugin extends plugin {
     const params = new URLSearchParams({
       size: "original",
       r18: isR18 ? "1" : "0",
-      proxy: DEFAULT_PROXY,
+      proxy: this.pixivConfig.proxy || DEFAULT_IMAGE_PROXY,
       excludeAI: "true",
     });
 
