@@ -1,6 +1,7 @@
 import { AbstractTool } from "./AbstractTool.js";
 import { FlipImage } from "../../ImageUtils/ImageUtils.js";
 import setting from "../../setting.js";
+import { DEFAULT_IMAGE_PROXY } from "../../pixiv/constants.js";
 
 export class IllustrationTool extends AbstractTool {
   name = "Illustration";
@@ -46,7 +47,7 @@ export class IllustrationTool extends AbstractTool {
       const params = new URLSearchParams({
         size: "original",
         r18: isR18 ? "1" : "0",
-        proxy: this.pixivConfig.proxy,
+        proxy: this.pixivConfig.proxy || DEFAULT_IMAGE_PROXY,
         excludeAI: "true",
       });
       if (processedTags.length > 0) {
