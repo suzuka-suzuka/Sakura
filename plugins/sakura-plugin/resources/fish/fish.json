@@ -4890,10 +4890,12 @@
     "boss_exp": 200,
     "reward_chest_id": "chest_river",
     "boss_mechanic": {
-      "type": "steal_loot",
+      "type": "steal_coins",
       "name": "探囊鬼手",
-      "layers": 1,
-      "description": "每次首领攻击摸走一份战利品：每层令本场首领金币奖励 -5%，经验与宝箱不受影响。"
+      "min": 0,
+      "max": 50,
+      "broke_rod_damage": 20,
+      "description": "每次首领攻击摸走0～50樱花币，余额不足50时一次掏空；一旦身无分文，它便改为每次重砸鱼竿20点耐久——兜里没钱就别来。"
     },
     "locations": [
       "river"
@@ -4974,7 +4976,7 @@
       "type": "rod_crush",
       "name": "吞舟重撞",
       "multiplier": 3,
-      "scar_ramp_after": 4,
+      "scar_ramp_after": 6,
       "scar_early": 1,
       "scar_late": 2,
       "description": "每次重撞对鱼竿造成3倍持久伤害，耐久不足的鱼竿会当场被撞断并永久损失；同时在竿身留下难以察觉的暗伤——它当场就在拖低你的控制力。"

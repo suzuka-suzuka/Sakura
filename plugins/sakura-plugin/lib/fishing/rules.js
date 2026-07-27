@@ -67,19 +67,21 @@ export const BOSS_PRICE_WEIGHT_RANGE = 0.5;
 export const BOSS_LINE_BASE_DURABILITY_RATIO = 0.3;
 // 赤潮锯刑：线绷得越紧锯齿咬得越深，伤害随当前张力放大 1 + 张力/100 × 该系数。
 export const BOSS_LINE_REND_TENSION_SCALE = 2;
-// 探囊鬼手：偷的是本场战利品而不是钱包余额，每命中 1 层、结算时每层扣该比例。
-// 挂战利品的原因是余额可以提前转走，挂比例则不需要额外封顶（打满 12 击即 -60%）。
-export const BOSS_LOOT_STEAL_RATE_PER_LAYER = 0.05;
+// 探囊鬼手：偷的是钱包余额而不是战利品——扣战利品的话失败一场等于零损耗。
+// 余额不足一次偷取上限时直接掏空；身无分文则改砸鱼竿，于是它成了唯一一个
+// 「兜里得有钱才打得过」的首领：11 次攻击最多偷走 550，垫够这个数就绝不会被砸竿。
+export const BOSS_COIN_STEAL_MAX = 50;
+export const BOSS_STEAL_BROKE_ROD_DAMAGE = 20;
 // 吞舟重撞：鱼竿伤害走固定倍率而不是当前耐久的比例——按比例扣的话竿越破挨得越轻，
 // 带残竿挑战反而更安全，不合常理。固定值则相反：耐久不够的竿会当场被打断。
 export const BOSS_ROD_CRUSH_ROD_MULTIPLIER = 3;
 // 同时留下当场生效的永久暗伤：前几击轻、之后加重，越拖越难打。
-export const BOSS_ROD_CRUSH_SCAR_RAMP_AFTER = 4;
+export const BOSS_ROD_CRUSH_SCAR_RAMP_AFTER = 6;
 export const BOSS_ROD_CRUSH_SCAR_EARLY = 1;
 export const BOSS_ROD_CRUSH_SCAR_LATE = 2;
 export const BOSS_MECHANIC_TYPES = Object.freeze([
   "stamina_drain",
-  "steal_loot",
+  "steal_coins",
   "tension_surge",
   "line_rend",
   "rod_crush",
@@ -307,8 +309,9 @@ export function getBossAttackCooldownRemaining(
 }
 
 // context.tension 为当前张力，赤潮锯刑按它放大鱼线伤害；context.attackRound 供吞舟重撞
-// 判断暗伤是否进入加重阶段；均不传时按第 1 击、零张力算（保证纯函数在没有战斗状态时也能用）。
-// 探囊鬼手只累计战利品层数，实际扣减在 calculateBossCatchReward 里结算。
+// 判断暗伤是否进入加重阶段；context.coinBalance 为玩家余额，探囊鬼手据此决定偷多少、
+// 或在身无分文时改砸鱼竿。均不传时按第 1 击、零张力、余额充足处理（保证纯函数在没有
+// 战斗状态时也能用）。
 export function resolveBossAttack(boss, random = Math.random, context = {}) {
   const attack = Math.max(1, Math.floor(Number(boss?.attack) || 1));
   const mechanic = boss?.boss_mechanic || {};
@@ -318,7 +321,8 @@ export function resolveBossAttack(boss, random = Math.random, context = {}) {
     rodDamage: baseGearDamage,
     distanceGain: Math.max(1, Math.floor(attack / 4)),
     staminaDrain: 0,
-    lootStealLayers: 0,
+    coinSteal: 0,
+    stealFallback: false,
     rodControlLoss: 0,
     tensionGain: 0,
     heal: 0,
@@ -328,9 +332,30 @@ export function resolveBossAttack(boss, random = Math.random, context = {}) {
     case "stamina_drain":
       result.staminaDrain = Math.max(1, Math.floor(Number(mechanic.amount) || 1));
       break;
-    case "steal_loot":
-      result.lootStealLayers = Math.max(1, Math.floor(Number(mechanic.layers) || 1));
+    case "steal_coins": {
+      const balance = Number(context?.coinBalance);
+      const brokeRodDamage = Number.isSafeInteger(mechanic.broke_rod_damage)
+        ? Math.max(1, mechanic.broke_rod_damage)
+        : BOSS_STEAL_BROKE_ROD_DAMAGE;
+      if (Number.isFinite(balance) && balance <= 0) {
+        // 身无分文：偷不到东西就砸鱼竿，逼着玩家兜里揣够钱再来。
+        result.rodDamage = brokeRodDamage;
+        result.stealFallback = true;
+        break;
+      }
+      const max = Number.isSafeInteger(mechanic.max)
+        ? Math.max(0, mechanic.max)
+        : BOSS_COIN_STEAL_MAX;
+      const min = Number.isSafeInteger(mechanic.min) ? Math.max(0, mechanic.min) : 0;
+      if (Number.isFinite(balance) && balance <= max) {
+        // 余额不够一次偷取上限时直接掏空，下一击就会转为砸鱼竿。
+        result.coinSteal = Math.floor(balance);
+        break;
+      }
+      const roll = Math.max(0, Math.min(0.999999999999, Number(random()) || 0));
+      result.coinSteal = min + Math.floor(roll * (Math.max(min, max) - min + 1));
       break;
+    }
     case "tension_surge":
       result.tensionGain = Math.max(1, Math.floor(Number(mechanic.amount) || 1));
       break;
@@ -1088,15 +1113,13 @@ export function rollTorpedoBlastCatch(
 }
 
 // 首领的金币、经验和当地宝箱组成独立奖励包；异色是唯一收益倍率例外。
-// fish.lootStealLayers 为探囊鬼手命中的层数，在异色倍率之后按层扣减金币（经验与宝箱不受影响）。
+// 探囊鬼手偷的是战斗中的钱包余额，不参与这里的结算。
 export function calculateBossCatchReward(fish) {
   if (!isBossFish(fish)) throw new TypeError("只能结算首领渔获奖励");
   const shiny = Boolean(fish.isShiny);
-  const stealLayers = Math.max(0, Math.floor(Number(fish.lootStealLayers) || 0));
-  const keptRate = Math.max(0, 1 - stealLayers * BOSS_LOOT_STEAL_RATE_PER_LAYER);
   return {
     earnings: Math.round(
-      calculateBossFishPrice(fish) * (shiny ? SHINY_PRICE_MULTIPLIER : 1) * keptRate,
+      calculateBossFishPrice(fish) * (shiny ? SHINY_PRICE_MULTIPLIER : 1),
     ),
     expGain: Math.max(1, Math.floor(
       (Number(fish.boss_exp) || 1) * (shiny ? SHINY_EXP_MULTIPLIER : 1),
@@ -1179,10 +1202,16 @@ export function validateLegacyFishData(fishData) {
       ) {
         errors.push(`${label}: 首领机制数值无效`);
       } else if (
-        mechanic.type === "steal_loot" &&
-        (!Number.isSafeInteger(mechanic.layers) || mechanic.layers <= 0)
+        mechanic.type === "steal_coins" && (
+          !Number.isSafeInteger(mechanic.min) ||
+          !Number.isSafeInteger(mechanic.max) ||
+          mechanic.min < 0 ||
+          mechanic.max < mechanic.min ||
+          !Number.isSafeInteger(mechanic.broke_rod_damage) ||
+          mechanic.broke_rod_damage <= 0
+        )
       ) {
-        errors.push(`${label}: 首领战利品抽取层数无效`);
+        errors.push(`${label}: 首领偷钱区间或砸竿伤害无效`);
       } else if (
         mechanic.type === "line_rend" &&
         (!Number.isFinite(mechanic.tension_scale) || mechanic.tension_scale <= 0)
