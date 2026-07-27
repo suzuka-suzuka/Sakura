@@ -18,7 +18,7 @@ categories:
         icon: 🔧
         type: consumable
         instant_effect: repair_rod
-        description: 完全修复当前鱼竿的耐久损耗、骸骨鲨留下的暗伤，并解除深压回响的控制力减益。
+        description: 完全修复鱼竿耐久与骸骨鲨暗伤，并解除深压回响的控制力减益。
 
       - id: item_holy_water
         name: 净化圣水
@@ -67,6 +67,8 @@ categories:
         icon: 💰
         type: buff
         duration: 2100
+        # 收益倍率互斥组：同组道具同一时间只能生效一个，避免倍率连乘。
+        exclusive_group: coin_boost
         description: 落日海岸专属道具。使用后35分钟内钓鱼金币收益翻倍。
         activation_message: "💰 双倍金币卡已激活！\n✨ 接下来35分钟内钓鱼金币收益 ×2！"
 
@@ -75,7 +77,8 @@ categories:
         icon: 🩸
         type: buff
         duration: 2100
-        description: 深渊海沟专属道具。使用后35分钟内更容易遭遇噩梦，钓鱼金币与经验均变为3倍。
+        exclusive_group: coin_boost
+        description: 深渊海沟专属道具。35分钟内噩梦率提升，金币与经验×3，与双倍金币卡互斥。
         activation_message: "🩸 怪物诱饵撒入水中！\n💀 接下来35分钟内更容易遭遇噩梦，钓鱼金币与经验 ×3！"
 
       - id: item_bottle_wish

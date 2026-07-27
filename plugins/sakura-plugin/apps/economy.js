@@ -1024,7 +1024,19 @@ export default class Economy extends plugin {
     }
 
     const buffKey = `sakura:fishing:buff:${item.id}:${groupId}:${userId}`;
-    
+
+    // 同一互斥组的增益只能生效一个，否则倍率连乘会让收益远超设计口径。
+    // 冲突时不消耗道具，让玩家自己决定等哪一个过期。
+    const conflict = await this.findExclusiveBuffConflict(item, shopManager, groupId, userId);
+    if (conflict) {
+      await e.reply(
+        `⚠️ 【${conflict.name}】还剩 ${conflict.remainText}，和【${item.name}】不能同时生效~\n` +
+        `道具没有被消耗，等它结束后再用吧。`,
+        10,
+      );
+      return true;
+    }
+
     if (!inventoryManager.removeItem(item.id, 1)) {
       await e.reply(`你没有【${itemName}】，无法使用~`, 10);
       return true;
@@ -1042,6 +1054,36 @@ export default class Economy extends plugin {
     await e.reply(item.activation_message);
     return true;
   });
+
+  // 查找同互斥组内正在生效的其它增益道具；Redis 读取失败时按无冲突处理，不阻塞使用。
+  async findExclusiveBuffConflict(item, shopManager, groupId, userId) {
+    const group = item.exclusive_group;
+    if (!group) return null;
+
+    const rivals = shopManager
+      .getAllItems()
+      .filter((other) => other.exclusive_group === group && other.id !== item.id);
+    if (rivals.length === 0) return null;
+
+    try {
+      const ttls = await Promise.all(
+        rivals.map((other) =>
+          redis.ttl(`sakura:fishing:buff:${other.id}:${groupId}:${userId}`).catch(() => -2),
+        ),
+      );
+      for (const [index, ttl] of ttls.entries()) {
+        if (ttl > 0) {
+          return {
+            name: rivals[index].name,
+            remainText: ttl >= 60 ? `${Math.ceil(ttl / 60)} 分钟` : `${ttl} 秒`,
+          };
+        }
+      }
+    } catch (err) {
+      logger.warn(`[经济系统] 读取互斥道具状态失败，放行本次使用: ${err.message}`);
+    }
+    return null;
+  }
 
   // 即时生效道具：先做前置校验（不满足不消耗），再扣道具、结算效果
   async applyInstantItem(e, item, { inventoryManager, fishingManager, argument = "" }) {
