@@ -1,15 +1,15 @@
-import { connect } from "puppeteer-real-browser";
 import { FlipImage } from "../lib/ImageUtils/ImageUtils.js";
 import _ from "lodash";
 
+// konachan 用 .net 而非 .com：后者被 Cloudflare 拦在 403，伪造 UA 也无效
+// （TLS 指纹级别的拦截），原先正是为此才要走 puppeteer-real-browser。
+// .net 是同一套数据库的 SFW 镜像，裸 fetch 即可，无需浏览器环境。
 const IMAGE_SOURCES = {
   yande: {
     url: "https://yande.re/post.json?tags=loli+-rating:e+-nipples&limit=500",
-    usePuppeteer: false,
   },
   konachan: {
-    url: "https://konachan.com/post.json?tags=loli+-rating:e+-nipples&limit=500",
-    usePuppeteer: true,
+    url: "https://konachan.net/post.json?tags=loli+-rating:e+-nipples&limit=500",
   },
 };
 
@@ -46,52 +46,11 @@ export class GetImagePlugin extends plugin {
     let jsonData;
 
     try {
-      if (sourceConfig.usePuppeteer) {
-        let browser;
-        try {
-          const isLinux = process.platform === "linux";
-
-          const { page, browser: realBrowser } = await connect({
-            headless: false,
-            args: isLinux
-              ? [
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-              ]
-              : [],
-            turnstile: true,
-            customConfig: {},
-            connectOption: {},
-            disableXvfb: false,
-            ignoreAllFlags: false,
-            ...(isLinux && {
-              xvfbsession: true,
-            }),
-          });
-          browser = realBrowser;
-
-          await page.goto(sourceConfig.url, {
-            waitUntil: "networkidle2",
-            timeout: 20000,
-          });
-
-          await new Promise((resolve) => setTimeout(resolve, 20000));
-
-          const jsonText = await page.evaluate(() => document.body.innerText);
-          jsonData = JSON.parse(jsonText);
-        } finally {
-          if (browser) {
-            await browser.close();
-          }
-        }
-      } else {
-        const response = await fetch(sourceConfig.url);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        jsonData = await response.json();
+      const response = await fetch(sourceConfig.url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
+      jsonData = await response.json();
 
       if (Array.isArray(jsonData) && jsonData.length > 0) {
         const imageUrls = jsonData
