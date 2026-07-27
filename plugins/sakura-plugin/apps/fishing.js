@@ -511,12 +511,6 @@ export default class Fishing extends plugin {
     state.distance = Math.min(100, state.distance + attackResult.distanceGain);
     state.tension = Math.min(100, state.tension + attackResult.tensionGain);
 
-    if (lineDamage.applied && !lineDamage.isBroken && !lineDamage.breakPrevented) {
-      effectMessages.push(
-        `🧵 鱼线本场耐久剩余 ${lineDamage.currentDurability}/${lineDamage.maxDurability}`,
-      );
-    }
-
     const rodDamage = applyRodDamage(
       fishingManager,
       e.user_id,
