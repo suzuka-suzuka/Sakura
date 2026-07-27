@@ -4851,8 +4851,8 @@
     "name": "绯樱鲤王",
     "rarity": "传说",
     "description": "吞食了百年落樱的池塘霸主，鳞片开合时会喷出令人脱力的绯色瘴气。",
-    "base_price": 600,
-    "difficulty": 220,
+    "base_price": 800,
+    "difficulty": 225,
     "weight": [
       170,
       210
@@ -4878,8 +4878,8 @@
     "name": "青柳猿王",
     "rarity": "传说",
     "description": "盘踞河湾的水猿之王，一只手拽线，另一只手总能摸到钓客的钱袋。",
-    "base_price": 600,
-    "difficulty": 220,
+    "base_price": 800,
+    "difficulty": 225,
     "weight": [
       170,
       210
@@ -4890,12 +4890,10 @@
     "boss_exp": 200,
     "reward_chest_id": "chest_river",
     "boss_mechanic": {
-      "type": "steal_coins",
+      "type": "steal_loot",
       "name": "探囊鬼手",
-      "min": 30,
-      "max": 70,
-      "fallback_rod_multiplier": 2,
-      "description": "每次首领攻击持续偷走30～70樱花币，余额不足时偷到0为止；若身无分文，则改为对鱼竿造成双倍伤害。"
+      "layers": 1,
+      "description": "每次首领攻击摸走一份战利品：每层令本场首领金币奖励 -5%，经验与宝箱不受影响。"
     },
     "locations": [
       "river"
@@ -4907,8 +4905,8 @@
     "name": "雾甲鳄龟",
     "rarity": "传说",
     "description": "龟甲上背着一整片浓雾，猛然翻身时连方向感和鱼线张力都会一同失控。",
-    "base_price": 600,
-    "difficulty": 220,
+    "base_price": 800,
+    "difficulty": 225,
     "weight": [
       170,
       210
@@ -4934,8 +4932,8 @@
     "name": "赤潮锯鲨皇",
     "rarity": "传说",
     "description": "随着落日赤潮巡游的锯鲨皇，锯齿吻能像割草一样反复切削鱼线。",
-    "base_price": 600,
-    "difficulty": 220,
+    "base_price": 800,
+    "difficulty": 225,
     "weight": [
       170,
       210
@@ -4948,8 +4946,8 @@
     "boss_mechanic": {
       "type": "line_rend",
       "name": "赤潮锯刑",
-      "multiplier": 1.8,
-      "description": "首领攻击对鱼线的本场耐久造成1.8倍伤害，耐久归零会立即断线。"
+      "tension_scale": 2,
+      "description": "锯齿咬住绷紧的鱼线：张力越高，本场鱼线耐久伤害越重（张力50约8点、张力85约11点），耐久归零会立即断线。"
     },
     "locations": [
       "coast"
@@ -4961,8 +4959,8 @@
     "name": "海沟吞舟兽",
     "rarity": "传说",
     "description": "能把沉船连同海水一起吞下的深渊巨口，高压水域中的搏斗必须速战速决。",
-    "base_price": 600,
-    "difficulty": 220,
+    "base_price": 800,
+    "difficulty": 225,
     "weight": [
       170,
       210
@@ -4975,8 +4973,11 @@
     "boss_mechanic": {
       "type": "rod_crush",
       "name": "吞舟重撞",
-      "multiplier": 1.7,
-      "description": "首领攻击对鱼竿造成1.7倍持久伤害，折断的鱼竿会永久损失。"
+      "multiplier": 3,
+      "scar_ramp_after": 4,
+      "scar_early": 1,
+      "scar_late": 2,
+      "description": "每次重撞对鱼竿造成3倍持久伤害，耐久不足的鱼竿会当场被撞断并永久损失；同时在竿身留下难以察觉的暗伤——它当场就在拖低你的控制力。"
     },
     "locations": [
       "abyss"
@@ -4988,8 +4989,8 @@
     "name": "星渊古龙",
     "rarity": "传说",
     "description": "沉睡在星河尽头的古龙，伤口会吸收坠落的星辉，在战斗中不断弥合。",
-    "base_price": 600,
-    "difficulty": 220,
+    "base_price": 800,
+    "difficulty": 225,
     "weight": [
       170,
       210

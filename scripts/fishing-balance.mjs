@@ -798,11 +798,20 @@ export function simulateBossWinRate({
   let victories = 0;
 
   for (let run = 0; run < iterations; run += 1) {
+    // 本场线耐久挂「承重 − 首领体重」的余量，所以每场都要先摇定首领重量。
+    const [minWeight, maxWeight] = boss.weight;
+    const actualWeight = Math.round(
+      (minWeight + (maxWeight - minWeight) * random()) * 100,
+    ) / 100;
     let bossHp = boss.hp;
     let distance = 50;
     let tension = 50;
-    let lineDurability = calculateBossLineDurability(lineCapacity);
+    let lineDurability = calculateBossLineDurability(lineCapacity, actualWeight);
     let currentRodDurability = rodDurability;
+    // 吞舟重撞的暗伤当场生效，会一路削低有效控制力。
+    let rodScar = 0;
+    let attackRound = 0;
+    const controlNow = () => Math.max(0, effectiveControl - rodScar);
     let stamina = getFishingStaminaMax(1) - getFishingStaminaCost();
     let fishState = FISH_FIGHT_STATE.calm;
     let nextStateChangeAt = getFishFightStateChangeDelay(random);
@@ -817,9 +826,11 @@ export function simulateBossWinRate({
       }
 
       if (now > 0 && now % BOSS_ATTACK_INTERVAL_MS === 0 && bossHp > 0) {
-        const attack = resolveBossAttack(boss, random);
+        attackRound += 1;
+        const attack = resolveBossAttack(boss, random, { tension, attackRound });
         lineDurability -= attack.lineDamage;
         currentRodDurability -= attack.rodDamage;
+        rodScar += attack.rodControlLoss;
         distance = Math.min(100, distance + attack.distanceGain);
         tension = Math.min(100, tension + attack.tensionGain);
         stamina -= attack.staminaDrain;
@@ -836,7 +847,7 @@ export function simulateBossWinRate({
       }
 
       if (bossHp > 0 && now - lastPlayerAttackAt >= BOSS_PLAYER_ATTACK_COOLDOWN_MS) {
-        bossHp = Math.max(0, bossHp - rollBossPlayerDamage(effectiveControl, random));
+        bossHp = Math.max(0, bossHp - rollBossPlayerDamage(controlNow(), random));
         lastPlayerAttackAt = now;
         if (bossHp <= 0 && distance <= 0) won = true;
         if (won) break;
@@ -845,14 +856,14 @@ export function simulateBossWinRate({
 
       const pull = calculateNormalTugActionEffects({
         fishDifficulty: boss.difficulty,
-        effectiveControl,
+        effectiveControl: controlNow(),
         pressure,
         stateId: fishState,
         action: "pull",
       });
       const loosen = calculateNormalTugActionEffects({
         fishDifficulty: boss.difficulty,
-        effectiveControl,
+        effectiveControl: controlNow(),
         pressure,
         stateId: fishState,
         action: "loosen",

@@ -53,15 +53,33 @@ export const BOSS_BAIT_ID = "bait_boss";
 export const BOSS_ATTACK_INTERVAL_MS = 5000;
 export const BOSS_PLAYER_ATTACK_COOLDOWN_MS = 5000;
 export const BOSS_FIGHT_TIMEOUT_MS = 60 * 1000;
-export const BOSS_MIN_DIFFICULTY = 220;
+// 首领困难度按「顶级鱼竿 + 熟练度 10 → 溜鱼通过率 100%」反推：190 + 10 + 25。
+// 熟练度每 +5 抬 20 个百分点，裸竿 60%、熟练度 5 落在原本的 80% 校准带。
+export const BOSS_MIN_DIFFICULTY = 225;
+export const BOSS_MASTERY_FOR_FULL_CONTROL = 10;
 export const BOSS_MIN_HP = 150;
 export const BOSS_MIN_ATTACK = 8;
-// 偷钱首领碰上零余额时，机制不能空过一回合，改判为砸鱼竿：基础鱼竿伤害 × 该倍率。
-// 走倍率而不是固定值，是为了跟 line_rend / rod_crush 一样随首领攻击力自动缩放。
-export const BOSS_STEAL_FALLBACK_ROD_MULTIPLIER = 2;
+// 首领售价 = base ×(FLOOR + 重量进度 × RANGE)，即 0.75～1.25 倍，比常规鱼的 0.5～1.5 倍窄一半。
+export const BOSS_PRICE_WEIGHT_FLOOR = 0.75;
+export const BOSS_PRICE_WEIGHT_RANGE = 0.5;
+// 本场鱼线耐久 = 承重的 30% 打底 + 超出首领体重的富余承重。挂余量而不是挂承重，
+// 是为了让「线越勉强越容易断」成立：秘银线打 190 公斤剩 83 点，打满 210 公斤只剩 63 点。
+export const BOSS_LINE_BASE_DURABILITY_RATIO = 0.3;
+// 赤潮锯刑：线绷得越紧锯齿咬得越深，伤害随当前张力放大 1 + 张力/100 × 该系数。
+export const BOSS_LINE_REND_TENSION_SCALE = 2;
+// 探囊鬼手：偷的是本场战利品而不是钱包余额，每命中 1 层、结算时每层扣该比例。
+// 挂战利品的原因是余额可以提前转走，挂比例则不需要额外封顶（打满 12 击即 -60%）。
+export const BOSS_LOOT_STEAL_RATE_PER_LAYER = 0.05;
+// 吞舟重撞：鱼竿伤害走固定倍率而不是当前耐久的比例——按比例扣的话竿越破挨得越轻，
+// 带残竿挑战反而更安全，不合常理。固定值则相反：耐久不够的竿会当场被打断。
+export const BOSS_ROD_CRUSH_ROD_MULTIPLIER = 3;
+// 同时留下当场生效的永久暗伤：前几击轻、之后加重，越拖越难打。
+export const BOSS_ROD_CRUSH_SCAR_RAMP_AFTER = 4;
+export const BOSS_ROD_CRUSH_SCAR_EARLY = 1;
+export const BOSS_ROD_CRUSH_SCAR_LATE = 2;
 export const BOSS_MECHANIC_TYPES = Object.freeze([
   "stamina_drain",
-  "steal_coins",
+  "steal_loot",
   "tension_surge",
   "line_rend",
   "rod_crush",
@@ -208,9 +226,12 @@ export function selectBossFromData(
   };
 }
 
-export function calculateBossLineDurability(lineCapacity) {
+export function calculateBossLineDurability(lineCapacity, bossWeight = 0) {
   const capacity = Math.max(0, Number(lineCapacity) || 0);
-  return Math.max(20, Math.round(20 + capacity));
+  const weight = Math.max(0, Number(bossWeight) || 0);
+  return Math.max(1, Math.round(
+    capacity * BOSS_LINE_BASE_DURABILITY_RATIO + Math.max(0, capacity - weight),
+  ));
 }
 
 // Boss 鱼线耐久只存在于当前战斗，会话结束后不写入玩家数据。
@@ -285,8 +306,9 @@ export function getBossAttackCooldownRemaining(
   return Math.max(0, Math.ceil(cooldown - (current - last)));
 }
 
-// context.coinBalance 为调用方读到的玩家余额；不传则维持原有偷钱行为，
-// 由调用方自己去 clamp（保证纯函数在没有经济数据时也能用）。
+// context.tension 为当前张力，赤潮锯刑按它放大鱼线伤害；context.attackRound 供吞舟重撞
+// 判断暗伤是否进入加重阶段；均不传时按第 1 击、零张力算（保证纯函数在没有战斗状态时也能用）。
+// 探囊鬼手只累计战利品层数，实际扣减在 calculateBossCatchReward 里结算。
 export function resolveBossAttack(boss, random = Math.random, context = {}) {
   const attack = Math.max(1, Math.floor(Number(boss?.attack) || 1));
   const mechanic = boss?.boss_mechanic || {};
@@ -296,49 +318,52 @@ export function resolveBossAttack(boss, random = Math.random, context = {}) {
     rodDamage: baseGearDamage,
     distanceGain: Math.max(1, Math.floor(attack / 4)),
     staminaDrain: 0,
-    coinSteal: 0,
+    lootStealLayers: 0,
+    rodControlLoss: 0,
     tensionGain: 0,
     heal: 0,
-    stealFallback: false,
   };
 
   switch (mechanic.type) {
     case "stamina_drain":
       result.staminaDrain = Math.max(1, Math.floor(Number(mechanic.amount) || 1));
       break;
-    case "steal_coins": {
-      const balance = Number(context?.coinBalance);
-      if (Number.isFinite(balance) && balance <= 0) {
-        // 身无分文：偷不到东西，转而砸鱼竿，免得穷玩家白拿一回合。
-        const multiplier = Math.max(
-          1,
-          Number(mechanic.fallback_rod_multiplier) || BOSS_STEAL_FALLBACK_ROD_MULTIPLIER,
-        );
-        result.rodDamage = Math.max(1, Math.round(baseGearDamage * multiplier));
-        result.stealFallback = true;
-        break;
-      }
-      const min = Math.max(1, Math.floor(Number(mechanic.min) || 1));
-      const max = Math.max(min, Math.floor(Number(mechanic.max) || min));
-      const roll = Math.max(0, Math.min(0.999999999999, Number(random()) || 0));
-      result.coinSteal = min + Math.floor(roll * (max - min + 1));
+    case "steal_loot":
+      result.lootStealLayers = Math.max(1, Math.floor(Number(mechanic.layers) || 1));
       break;
-    }
     case "tension_surge":
       result.tensionGain = Math.max(1, Math.floor(Number(mechanic.amount) || 1));
       break;
-    case "line_rend":
+    case "line_rend": {
+      const configuredScale = Number(mechanic.tension_scale);
+      const scale = Number.isFinite(configuredScale)
+        ? Math.max(0, configuredScale)
+        : BOSS_LINE_REND_TENSION_SCALE;
+      const tension = Math.max(0, Math.min(100, Number(context?.tension) || 0));
       result.lineDamage = Math.max(
         1,
-        Math.round(baseGearDamage * Math.max(1, Number(mechanic.multiplier) || 1)),
+        Math.ceil(baseGearDamage * (1 + (tension / 100) * scale)),
       );
       break;
-    case "rod_crush":
-      result.rodDamage = Math.max(
-        1,
-        Math.round(baseGearDamage * Math.max(1, Number(mechanic.multiplier) || 1)),
-      );
+    }
+    case "rod_crush": {
+      const multiplier = Number.isFinite(Number(mechanic.multiplier))
+        ? Math.max(1, Number(mechanic.multiplier))
+        : BOSS_ROD_CRUSH_ROD_MULTIPLIER;
+      result.rodDamage = Math.max(1, Math.round(baseGearDamage * multiplier));
+      const rampAfter = Number.isSafeInteger(mechanic.scar_ramp_after)
+        ? Math.max(0, mechanic.scar_ramp_after)
+        : BOSS_ROD_CRUSH_SCAR_RAMP_AFTER;
+      const earlyScar = Number.isSafeInteger(mechanic.scar_early)
+        ? Math.max(0, mechanic.scar_early)
+        : BOSS_ROD_CRUSH_SCAR_EARLY;
+      const lateScar = Number.isSafeInteger(mechanic.scar_late)
+        ? Math.max(0, mechanic.scar_late)
+        : BOSS_ROD_CRUSH_SCAR_LATE;
+      const round = Math.max(1, Math.floor(Number(context?.attackRound) || 1));
+      result.rodControlLoss = round <= rampAfter ? earlyScar : lateScar;
       break;
+    }
     case "regenerate":
       result.heal = Math.max(1, Math.floor(Number(mechanic.amount) || 1));
       break;
@@ -1009,12 +1034,27 @@ export function selectFishFromData(
   };
 }
 
-export function calculateLegacyFishPrice(fish, globalMultiplier = 1) {
-  const basePrice = Number(fish?.base_price) || 0;
+function getFishWeightProgress(fish) {
   const weight = Number(fish?.actualWeight) || 0;
   const [minWeight, maxWeight] = fish?.weight || [weight, weight];
-  const progress = maxWeight === minWeight ? 0.5 : Math.max(0, Math.min(1, (weight - minWeight) / (maxWeight - minWeight)));
-  return Math.round(basePrice * (0.5 + progress) * Math.max(0, Number(globalMultiplier) || 0));
+  if (maxWeight === minWeight) return 0.5;
+  return Math.max(0, Math.min(1, (weight - minWeight) / (maxWeight - minWeight)));
+}
+
+export function calculateLegacyFishPrice(fish, globalMultiplier = 1) {
+  const basePrice = Number(fish?.base_price) || 0;
+  return Math.round(
+    basePrice * (0.5 + getFishWeightProgress(fish)) * Math.max(0, Number(globalMultiplier) || 0),
+  );
+}
+
+// 首领是打赢的，不是抽到的：重量浮动收窄到 ±25%，避免同一场胜利出现三倍价差，
+// 也让最低价稳定高于传说 base 上限。
+export function calculateBossFishPrice(fish) {
+  const basePrice = Number(fish?.base_price) || 0;
+  return Math.round(
+    basePrice * (BOSS_PRICE_WEIGHT_FLOOR + getFishWeightProgress(fish) * BOSS_PRICE_WEIGHT_RANGE),
+  );
 }
 
 // 鱼雷爆破收获：炸出来的是当地鱼，宝藏和噩梦不参与，也不做异色判定。
@@ -1048,12 +1088,15 @@ export function rollTorpedoBlastCatch(
 }
 
 // 首领的金币、经验和当地宝箱组成独立奖励包；异色是唯一收益倍率例外。
+// fish.lootStealLayers 为探囊鬼手命中的层数，在异色倍率之后按层扣减金币（经验与宝箱不受影响）。
 export function calculateBossCatchReward(fish) {
   if (!isBossFish(fish)) throw new TypeError("只能结算首领渔获奖励");
   const shiny = Boolean(fish.isShiny);
+  const stealLayers = Math.max(0, Math.floor(Number(fish.lootStealLayers) || 0));
+  const keptRate = Math.max(0, 1 - stealLayers * BOSS_LOOT_STEAL_RATE_PER_LAYER);
   return {
     earnings: Math.round(
-      calculateLegacyFishPrice(fish) * (shiny ? SHINY_PRICE_MULTIPLIER : 1),
+      calculateBossFishPrice(fish) * (shiny ? SHINY_PRICE_MULTIPLIER : 1) * keptRate,
     ),
     expGain: Math.max(1, Math.floor(
       (Number(fish.boss_exp) || 1) * (shiny ? SHINY_EXP_MULTIPLIER : 1),
@@ -1136,25 +1179,28 @@ export function validateLegacyFishData(fishData) {
       ) {
         errors.push(`${label}: 首领机制数值无效`);
       } else if (
-        mechanic.type === "steal_coins" && (
-          !Number.isFinite(mechanic.min) ||
-          !Number.isFinite(mechanic.max) ||
-          mechanic.min <= 0 ||
-          mechanic.max < mechanic.min
+        mechanic.type === "steal_loot" &&
+        (!Number.isSafeInteger(mechanic.layers) || mechanic.layers <= 0)
+      ) {
+        errors.push(`${label}: 首领战利品抽取层数无效`);
+      } else if (
+        mechanic.type === "line_rend" &&
+        (!Number.isFinite(mechanic.tension_scale) || mechanic.tension_scale <= 0)
+      ) {
+        errors.push(`${label}: 首领鱼线张力系数无效`);
+      } else if (
+        mechanic.type === "rod_crush" && (
+          !Number.isFinite(mechanic.multiplier) ||
+          mechanic.multiplier < 1 ||
+          !Number.isSafeInteger(mechanic.scar_ramp_after) ||
+          mechanic.scar_ramp_after < 0 ||
+          !Number.isSafeInteger(mechanic.scar_early) ||
+          mechanic.scar_early < 0 ||
+          !Number.isSafeInteger(mechanic.scar_late) ||
+          mechanic.scar_late < mechanic.scar_early
         )
       ) {
-        errors.push(`${label}: 首领偷钱区间无效`);
-      } else if (
-        mechanic.type === "steal_coins" &&
-        mechanic.fallback_rod_multiplier != null &&
-        (!Number.isFinite(mechanic.fallback_rod_multiplier) || mechanic.fallback_rod_multiplier < 1)
-      ) {
-        errors.push(`${label}: 首领偷钱兜底鱼竿倍率无效`);
-      } else if (
-        ["line_rend", "rod_crush"].includes(mechanic.type) &&
-        (!Number.isFinite(mechanic.multiplier) || mechanic.multiplier < 1)
-      ) {
-        errors.push(`${label}: 首领伤害倍率无效`);
+        errors.push(`${label}: 首领鱼竿伤害倍率或暗伤配置无效`);
       }
     } else if (
       fish?.hp != null ||

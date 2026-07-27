@@ -23,6 +23,7 @@ import {
 import {
   BOSS_ATTACK_INTERVAL_MS,
   BOSS_BAIT_ID,
+  BOSS_LOOT_STEAL_RATE_PER_LAYER,
   FISH_FIGHT_STATE,
   FISHING_BENEFIT_DURATION_SECONDS,
   FISHING_COOLDOWN_SECONDS,
@@ -230,12 +231,16 @@ function formatBossCombatStatus(state, fishingManager, userId) {
   const lineBar = createProgressBar(lineCurrent, lineMax, 10);
   const rod = fishingManager.getRodDurabilityInfo(userId, state.rodConfig.id);
   const rodBar = createProgressBar(rod.currentDurability, rod.maxDurability, 10);
+  const stealLayers = Math.max(0, Number(state.bossLootStealLayers) || 0);
   return [
     `👑 生命\n${hpBar} ${state.bossHp}/${state.bossMaxHp}`,
     `📏 距离\n${distanceBar} ${Math.max(0, Math.round(state.distance))}/100`,
     `⚡ 张力\n${tensionBar} ${Math.max(0, Math.round(state.tension))}/100`,
     `🧵 鱼线\n${lineBar} ${lineCurrent}/${lineMax}`,
     `🎣 鱼竿\n${rodBar} ${rod.currentDurability}/${rod.maxDurability}`,
+    ...(stealLayers > 0
+      ? [`💸 战利品 -${Math.round(stealLayers * BOSS_LOOT_STEAL_RATE_PER_LAYER * 100)}%`]
+      : []),
   ].join("\n");
 }
 
@@ -480,14 +485,18 @@ export default class Fishing extends plugin {
 
   async executeBossAttack(e, state) {
     const fishingManager = new FishingManager(e.group_id);
-    const economyManager = new EconomyManager(e);
+    // 赤潮锯刑按命中瞬间的张力放大鱼线伤害，所以要在张力结算之前把当前值取出来；
+    // 吞舟重撞的暗伤在第几击之后加重，也要按本次命中的轮次算。
+    const tensionAtAttack = state.tension;
+    const attackRound = (state.bossAttackRounds || 0) + 1;
     const attackResult = resolveBossAttack(state.fish, Math.random, {
-      coinBalance: economyManager.getCoins(e),
+      tension: tensionAtAttack,
+      attackRound,
     });
     const mechanic = state.fish.boss_mechanic;
     const effectMessages = [];
 
-    state.bossAttackRounds = (state.bossAttackRounds || 0) + 1;
+    state.bossAttackRounds = attackRound;
     const lineDamage = resolveBossLineDamage({
       currentDurability: state.bossLineDurability,
       maxDurability: state.bossLineMaxDurability,
@@ -515,6 +524,22 @@ export default class Fishing extends plugin {
       attackResult.rodDamage,
     );
 
+    // 暗伤直接写进 rod_stats，而溜鱼每次都会重新读取控制力，所以本场立刻生效。
+    // 只报"留下了暗伤"，不报点数和剩余控制力；每一击的措辞也保持一致，
+    // 这样连暗伤在第几击开始加重都看不出来，只能从手感变差里察觉。
+    let scarBrokeRod = false;
+    if (attackResult.rodControlLoss > 0) {
+      const scarResult = fishingManager.applyRodControlLoss(
+        e.user_id,
+        state.rodConfig.id,
+        attackResult.rodControlLoss,
+      );
+      scarBrokeRod = Boolean(scarResult.isBroken);
+      if (scarResult.controlResult.lost > 0) {
+        effectMessages.push(`🩹 ${mechanic.name}在竿身内部又碾出一道暗伤`);
+      }
+    }
+
     let staminaResult = null;
     if (attackResult.staminaDrain > 0) {
       staminaResult = fishingManager.drainFishingStamina(
@@ -526,21 +551,15 @@ export default class Fishing extends plugin {
       );
     }
 
-    if (attackResult.stealFallback) {
-      effectMessages.push(
-        `💸 ${mechanic.name}摸了个空——你身无分文，它恼羞成怒地砸向鱼竿！`,
+    if (attackResult.lootStealLayers > 0) {
+      // 扣的是尚未到手的战利品，所以只累计层数，胜利结算时才真正折价。
+      state.bossLootStealLayers = (state.bossLootStealLayers || 0) + attackResult.lootStealLayers;
+      const stealPercent = Math.round(
+        state.bossLootStealLayers * BOSS_LOOT_STEAL_RATE_PER_LAYER * 100,
       );
-    } else if (attackResult.coinSteal > 0) {
-      const balance = economyManager.getCoins(e);
-      const stolen = Math.min(balance, attackResult.coinSteal);
-      if (stolen > 0) {
-        economyManager.reduceCoins(e, stolen, {
-          type: "支出",
-          note: `首领战：${state.fish.name}偷窃`,
-          relatedId: state.id,
-        });
-        effectMessages.push(`💸 ${mechanic.name}偷走 ${stolen} 樱花币`);
-      }
+      effectMessages.push(
+        `💸 ${mechanic.name}摸走一份战利品，本场金币奖励已 -${stealPercent}%`,
+      );
     }
 
     if (attackResult.tensionGain > 0) {
@@ -554,10 +573,11 @@ export default class Fishing extends plugin {
     }
 
     if (attackResult.lineDamage > Math.ceil(state.fish.attack / 2)) {
-      effectMessages.push(`🪚 ${mechanic.name}强化了本次鱼线伤害`);
+      effectMessages.push(
+        `🪚 ${mechanic.name}顺着 ${tensionAtAttack} 点张力加深了本次鱼线伤害`,
+      );
     }
-    // 偷钱兜底本身就已经在上面说明了鱼竿挨打的缘由，这里不再重复提示。
-    if (!attackResult.stealFallback && attackResult.rodDamage > Math.ceil(state.fish.attack / 2)) {
+    if (attackResult.rodDamage > Math.ceil(state.fish.attack / 2)) {
       effectMessages.push(`💥 ${mechanic.name}强化了本次鱼竿伤害`);
     }
 
@@ -566,7 +586,7 @@ export default class Fishing extends plugin {
     );
     const tensionBroken = state.tension >= 100;
     const exhausted = Boolean(staminaResult?.exhausted);
-    const rodBroken = rodDamage.isBroken;
+    const rodBroken = rodDamage.isBroken || scarBrokeRod;
 
     if (lineDestroyed || tensionBroken || exhausted || rodBroken || state.distance >= 100) {
       let lineBreak = null;
@@ -593,7 +613,11 @@ export default class Fishing extends plugin {
         masteryGain: rodBroken ? 0 : 1,
       });
       const reasons = [];
-      if (rodBroken) reasons.push(`🎣 【${state.rodConfig.name}】被击断了`);
+      if (scarBrokeRod) {
+        reasons.push(`🎣 暗伤吃光了控制力，【${state.rodConfig.name}】彻底报废`);
+      } else if (rodBroken) {
+        reasons.push(`🎣 【${state.rodConfig.name}】被击断了`);
+      }
       if (lineDamage.isBroken) {
         reasons.push(`🧵 本场耐久归零，【${state.lineConfig.name}】当场断裂`);
       } else if (lineDamage.breakPrevented) {
@@ -655,10 +679,14 @@ export default class Fishing extends plugin {
     if (boss) {
       state.bossHp = Math.max(1, Math.floor(Number(state.fish.hp) || 1));
       state.bossMaxHp = state.bossHp;
-      state.bossLineMaxDurability = calculateBossLineDurability(state.lineConfig.capacity);
+      state.bossLineMaxDurability = calculateBossLineDurability(
+        state.lineConfig.capacity,
+        state.fish.actualWeight,
+      );
       state.bossLineDurability = state.bossLineMaxDurability;
       state.bossLastPlayerAttackAt = 0;
       state.bossAttackRounds = 0;
+      state.bossLootStealLayers = 0;
 
       await e.reply([
         `👑 首领战开始！【${state.fish.name}】现身！\n`,
@@ -666,7 +694,7 @@ export default class Fishing extends plugin {
         `${formatBossCombatStatus(state, fishingManager, e.user_id)}\n\n`,
         `📝 指令：\n  「拉」拉近距离并增加张力\n  「溜」降低张力但会拉远距离\n  「攻」发起攻击（5秒冷却）\n`,
         `🏆 必须同时把首领生命与距离降到 0；首领每5秒反击一次！\n`,
-        `🧵 鱼线按承重生成本场临时耐久，归零立即断线；战斗结束后不保留损伤！\n`,
+        `🧵 鱼线本场临时耐久按「承重余量」生成（承重越接近首领体重越薄），归零立即断线；战斗结束后不保留损伤！\n`,
         `⚠️ 限时 ${Math.floor(timeoutMs / 1000)} 秒，当前为单人挑战。`,
       ]);
       this.scheduleBossAttack(e, stateKey, state.id);
@@ -1930,7 +1958,10 @@ export default class Fishing extends plugin {
     const settlement = new FishingSettlementService(e);
     const isPerfect = Boolean(state.isPerfect);
     const bossVictory = isBossFish(fish);
-    const bossReward = bossVictory ? calculateBossCatchReward(fish) : null;
+    // 探囊鬼手的层数在战斗中累计，胜利结算时才从金币奖励里扣。
+    const bossReward = bossVictory
+      ? calculateBossCatchReward({ ...fish, lootStealLayers: state.bossLootStealLayers })
+      : null;
     // 首领奖励独立于普通收益链：只允许异色 ×4，不吃其余经验加成。
     let expGain = bossVictory
       ? bossReward.expGain
@@ -2114,8 +2145,11 @@ export default class Fishing extends plugin {
       const rewardChest = bossVictory
         ? new ShopManager().findItemById(settleResult.rewardItemId)
         : null;
+      const bossStealLayers = bossVictory ? Math.max(0, Number(state.bossLootStealLayers) || 0) : 0;
       const bossRewardMsg = bossVictory
-        ? `🗝️ 当地宝箱：【${rewardChest?.name || settleResult.rewardItemId}】×${settleResult.rewardItemCount} 已放入背包\n`
+        ? `${bossStealLayers > 0
+          ? `💸 被摸走 ${bossStealLayers} 份战利品，金币奖励 -${Math.round(bossStealLayers * BOSS_LOOT_STEAL_RATE_PER_LAYER * 100)}%\n`
+          : ""}🗝️ 当地宝箱：【${rewardChest?.name || settleResult.rewardItemId}】×${settleResult.rewardItemCount} 已放入背包\n`
         : "";
 
       const debtPenaltyMsg = settleResult.markDeducted > 0
