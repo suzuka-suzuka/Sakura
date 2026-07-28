@@ -28,6 +28,8 @@ import {
   FISHING_COOLDOWN_SECONDS,
   FISHING_TIME_SAND_COOLDOWN_SECONDS,
   FISHING_LOCATIONS,
+  FOG_LAMP_WEIGHT_MULTIPLIERS,
+  FOG_LAMP_ZERO_RARITIES,
   GHOST_DEBT_INTEREST_RATE,
   GHOST_DEBT_MARK_PENALTY_RATE,
   GHOST_DEBT_PRINCIPAL,
@@ -252,6 +254,7 @@ async function selectRandomFish(
     nightmareBonus = 0,
     curseLayers = 0,
     nightmareWeightMultiplier = 1,
+    finalWeightMultipliers = null,
     zeroWeightRarities = [],
   } = {},
 ) {
@@ -291,6 +294,7 @@ async function selectRandomFish(
     treasureWeightMultiplier,
     nightmareBonus,
     nightmareWeightMultiplier,
+    finalWeightMultipliers,
     zeroWeightRarities,
     forceRarity,
     hour: getShanghaiHour(),
@@ -963,8 +967,10 @@ export default class Fishing extends plugin {
             nightmareBonus: buffFlags.hasMonsterBait ? 50 : 0,
             curseLayers: curseAccrued,
             nightmareWeightMultiplier: nightmareStatus.brideNightmareMultiplier,
-            // 最后判定雾灯：即使花嫁、诅咒与怪物诱饵先抬高噩梦，最终仍归零。
-            zeroWeightRarities: buffFlags.hasFogLamp ? ["垃圾", "噩梦"] : [],
+            // 雾灯最后结算：花嫁、诅咒与怪物诱饵抬完噩梦之后，再宝藏×2、噩梦×0.5、垃圾清零。
+            // 噩梦是减半不是免疫——钓上来的噩梦照常触发减益，圣水仍是唯一的解。
+            finalWeightMultipliers: buffFlags.hasFogLamp ? FOG_LAMP_WEIGHT_MULTIPLIERS : null,
+            zeroWeightRarities: buffFlags.hasFogLamp ? FOG_LAMP_ZERO_RARITIES : [],
           },
         );
       // 真实鱼重用于展示、出售和记录；天气只把它换算为本竿承受的有效拉力。

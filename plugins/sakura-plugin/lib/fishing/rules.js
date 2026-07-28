@@ -500,6 +500,12 @@ export const GHOST_DEBT_MARK_PENALTY_RATE = 0.1;
 export const FISHING_COOLDOWN_SECONDS = 5 * 60;
 export const FISHING_TIME_SAND_COOLDOWN_SECONDS = FISHING_COOLDOWN_SECONDS / 2;
 export const FISHING_BENEFIT_DURATION_SECONDS = 35 * 60;
+// 雾灯：不产钱，把渔获转成箱子和安全感。宝藏翻倍、噩梦减半、垃圾清零，
+// 三项都在权重结算的最后一层生效（见 getRarityPoolByBaitQuality）。
+// 噩梦取 ×0.5 而不是归零，是为了让怪物诱饵的 ×3 仍要付出代价：
+// 神之诱饵档单开雾灯噩梦 5%→2.47%，叠怪物诱饵则 36.7%→21.8%，剩下的是真风险。
+export const FOG_LAMP_WEIGHT_MULTIPLIERS = Object.freeze({ "宝藏": 2, "噩梦": 0.5 });
+export const FOG_LAMP_ZERO_RARITIES = Object.freeze(["垃圾"]);
 export const FISHING_BITE_WAIT_MAX_SECONDS = 120;
 export const FISHING_BITE_WAIT_REDUCTION_PER_LEVEL_SECONDS = 3;
 export const FISHING_STAMINA_BASE = 10;
@@ -899,11 +905,14 @@ export function isPerfectCatch({
 
 export function getRarityPoolByBaitQuality(
   quality,
-  curseLayers = 0,
-  treasureWeightMultiplier = 1,
-  nightmareBonus = 0,
-  nightmareWeightMultiplier = 1,
-  zeroWeightRarities = [],
+  {
+    curseLayers = 0,
+    treasureWeightMultiplier = 1,
+    nightmareBonus = 0,
+    nightmareWeightMultiplier = 1,
+    finalWeightMultipliers = null,
+    zeroWeightRarities = [],
+  } = {},
 ) {
   const [configuredPool, configuredWeights] = QUALITY_WEIGHTS[quality] || QUALITY_WEIGHTS[1];
   const pool = [...configuredPool];
@@ -918,7 +927,7 @@ export function getRarityPoolByBaitQuality(
       : 1;
     weights[treasureIndex] *= multiplier;
   }
-  // 最终顺序：宝藏猎人倍率 → 骷髅诅咒逐层加噩梦（先加）→ 花嫁连乘（后乘）→ 怪物诱饵加权 → 雾灯归零。
+  // 最终顺序：宝藏猎人倍率 → 骷髅诅咒逐层加噩梦（先加）→ 花嫁连乘（后乘）→ 怪物诱饵加权 → 雾灯等最终覆盖层。
   // 诅咒每层给噩梦权重 +1，且必须在花嫁倍率之前结算，实现「先加后乘」。
   if (nightmareIndex >= 0) {
     const safeCurseLayers = Math.max(0, Math.floor(Number(curseLayers) || 0));
@@ -934,8 +943,18 @@ export function getRarityPoolByBaitQuality(
       weights[nightmareIndex] + Number(nightmareBonus),
     );
   }
-  // 雾灯等最终覆盖效果最后结算：环境、怪物诱饵、诅咒和花嫁都算完后，
-  // 指定品质的权重仍会被强制清零。
+  // 雾灯等最终覆盖效果最后结算：环境、怪物诱饵、诅咒和花嫁都算完后再乘/清零。
+  // 噩梦倍率必须留在这一层——放到怪物诱饵 +50 之前的话 (5×0.5)+50=52.5，
+  // 雾灯只削得掉两个百分点，等于没开。
+  if (finalWeightMultipliers) {
+    for (const [rarity, rawMultiplier] of Object.entries(finalWeightMultipliers)) {
+      const index = pool.indexOf(rarity);
+      if (index < 0) continue;
+      const multiplier = Number(rawMultiplier);
+      if (!Number.isFinite(multiplier) || multiplier < 0) continue;
+      weights[index] *= multiplier;
+    }
+  }
   for (const rarity of Array.isArray(zeroWeightRarities) ? zeroWeightRarities : []) {
     const index = pool.indexOf(rarity);
     if (index >= 0) weights[index] = 0;
@@ -1007,6 +1026,7 @@ export function selectFishFromData(
     treasureWeightMultiplier = 1,
     nightmareBonus = 0,
     nightmareWeightMultiplier = 1,
+    finalWeightMultipliers = null,
     zeroWeightRarities = [],
     forceRarity = null,
     hour = new Date().getHours(),
@@ -1015,14 +1035,14 @@ export function selectFishFromData(
     random = Math.random,
   } = {},
 ) {
-  const { pool, weights } = getRarityPoolByBaitQuality(
-    baitQuality,
+  const { pool, weights } = getRarityPoolByBaitQuality(baitQuality, {
     curseLayers,
     treasureWeightMultiplier,
     nightmareBonus,
     nightmareWeightMultiplier,
+    finalWeightMultipliers,
     zeroWeightRarities,
-  );
+  });
   // 星愿瓶等道具可强制指定本次稀有度，跳过权重摇取
   const rarity = forceRarity && RARITY_CONFIG[forceRarity]
     ? forceRarity

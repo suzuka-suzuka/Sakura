@@ -919,7 +919,7 @@ async function generateWeatherGuide() {
   );
   drawTextBlock(
     ctx,
-    "• 晴天更轻、更容易，但收益也低；雷暴收益最高，同时最难。\n• 雾灯只把个人天气固定为雾，并屏蔽垃圾与噩梦，不改变群内天气播报。\n• 首领与鱼雷爆破收获不吃天气重量、难度或收益倍率。",
+    "• 晴天更轻、更容易，但收益也低；雷暴收益最高，同时最难。\n• 雾灯只把个人天气固定为雾，并让宝藏权重×2、噩梦×0.5、垃圾归零，不改变群内天气播报。\n• 首领与鱼雷爆破收获不吃天气重量、难度或收益倍率。",
     390,
     height - 273,
     WIDTH - 550,
@@ -1121,7 +1121,7 @@ const NIGHTMARE_TEXT = Object.freeze({
   },
   nightmare_weight_multiplier: {
     effect: "花嫁印记累计生效：每层让噩梦抽取权重再 ×2。",
-    counter: "净化圣水清除全部花嫁印记；雾灯可临时屏蔽噩梦。",
+    counter: "净化圣水清除全部花嫁印记；雾灯可临时把噩梦权重减半。",
   },
   steal_bait: {
     effect: "偷走背包里价值最高的鱼饵 ×1；没鱼饵时改为鱼竿 -20 耐久。",
@@ -1182,7 +1182,7 @@ async function generateNightmareGuide() {
     const locationId = fish.locations?.length === 1 ? fish.locations[0] : null;
     const meta = NIGHTMARE_TEXT[fish.nightmare_effect?.type] || {
       effect: fish.description,
-      counter: "优先使用雾灯或深渊猎手完整免疫。",
+      counter: "深渊猎手可完整免疫；雾灯只把遭遇概率减半。",
     };
     drawPanel(ctx, x, y, cardWidth, cardHeight, {
       fill: "rgba(250, 250, 252, 0.94)",
@@ -1259,7 +1259,7 @@ async function generateNightmareGuide() {
     border: "rgba(57, 125, 90, 0.32)",
   });
   const counters = [
-    ["1 · 雾灯", "35 分钟内个人天气固定为雾，同时把垃圾与噩梦权重归零；最直接的预防。"],
+    ["1 · 雾灯", "35 分钟内个人天气固定为雾，宝藏权重×2、噩梦×0.5、垃圾归零；只降低遭遇率，钓上来照样生效。"],
     ["2 · 深渊猎手", "充能触发时，噩梦伤害、偷取、状态与断线全部免疫；1级最多1次/24小时，2级最多2次/12小时恢复1次。"],
     ["3 · 河神垂青", "只保住鱼线并给予折现奖励，噩梦本体效果照常生效。"],
     ["4 · 净化圣水", "清诅咒、花嫁印记、亡者债务/抽成印记与深压；不修鱼竿暗伤。"],
@@ -1296,7 +1296,7 @@ const ITEM_GUIDE_TEXT = Object.freeze({
   torpedo: `每人最多埋1枚。被别人钓中：鱼竿-${TORPEDO_ROD_DAMAGE}、断线，钓点鱼价35分钟×${TORPEDO_PRICE_BOOST_MULTIPLIER}；满${Math.round(TORPEDO_ARM_DURATION_MS / 3600000)}小时可自爆，获得当地随机${TORPEDO_BLAST_CATCH_COUNT}条鱼并使鱼价×${TORPEDO_DETONATE_PRICE_MULTIPLIER}。`,
   item_sign_koi: "35分钟内下一次咬钩必定异色；宝藏、噩梦、鱼雷、首领不适用，但仍会消耗许愿签。",
   item_charm_river: "35分钟内鱼线永不断裂；每次成功保线，会按本竿鱼饵市价获得等额樱花币。",
-  item_lamp_fog: "35分钟内个人天气固定为雾，享受雾倍率，同时不会钓到垃圾或噩梦。",
+  item_lamp_fog: "35分钟内个人天气固定为雾，享受雾倍率，宝藏权重×2、噩梦×0.5，且不会钓到垃圾。",
   item_card_double_coin: "35分钟内普通垂钓金币收益×2；首领奖励不吃该倍率。",
   item_bait_monster: "35分钟内噩梦权重+50，普通垂钓金币与经验×3；首领奖励不吃该倍率。",
   item_bottle_wish: "使用时指定任意品质；35分钟内下一次普通咬钩必定为该品质。首领鱼饵不会消耗星愿。",

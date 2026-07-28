@@ -424,7 +424,8 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
       const rows = Math.max(1, Math.ceil(visibleItems.length / columns))
       const cardGap = 16
       const cardWidth = (this.width - 72 - cardGap * (columns - 1)) / columns
-      const cardHeight = 214
+      // 描述区 3 行（y+187/206/225，行高 19），末行基线离卡片底 8px，与商店卡片同为 3 行上限。
+      const cardHeight = 233
       const cardsTop = 230
       const height = Math.max(580, cardsTop + rows * cardHeight + Math.max(0, rows - 1) * cardGap + 72)
       const { canvas, ctx } = this.createBaseCanvas(height)
@@ -518,7 +519,7 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
           font: `14px ${this.fontFamily}`,
           color: COLORS.muted,
           lineHeight: 19,
-          maxLines: 2,
+          maxLines: 3,
         })
       }
 

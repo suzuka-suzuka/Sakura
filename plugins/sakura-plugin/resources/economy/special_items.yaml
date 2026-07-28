@@ -59,8 +59,8 @@ categories:
         icon: 🌫️
         type: buff
         duration: 2100
-        description: 雾隐湖专属道具。使用后35分钟内个人天气固定为雾，且不会钓到垃圾或噩梦。
-        activation_message: "🌫️ 雾灯亮起！\n🎣 接下来35分钟内个人天气固定为雾，不会钓到垃圾或噩梦！"
+        description: 雾隐湖专属。35分钟内天气固定为雾，宝藏×2、噩梦×0.5、不出垃圾。
+        activation_message: "🌫️ 雾灯亮起！\n🎣 接下来35分钟内个人天气固定为雾，宝藏翻倍、噩梦减半，不会钓到垃圾！"
 
       - id: item_card_double_coin
         name: 双倍金币卡
