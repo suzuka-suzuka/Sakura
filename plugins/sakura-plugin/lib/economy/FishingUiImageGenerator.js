@@ -712,16 +712,32 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
       infoTop + 81,
     )
     ctx.fillStyle = COLORS.secondary
-    // 每人只有一枚，所以这里改成报它埋在哪、还有多久能引爆；
-    // 两行是因为「地点 + 倒计时」挤在一行会超出面板宽度。
-    const deployedLines = torpedo.deployed
-      ? [
-        `已埋在【${torpedo.deployedLocationName || "某个钓点"}】`,
-        torpedo.detonateReady
-          ? "已可 #引爆鱼雷"
-          : `还需 ${torpedo.detonateCountdown} 可引爆`,
+    // 每个钓点各一枚，最多六枚，逐条列会撑爆面板：只报总数，
+    // 外加「哪些能炸」或「最快的那枚还要多久」，固定两行不挤出面板宽度。
+    const deployed = Array.isArray(torpedo.deployedList) ? torpedo.deployedList : []
+    const readyList = deployed.filter((item) => item.ready)
+    let deployedLines
+    if (!deployed.length) {
+      deployedLines = ["你尚未投放鱼雷"]
+    } else if (readyList.length) {
+      deployedLines = [
+        `已埋 ${deployed.length} 枚 · ${readyList.length} 枚可引爆`,
+        this.truncateText(
+          ctx,
+          `可引爆：${readyList.map((item) => item.locationName).join("、")}`,
+          300,
+        ),
       ]
-      : ["你尚未投放鱼雷"]
+    } else {
+      deployedLines = [
+        `已埋 ${deployed.length} 枚`,
+        this.truncateText(
+          ctx,
+          `最快【${deployed[0].locationName}】还需 ${deployed[0].countdown}`,
+          300,
+        ),
+      ]
+    }
     let torpedoLineY = infoTop + 116
     for (const line of deployedLines) {
       ctx.fillText(line, 178, torpedoLineY)

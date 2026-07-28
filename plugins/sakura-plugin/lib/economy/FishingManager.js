@@ -1444,32 +1444,39 @@ export default class FishingManager {
     }));
   }
 
-  // 每人同时只能有一枚未引爆的鱼雷，不限钓点；返回数组是为了兼容既有的状态面板。
+  // 每个钓点各限一枚，所以同一个人可能有多枚在不同钓点潜伏；按投放先后排序，
+  // 面板与提示都按「先埋的先到期」来读。
   getUserTorpedoes(userId) {
     userId = String(userId);
     const rows = db.prepare(`
         SELECT timestamp, location
         FROM pond_torpedoes
         WHERE group_id = ? AND user_id = ?
+        ORDER BY timestamp ASC
     `).all(this.groupId, userId);
-    return rows.map((row) => ({
-      timestamp: Number(row.timestamp) || 0,
-      location: normalizeFishingLocation(row.location),
-    }));
+    return rows.map((row) => {
+      const timestamp = Number(row.timestamp) || 0;
+      return {
+        timestamp,
+        location: normalizeFishingLocation(row.location),
+        readyAt: timestamp + TORPEDO_ARM_DURATION_MS,
+      };
+    });
   }
 
-  getUserTorpedo(userId) {
+  getUserTorpedo(userId, locationId) {
     userId = String(userId);
+    const location = normalizeFishingLocation(locationId);
     const row = db.prepare(`
-        SELECT timestamp, location
+        SELECT timestamp
         FROM pond_torpedoes
-        WHERE group_id = ? AND user_id = ?
-    `).get(this.groupId, userId);
+        WHERE group_id = ? AND user_id = ? AND location = ?
+    `).get(this.groupId, userId, location);
     if (!row) return null;
     const timestamp = Number(row.timestamp) || 0;
     return {
       timestamp,
-      location: normalizeFishingLocation(row.location),
+      location,
       readyAt: timestamp + TORPEDO_ARM_DURATION_MS,
     };
   }
@@ -1497,18 +1504,19 @@ export default class FishingManager {
     userId = String(userId);
     const location = normalizeFishingLocation(locationId);
     const transaction = db.transaction(() => {
-      // 每人同时只能有一枚，不看钓点：多枚并存会让「埋一天再引爆」变成流水线。
+      // 每个钓点各限一枚：同一钓点堆雷会让「埋一轮再引爆」变成流水线，
+      // 但换个钓点再埋是允许的，六个钓点最多同时潜伏六枚。
       const existing = db.prepare(`
-          SELECT timestamp, location FROM pond_torpedoes
-          WHERE group_id = ? AND user_id = ?
-      `).get(this.groupId, userId);
+          SELECT timestamp FROM pond_torpedoes
+          WHERE group_id = ? AND user_id = ? AND location = ?
+      `).get(this.groupId, userId, location);
       if (existing) {
         return {
           success: false,
           reason: "already_deployed",
-          location: normalizeFishingLocation(existing.location),
+          location,
           readyAt: (Number(existing.timestamp) || 0) + TORPEDO_ARM_DURATION_MS,
-          msg: "你已经有一枚尚未引爆的鱼雷了！",
+          msg: "这个钓点已经有你的一枚鱼雷了！",
         };
       }
 
@@ -1542,27 +1550,27 @@ export default class FishingManager {
 
   // 引爆：删掉鱼雷这一步就是幂等锁——删不到就说明它已经被引爆或被别人钓走了，
   // 结算回调只在删除成功后、同一个事务里执行，不会出现「雷没了钱也没到账」。
-  detonateTorpedo(userId, { now = Date.now(), settle = null } = {}) {
+  detonateTorpedo(userId, { location: locationId, now = Date.now(), settle = null } = {}) {
     userId = String(userId);
+    const location = normalizeFishingLocation(locationId);
     const transaction = db.transaction(() => {
       const existing = db.prepare(`
-          SELECT timestamp, location FROM pond_torpedoes
-          WHERE group_id = ? AND user_id = ?
-      `).get(this.groupId, userId);
-      if (!existing) return { success: false, reason: "not_deployed" };
+          SELECT timestamp FROM pond_torpedoes
+          WHERE group_id = ? AND user_id = ? AND location = ?
+      `).get(this.groupId, userId, location);
+      if (!existing) return { success: false, reason: "not_deployed", location };
 
       const armedAt = Number(existing.timestamp) || 0;
       const readyAt = armedAt + TORPEDO_ARM_DURATION_MS;
-      const location = normalizeFishingLocation(existing.location);
       if (now < readyAt) {
         return { success: false, reason: "not_armed", readyAt, location };
       }
 
       const removed = db.prepare(`
           DELETE FROM pond_torpedoes
-          WHERE group_id = ? AND user_id = ?
-      `).run(this.groupId, userId);
-      if (removed.changes !== 1) return { success: false, reason: "gone" };
+          WHERE group_id = ? AND user_id = ? AND location = ?
+      `).run(this.groupId, userId, location);
+      if (removed.changes !== 1) return { success: false, reason: "gone", location };
 
       const settlement = typeof settle === "function" ? settle({ location }) : null;
       return { success: true, location, armedAt, settlement };

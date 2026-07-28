@@ -1,6 +1,33 @@
 import { Segment, Group, Friend } from "../api/client.js";
 import Config from "./config.js";
 import { isMasterUser, normalizeMasters } from "../utils/common.js";
+
+/**
+ * 这几个属性名 JS 运行时会隐式访问，转发给 bot 会造成难查的怪问题：
+ * then 会让 Event 被当成 Promise（await 事件对象直接挂起），
+ * toJSON 会让 JSON.stringify 调到接口方法上。
+ */
+const NEVER_FORWARD_TO_BOT = new Set(["then", "toJSON"]);
+
+/**
+ * 判断某个属性名该不该转发给 bot 当接口方法调用。
+ *
+ * 只放行驼峰命名。理由是 ws 层会把任意蛇形名当作 OneBot 动作名并返回一个函数
+ * （见 wsClient 的 /^[a-z][a-z_0-9]*$/ 分支），于是事件上不存在的数据字段
+ * ——group_id、sender、message 这些——读出来会是函数而不是 undefined，
+ * 所有 if (e.group_id) 之类的判空因此全部失效。
+ *
+ * OneBot 事件的数据字段一律是蛇形或全小写，而 bot 的接口方法一律是驼峰
+ * （sendGroupMsg、getInfo…），"是否含大写字母"正好把两者分开。
+ */
+function shouldForwardToBot(prop) {
+  return (
+    typeof prop === "string" &&
+    !NEVER_FORWARD_TO_BOT.has(prop) &&
+    /[A-Z]/.test(prop)
+  );
+}
+
 export class Event {
   constructor(event, bot) {
     Object.assign(this, event);
@@ -21,8 +48,11 @@ export class Event {
           return target[prop];
         }
 
-        if (target.bot && typeof target.bot[prop] === "function") {
-          return target.bot[prop].bind(target.bot);
+        if (target.bot && shouldForwardToBot(prop)) {
+          const value = target.bot[prop];
+          if (typeof value === "function") {
+            return value.bind(target.bot);
+          }
         }
 
         return undefined;

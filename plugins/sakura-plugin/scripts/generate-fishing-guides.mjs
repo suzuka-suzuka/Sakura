@@ -1293,7 +1293,7 @@ const ITEM_GUIDE_TEXT = Object.freeze({
   item_holy_water: "立即清除骷髅诅咒、花嫁印记、亡者债务/抽成印记与深压回响。",
   item_sand_time: "35分钟内把每竿钓鱼冷却从5分钟缩短到2分30秒。",
   bait_boss: "宝箱非卖品。装备后下一竿必定呼出当前钓点首领；每次消耗1个。",
-  torpedo: `每人最多埋1枚。被别人钓中：鱼竿-${TORPEDO_ROD_DAMAGE}、断线，钓点鱼价35分钟×${TORPEDO_PRICE_BOOST_MULTIPLIER}；满${Math.round(TORPEDO_ARM_DURATION_MS / 3600000)}小时可自爆，获得当地随机${TORPEDO_BLAST_CATCH_COUNT}条鱼并使鱼价×${TORPEDO_DETONATE_PRICE_MULTIPLIER}。`,
+  torpedo: `每个钓点各限埋1枚。被别人钓中：鱼竿-${TORPEDO_ROD_DAMAGE}、断线，钓点鱼价35分钟×${TORPEDO_PRICE_BOOST_MULTIPLIER}；满${Math.round(TORPEDO_ARM_DURATION_MS / 3600000)}小时可自爆，获得当地随机${TORPEDO_BLAST_CATCH_COUNT}条鱼并使鱼价×${TORPEDO_DETONATE_PRICE_MULTIPLIER}。`,
   item_sign_koi: "35分钟内下一次咬钩必定异色；宝藏、噩梦、鱼雷、首领不适用，但仍会消耗许愿签。",
   item_charm_river: "35分钟内鱼线永不断裂；每次成功保线，会按本竿鱼饵市价获得等额樱花币。",
   item_lamp_fog: "35分钟内个人天气固定为雾，享受雾倍率，宝藏权重×2、噩梦×0.5，且不会钓到垃圾。",

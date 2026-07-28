@@ -156,4 +156,4 @@ categories:
         name: 鱼雷
         price: 400
         type: consumable
-        description: 投放到钓点，被钓中者损伤鱼竿，该钓点鱼价35分钟×1.5；满24小时自爆。
+        description: 每个钓点各限埋1枚。被钓中者损伤鱼竿，该钓点鱼价35分钟×1.5；满12小时自爆。

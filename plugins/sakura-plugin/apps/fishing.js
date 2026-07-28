@@ -2641,10 +2641,12 @@ export default class Fishing extends plugin {
     const balance = economyManager.getCoins(e);
 
     const dangerousTorpedoes = fishingManager.getAvailableTorpedoCount(userId, locationId);
-    const deployedTorpedo = fishingManager.getUserTorpedo(userId);
-    const deployedLocation = deployedTorpedo
-      ? getFishingLocationConfig(deployedTorpedo.location)
-      : null;
+    // 每个钓点各能埋一枚，最多同时六枚，面板按「先埋的先到期」的顺序汇总。
+    const deployedTorpedoes = fishingManager.getUserTorpedoes(userId).map((item) => ({
+      locationName: getFishingLocationConfig(item.location)?.name || item.location,
+      ready: Date.now() >= item.readyAt,
+      countdown: formatDetonateCountdown(item.readyAt),
+    }));
     const locationTorpedoes = fishingManager.getTotalTorpedoCount(locationId);
     let priceBoostActive = false;
     let priceBoostRemainingMinutes = 0;
@@ -2689,12 +2691,7 @@ export default class Fishing extends plugin {
         effects,
         torpedo: {
           dangerousCount: dangerousTorpedoes,
-          deployed: Boolean(deployedTorpedo),
-          deployedLocationName: deployedLocation?.name || "",
-          detonateReady: Boolean(deployedTorpedo) && Date.now() >= deployedTorpedo.readyAt,
-          detonateCountdown: deployedTorpedo
-            ? formatDetonateCountdown(deployedTorpedo.readyAt)
-            : "",
+          deployedList: deployedTorpedoes,
           currentLocationName: locationConfig?.name || "当前钓点",
           locationCount: locationTorpedoes,
           priceBoostActive,
@@ -2861,25 +2858,25 @@ export default class Fishing extends plugin {
 
     if (result.success) {
       const locationTorpedoes = fishingManager.getTotalTorpedoCount(locationId);
+      const ownTorpedoes = fishingManager.getUserTorpedoCount(userId);
       await e.reply([
         `💣 嘿嘿嘿... 鱼雷已悄悄投放到${location.emoji}【${location.name}】！\n`,
         `🎯 这 ${Math.round(TORPEDO_ARM_DURATION_MS / 3600000)} 小时里它是个陷阱，` +
         `被同钓点的其他人钓中就会当场炸开。\n`,
         `⏰ ${formatDetonateCountdown(result.readyAt)}后可发送「#引爆鱼雷」自行引爆。\n`,
-        `📊 当前钓点共有 ${locationTorpedoes} 个鱼雷潜伏中~`,
+        `📊 当前钓点共有 ${locationTorpedoes} 个鱼雷潜伏中，你自己埋了 ${ownTorpedoes} 枚~`,
       ]);
     } else {
       let message;
       if (result.reason === "not_owned") {
         message = "💣 你背包里没有鱼雷！\n快去「商店」购买吧~";
       } else {
-        const existingLocation = getFishingLocationConfig(result.location);
         const ready = Date.now() >= result.readyAt;
-        message = `💣 你在${existingLocation?.emoji || ""}【${existingLocation?.name || "某个钓点"}】` +
-          "投放的鱼雷还没引爆！\n每人同时只能有一枚，" +
+        message = `💣 你在${location.emoji}【${location.name}】投放的鱼雷还没引爆！\n` +
+          "每个钓点只能埋一枚，" +
           (ready
-            ? "先发送「#引爆鱼雷」清掉它吧~"
-            : `等它炸了或者 ${formatDetonateCountdown(result.readyAt)}后引爆再说~`);
+            ? "先发送「#引爆鱼雷」清掉它，或者换个钓点再埋~"
+            : `等它炸了、${formatDetonateCountdown(result.readyAt)}后引爆，或者换个钓点再埋~`);
       }
       await e.reply(message, 10);
     }
@@ -2887,18 +2884,45 @@ export default class Fishing extends plugin {
     return true;
   });
 
-  detonateTorpedo = Command(/^#?(引爆|起爆)鱼雷$/, async (e) => {
+  detonateTorpedo = Command(/^#?(引爆|起爆)鱼雷\s*(\S*)$/, async (e) => {
     if (!this.checkWhitelist(e)) return false;
     const groupId = e.group_id;
     const userId = e.user_id;
 
     const fishingManager = new FishingManager(groupId);
-    const armed = fishingManager.getUserTorpedo(userId);
+    // 每个钓点各能埋一枚，所以得先定位炸哪一枚：带钓点名就炸那个（可远程），
+    // 不带就炸自己当前所在钓点的，和「#投放鱼雷」埋在当前钓点是一对。
+    const targetName = (e.msg.match(/^#?(引爆|起爆)鱼雷\s*(\S*)$/)?.[2] || "").trim();
+    let targetLocationId;
+    if (targetName) {
+      const entry = Object.entries(FISHING_LOCATIONS).find(
+        ([, config]) => config.name === targetName,
+      );
+      if (!entry) {
+        const validNames = Object.values(FISHING_LOCATIONS).map((config) => config.name).join("、");
+        await e.reply(`找不到钓点【${targetName}】\n可选钓点：${validNames}`, 10);
+        return true;
+      }
+      targetLocationId = entry[0];
+    } else {
+      targetLocationId = fishingManager.getFishingLocation(userId);
+    }
+
+    const armedLocation = getFishingLocationConfig(targetLocationId);
+    const armed = fishingManager.getUserTorpedo(userId, targetLocationId);
     if (!armed) {
-      await e.reply("💣 你没有已投放的鱼雷~\n先发送「#投放鱼雷」埋一枚吧！", 10);
+      const others = fishingManager.getUserTorpedoes(userId);
+      const hint = others.length
+        ? `\n📍 你的鱼雷埋在：${others
+          .map((item) => getFishingLocationConfig(item.location)?.name || item.location)
+          .join("、")}\n发送「#引爆鱼雷 钓点名」可远程引爆。`
+        : "\n先发送「#投放鱼雷」埋一枚吧！";
+      await e.reply(
+        `💣 ${armedLocation?.emoji || ""}【${armedLocation?.name || "该钓点"}】没有你的鱼雷~${hint}`,
+        10,
+      );
       return true;
     }
-    const armedLocation = getFishingLocationConfig(armed.location);
     if (Date.now() < armed.readyAt) {
       await e.reply(
         `💣 ${armedLocation?.emoji || ""}【${armedLocation?.name || "某个钓点"}】的鱼雷还没到引信时间~\n` +
@@ -2923,6 +2947,7 @@ export default class Fishing extends plugin {
 
     const settlementService = new FishingSettlementService(e);
     const result = fishingManager.detonateTorpedo(userId, {
+      location: armed.location,
       settle: () => settlementService.settleTorpedoBlast({
         earnings: blast.earnings,
         note: `鱼雷爆破收获（${armedLocation?.name || armed.location}）`,

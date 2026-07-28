@@ -76,6 +76,7 @@ export const commandNames = {
     "pixivSearch.viewRanking": "p站排行榜",
     "pixivSearch.getRankingItem": "p站排行榜详情",
     "SearchImage.imageSearch": "搜图",
+    "Trpg.startGame": "开始跑团",
 };
 
 export const manualCommandNames = [
@@ -684,6 +685,16 @@ export const ReminderTaskSchema = z.object({
 
 
 
+export const TrpgSchema = z.object({
+    enable: z.boolean().default(true).describe('启用AI跑团|关闭后所有跑团指令不响应'),
+    route: z.string().default('').describe('模型路由|#routeSelect|出模组和当KP用的路由，留空则跟随 AI 设定里的通用路由'),
+    minPlayers: z.number().int().min(1).max(12).default(2).describe('最少开局人数|不足这个人数无法开始'),
+    maxPlayers: z.number().int().min(1).max(12).default(6).describe('最多参与人数|人数越多出模组越慢、越费token'),
+    maxRounds: z.number().int().min(0).max(200).default(30).describe('回合上限|跑到这个回合数强制收场，0 表示不限制'),
+    onlyWhiteCreate: z.boolean().default(false).describe('仅白名单可开局|开启后普通成员不能创建跑团'),
+    enableFreeDice: z.boolean().default(true).describe('启用自由掷骰|响应 .r 1d100 这类指令'),
+}).describe('AI跑团');
+
 export const pluginMeta = {
     displayName: '樱花插件',
     icon: '🌸',
@@ -722,6 +733,7 @@ export const configSchema = {
     'summary': SummarySchema,
     'teatime': TeatimeSchema,
     'reminderTask': ReminderTaskSchema,
+    'trpg': TrpgSchema,
 };
 
 
@@ -733,6 +745,7 @@ export const schemaCategories = {
     '戳一戳': ['poke'],
     '图片功能': ['ImageChannels', 'CliProxyMedia', 'EditImage', 'nai', 'pixiv', 'r18', 'summary', 'SearchImage', 'cool', 'teatime', 'EmojiThief'],
     '经济系统': ['economy'],
+    '游戏玩法': ['trpg'],
     '其他功能': ['60sNews', 'GroupInsight', 'AutoCleanup', 'forwardMessage', 'groupnotice', 'repeat', 'recall', 'bilicookie', 'VoxCPMVoice', 'reminderTask'],
 };
 
@@ -767,6 +780,7 @@ export const schemaLabels = {
     'SearchImage': '统一搜图',
     'summary': '图片外显',
     'teatime': '下午茶推送',
+    'trpg': 'AI 跑团',
     'reminderTask': '重复提醒任务',
 };
 

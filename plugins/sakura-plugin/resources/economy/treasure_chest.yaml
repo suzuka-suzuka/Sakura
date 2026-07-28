@@ -12,7 +12,7 @@ chests:
       - { weight: 8, type: item, item_id: bait_boss, count: 1 }
       - { weight: 15, type: item, item_id: item_sign_koi, count: 1 }
       - { weight: 20, type: random_bait, count: 3 }
-      - { weight: 10, type: item, item_id: torpedo, count: 2 }
+      - { weight: 10, type: item, item_id: torpedo, count: 1 }
       - { weight: 15, type: item, item_id: treasure_pond_sakura_amber, count: 1 }
 
   chest_river:
@@ -24,7 +24,7 @@ chests:
       - { weight: 8, type: item, item_id: bait_boss, count: 1 }
       - { weight: 15, type: item, item_id: item_charm_river, count: 1 }
       - { weight: 20, type: random_bait, count: 3 }
-      - { weight: 10, type: item, item_id: torpedo, count: 2 }
+      - { weight: 10, type: item, item_id: torpedo, count: 1 }
       - { weight: 15, type: item, item_id: treasure_river_golden_scale, count: 1 }
 
   chest_lake:
@@ -36,7 +36,7 @@ chests:
       - { weight: 8, type: item, item_id: bait_boss, count: 1 }
       - { weight: 15, type: item, item_id: item_lamp_fog, count: 1 }
       - { weight: 20, type: random_bait, count: 3 }
-      - { weight: 10, type: item, item_id: torpedo, count: 2 }
+      - { weight: 10, type: item, item_id: torpedo, count: 1 }
       - { weight: 15, type: item, item_id: treasure_lake_bronze_mirror, count: 1 }
 
   chest_coast:
@@ -48,7 +48,7 @@ chests:
       - { weight: 8, type: item, item_id: bait_boss, count: 1 }
       - { weight: 15, type: item, item_id: item_card_double_coin, count: 1 }
       - { weight: 20, type: random_bait, count: 3 }
-      - { weight: 10, type: item, item_id: torpedo, count: 2 }
+      - { weight: 10, type: item, item_id: torpedo, count: 1 }
       - { weight: 15, type: item, item_id: treasure_coast_black_pearl, count: 1 }
 
   chest_abyss:
@@ -60,7 +60,7 @@ chests:
       - { weight: 8, type: item, item_id: bait_boss, count: 1 }
       - { weight: 15, type: item, item_id: item_bait_monster, count: 1 }
       - { weight: 20, type: random_bait, count: 3 }
-      - { weight: 10, type: item, item_id: torpedo, count: 2 }
+      - { weight: 10, type: item, item_id: torpedo, count: 1 }
       - { weight: 15, type: item, item_id: treasure_abyss_dragon_ambergris, count: 1 }
 
   chest_mystic:
@@ -72,5 +72,5 @@ chests:
       - { weight: 8, type: item, item_id: bait_boss, count: 1 }
       - { weight: 15, type: item, item_id: item_bottle_wish, count: 1 }
       - { weight: 20, type: random_bait, count: 3 }
-      - { weight: 10, type: item, item_id: torpedo, count: 2 }
+      - { weight: 10, type: item, item_id: torpedo, count: 1 }
       - { weight: 15, type: item, item_id: treasure_mystic_star_fragment, count: 1 }

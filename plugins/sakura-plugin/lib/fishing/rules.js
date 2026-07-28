@@ -527,8 +527,8 @@ export const TORPEDO_ROD_DAMAGE = 20;
 // 能挑时机的那一档就该弱一些。
 export const TORPEDO_PRICE_BOOST_MULTIPLIER = 1.5;
 export const TORPEDO_DETONATE_PRICE_MULTIPLIER = 1.25;
-// 投放满 24 小时才能手动引爆；在此之前它仍是会被别人钓中的陷阱。
-export const TORPEDO_ARM_DURATION_MS = 24 * 60 * 60 * 1000;
+// 投放满 12 小时才能手动引爆；在此之前它仍是会被别人钓中的陷阱。
+export const TORPEDO_ARM_DURATION_MS = 12 * 60 * 60 * 1000;
 // 引爆者独得的爆破收获：当地随机 3 条鱼的基准售价。
 // 稀有度按固定的中档饵口径摇取——炸弹震晕的鱼不挑饵，也就不该受玩家装备影响；
 // 垃圾照常参与，宝藏和噩梦不是鱼，排除在外。
