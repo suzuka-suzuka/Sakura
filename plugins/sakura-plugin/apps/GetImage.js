@@ -22,20 +22,12 @@ export class GetImagePlugin extends plugin {
     });
   }
 
-  handleImage = Command(/^#?来张萝莉图(y|k)?$/, async (e) => {
-    const sourceMap = {
-      y: "yande",
-      k: "konachan",
-    };
+  handleImage = Command(/^#?来张萝莉图$/, async (e) => {
+    return await this.fetchAndSendImage(e, "yande");
+  });
 
-
-    let suffix = e.match?.[1];
-    if (!suffix) {
-      suffix = Math.random() < 0.9 ? "y" : "k";
-    }
-
-    const sourceKey = sourceMap[suffix];
-    return await this.fetchAndSendImage(e, sourceKey);
+  handleWallpaper = Command(/^#?来张萝莉壁纸$/, async (e) => {
+    return await this.fetchAndSendImage(e, "konachan");
   });
 
   async fetchAndSendImage(e, sourceKey) {
