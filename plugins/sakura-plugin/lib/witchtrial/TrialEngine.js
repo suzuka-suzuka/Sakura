@@ -532,6 +532,9 @@ export async function resolveVerdict({ e, route, session, playerVotes }) {
     correct: verdict.correct,
     truthText: propositionOf(caseFile, caseFile.truthId)?.text || "",
     culpritName: girlOf(session, caseFile.culpritId)?.name || "",
+    // 自杀/意外的章节里「凶手」就是死者本人，终局表要按这个改写措辞，
+    // 否则会打出「死者：梅露露　真凶：梅露露」这种胡话
+    truthType: propositionOf(caseFile, caseFile.truthId)?.conclusion?.type || "",
     // 判错的那几章，动机当时没被讲出来。留到终局一次性摊开。
     motive: caseFile.motive?.trigger || "",
     confession: caseFile.motive?.confession || "",

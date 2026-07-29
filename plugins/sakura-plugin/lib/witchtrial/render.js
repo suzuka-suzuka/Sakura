@@ -466,13 +466,30 @@ export function renderFinale(session, reason, closingText) {
   // 判错的章节，动机当时没人听见。这里一次性摊开——包括那些没被讲出来的。
   const truthBlock = session.history
     .map((item) => {
+      // 自杀/意外的章节没有凶手，死者就是"凶手"，措辞要换掉
+      const selfInflicted = item.truthType === VERDICT.SUICIDE || item.truthType === VERDICT.ACCIDENT;
+      const culpritLine = selfInflicted
+        ? `　真相：${item.truthType === VERDICT.SUICIDE ? "自杀" : "意外"}，没有凶手`
+        : `　真凶：${item.culpritName}`;
+
+      // 「她是无辜的」只在真的处刑了人、且判错时才成立
+      const executedLine = item.executedName
+        ? `　处刑：${item.executedName}${item.correct ? "" : "　← 她是无辜的"}`
+        : "　处刑：无人";
+
       const head = `第${item.chapter}章　${item.correct ? "✔" : "✘"}
 　死者：${item.victimName}
-　真凶：${item.culpritName}
-　处刑：${item.executedName || "无人"}${item.correct ? "" : "　← 她是无辜的"}`;
+${culpritLine}
+${executedLine}`;
+
       if (!item.motive) return head;
-      return `${head}
-　动机：${item.motive}${item.correct ? "" : `\n　（这段话当时没有人听见）${item.confession ? `\n　「${item.confession}」` : ""}`}`;
+
+      // 动机在判对的那一章已经当众讲过了，这里只补没讲过的
+      const motiveLine = selfInflicted ? `　她为什么：${item.motive}` : `　动机：${item.motive}`;
+      const unheard = item.correct
+        ? ""
+        : `\n　（这段话当时没有人听见）${item.confession ? `\n　「${item.confession}」` : ""}`;
+      return `${head}\n${motiveLine}${unheard}`;
     })
     .join("\n\n");
 
