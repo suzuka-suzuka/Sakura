@@ -12,8 +12,18 @@
 
 import { getAI } from "../AIUtils/getAI.js";
 import { judgeCheck, rollDie } from "./dice.js";
-import { KP_SYSTEM, buildTurnPrompt } from "./prompts.js";
-import { extractJson, getSkillValue, safeInt, safeString, normalizeStringArray } from "./schema.js";
+import { KP_SYSTEM, buildFinalePrompt, buildTurnPrompt, describePacing } from "./prompts.js";
+import {
+  collectFlagVocabulary,
+  evaluateEndings,
+  extractJson,
+  getSkillValue,
+  normalizeStringArray,
+  pendingEndingFlags,
+  safeInt,
+  safeString,
+  settleGoals,
+} from "./schema.js";
 
 /** 摘要最多保留多少条，超了就丢最早的 */
 const MAX_SUMMARY_LINES = 14;
@@ -21,24 +31,44 @@ const MAX_SUMMARY_LINES = 14;
 const RECENT_LOG_SIZE = 3;
 /** 预判定表里放多少项技能 */
 const CHECK_TABLE_SIZE = 12;
+/** 力竭状态下技能值打几折 */
+const EXHAUSTED_SKILL_RATIO = 0.5;
+
+export const EXHAUSTED_STATUS = "力竭";
+
+export function isExhausted(character) {
+  return Array.isArray(character?.status) && character.status.includes(EXHAUSTED_STATUS);
+}
+
+/**
+ * 力竭状态下的有效技能值
+ * 回合结算和手动 #检定 共用这一套折算，免得两边算出不同的数
+ */
+export function effectiveSkillValue(value, exhausted) {
+  const base = Number(value) || 0;
+  return exhausted ? Math.max(1, Math.floor(base * EXHAUSTED_SKILL_RATIO)) : base;
+}
 
 /**
  * 为一个角色构建本回合的「骰点 × 技能」预判定表
  * KP 只需在这张表里挑一行，不需要自己算成败
+ * 力竭的角色技能值先打折再判定，惩罚落在本地，KP 无从干预
  */
-function buildCheckTable(character, roll) {
+function buildCheckTable(character, roll, exhausted) {
+  const adjust = (value) => effectiveSkillValue(value, exhausted);
+
   const entries = Object.entries(character.skills || {})
     .sort((a, b) => b[1] - a[1])
     .slice(0, CHECK_TABLE_SIZE);
 
   const table = {};
   for (const [skill, value] of entries) {
-    table[skill] = judgeCheck(roll, value);
+    table[skill] = judgeCheck(roll, adjust(value));
   }
   // 属性直骰也可能被点名，补几项常用的
   for (const attr of ["力量", "敏捷", "意志", "智力"]) {
     const value = character.attrs?.[attr];
-    if (Number.isFinite(value)) table[attr] = judgeCheck(roll, value);
+    if (Number.isFinite(value)) table[attr] = judgeCheck(roll, adjust(value));
   }
   return table;
 }
@@ -52,12 +82,14 @@ export function prepareActions(session, characters) {
     if (!character || !character.alive) continue;
 
     const roll = rollDie(100);
+    const exhausted = isExhausted(character);
     actions.push({
       userId: String(userId),
       name: character.name,
       text: safeString(text, 300),
       roll,
-      checkTable: buildCheckTable(character, roll),
+      exhausted,
+      checkTable: buildCheckTable(character, roll, exhausted),
     });
   }
 
@@ -65,7 +97,7 @@ export function prepareActions(session, characters) {
 }
 
 /** 归一化 KP 返回的结构 */
-function normalizeTurnResult(raw) {
+function normalizeTurnResult(raw, vocabulary = []) {
   const source = raw && typeof raw === "object" ? raw : {};
 
   const numberMap = (value, { min = -99, max = 99 } = {}) => {
@@ -95,26 +127,31 @@ function normalizeTurnResult(raw) {
     }
   }
 
+  // 标记只认词表内的名字。KP 自己编的一律丢弃，否则结局条件永远对不上，
+  // 本地判定也就失去意义了。
+  const allowed = new Set(vocabulary);
+  const rawFlags = Array.isArray(source.flags)
+    ? source.flags
+    : source.flags && typeof source.flags === "object"
+      ? Object.entries(source.flags).filter(([, value]) => value === true || value === "true").map(([key]) => key)
+      : [];
+
   const flags = {};
-  if (source.flags && typeof source.flags === "object") {
-    for (const [key, value] of Object.entries(source.flags).slice(0, 12)) {
-      const name = safeString(key, 30);
-      if (name) flags[name] = value === true || value === "true" ? true : safeString(value, 40);
-    }
+  const rejectedFlags = [];
+  for (const item of rawFlags.slice(0, 12)) {
+    const name = safeString(item, 30);
+    if (!name) continue;
+    if (allowed.has(name)) flags[name] = true;
+    else rejectedFlags.push(name);
   }
 
-  let ending = null;
-  if (source.ending && typeof source.ending === "object") {
-    const name = safeString(source.ending.name, 40);
-    const description = safeString(source.ending.description, 800);
-    if (name || description) {
-      ending = {
-        id: safeString(source.ending.id, 40),
-        name: name || "结局",
-        description,
-      };
-    }
-  }
+  const options = (Array.isArray(source.options) ? source.options : [])
+    .slice(0, 4)
+    .map((item) => ({
+      text: safeString(typeof item === "string" ? item : item?.text, 60),
+      hint: safeString(item?.hint, 24),
+    }))
+    .filter((item) => item.text);
 
   return {
     narration: safeString(source.narration, 2000),
@@ -129,8 +166,9 @@ function normalizeTurnResult(raw) {
     items,
     status,
     flags,
+    rejectedFlags,
+    options,
     summary: safeString(source.summary, 200),
-    ending,
   };
 }
 
@@ -225,9 +263,11 @@ function applyUpdates(turnResult, characters) {
 
 /**
  * 推进一个回合
- * @returns {Promise<{ narration, checks, events, ending, summary }>}
+ * @returns {Promise<{ narration, checks, events, options, ending, newFlags, summary }>}
  */
-export async function runTurn({ e, route, session, characters, actions }) {
+export async function runTurn({ e, route, session, characters, actions, maxRounds = 0 }) {
+  const vocabulary = collectFlagVocabulary(session.module, characters);
+  const pacing = describePacing(session.round, maxRounds);
   const sessionView = {
     round: session.round,
     currentScene: session.currentScene,
@@ -241,6 +281,9 @@ export async function runTurn({ e, route, session, characters, actions }) {
     characters,
     session: sessionView,
     actions,
+    flagVocabulary: vocabulary,
+    pendingFlags: pendingEndingFlags(session.module, session.flags),
+    pacing,
   });
 
   const result = await getAI(route, e, [{ text: prompt }], KP_SYSTEM, false, false, []);
@@ -252,9 +295,12 @@ export async function runTurn({ e, route, session, characters, actions }) {
     throw new Error("KP 返回的内容无法解析，本回合未推进");
   }
 
-  const turnResult = normalizeTurnResult(parsed);
+  const turnResult = normalizeTurnResult(parsed, vocabulary);
   if (!turnResult.narration) {
     throw new Error("KP 没有产出叙事，本回合未推进");
+  }
+  if (turnResult.rejectedFlags.length) {
+    logger.warn(`[跑团] KP 试图设置词表外的标记，已忽略：${turnResult.rejectedFlags.join("、")}`);
   }
 
   const checks = resolveChecks(turnResult, actions, characters);
@@ -265,9 +311,11 @@ export async function runTurn({ e, route, session, characters, actions }) {
     session.currentScene = turnResult.scene;
   }
 
+  const newFlags = Object.keys(turnResult.flags).filter((name) => session.flags?.[name] !== true);
   session.flags = { ...session.flags, ...turnResult.flags };
   session.round += 1;
   session.pendingActions = {};
+  session.currentOptions = turnResult.options;
 
   if (turnResult.summary) {
     session.summaryLines = [...(session.summaryLines || []), turnResult.summary].slice(-MAX_SUMMARY_LINES);
@@ -277,11 +325,43 @@ export async function runTurn({ e, route, session, characters, actions }) {
     { round: session.round, text: turnResult.narration.slice(0, 220) },
   ].slice(-RECENT_LOG_SIZE);
 
+  // 收场与否由本地对标记求值决定，KP 无权宣布
+  const ending = evaluateEndings(session.module, session.flags);
+
   return {
     narration: turnResult.narration,
     checks,
     events,
-    ending: turnResult.ending,
+    options: turnResult.options,
+    newFlags,
+    ending,
+    // 播报用的是打完这一回合之后的节奏，所以重新算一次
+    pacing: describePacing(session.round, maxRounds),
     summary: turnResult.summary,
   };
+}
+
+/**
+ * 达成结局时写终章
+ * 多花一次调用，换一段贴合本局实际经历的收尾；失败就回落到模组预写的结局文本
+ */
+export async function writeFinale({ e, route, session, characters, ending }) {
+  const goalResults = settleGoals(characters, session.flags);
+
+  try {
+    const prompt = buildFinalePrompt({
+      module: session.module,
+      ending,
+      session,
+      characters,
+      goalResults,
+    });
+    const result = await getAI(route, e, [{ text: prompt }], null, false, false, []);
+    const text = typeof result === "string" ? "" : safeString(result?.text, 2000);
+    if (text) return { text, goalResults };
+  } catch (error) {
+    logger.warn(`[跑团] 终章生成失败，回落到预写结局：${error.message}`);
+  }
+
+  return { text: ending.description, goalResults };
 }

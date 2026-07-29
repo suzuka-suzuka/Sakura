@@ -28,7 +28,7 @@ function userKey(selfId, userId) {
   return `${KEY_PREFIX}:user:${selfId}:${userId}`;
 }
 
-export function createSession({ selfId, groupId, hostId, hostNickname, theme, tone, maxPlayers, routeId }) {
+export function createSession({ selfId, groupId, hostId, hostNickname, theme, tone, maxPlayers, maxRounds, routeId }) {
   const now = Date.now();
   return {
     version: 1,
@@ -39,6 +39,8 @@ export function createSession({ selfId, groupId, hostId, hostNickname, theme, to
     theme: theme || "",
     tone: tone || "",
     maxPlayers,
+    // 开局时固定下来，中途改配置不影响正在跑的这一局
+    maxRounds: Number.isFinite(maxRounds) ? maxRounds : 0,
     routeId,
     players: [{ userId: String(hostId), nickname: hostNickname || String(hostId) }],
     module: null,
@@ -46,6 +48,7 @@ export function createSession({ selfId, groupId, hostId, hostNickname, theme, to
     round: 0,
     currentScene: "",
     pendingActions: {},
+    currentOptions: [],
     flags: {},
     summaryLines: [],
     recentLog: [],

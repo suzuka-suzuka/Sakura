@@ -166,13 +166,24 @@ export function normalizeModule(raw) {
         outcome: safeString(item?.outcome, 300),
       }))
       .filter((item) => item.title),
+    storyFlags: (Array.isArray(source.storyFlags) ? source.storyFlags : [])
+      .slice(0, 14)
+      .map((item) => ({
+        name: safeString(item?.name, 30),
+        description: safeString(item?.description, 120),
+      }))
+      .filter((item) => item.name),
     endings: (Array.isArray(source.endings) ? source.endings : [])
       .slice(0, 5)
       .map((item, index) => ({
         id: slugId(item?.id, `ending_${index + 1}`),
         name: safeString(item?.name, 40) || `结局${index + 1}`,
-        condition: safeString(item?.condition, 200),
         description: safeString(item?.description, 500),
+        requires: {
+          all: normalizeStringArray(item?.requires?.all, { limit: 8, maxLength: 30 }),
+          any: normalizeStringArray(item?.requires?.any, { limit: 8, maxLength: 30 }),
+          none: normalizeStringArray(item?.requires?.none, { limit: 8, maxLength: 30 }),
+        },
       })),
     dangers: normalizeStringArray(source.dangers, { limit: 6, maxLength: 150 }),
     startScene: slugId(source.startScene, scenes[0]?.id || "scene_1"),
@@ -189,10 +200,24 @@ export function validateModule(module) {
   if (module.npcs.length < 2) problems.push("NPC 少于 2 个");
   if (module.mainline.length < 3) problems.push("主线事件少于 3 条");
   if (module.endings.length < 2) problems.push("结局少于 2 个");
+  if (module.storyFlags.length < 4) problems.push("剧情标记少于 4 个");
 
   const sceneIds = new Set(module.scenes.map((scene) => scene.id));
   if (module.scenes.length && !sceneIds.has(module.startScene)) {
     problems.push("起始场景不在场景列表里");
+  }
+
+  // 结局条件必须能被本地判定：引用的标记要在词表里，且不能没有条件
+  const flagNames = new Set(module.storyFlags.map((flag) => flag.name));
+  for (const ending of module.endings) {
+    const referenced = [...ending.requires.all, ...ending.requires.any, ...ending.requires.none];
+    const unknown = referenced.filter((name) => !flagNames.has(name));
+    if (unknown.length) {
+      problems.push(`结局「${ending.name}」引用了词表外的标记：${unknown.join("、")}`);
+    }
+    if (!ending.requires.all.length && !ending.requires.any.length) {
+      problems.push(`结局「${ending.name}」没有任何达成条件`);
+    }
   }
 
   return { ok: problems.length === 0, problems };
@@ -231,6 +256,8 @@ export function normalizeCharacter(raw, { userId, nickname } = {}) {
     appearance: safeString(source.appearance, 200),
     background: safeString(source.background, 600),
     goal: safeString(source.goal, 300),
+    // 个人目标的达成标记，收场时按它逐人结算；AI 没给就本地兜一个
+    goalFlag: safeString(source.goalFlag, 30) || `${safeString(source.name, 12) || "某人"}的心愿`,
     attrs,
     skills,
     hp: derived.maxHp,
@@ -297,7 +324,13 @@ export function compactModule(module, currentSceneId) {
       .map((item) => ({ id: item.id, 名称: item.name, 一句话: item.description.slice(0, 60) })),
     NPC: module.npcs,
     主线: module.mainline,
-    结局: module.endings.map((item) => ({ id: item.id, 名称: item.name, 条件: item.condition })),
+    // 结局条件由本地判定，这里只给 KP 看方向，让它知道该往哪推
+    结局: module.endings.map((item) => ({
+      名称: item.name,
+      需要达成: item.requires.all,
+      任一即可: item.requires.any,
+      一旦达成则排除: item.requires.none,
+    })),
     危险: module.dangers,
   };
 }
@@ -320,4 +353,77 @@ export function compactCharacter(character) {
         .slice(0, 12)
     ),
   };
+}
+
+// ===== 剧情标记与收场判定 =====
+
+/**
+ * 本局允许使用的全部标记名 = 模组词表 + 每人的个人目标标记
+ * KP 只能从这份词表里选，写词表外的一律丢弃，否则结局条件永远对不上
+ */
+export function collectFlagVocabulary(module, characters = []) {
+  const names = new Set((module?.storyFlags || []).map((flag) => flag.name).filter(Boolean));
+  for (const character of characters) {
+    if (character?.goalFlag) names.add(character.goalFlag);
+  }
+  return [...names];
+}
+
+/** 旧版本存下的会话没有 requires 字段，按「无条件」处理即可，不会误触发 */
+function endingRequires(ending) {
+  const requires = ending?.requires || {};
+  return {
+    all: Array.isArray(requires.all) ? requires.all : [],
+    any: Array.isArray(requires.any) ? requires.any : [],
+    none: Array.isArray(requires.none) ? requires.none : [],
+  };
+}
+
+function endingMatches(ending, flags) {
+  const has = (name) => flags?.[name] === true;
+  const { all, any, none } = endingRequires(ending);
+
+  // 没有任何条件的结局不会自动触发，避免开局就收场
+  if (!all.length && !any.length) return false;
+  if (none.some(has)) return false;
+  if (all.length && !all.every(has)) return false;
+  if (any.length && !any.some(has)) return false;
+  return true;
+}
+
+/**
+ * 本地判定是否达成了某个结局
+ * 多个同时满足时取条件最多的那个，它通常也是最特殊、最该被讲出来的那个
+ */
+export function evaluateEndings(module, flags) {
+  const weight = (ending) => {
+    const { all, any } = endingRequires(ending);
+    return all.length + any.length;
+  };
+  const matched = (module?.endings || [])
+    .filter((ending) => endingMatches(ending, flags))
+    .sort((a, b) => weight(b) - weight(a));
+  return matched[0] || null;
+}
+
+/** 还没达成、但某个结局还用得上的标记，用来引导 KP 出选项 */
+export function pendingEndingFlags(module, flags) {
+  const wanted = new Set();
+  for (const ending of module?.endings || []) {
+    const { all, any } = endingRequires(ending);
+    for (const name of [...all, ...any]) {
+      if (flags?.[name] !== true) wanted.add(name);
+    }
+  }
+  return [...wanted];
+}
+
+/** 逐人结算个人目标 */
+export function settleGoals(characters, flags) {
+  return characters.map((character) => ({
+    userId: character.userId,
+    name: character.name,
+    goal: character.goal || "（未设定）",
+    achieved: flags?.[character.goalFlag] === true,
+  }));
 }

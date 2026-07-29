@@ -6,6 +6,7 @@
  */
 
 import { CHECK_LEVELS } from "./dice.js";
+import { PACING } from "./prompts.js";
 import { PHASES } from "./SessionStore.js";
 
 /** 成功等级对应的提示图标，让群里一眼看出成败 */
@@ -79,7 +80,10 @@ ${module.scenes.find((scene) => scene.id === module.startScene)?.description || 
   ];
 }
 
-export function renderTurn({ round, narration, checks, events }) {
+/** 选项编号，最多 4 条 */
+export const OPTION_MARKS = ["①", "②", "③", "④"];
+
+export function renderTurn({ round, narration, checks, events, options = [], newFlags = [], pacing = null }) {
   const parts = [`━━━ 第 ${round} 回合 ━━━\n\n${narration}`];
 
   if (checks.length) {
@@ -93,6 +97,28 @@ export function renderTurn({ round, narration, checks, events }) {
 
   if (events.length) {
     parts.push(`【状态变化】\n${events.join("\n")}`);
+  }
+
+  if (newFlags.length) {
+    parts.push(`【进展】\n${newFlags.map((name) => `✔ ${name}`).join("\n")}`);
+  }
+
+  // 进入后段时提示玩家，免得 KP 突然加速显得莫名其妙
+  if (pacing && !pacing.unlimited && (pacing.phase === PACING.CLOSING || pacing.phase === PACING.FINAL)) {
+    parts.push(
+      pacing.phase === PACING.FINAL
+        ? `⏳ 只剩最后 ${pacing.remaining} 回合了，该做的决断就在这几手里。`
+        : `⏳ 已进入本局后段（第 ${round}/${pacing.maxRounds} 回合），KP 开始收线了。`
+    );
+  }
+
+  if (options.length) {
+    const lines = options.map(
+      (option, index) => `${OPTION_MARKS[index] || `${index + 1}.`} ${option.text}${option.hint ? `（${option.hint}）` : ""}`
+    );
+    parts.push(
+      `【可以考虑】\n${lines.join("\n")}\n\n发【#行动 序号】选一个，也可以【#行动 你自己想做的事】。`
+    );
   }
 
   return parts.join("\n\n");
@@ -122,36 +148,62 @@ ${roster}
   const submitted = Object.keys(session.pendingActions || {});
   const aliveList = characters.filter((character) => character.alive);
 
+  const flags = session.flags || {};
   const roster = characters
     .map((character) => {
       const mark = character.alive ? (submitted.includes(character.userId) ? "✅" : "⏳") : "💀";
       const status = character.status.length ? `［${character.status.join("、")}］` : "";
-      return `${mark} ${character.name}　HP ${character.hp}/${character.maxHp}　SAN ${character.san}/${character.maxSan}${status}`;
+      const goal = flags[character.goalFlag] === true ? "　🎯个人目标已达成" : "";
+      return `${mark} ${character.name}　HP ${character.hp}/${character.maxHp}　SAN ${character.san}/${character.maxSan}${status}${goal}`;
     })
     .join("\n");
 
+  // 只公开「已经达成了什么」，不公开结局条件本身——给方向不给答案
+  const storyFlagNames = (session.module?.storyFlags || []).map((flag) => flag.name);
+  const achieved = storyFlagNames.filter((name) => flags[name] === true);
+  const progressBlock = storyFlagNames.length
+    ? `\n【进展 ${achieved.length}/${storyFlagNames.length}】\n${achieved.length ? achieved.map((name) => `✔ ${name}`).join("\n") : "（还没查出什么）"}`
+    : "";
+
+  const optionsBlock = session.currentOptions?.length
+    ? `\n【上一回合的建议】\n${session.currentOptions
+        .map((option, index) => `${OPTION_MARKS[index] || `${index + 1}.`} ${option.text}`)
+        .join("\n")}`
+    : "";
+
+  const roundText = session.maxRounds > 0
+    ? `第 ${session.round}/${session.maxRounds} 回合`
+    : `第 ${session.round} 回合`;
+
   return `【${session.module?.title || "跑团"} · ${phaseText}】
-第 ${session.round} 回合　当前场景：${scene?.name || "未知"}
+${roundText}　当前场景：${scene?.name || "未知"}
 
 ${roster}
 
 本回合已宣告 ${submitted.length}/${aliveList.length} 人（✅已交 ⏳未交 💀出局）
+${progressBlock}${optionsBlock}
 ${session.summaryLines.length ? `\n【剧情回顾】\n${session.summaryLines.slice(-5).join("\n")}` : ""}`;
 }
 
-export function renderEnding(module, ending, characters) {
+export function renderEnding(module, ending, characters, finaleText, goalResults = []) {
   const survivors = characters.filter((character) => character.alive);
+
+  const goalBlock = goalResults.length
+    ? `\n【个人目标】\n${goalResults
+        .map((item) => `${item.achieved ? "✔" : "✘"} ${item.name}：${item.goal}`)
+        .join("\n")}\n`
+    : "";
 
   return `━━━ 本局终 ━━━
 
 【${ending.name}】
 
-${ending.description}
-
-——《${module.title}》完——
-
+${finaleText || ending.description}
+${goalBlock}
 存活：${survivors.length ? survivors.map((character) => character.name).join("、") : "无人生还"}
-出局：${characters.length - survivors.length} 人`;
+出局：${characters.length - survivors.length} 人
+
+——《${module.title}》完——`;
 }
 
 export const HELP_TEXT = `【AI 跑团 · 指令】
@@ -163,7 +215,8 @@ export const HELP_TEXT = `【AI 跑团 · 指令】
   #开始跑团　　　　　房主开局，AI 出模组并私聊发卡
 
 游玩
-  #行动 <你要做什么>　提交本回合宣告（群里或私聊都行）
+  #行动 <序号>　　　　选 KP 给的建议行动，如【#行动 2】
+  #行动 <你要做什么>　自己写，不受选项限制（群里或私聊都行）
   #推进　　　　　　　房主强制结算本回合
   #我的角色卡　　　　私聊补发角色卡
   #跑团状态　　　　　查看当前进度

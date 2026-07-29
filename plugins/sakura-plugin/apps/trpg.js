@@ -1,10 +1,17 @@
 import Setting from "../lib/setting.js";
 import { generateCharacters, generateModule } from "../lib/trpg/ModuleGenerator.js";
-import { prepareActions, runTurn } from "../lib/trpg/KpEngine.js";
+import {
+  effectiveSkillValue,
+  isExhausted,
+  prepareActions,
+  runTurn,
+  writeFinale,
+} from "../lib/trpg/KpEngine.js";
 import { formatCheck, rollExpression, skillCheck } from "../lib/trpg/dice.js";
-import { getSkillValue, safeString } from "../lib/trpg/schema.js";
+import { getSkillValue, safeString, settleGoals } from "../lib/trpg/schema.js";
 import {
   HELP_TEXT,
+  OPTION_MARKS,
   buildNodes,
   renderCharacterCard,
   renderEnding,
@@ -27,6 +34,21 @@ import {
   releaseTurnLock,
   saveSession,
 } from "../lib/trpg/SessionStore.js";
+
+/** 回合耗尽时用的合成结局，让收场也能走终章而不是硬掐断 */
+const UNFINISHED_ENDING = {
+  id: "unfinished",
+  name: "未竟",
+  description: "调查在时间耗尽时中断，没有走到任何一个结局。该查的还没查完，该问的还没问出口。",
+  requires: { all: [], any: [], none: [] },
+};
+
+/** 选项序号的各种写法：半角、全角、带圈 */
+const OPTION_INPUT = Object.fromEntries(
+  ["1234", "１２３４", "①②③④"].flatMap((set) =>
+    [...set].map((char, index) => [char, index + 1])
+  )
+);
 
 /** 配置文件还没生成时的兜底，避免插件静默失效 */
 const CONFIG_DEFAULTS = {
@@ -150,6 +172,7 @@ export class Trpg extends plugin {
       hostNickname: e.sender?.card || e.sender?.nickname || e.nickname,
       theme,
       maxPlayers: this.config.maxPlayers,
+      maxRounds: this.config.maxRounds,
       routeId: this.getRoute(),
     });
     await saveSession(session);
@@ -303,7 +326,7 @@ export class Trpg extends plugin {
       }
 
       await e.reply(
-        `开跑！第 1 回合开始。\n\n每人发【#行动 你要做什么】提交宣告，全员交完自动结算。\n房主也可以发【#推进】提前结算。`
+        `开跑！第 1 回合开始。\n\n每人发【#行动 你要做什么】提交宣告，全员交完自动结算。\n第一回合先自由发挥，之后每回合 KP 都会给几条建议行动，届时发【#行动 2】就能直接选。\n房主也可以发【#推进】提前结算。`
       );
     } catch (error) {
       logger.error(`[跑团] 群 ${session.groupId} 开局失败：${error.stack || error}`);
@@ -335,10 +358,26 @@ export class Trpg extends plugin {
       return true;
     }
 
-    const text = safeString(e.match?.[1], 300);
-    if (!text) {
+    const raw = safeString(e.match?.[1], 300);
+    if (!raw) {
       await e.reply("宣告不能是空的。");
       return true;
+    }
+
+    // 纯数字/序号视为选 KP 给的建议，其余一律当自由宣告
+    const picked = OPTION_INPUT[raw];
+    let text = raw;
+    if (picked) {
+      const option = session.currentOptions?.[picked - 1];
+      if (!option) {
+        await e.reply(
+          session.currentOptions?.length
+            ? `只有 ${session.currentOptions.length} 个建议可选。`
+            : "现在还没有建议选项，直接写你想做什么吧。"
+        );
+        return true;
+      }
+      text = option.text;
     }
 
     session.pendingActions[String(e.user_id)] = text;
@@ -395,13 +434,10 @@ export class Trpg extends plugin {
 
       await this.announce(e, session, "🎲 KP 正在推演本回合…");
 
-      const result = await runTurn({
-        e,
-        route: session.routeId || this.getRoute(),
-        session,
-        characters,
-        actions,
-      });
+      const route = session.routeId || this.getRoute();
+      // 回合上限在开局时就固定在会话里，旧存档回落到当前配置
+      const maxRounds = Number.isFinite(session.maxRounds) ? session.maxRounds : this.config.maxRounds;
+      const result = await runTurn({ e, route, session, characters, actions, maxRounds });
       await saveSession(session);
 
       await this.announce(
@@ -412,27 +448,43 @@ export class Trpg extends plugin {
           narration: result.narration,
           checks: result.checks,
           events: result.events,
+          options: result.options,
+          newFlags: result.newFlags,
+          pacing: result.pacing,
         })
       );
 
-      // 收场判定：先看有没有达成结局，再看是不是团灭，最后看回合上限
+      // 收场判定：结局由本地对剧情标记求值得出，KP 无权宣布
       if (result.ending) {
-        await this.announce(e, session, renderEnding(session.module, result.ending, characters));
+        await this.announce(e, session, "📖 KP 正在写终章…");
+        const finale = await writeFinale({ e, route, session, characters, ending: result.ending });
+        await this.announce(
+          e,
+          session,
+          renderEnding(session.module, result.ending, characters, finale.text, finale.goalResults)
+        );
         await this.endSession(session);
         return;
       }
 
       if (characters.every((character) => !character.alive)) {
-        await this.announce(e, session, buildWipeoutText(session.module));
+        await this.announce(
+          e,
+          session,
+          `${buildWipeoutText(session.module)}\n\n${this.renderGoalReport(session, characters)}`
+        );
         await this.endSession(session);
         return;
       }
 
-      if (this.config.maxRounds > 0 && session.round >= this.config.maxRounds) {
+      // 回合耗尽也走终章，不再甩一句「达到上限」硬掐断
+      if (maxRounds > 0 && session.round >= maxRounds) {
+        await this.announce(e, session, "📖 时间到了，KP 正在收尾…");
+        const finale = await writeFinale({ e, route, session, characters, ending: UNFINISHED_ENDING });
         await this.announce(
           e,
           session,
-          `已经跑到第 ${session.round} 回合，达到本局上限，KP 就此收场。\n发【#创建跑团】开新的一局吧。`
+          `${renderEnding(session.module, UNFINISHED_ENDING, characters, finale.text, finale.goalResults)}\n\n发【#创建跑团】开新的一局吧。`
         );
         await this.endSession(session);
       }
@@ -442,6 +494,15 @@ export class Trpg extends plugin {
     } finally {
       releaseTurnLock(session);
     }
+  }
+
+  /** 逐人结算个人目标，用于没有走到结局的那些收场路径 */
+  renderGoalReport(session, characters) {
+    const results = settleGoals(characters, session.flags);
+    if (!results.length) return "";
+    return `【个人目标】\n${results
+      .map((item) => `${item.achieved ? "✔" : "✘"} ${item.name}：${item.goal}`)
+      .join("\n")}\n`;
   }
 
   async endSession(session) {
@@ -491,8 +552,10 @@ export class Trpg extends plugin {
     if (!character) return false;
 
     const skillName = safeString(e.match?.[1], 20);
-    const value = getSkillValue(character, skillName);
-    const result = skillCheck(value);
+    const baseValue = getSkillValue(character, skillName);
+    // 和回合结算走同一套折算，否则力竭时手动检定看到的数字偏乐观、跟实战对不上
+    const exhausted = isExhausted(character);
+    const result = skillCheck(effectiveSkillValue(baseValue, exhausted));
 
     await e.reply(
       formatCheck({
@@ -501,6 +564,7 @@ export class Trpg extends plugin {
         skill: result.skill,
         roll: result.roll,
         level: result.level,
+        note: exhausted ? `力竭，原 ${baseValue}` : "",
       })
     );
     return true;

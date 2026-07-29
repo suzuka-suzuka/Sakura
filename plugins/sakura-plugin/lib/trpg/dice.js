@@ -146,8 +146,9 @@ export function deriveStats(attrs = {}) {
 }
 
 /** 把检定结果排版成一行，用于群内公示 */
-export function formatCheck({ name, skill, skillName, roll, level }) {
+export function formatCheck({ name, skill, skillName, roll, level, note }) {
   const who = name ? `${name} ` : "";
   const what = skillName ? `${skillName}` : "检定";
-  return `🎲 ${who}${what} ${roll}/${skill} → ${level}`;
+  const tail = note ? `（${note}）` : "";
+  return `🎲 ${who}${what} ${roll}/${skill}${tail} → ${level}`;
 }
