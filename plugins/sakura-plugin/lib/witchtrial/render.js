@@ -282,6 +282,82 @@ export function renderSuspicionBoard(session) {
 
 // ===== 查询 =====
 
+/**
+ * 魔女图鉴
+ *
+ * 能力是公开信息，而且整个「设定系本格」的推理都建立在
+ * 「谁的能力做得到这个手法」上——没有图鉴玩家就没法推理。
+ * 已死和已处刑的少女也留在册子里：往前几章的推理还要用到她们的能力。
+ * 唯一不进图鉴的是秘密，那是各人自己的事。
+ */
+export function renderCodex(session) {
+  const girls = Object.values(session.girls || {});
+  const alive = girls.filter((girl) => girl.alive);
+  const gone = girls.filter((girl) => !girl.alive);
+
+  const entry = (girl) => {
+    const state = girl.alive
+      ? `嫌疑 ${girl.suspicion}`
+      : girl.fate === "victim"
+        ? "已死亡"
+        : "已处刑";
+    const kind = girl.kind === "player" ? "【玩家】" : "";
+    return `${girl.alive ? "○" : "×"} ${girl.name}　${girl.age}岁　${kind}${state}
+　　能力：${girl.ability.name}
+　　　可以：${girl.ability.can.join("、") || "（未定义）"}
+　　　限制：${girl.ability.limit}`;
+  };
+
+  const pages = [
+    `━━━ 魔女图鉴 ━━━
+${session.prison?.name || "孤岛牢狱"}　第 ${session.chapter} 章
+
+在场 ${alive.length} 人，退场 ${gone.length} 人。
+能力是公开的——谁做得到、谁做不到，都写在这里。`,
+    `【在场】\n\n${alive.map(entry).join("\n\n") || "（无）"}`,
+  ];
+
+  if (gone.length) {
+    pages.push(`【已退场】\n\n${gone.map(entry).join("\n\n")}`);
+  }
+
+  if (session.prison?.locations?.length) {
+    pages.push(
+      `【区域】\n\n${session.prison.locations.map((item) => `· ${item.name}\n  ${item.description}`).join("\n\n")}`
+    );
+  }
+  if (session.prison?.rules?.length) {
+    pages.push(`【牢狱规则】\n\n${session.prison.rules.map((item, i) => `${i + 1}. ${item}`).join("\n")}`);
+  }
+
+  return pages;
+}
+
+/** 图鉴的单人条目，比名录多出身世 */
+export function renderCodexEntry(session, girl) {
+  const state = girl.alive
+    ? `在场　嫌疑 ${girl.suspicion}`
+    : girl.fate === "victim"
+      ? "已死亡"
+      : "已处刑";
+
+  return `━━━ ${girl.name} ━━━
+${girl.age}岁　${girl.kind === "player" ? "玩家" : "NPC"}　${state}
+
+【外貌】
+${girl.appearance || "（未描述）"}
+
+【身世】
+${girl.profile || "（未描述）"}
+
+【魔法能力】
+${girl.ability.name}
+  可以：${girl.ability.can.join("、") || "（未定义）"}
+  限制：${girl.ability.limit}
+
+${girl.secretExposed ? `【已曝光的秘密】\n${girl.secret}` : "【秘密】\n（还没有人翻出来）"}`;
+}
+
 export function renderPouch(session, girl, evidence) {
   if (!evidence.length) {
     return `【${girl.name} 的证物袋】\n\n空的。去【#调查 <地点>】或【#询问 <少女> <问题>】找点东西。`;
@@ -547,6 +623,8 @@ export const HELP_TEXT = `【魔女审判 · 指令】
   #投票 <编号>
 
 查询
+  #图鉴　　　　全体少女的能力与限制（推理的基础，含已退场的人）
+  #图鉴 <名字>　单人详情，带身世
   #我的少女　　查看自己的能力与秘密
   #证物袋　　　查看手里的牌
   #命题　　　　查看全部命题与支持数

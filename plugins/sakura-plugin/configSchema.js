@@ -690,7 +690,7 @@ export const WitchTrialSchema = z.object({
     route: z.string().default('').describe('模型路由|#routeSelect|出案件和当叙述者用的路由，留空则跟随 AI 设定里的通用路由'),
     minPlayers: z.number().int().min(2).max(12).default(2).describe('最少开局人数|两人也能玩，一个是凶手的概率仍然存在'),
     maxPlayers: z.number().int().min(2).max(12).default(6).describe('最多参与人数|人数越多出案件越慢、越费token'),
-    npcCount: z.number().int().min(3).max(12).default(6).describe('NPC少女数量|凑成一屋子人。死者永远从NPC里出，所以玩家不会因为运气差被踢出局'),
+    rosterSize: z.number().int().min(6).max(14).default(9).describe('牢狱总人数|玩家+NPC的目标人数。NPC数量由它减去实到玩家数算出，人多时自动少配NPC，免得一屋子角色让庭审失焦'),
     maxChapters: z.number().int().min(1).max(6).default(3).describe('章节上限|每章减员2人（1名死者+1名被处刑者），3章约等于QQ群能撑住的长度'),
     investigateRounds: z.number().int().min(1).max(8).default(3).describe('调查轮数|每章的搜证阶段有几轮'),
     trialRounds: z.number().int().min(2).max(10).default(5).describe('庭审轮数|轮次用尽就强制投票，超时会处刑嫌疑值最高者'),

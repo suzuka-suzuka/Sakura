@@ -13,6 +13,8 @@ import { buildClosingText } from "../lib/witchtrial/prompts.js";
 import {
   HELP_TEXT,
   buildNodes,
+  renderCodex,
+  renderCodexEntry,
   renderCourtRecord,
   renderCulpritNotice,
   renderFinale,
@@ -50,7 +52,7 @@ const CONFIG_DEFAULTS = {
   route: "",
   minPlayers: 2,
   maxPlayers: 6,
-  npcCount: 6,
+  rosterSize: 9,
   maxChapters: 3,
   investigateRounds: 3,
   trialRounds: 5,
@@ -76,6 +78,20 @@ export class WitchTrial extends plugin {
   /** 审判路由没单独配就跟着 AI 的通用路由走 */
   getRoute() {
     return this.config.route || Setting.getConfig("AI")?.appsRoute || "";
+  }
+
+  /**
+   * 本局要配几位 NPC 少女
+   *
+   * 人多时自动少配：一屋子十几个角色，AI 每轮都要顾到，庭审会糊掉。
+   * 但有个硬下限——**NPC 不会降到 0**。「死者永远是 NPC」是承重规则，
+   * NPC 一旦耗尽，玩家就会因为开局掷骰而出局，而不是因为输掉审判。
+   * 下限取 maxChapters + 1：每章至少吃掉一个死者，再留一个当缓冲。
+   */
+  npcCountFor(playerCount) {
+    const floor = this.config.maxChapters + 1;
+    const wanted = this.config.rosterSize - playerCount;
+    return Math.max(floor, Math.min(wanted, 12));
   }
 
   getGroupId(e) {
@@ -207,7 +223,7 @@ export class WitchTrial extends plugin {
     await saveSession(session);
 
     await e.reply(
-      `魔女审判已开局，房主是你。\n题材：${theme || "由 AI 自选"}\n\n其他人发【#加入审判】上车，满 ${this.config.minPlayers} 人后房主发【#开始审判】。\n上限 ${this.config.maxPlayers} 人，另有 ${this.config.npcCount} 位 NPC 少女陪你们一起被关进去。`
+      `魔女审判已开局，房主是你。\n题材：${theme || "由 AI 自选"}\n\n其他人发【#加入审判】上车，满 ${this.config.minPlayers} 人后房主发【#开始审判】。\n上限 ${this.config.maxPlayers} 人。\n\n牢狱里总共关 ${this.config.rosterSize} 人左右，玩家之外由 NPC 少女补齐——\n人少时 NPC 多，人多时 NPC 少，但永远不会没有：死者只会从 NPC 里出。`
     );
     return true;
   });
@@ -311,7 +327,7 @@ export class WitchTrial extends plugin {
           e,
           route,
           players: session.players,
-          npcCount: this.config.npcCount,
+          npcCount: this.npcCountFor(session.players.length),
           theme: session.theme,
           onProgress: (text) => e.reply(text).catch(() => {}),
         });
@@ -789,6 +805,32 @@ export class WitchTrial extends plugin {
     } catch {
       await e.reply("私聊发不出去，请先加机器人好友再试。", 0, true);
     }
+    return true;
+  });
+
+  // 能力是公开信息，整套推理都靠它——所以图鉴不设权限，群里私聊都能查
+  showCodex = Command(/^#图鉴\s*(.*)$/, async (e) => {
+    if (!this.config.enable) return false;
+    const resolved = await this.resolveSession(e);
+    if (!resolved?.session.prison) return false;
+    const { session } = resolved;
+
+    const query = safeString(e.match?.[1], 20);
+    if (query) {
+      const girl = this.findGirl(session, query);
+      if (!girl) {
+        await e.reply("图鉴里没有这个人。");
+        return true;
+      }
+      await e.reply(renderCodexEntry(session, girl));
+      return true;
+    }
+
+    await e.sendForwardMsg(renderCodex(session), {
+      prompt: "魔女图鉴",
+      source: session.prison.name,
+      summary: `${Object.keys(session.girls).length} 位少女`,
+    });
     return true;
   });
 
