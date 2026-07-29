@@ -49,6 +49,29 @@ function lockKey(selfId, groupId) {
   return `${KEY_PREFIX}:lock:${selfId}:${groupId}`;
 }
 
+function cancellationKey(selfId, groupId, sessionId) {
+  return `${KEY_PREFIX}:cancelled:${selfId}:${groupId}:${sessionId}`;
+}
+
+function sessionIdentity(session) {
+  return String(
+    session?.sessionId ||
+      `legacy:${session?.selfId || ""}:${session?.groupId || ""}:${session?.createdAt || 0}`
+  );
+}
+
+export class SessionCancelledError extends Error {
+  constructor(session) {
+    super(`审判会话 ${session?.groupId || ""} 已被结束`);
+    this.name = "SessionCancelledError";
+    this.code = "WITCHTRIAL_SESSION_CANCELLED";
+  }
+}
+
+export function isSessionCancelledError(error) {
+  return error?.code === "WITCHTRIAL_SESSION_CANCELLED";
+}
+
 async function compareDelete(key, expected) {
   return redis.eval(
     "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end",
@@ -83,7 +106,8 @@ export function createSession({
 }) {
   const now = Date.now();
   return {
-    version: 3,
+    version: 4,
+    sessionId: randomUUID(),
     selfId: String(selfId),
     groupId: String(groupId),
     hostId: String(hostId),
@@ -174,6 +198,11 @@ function migrateSession(session) {
     session.fakeUsed = Boolean(session.fakeUsed);
     session.version = 3;
   }
+  if (session.version < 4) {
+    session.sessionId = sessionIdentity(session);
+    session.version = 4;
+  }
+  session.sessionId ||= sessionIdentity(session);
   return session;
 }
 
@@ -217,34 +246,115 @@ export async function loadSession(selfId, groupId) {
 }
 
 export async function saveSession(session) {
+  session.sessionId ||= sessionIdentity(session);
   session.updatedAt = Date.now();
-  const key = sessionKey(session.selfId, session.groupId);
-  await redis.set(key, JSON.stringify(session), "EX", SESSION_TTL);
+  const keys = [
+    sessionKey(session.selfId, session.groupId),
+    cancellationKey(
+      session.selfId,
+      session.groupId,
+      sessionIdentity(session)
+    ),
+    ...session.players.map((player) => userKey(session.selfId, player.userId)),
+  ];
+  const saved = await redis.eval(
+    `-- witchtrial_save
+if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end
+redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+for i = 3, #KEYS do
+  local current = redis.call('GET', KEYS[i])
+  if (not current) or current == ARGV[3] then
+    redis.call('SET', KEYS[i], ARGV[3], 'EX', ARGV[2])
+  end
+end
+return 1`,
+    keys.length,
+    ...keys,
+    JSON.stringify(session),
+    String(SESSION_TTL),
+    String(session.groupId)
+  );
 
-  // 只刷新空索引或仍指向本群的索引，绝不覆盖另一局的归属。
-  // 正常加入流程会先用 claimUserIndex 原子占位；这里是续期和旧会话兼容。
-  const pipeline = redis.pipeline();
-  for (const player of session.players) {
-    pipeline.eval(
-      "local v = redis.call('GET', KEYS[1]); if (not v) or v == ARGV[1] then redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2]); return 1 else return 0 end",
-      1,
-      userKey(session.selfId, player.userId),
-      String(session.groupId),
-      String(SESSION_TTL)
-    );
-  }
-  await pipeline.exec();
+  if (Number(saved) !== 1) throw new SessionCancelledError(session);
+  return true;
 }
 
 export async function deleteSession(session) {
-  await redis.del(sessionKey(session.selfId, session.groupId));
+  session.sessionId ||= sessionIdentity(session);
+  const keys = [
+    sessionKey(session.selfId, session.groupId),
+    cancellationKey(
+      session.selfId,
+      session.groupId,
+      sessionIdentity(session)
+    ),
+    ...session.players.map((player) => userKey(session.selfId, player.userId)),
+  ];
+  const deleted = await redis.eval(
+    `-- witchtrial_delete
+redis.call('SET', KEYS[2], '1', 'EX', ARGV[2])
+local raw = redis.call('GET', KEYS[1])
+if raw then
+  local ok, current = pcall(cjson.decode, raw)
+  if ok and current.sessionId and tostring(current.sessionId) ~= ARGV[1] then
+    return 0
+  end
+  redis.call('DEL', KEYS[1])
+end
+for i = 3, #KEYS do
+  if redis.call('GET', KEYS[i]) == ARGV[3] then
+    redis.call('DEL', KEYS[i])
+  end
+end
+return 1`,
+    keys.length,
+    ...keys,
+    sessionIdentity(session),
+    String(SESSION_TTL),
+    String(session.groupId)
+  );
+  return Number(deleted) === 1;
+}
 
-  for (const player of session.players) {
-    await compareDelete(
-      userKey(session.selfId, player.userId),
-      String(session.groupId)
-    );
+/** 当前长任务是否已被房主/管理员终止。 */
+export async function isSessionCancelled(session) {
+  const cancelled = await redis.get(
+    cancellationKey(
+      session.selfId,
+      session.groupId,
+      sessionIdentity(session)
+    )
+  );
+  return cancelled === "1";
+}
+
+export async function assertSessionActive(session) {
+  if (await isSessionCancelled(session)) {
+    throw new SessionCancelledError(session);
   }
+}
+
+/**
+ * 不等待正在进行的 AI 请求：留下终止墓碑、清理会话，并撤掉当前写锁。
+ * 旧任务稍后返回时，saveSession 会凭 sessionId 拒绝它，不能把局复活。
+ */
+export async function cancelSession(session) {
+  const current = await loadSession(session.selfId, session.groupId);
+  if (current && sessionIdentity(current) === sessionIdentity(session)) {
+    session = current;
+  }
+  const deleted = await deleteSession(session);
+  if (!deleted) return false;
+
+  const key = `${session.selfId}:${session.groupId}`;
+  const held = busySessions.get(key);
+  if (held?.timer) clearInterval(held.timer);
+  if (held) busySessions.delete(key);
+
+  const redisLockKey = lockKey(session.selfId, session.groupId);
+  const token = held?.token || await redis.get(redisLockKey);
+  if (token) await compareDelete(redisLockKey, token);
+  return true;
 }
 
 /**
@@ -363,10 +473,21 @@ export function publicize(session, evidenceId) {
 /** 抢占会话写锁，覆盖提交、结算、开章与结束；返回锁令牌 */
 export async function acquireTurnLock(session) {
   const key = `${session.selfId}:${session.groupId}`;
-  if (busySessions.has(key)) return null;
+  const existing = busySessions.get(key);
+  if (existing) {
+    const cancelled =
+      Boolean(existing.sessionId) &&
+      (await redis.get(
+        cancellationKey(session.selfId, session.groupId, existing.sessionId)
+      )) === "1";
+    if (!cancelled) return null;
+    if (existing.timer) clearInterval(existing.timer);
+    busySessions.delete(key);
+  }
 
   const token = randomUUID();
-  busySessions.set(key, { token, timer: null });
+  const sessionId = sessionIdentity(session);
+  busySessions.set(key, { token, timer: null, sessionId });
   try {
     const redisKey = lockKey(session.selfId, session.groupId);
     const claimed = await redis.set(
@@ -389,7 +510,7 @@ export async function acquireTurnLock(session) {
       });
     }, LOCK_RENEW_INTERVAL_MS);
     timer.unref?.();
-    busySessions.set(key, { token, timer });
+    busySessions.set(key, { token, timer, sessionId });
     return token;
   } catch (error) {
     if (busySessions.get(key)?.token === token) busySessions.delete(key);

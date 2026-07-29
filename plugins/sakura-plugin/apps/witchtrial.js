@@ -48,6 +48,8 @@ import {
   PHASES,
   acquireTurnLock,
   armTurnDeadline,
+  assertSessionActive,
+  cancelSession,
   claimUserIndex,
   clearTurnDeadline,
   createSession,
@@ -55,6 +57,8 @@ import {
   dropUserIndex,
   findSessionByUser,
   isPlayer,
+  isSessionCancelled,
+  isSessionCancelledError,
   isTurnDeadlineExpired,
   listSessionsBySelfId,
   loadSession,
@@ -208,6 +212,7 @@ export class WitchTrial extends plugin {
 
     armTurnDeadline(session);
     await saveSession(session);
+    await assertSessionActive(session);
 
     const phaseLabel =
       session.phase === PHASES.VOTING
@@ -249,7 +254,10 @@ export class WitchTrial extends plugin {
       }
       if (!allowEarly && !isTurnDeadlineExpired(current)) return false;
 
-      return this.resolveTimedTurnUnderLock(e, current, lockToken, { reason });
+      return await this.resolveTimedTurnUnderLock(e, current, lockToken, { reason });
+    } catch (error) {
+      if (isSessionCancelledError(error) || await isSessionCancelled(session)) return false;
+      throw error;
     } finally {
       await releaseTurnLock(lockRef, lockToken);
     }
@@ -563,7 +571,10 @@ export class WitchTrial extends plugin {
             players: session.players,
             npcCount: this.npcCountFor(session.players.length),
             theme: session.theme,
-            onProgress: (text) => e.reply(text).catch(() => {}),
+            onProgress: async (text) => {
+              await assertSessionActive(session);
+              return e.reply(text).catch(() => {});
+            },
           });
 
           session.prison = prison;
@@ -573,6 +584,7 @@ export class WitchTrial extends plugin {
           // 私聊发少女卡，发不出去的（多半没加好友）在群里点名
           const failed = [];
           for (const player of session.players) {
+            await assertSessionActive(session);
             const girl = session.girls[toPlayerId(player.userId)];
             if (!girl) continue;
             try {
@@ -587,6 +599,7 @@ export class WitchTrial extends plugin {
             }
           }
 
+          await assertSessionActive(session);
           await e.sendForwardMsg(renderPrisonIntro(prison), {
             prompt: `《${prison.name}》`,
             source: prison.name,
@@ -594,6 +607,7 @@ export class WitchTrial extends plugin {
           });
 
           if (failed.length) {
+            await assertSessionActive(session);
             // 只 @ 人，绝不带上她分到的少女名——那等于当众公布 QQ 到囚犯的映射
             await e.reply([
               "以下几位私聊发卡失败，请先加机器人好友，然后私聊发【#我的少女】补发：\n",
@@ -601,9 +615,13 @@ export class WitchTrial extends plugin {
             ]);
           }
 
+          await assertSessionActive(session);
           await e.reply("案件正在发生…");
           await this.openChapter(e, session);
         } catch (error) {
+          if (isSessionCancelledError(error) || await isSessionCancelled(session)) {
+            return { handled: true, refund: true };
+          }
           logger.error(`[魔女审判] 群 ${session.groupId} 开局失败：${error.stack || error}`);
           session.phase = PHASES.RECRUITING;
           session.advancePending = false;
@@ -633,7 +651,10 @@ export class WitchTrial extends plugin {
       session,
       playerCulpritChance: this.config.playerCulpritChance / 100,
       suicideChance: this.config.suicideChance / 100,
-      onProgress: (text) => this.announce(e, session, text).catch(() => {}),
+      onProgress: async (text) => {
+        await assertSessionActive(session);
+        return this.announce(e, session, text).catch(() => {});
+      },
     });
     armTurnDeadline(session);
     await saveSession(session);
@@ -642,6 +663,7 @@ export class WitchTrial extends plugin {
     // 两条消息长度不同，但没人看得见别人收到了什么。
     const failed = [];
     for (const girl of livingPlayers(session)) {
+      await assertSessionActive(session);
       const isCulprit = girl.id === session.caseFile.culpritId;
       try {
         const roleNotice = isCulprit
@@ -658,8 +680,10 @@ export class WitchTrial extends plugin {
       }
     }
 
+    await assertSessionActive(session);
     await this.announce(e, session, renderIncident(session, session.caseFile, victim));
     if (failed.length) {
+      await assertSessionActive(session);
       await this.announce(e, session, [
         "以下几位没有收到本章私聊，请加机器人好友后私聊发送【#本章身份】补领：\n",
         ...failed.map((girl) => segment.at(girl.userId)),
@@ -960,6 +984,7 @@ export class WitchTrial extends plugin {
       );
       current.pendingActions[currentGirl.id] = action;
       await saveSession(current);
+      await assertSessionActive(current);
 
       const need = living.length;
       const done = Object.keys(current.pendingActions).length;
@@ -973,6 +998,9 @@ export class WitchTrial extends plugin {
 
       if (done >= need) await this.resolveTurn(e, current, lockToken);
       return true;
+    } catch (error) {
+      if (isSessionCancelledError(error)) return true;
+      throw error;
     } finally {
       await releaseTurnLock(session, lockToken);
     }
@@ -1040,6 +1068,7 @@ export class WitchTrial extends plugin {
     for (const item of results) {
       const girl = session.girls[item.actorId];
       if (girl?.kind !== "player" || !girl.userId) continue;
+      await assertSessionActive(session);
       try {
         await this.sendPrivate(e, girl.userId, renderFinding(session, item));
       } catch (error) {
@@ -1078,10 +1107,12 @@ export class WitchTrial extends plugin {
         }
         armTurnDeadline(session);
         await saveSession(session);
+        await assertSessionActive(session);
         await this.announce(e, session, renderInvestigateTurn(session, result));
         await this.sendFindings(e, session, result.results);
 
         if (result.phaseDone) {
+          await assertSessionActive(session);
           await this.announce(
             e,
             session,
@@ -1100,6 +1131,7 @@ export class WitchTrial extends plugin {
         }
         armTurnDeadline(session);
         await saveSession(session);
+        await assertSessionActive(session);
         await this.announce(e, session, renderTrialTurn(session, result));
 
         // 被追问的玩家私聊提醒一下，免得漏看群消息白挨 12 点
@@ -1107,6 +1139,7 @@ export class WitchTrial extends plugin {
           if (move.kind !== "question") continue;
           const target = session.girls[move.targetId];
           if (target?.kind !== "player" || !target.alive) continue;
+          await assertSessionActive(session);
           try {
             await this.sendPrivate(
               e,
@@ -1123,6 +1156,7 @@ export class WitchTrial extends plugin {
             // 真相是吸收态，证成即定案，不必投票
             await this.finishChapter(e, session, {}, lockToken);
           } else {
+            await assertSessionActive(session);
             await this.announce(
               e,
               session,
@@ -1132,6 +1166,7 @@ export class WitchTrial extends plugin {
         }
       }
     } catch (error) {
+      if (isSessionCancelledError(error) || await isSessionCancelled(session)) return;
       logger.error(`[魔女审判] 群 ${session.groupId} 回合结算失败：${error.stack || error}`);
       try {
         const retrySession = await loadSession(session.selfId, session.groupId);
@@ -1196,6 +1231,7 @@ export class WitchTrial extends plugin {
       );
       current.votes[girl.id] = picked.propId;
       await saveSession(current);
+      await assertSessionActive(current);
 
       const need = living.length;
       const done = Object.keys(current.votes).length;
@@ -1211,6 +1247,9 @@ export class WitchTrial extends plugin {
         await this.finishChapter(e, current, current.votes, lockToken);
       }
       return true;
+    } catch (error) {
+      if (isSessionCancelledError(error)) return true;
+      throw error;
     } finally {
       await releaseTurnLock(session, lockToken);
     }
@@ -1244,9 +1283,11 @@ export class WitchTrial extends plugin {
       clearTurnDeadline(session);
       await saveSession(session);
       settlementPersisted = true;
+      await assertSessionActive(session);
       await this.announce(e, session, verdictMessage);
 
       if (outcome.over.over) {
+        await assertSessionActive(session);
         await this.announce(
           e,
           session,
@@ -1256,6 +1297,7 @@ export class WitchTrial extends plugin {
         return;
       }
 
+      await assertSessionActive(session);
       await this.announce(
         e,
         session,
@@ -1263,6 +1305,7 @@ export class WitchTrial extends plugin {
       );
       await this.openChapter(e, session);
     } catch (error) {
+      if (isSessionCancelledError(error) || await isSessionCancelled(session)) return;
       logger.error(`[魔女审判] 群 ${session.groupId} 收场失败：${error.stack || error}`);
       if (!settlementPersisted) {
         try {
@@ -1302,6 +1345,7 @@ export class WitchTrial extends plugin {
       await this.announce(e, session, `第 ${session.chapter + 1} 章重新生成中…`);
       await this.openChapter(e, session);
     } catch (error) {
+      if (isSessionCancelledError(error) || await isSessionCancelled(session)) return;
       logger.error(`[魔女审判] 群 ${session.groupId} 续章失败：${error.stack || error}`);
       await this.announce(
         e,
@@ -1423,19 +1467,33 @@ export class WitchTrial extends plugin {
     if (!this.config.enable) return false;
     let session = await this.getGroupSession(e);
     if (!session) return false;
+    const privileged = Boolean(e.isAdmin || e.isMaster);
+    if (session.hostId !== String(e.user_id) && !privileged) {
+      await e.reply("只有房主、管理员或主人能结束本局。");
+      return true;
+    }
 
     const lockRef = session;
     const lockToken = await acquireTurnLock(lockRef);
     if (!lockToken) {
-      await e.reply("本局正在生成或结算，请等当前操作完成后再结束。");
+      const cancelled = await cancelSession(session);
+      if (!cancelled) {
+        await e.reply("本局状态刚刚发生了变化，请重新发送【#结束审判】。");
+        return true;
+      }
+      await e.reply(
+        session.prison
+          ? `《${session.prison.name}》在第 ${session.chapter} 章被中止。\n正在进行的生成或结算结果会被丢弃，不会重新把本局恢复出来。`
+          : "本局已解散。正在进行的生成结果会被丢弃。"
+      );
       return true;
     }
 
     try {
       session = await loadSession(session.selfId, session.groupId);
       if (!session) return true;
-      if (session.hostId !== String(e.user_id) && !e.isAdmin) {
-        await e.reply("只有房主或管理员能结束本局。");
+      if (session.hostId !== String(e.user_id) && !privileged) {
+        await e.reply("只有房主、管理员或主人能结束本局。");
         return true;
       }
 
