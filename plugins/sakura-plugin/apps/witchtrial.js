@@ -1,4 +1,5 @@
 import Setting from "../lib/setting.js";
+import { getCurrentBotSelfId } from "../../../src/api/client.js";
 import { generateSetup } from "../lib/witchtrial/CaseGenerator.js";
 import {
   pouchDetail,
@@ -8,7 +9,6 @@ import {
   startChapter,
   votableConclusions,
 } from "../lib/witchtrial/TrialEngine.js";
-import { recomputeSuspicion } from "../lib/witchtrial/logic.js";
 import { buildClosingText } from "../lib/witchtrial/prompts.js";
 import {
   HELP_TEXT,
@@ -18,9 +18,11 @@ import {
   renderCourtRecord,
   renderCulpritNotice,
   renderFinale,
+  renderFinding,
   renderGirlCard,
   renderIncident,
   renderInnocentNotice,
+  renderInvestigationLeads,
   renderInvestigateTurn,
   renderPouch,
   renderPropositions,
@@ -28,18 +30,33 @@ import {
   renderStatus,
   renderTrialOpening,
   renderTrialTurn,
+  renderTurnDeadline,
   renderVerdict,
   renderVoteMenu,
+  renderVoteProgress,
 } from "../lib/witchtrial/render.js";
-import { girlOfUser, livingPlayers, safeString, toPlayerId } from "../lib/witchtrial/schema.js";
+import { STANCE, recomputeSuspicion } from "../lib/witchtrial/logic.js";
+import {
+  girlByCode,
+  girlOfUser,
+  livingPlayers,
+  locationByCode,
+  safeString,
+  toPlayerId,
+} from "../lib/witchtrial/schema.js";
 import {
   PHASES,
   acquireTurnLock,
+  armTurnDeadline,
+  claimUserIndex,
+  clearTurnDeadline,
   createSession,
   deleteSession,
   dropUserIndex,
   findSessionByUser,
   isPlayer,
+  isTurnDeadlineExpired,
+  listSessionsBySelfId,
   loadSession,
   pouchOf,
   releaseTurnLock,
@@ -56,6 +73,7 @@ const CONFIG_DEFAULTS = {
   maxChapters: 3,
   investigateRounds: 3,
   trialRounds: 5,
+  turnTimeoutMinutes: 15,
   playerCulpritChance: 50,
   suicideChance: 15,
   onlyWhiteCreate: false,
@@ -78,6 +96,12 @@ export class WitchTrial extends plugin {
   /** 审判路由没单独配就跟着 AI 的通用路由走 */
   getRoute() {
     return this.config.route || Setting.getConfig("AI")?.appsRoute || "";
+  }
+
+  /** Redis 里的毫秒值只在创建房间时固化；开局中途改配置不会偷改当前玩家的截止时间 */
+  configuredTurnTimeoutMs() {
+    const minutes = Number(this.config.turnTimeoutMinutes);
+    return (Number.isFinite(minutes) ? Math.max(3, Math.min(120, minutes)) : 15) * 60_000;
   }
 
   /**
@@ -147,12 +171,132 @@ export class WitchTrial extends plugin {
     });
   }
 
+  /**
+   * 定时推进没有真实消息事件，补一个只含审判引擎所需字段的事件。
+   * AI 路由只读取 self_id，群播报只读取 bot/group_id。
+   */
+  scheduledEvent(session) {
+    const selfId = Number(session.selfId) || session.selfId;
+    const groupId = Number(session.groupId) || session.groupId;
+    const bot = this.getBot(selfId);
+    if (!bot) return null;
+
+    return {
+      bot,
+      self_id: selfId,
+      group_id: groupId,
+      user_id: Number(session.hostId) || session.hostId,
+      message_type: "group",
+      sender: null,
+      isAdmin: false,
+      isMaster: false,
+      reply: (message) => bot.sendGroupMsg(groupId, message),
+    };
+  }
+
+  /** 当前阶段是否需要回合截止时间 */
+  hasTimedTurn(session) {
+    return [PHASES.INVESTIGATE, PHASES.TRIAL, PHASES.VOTING].includes(session?.phase);
+  }
+
+  /**
+   * 锁内处理一个已经截止（或管理员要求立即处理）的回合。
+   * 先把截止时间顺延再调 AI：若供应商临时失败，定时器不会下一分钟就重复烧请求。
+   */
+  async resolveTimedTurnUnderLock(e, session, lockToken, { reason = "deadline" } = {}) {
+    if (!this.hasTimedTurn(session)) return false;
+
+    armTurnDeadline(session);
+    await saveSession(session);
+
+    const phaseLabel =
+      session.phase === PHASES.VOTING
+        ? "投票"
+        : session.phase === PHASES.INVESTIGATE
+          ? "调查"
+          : "庭审";
+    await this.announce(
+      e,
+      session,
+      reason === "admin"
+        ? `⚠ 管理员紧急结算本轮${phaseLabel}。未提交者按放弃本轮处理。`
+        : `⏰ 本轮${phaseLabel}已到截止时间。未提交者按放弃本轮处理。`
+    );
+
+    if (session.phase === PHASES.VOTING) {
+      await this.finishChapter(e, session, session.votes || {}, lockToken);
+    } else {
+      await this.resolveTurn(e, session, lockToken);
+    }
+    return true;
+  }
+
+  /** 自动推进或房主在截止后推进；会在锁内重新读取，避免拿旧快照结算 */
+  async advanceExpiredTurn(e, session, { allowEarly = false, reason = "deadline" } = {}) {
+    const lockRef = session;
+    const lockToken = await acquireTurnLock(lockRef);
+    if (!lockToken) return false;
+
+    try {
+      const current = await loadSession(session.selfId, session.groupId);
+      if (!current || !this.hasTimedTurn(current)) return false;
+
+      // 旧会话第一次被扫描时只补时钟，不把它当成已经超时。
+      if (!current.turnDeadlineAt) {
+        armTurnDeadline(current);
+        await saveSession(current);
+        return false;
+      }
+      if (!allowEarly && !isTurnDeadlineExpired(current)) return false;
+
+      return this.resolveTimedTurnUnderLock(e, current, lockToken, { reason });
+    } finally {
+      await releaseTurnLock(lockRef, lockToken);
+    }
+  }
+
+  /**
+   * 每分钟扫一次到期局。截止时间在 Redis 会话里，因此重启后仍然有效；
+   * 多进程同时扫到也只会有一个拿到分布式锁。
+   */
+  deadlineSweep = Cron("* * * * *", async () => {
+    if (!this.config.enable) return;
+    const selfId = getCurrentBotSelfId();
+    if (selfId == null) return;
+
+    let sessions;
+    try {
+      sessions = await listSessionsBySelfId(selfId);
+    } catch (error) {
+      logger.warn(`[魔女审判] 扫描回合截止时间失败：${error.message}`);
+      return;
+    }
+
+    for (const session of sessions) {
+      if (!this.hasTimedTurn(session)) continue;
+      const e = this.scheduledEvent(session);
+      if (!e) continue;
+
+      try {
+        await this.advanceExpiredTurn(e, session);
+      } catch (error) {
+        logger.error(
+          `[魔女审判] 群 ${session.groupId} 自动推进失败：${error.stack || error}`
+        );
+      }
+    }
+  });
+
   // ===== 查找工具 =====
 
-  /** 按名字模糊找少女，找不到返回 null */
+  /** 先认囚犯编号，再按名字模糊匹配。编号是精确的，优先级更高 */
   findGirl(session, text) {
     const name = safeString(text, 20);
     if (!name) return null;
+
+    const byCode = girlByCode(session, name);
+    if (byCode) return byCode;
+
     const all = Object.values(session.girls);
     return (
       all.find((girl) => girl.name === name) ||
@@ -161,9 +305,14 @@ export class WitchTrial extends plugin {
     );
   }
 
+  /** 先认地点代号 A/B/C，再按名字模糊匹配 */
   findLocation(session, text) {
     const name = safeString(text, 20);
     if (!name) return null;
+
+    const byCode = locationByCode(session, name);
+    if (byCode) return byCode;
+
     const all = session.prison?.locations || [];
     return (
       all.find((item) => item.name === name) ||
@@ -174,6 +323,7 @@ export class WitchTrial extends plugin {
 
   /** 取指令发起人在本局的少女，附带一堆前置校验 */
   async requireGirl(e, phases) {
+    if (!this.config.enable) return null;
     const resolved = await this.resolveSession(e);
     if (!resolved) return null;
 
@@ -201,93 +351,167 @@ export class WitchTrial extends plugin {
       return true;
     }
 
-    const existing = await this.getGroupSession(e);
-    if (existing && existing.phase !== PHASES.ENDED) {
-      await e.reply("本群已经有一局在跑了，先【#结束审判】再开新的。");
+    const lockRef = { selfId: String(e.self_id), groupId: String(groupId) };
+    const lockToken = await acquireTurnLock(lockRef);
+    if (!lockToken) {
+      await e.reply("本群的审判状态正在变更，稍后再试。");
       return true;
     }
 
-    const theme = safeString(e.match?.[1], 60);
-    const session = createSession({
-      selfId: e.self_id,
-      groupId,
-      hostId: e.user_id,
-      hostNickname: e.sender?.card || e.sender?.nickname || e.nickname,
-      theme,
-      maxPlayers: this.config.maxPlayers,
-      maxChapters: this.config.maxChapters,
-      investigateRounds: this.config.investigateRounds,
-      trialRounds: this.config.trialRounds,
-      routeId: this.getRoute(),
-    });
-    await saveSession(session);
+    let createdSession = null;
+    let ownershipConfirmed = false;
+    try {
+      const existing = await loadSession(e.self_id, groupId);
+      if (existing && existing.phase !== PHASES.ENDED) {
+        await e.reply("本群已经有一局在跑了，先【#结束审判】再开新的。");
+        return true;
+      }
+      if (existing) await deleteSession(existing);
 
-    await e.reply(
-      `魔女审判已开局，房主是你。\n题材：${theme || "由 AI 自选"}\n\n其他人发【#加入审判】上车，满 ${this.config.minPlayers} 人后房主发【#开始审判】。\n上限 ${this.config.maxPlayers} 人。\n\n牢狱里总共关 ${this.config.rosterSize} 人左右，玩家之外由 NPC 少女补齐——\n人少时 NPC 多，人多时 NPC 少，但永远不会没有：死者只会从 NPC 里出。`
-    );
-    return true;
+      const theme = safeString(e.match?.[1], 60);
+      const session = createSession({
+        selfId: e.self_id,
+        groupId,
+        hostId: e.user_id,
+        hostNickname: e.sender?.card || e.sender?.nickname || e.nickname,
+        theme,
+        maxPlayers: this.config.maxPlayers,
+        maxChapters: this.config.maxChapters,
+        investigateRounds: this.config.investigateRounds,
+        trialRounds: this.config.trialRounds,
+        turnTimeoutMs: this.configuredTurnTimeoutMs(),
+        routeId: this.getRoute(),
+      });
+      createdSession = session;
+      await saveSession(session);
+
+      const ownership = await claimUserIndex(e.self_id, e.user_id, groupId);
+      if (!ownership.ok) {
+        await e.reply("你已经在另一个群的审判中，不能同时创建或加入第二局。");
+        return true;
+      }
+      ownershipConfirmed = true;
+
+      await e.reply(
+        `魔女审判已开局，房主是你。\n题材：${theme || "由 AI 自选"}\n\n其他人发【#加入审判】上车，满 ${this.config.minPlayers} 人后房主发【#开始审判】。\n上限 ${this.config.maxPlayers} 人。\n\n牢狱里总共关 ${this.config.rosterSize} 人左右，玩家之外由 NPC 少女补齐——\n人少时 NPC 多，人多时 NPC 少，但永远不会没有：死者只会从 NPC 里出。`
+      );
+      return true;
+    } finally {
+      try {
+        if (createdSession && !ownershipConfirmed) {
+          await deleteSession(createdSession);
+        }
+      } finally {
+        await releaseTurnLock(lockRef, lockToken);
+      }
+    }
   });
 
   joinGame = Command(/^#加入审判$/, async (e) => {
     if (!this.config.enable) return false;
-    const session = await this.getGroupSession(e);
-    if (!session) return false;
-
-    if (session.phase !== PHASES.RECRUITING) {
-      await e.reply("这局已经开庭了，中途不能加入。");
-      return true;
-    }
-    if (isPlayer(session, e.user_id)) {
-      await e.reply("你已经在这局里了。");
-      return true;
-    }
-    if (session.players.length >= session.maxPlayers) {
-      await e.reply(`人满了（${session.maxPlayers} 人）。`);
+    const groupId = this.getGroupId(e);
+    if (!groupId) return false;
+    const lockRef = { selfId: String(e.self_id), groupId: String(groupId) };
+    const lockToken = await acquireTurnLock(lockRef);
+    if (!lockToken) {
+      await e.reply("本群的审判状态正在变更，稍后再试。");
       return true;
     }
 
-    session.players.push({
-      userId: String(e.user_id),
-      nickname: e.sender?.card || e.sender?.nickname || e.nickname || String(e.user_id),
-    });
-    await saveSession(session);
+    let joinedSession = null;
+    let ownershipConfirmed = false;
+    try {
+      const session = await loadSession(e.self_id, groupId);
+      if (!session) return false;
+      if (session.phase !== PHASES.RECRUITING) {
+        await e.reply("这局已经开庭了，中途不能加入。");
+        return true;
+      }
+      if (isPlayer(session, e.user_id)) {
+        await e.reply("你已经在这局里了。");
+        return true;
+      }
+      if (session.players.length >= session.maxPlayers) {
+        await e.reply(`人满了（${session.maxPlayers} 人）。`);
+        return true;
+      }
 
-    await e.reply(`已加入，当前 ${session.players.length}/${session.maxPlayers} 人。`);
-    return true;
+      session.players.push({
+        userId: String(e.user_id),
+        nickname: e.sender?.card || e.sender?.nickname || e.nickname || String(e.user_id),
+      });
+      joinedSession = session;
+      await saveSession(session);
+
+      const ownership = await claimUserIndex(e.self_id, e.user_id, groupId);
+      if (!ownership.ok) {
+        await e.reply("你已经在另一个群的审判中，不能同时加入第二局。");
+        return true;
+      }
+      ownershipConfirmed = true;
+
+      await e.reply(`已加入，当前 ${session.players.length}/${session.maxPlayers} 人。`);
+      return true;
+    } finally {
+      try {
+        if (joinedSession && !ownershipConfirmed) {
+          joinedSession.players = joinedSession.players.filter(
+            (player) => player.userId !== String(e.user_id)
+          );
+          await saveSession(joinedSession);
+          await dropUserIndex(e.self_id, e.user_id, groupId);
+        }
+      } finally {
+        await releaseTurnLock(lockRef, lockToken);
+      }
+    }
   });
 
   leaveGame = Command(/^#退出审判$/, async (e) => {
     if (!this.config.enable) return false;
-    const session = await this.getGroupSession(e);
-    if (!session) return false;
-    if (!isPlayer(session, e.user_id)) return false;
-
-    if (session.phase === PHASES.GENERATING) {
-      await e.reply("正在生成牢狱，等开局后再退。");
+    const groupId = this.getGroupId(e);
+    if (!groupId) return false;
+    const lockRef = { selfId: String(e.self_id), groupId: String(groupId) };
+    const lockToken = await acquireTurnLock(lockRef);
+    if (!lockToken) {
+      await e.reply("本群的审判状态正在变更，稍后再试。");
       return true;
     }
 
-    session.players = session.players.filter((player) => player.userId !== String(e.user_id));
-    delete session.girls[toPlayerId(e.user_id)];
-    delete session.pendingActions[toPlayerId(e.user_id)];
-    await dropUserIndex(e.self_id, e.user_id);
+    try {
+      const session = await loadSession(e.self_id, groupId);
+      if (!session || !isPlayer(session, e.user_id)) return false;
+      if (session.phase !== PHASES.RECRUITING) {
+        await e.reply("开局后不能中途退出，以免案件引用和投票失效；请让房主或管理员结束本局。");
+        return true;
+      }
 
-    if (!session.players.length) {
-      await deleteSession(session);
-      await e.reply("最后一个人也走了，本局解散。");
-      return true;
-    }
+      session.players = session.players.filter(
+        (player) => player.userId !== String(e.user_id)
+      );
+      delete session.girls[toPlayerId(e.user_id)];
+      delete session.pendingActions[toPlayerId(e.user_id)];
+      await dropUserIndex(e.self_id, e.user_id, groupId);
 
-    if (session.hostId === String(e.user_id)) {
-      session.hostId = session.players[0].userId;
+      if (!session.players.length) {
+        await deleteSession(session);
+        await e.reply("最后一个人也走了，本局解散。");
+        return true;
+      }
+
+      if (session.hostId === String(e.user_id)) {
+        session.hostId = session.players[0].userId;
+        await saveSession(session);
+        await e.reply(`你已退出，房主移交给 ${session.players[0].nickname}。`);
+        return true;
+      }
+
       await saveSession(session);
-      await e.reply(`你已退出，房主移交给 ${session.players[0].nickname}。`);
+      await e.reply(`你已退出，当前 ${session.players.length} 人。`);
       return true;
+    } finally {
+      await releaseTurnLock(lockRef, lockToken);
     }
-
-    await saveSession(session);
-    await e.reply(`你已退出，当前 ${session.players.length} 人。`);
-    return true;
   });
 
   // 开局是最烧钱的动作（出牢狱 + 出全体少女 + 出第一章案件），扣费挂在这里
@@ -296,91 +520,106 @@ export class WitchTrial extends plugin {
     { economy: { command: "开始审判", refundOnFalse: true } },
     async (e) => {
       if (!this.config.enable) return false;
-      const session = await this.getGroupSession(e);
+      let session = await this.getGroupSession(e);
       if (!session) return false;
 
-      if (session.hostId !== String(e.user_id) && !e.isAdmin) {
-        await e.reply("只有房主能开局。");
-        return true;
-      }
-      if (session.phase !== PHASES.RECRUITING) {
-        await e.reply("这局已经开始了。");
-        return true;
-      }
-      if (session.players.length < this.config.minPlayers) {
-        await e.reply(
-          `至少要 ${this.config.minPlayers} 人才能开庭，现在只有 ${session.players.length} 人。`
-        );
-        return true;
-      }
-
-      // 先占位再生成，防止生成期间被重复触发
-      session.phase = PHASES.GENERATING;
-      await saveSession(session);
-
-      await e.reply("典狱长正在挑选囚犯与牢房，大概要一两分钟…");
-
-      try {
-        const route = session.routeId || this.getRoute();
-
-        const { prison, girls } = await generateSetup({
-          e,
-          route,
-          players: session.players,
-          npcCount: this.npcCountFor(session.players.length),
-          theme: session.theme,
-          onProgress: (text) => e.reply(text).catch(() => {}),
-        });
-
-        session.prison = prison;
-        session.girls = girls;
-        await saveSession(session);
-
-        // 私聊发少女卡，发不出去的（多半没加好友）在群里点名
-        const failed = [];
-        for (const player of session.players) {
-          const girl = session.girls[toPlayerId(player.userId)];
-          if (!girl) continue;
-          try {
-            await this.sendPrivateForward(e, player.userId, [renderGirlCard(girl)], {
-              prompt: `${girl.name} 的少女卡`,
-              source: "少女卡",
-              summary: girl.ability.name,
-            });
-          } catch (error) {
-            logger.warn(`[魔女审判] 给 ${player.userId} 私聊发卡失败：${error.message}`);
-            failed.push(girl);
-          }
-        }
-
-        await e.sendForwardMsg(renderPrisonIntro(prison), {
-          prompt: `《${prison.name}》`,
-          source: prison.name,
-          summary: `${Object.keys(girls).length} 位少女`,
-        });
-
-        if (failed.length) {
-          const mentions = failed.flatMap((girl) => [
-            segment.at(girl.userId),
-            ` ${girl.name}\n`,
-          ]);
-          await e.reply([
-            "以下玩家私聊发卡失败，请先加机器人好友，然后发【#我的少女】补发：\n",
-            ...mentions,
-          ]);
-        }
-
-        await e.reply("案件正在发生…");
-        await this.openChapter(e, session);
-      } catch (error) {
-        logger.error(`[魔女审判] 群 ${session.groupId} 开局失败：${error.stack || error}`);
-        session.phase = PHASES.RECRUITING;
-        await saveSession(session);
-        await e.reply(`开局失败：${error.message}\n已退回招募状态，可以再试一次【#开始审判】。`);
+      const lockRef = session;
+      const lockToken = await acquireTurnLock(lockRef);
+      if (!lockToken) {
+        await e.reply("本群的审判状态正在变更，稍后再试。");
         return { handled: true, refund: true };
       }
+      try {
+        session = await loadSession(session.selfId, session.groupId);
+        if (!session) return { handled: true, refund: true };
+        if (session.hostId !== String(e.user_id) && !e.isAdmin) {
+          await e.reply("只有房主能开局。");
+          return true;
+        }
+        if (session.phase !== PHASES.RECRUITING) {
+          await e.reply("这局已经开始了。");
+          return true;
+        }
+        if (session.players.length < this.config.minPlayers) {
+          await e.reply(
+            `至少要 ${this.config.minPlayers} 人才能开庭，现在只有 ${session.players.length} 人。`
+          );
+          return true;
+        }
 
-      return true;
+        // 先占位再生成，防止生成期间被重复触发或结束后被旧任务复活
+        session.phase = PHASES.GENERATING;
+        session.advancePending = false;
+        clearTurnDeadline(session);
+        await saveSession(session);
+
+        await e.reply("典狱长正在挑选囚犯与牢房，大概要一两分钟…");
+
+        try {
+          const route = session.routeId || this.getRoute();
+          const { prison, girls } = await generateSetup({
+            e,
+            route,
+            players: session.players,
+            npcCount: this.npcCountFor(session.players.length),
+            theme: session.theme,
+            onProgress: (text) => e.reply(text).catch(() => {}),
+          });
+
+          session.prison = prison;
+          session.girls = girls;
+          await saveSession(session);
+
+          // 私聊发少女卡，发不出去的（多半没加好友）在群里点名
+          const failed = [];
+          for (const player of session.players) {
+            const girl = session.girls[toPlayerId(player.userId)];
+            if (!girl) continue;
+            try {
+              await this.sendPrivateForward(e, player.userId, [renderGirlCard(girl)], {
+                prompt: `${girl.name} 的少女卡`,
+                source: "少女卡",
+                summary: girl.ability.name,
+              });
+            } catch (error) {
+              logger.warn(`[魔女审判] 给 ${player.userId} 私聊发卡失败：${error.message}`);
+              failed.push(girl);
+            }
+          }
+
+          await e.sendForwardMsg(renderPrisonIntro(prison), {
+            prompt: `《${prison.name}》`,
+            source: prison.name,
+            summary: `${Object.keys(girls).length} 位少女`,
+          });
+
+          if (failed.length) {
+            // 只 @ 人，绝不带上她分到的少女名——那等于当众公布 QQ 到囚犯的映射
+            await e.reply([
+              "以下几位私聊发卡失败，请先加机器人好友，然后私聊发【#我的少女】补发：\n",
+              ...failed.map((girl) => segment.at(girl.userId)),
+            ]);
+          }
+
+          await e.reply("案件正在发生…");
+          await this.openChapter(e, session);
+        } catch (error) {
+          logger.error(`[魔女审判] 群 ${session.groupId} 开局失败：${error.stack || error}`);
+          session.phase = PHASES.RECRUITING;
+          session.advancePending = false;
+          session.prison = null;
+          session.girls = {};
+          session.caseFile = null;
+          clearTurnDeadline(session);
+          await saveSession(session);
+          await e.reply(`开局失败：${error.message}\n已退回招募状态，可以再试一次【#开始审判】。`);
+          return { handled: true, refund: true };
+        }
+
+        return true;
+      } finally {
+        await releaseTurnLock(lockRef, lockToken);
+      }
     }
   );
 
@@ -388,7 +627,7 @@ export class WitchTrial extends plugin {
   async openChapter(e, session) {
     const route = session.routeId || this.getRoute();
 
-    const { victim, culprit } = await startChapter({
+    const { victim } = await startChapter({
       e,
       route,
       session,
@@ -396,24 +635,36 @@ export class WitchTrial extends plugin {
       suicideChance: this.config.suicideChance / 100,
       onProgress: (text) => this.announce(e, session, text).catch(() => {}),
     });
+    armTurnDeadline(session);
     await saveSession(session);
 
     // 每位在场玩家都收到一条私聊。凶手拿到真相，其余人拿到一句无事发生——
     // 两条消息长度不同，但没人看得见别人收到了什么。
+    const failed = [];
     for (const girl of livingPlayers(session)) {
       const isCulprit = girl.id === session.caseFile.culpritId;
       try {
+        const roleNotice = isCulprit
+          ? renderCulpritNotice(session, session.caseFile, victim)
+          : renderInnocentNotice();
         await this.sendPrivate(
           e,
           girl.userId,
-          isCulprit ? renderCulpritNotice(session, session.caseFile, victim) : renderInnocentNotice()
+          `${roleNotice}\n\n${renderInvestigationLeads(session, girl)}`
         );
       } catch (error) {
         logger.warn(`[魔女审判] 给 ${girl.userId} 发本章通知失败：${error.message}`);
+        failed.push(girl);
       }
     }
 
     await this.announce(e, session, renderIncident(session, session.caseFile, victim));
+    if (failed.length) {
+      await this.announce(e, session, [
+        "以下几位没有收到本章私聊，请加机器人好友后私聊发送【#本章身份】补领：\n",
+        ...failed.map((girl) => segment.at(girl.userId)),
+      ]);
+    }
   }
 
   // ===== 调查阶段 =====
@@ -430,7 +681,7 @@ export class WitchTrial extends plugin {
     const location = this.findLocation(session, e.match?.[1]);
     if (!location) {
       await e.reply(
-        `没有这个地方。可以去：${session.prison.locations.map((item) => item.name).join("、")}`
+        `没有这个地方。可以去：\n${session.prison.locations.map((item) => `${item.code}. ${item.name}`).join("\n")}`
       );
       return true;
     }
@@ -507,6 +758,10 @@ export class WitchTrial extends plugin {
       await e.reply("没有这个编号的命题，发【#命题】看清单。");
       return true;
     }
+    if (!prop.conclusion) {
+      await e.reply("主张必须选择标有【指认】【自杀】或【意外】的结论。");
+      return true;
+    }
 
     return this.submitAction(e, session, girl, {
       kind: "claim",
@@ -515,7 +770,9 @@ export class WitchTrial extends plugin {
     });
   });
 
-  refute = Command(/^#出示\s*(\d+)\s*(?:反驳|驳)\s*(\d+)$/, async (e) => {
+  // 出牌必须声明方向。不用声明就能公开证据的话，出牌就没有风险了——
+  // 玩家只看得见证物的名字和描述，往哪打全靠推，打空要反噬。
+  playEvidence = Command(/^#出示\s*(\d+)\s*(支持|反驳|驳)\s*(\d+)$/, async (e) => {
     const ctx = await this.requireGirl(e, [PHASES.TRIAL]);
     if (!ctx) return false;
     const { session, girl } = ctx;
@@ -527,17 +784,53 @@ export class WitchTrial extends plugin {
       await e.reply("你证物袋里没有这个编号，发【#证物袋】看看手里有什么。");
       return true;
     }
-    const prop = session.caseFile.propositions[Number(e.match[2]) - 1];
+    if (
+      session.publicEvidence.includes(evidenceId) ||
+      session.destroyedEvidence.includes(evidenceId)
+    ) {
+      await e.reply("这条证据已经公开或被销毁，不能重复出示。");
+      return true;
+    }
+    const prop = session.caseFile.propositions[Number(e.match[3]) - 1];
     if (!prop) {
       await e.reply("没有这个编号的命题，发【#命题】看清单。");
       return true;
     }
 
+    const stance = e.match[2] === "支持" ? STANCE.SUPPORT : STANCE.REFUTE;
     return this.submitAction(e, session, girl, {
-      kind: "refute",
+      kind: "play",
+      stance,
       evidenceId,
       propId: prop.id,
-      label: "出示证据反驳",
+      label: `出示证据${stance === STANCE.SUPPORT ? "支持" : "反驳"}命题`,
+    });
+  });
+
+  challengeFake = Command(/^#揭穿\s*(\d+)$/, async (e) => {
+    const ctx = await this.requireGirl(e, [PHASES.TRIAL]);
+    if (!ctx) return false;
+    const { session, girl } = ctx;
+    if (!girl.alive) return false;
+
+    const bag = pouchOf(session, girl.id);
+    const evidenceId = bag[Number(e.match[1]) - 1];
+    if (!evidenceId) {
+      await e.reply("你证物袋里没有这个编号，发【#证物袋】核对。");
+      return true;
+    }
+    if (
+      session.publicEvidence.includes(evidenceId) ||
+      session.destroyedEvidence.includes(evidenceId)
+    ) {
+      await e.reply("这条证据已经公开或被销毁，不能再拿来揭穿。");
+      return true;
+    }
+
+    return this.submitAction(e, session, girl, {
+      kind: "challenge",
+      evidenceId,
+      label: "尝试揭穿台面上的伪证",
     });
   });
 
@@ -552,6 +845,10 @@ export class WitchTrial extends plugin {
       await e.reply("没有这个人，或者她已经不在了。");
       return true;
     }
+    if (target.id === girl.id) {
+      await e.reply("不能在庭上追问自己。");
+      return true;
+    }
 
     return this.submitAction(e, session, girl, {
       kind: "question",
@@ -561,16 +858,33 @@ export class WitchTrial extends plugin {
     });
   });
 
-  answer = Command(/^#回应\s*([\s\S]+)$/, async (e) => {
+  // 回应必须押一个命题当辩解。光说漂亮话不算数——你得指出你的说法
+  // 靠台面上的哪一条撑着，而那一条随即变成别人可以攻击的靶子。
+  answer = Command(/^#回应\s*(\d+)\s*([\s\S]+)$/, async (e) => {
     const ctx = await this.requireGirl(e, [PHASES.TRIAL]);
     if (!ctx) return false;
     const { session, girl } = ctx;
     if (!girl.alive) return false;
 
+    const prop = session.caseFile.propositions[Number(e.match[1]) - 1];
+    if (!prop) {
+      await e.reply("没有这个编号的命题。发【#命题】看清单。");
+      return true;
+    }
+    if (!prop.conclusion) {
+      await e.reply(
+        "回应必须押一个**结论**——就是那些标着【指认】【自杀】【意外】的。\n" +
+          "被追问了，你得当众说出你认为她是怎么死的，不能拿一句无关痛痒的事实搪塞。\n" +
+          "发【#命题】看哪几条是结论。"
+      );
+      return true;
+    }
+
     return this.submitAction(e, session, girl, {
       kind: "answer",
-      text: safeString(e.match?.[1], 120),
-      label: "回应追问",
+      propId: prop.id,
+      text: safeString(e.match?.[2], 120),
+      label: `押「${prop.text}」表态`,
     });
   });
 
@@ -580,17 +894,34 @@ export class WitchTrial extends plugin {
     const { session, girl } = ctx;
     if (!girl.alive) return false;
     if (girl.id !== session.caseFile?.culpritId) return false;
+    if (session.fakeUsed) {
+      await e.reply("本章的伪证机会已经用掉了。");
+      return true;
+    }
+    if (session.round >= session.trialRounds - 1) {
+      await e.reply("最后一轮不能再造伪证——对方必须至少有下一轮可以反制。");
+      return true;
+    }
 
     const prop = session.caseFile.propositions[Number(e.match[1]) - 1];
     if (!prop) {
       await e.reply("没有这个编号的命题。");
       return true;
     }
+    if (!prop.conclusion) {
+      await e.reply("伪证只能用来否定一个【指认】【自杀】或【意外】结论。");
+      return true;
+    }
+    const text = safeString(e.match?.[2], 200);
+    if (text.replace(/\s/g, "").length < 12) {
+      await e.reply("说辞太短，至少写 12 个有效字符，让它成为一条可以被核验的具体陈述。");
+      return true;
+    }
 
     return this.submitAction(e, session, girl, {
       kind: "fake",
       propId: prop.id,
-      text: safeString(e.match?.[2], 200),
+      text,
       label: "抛出一条说辞",
     });
   });
@@ -602,51 +933,134 @@ export class WitchTrial extends plugin {
    * 群里提交只播报「谁交了」，不播报交了什么——这个游戏的信息不对称是核心
    */
   async submitAction(e, session, girl, action) {
-    session.pendingActions[girl.id] = action;
-    await saveSession(session);
-
-    const need = livingPlayers(session).length;
-    const done = Object.keys(session.pendingActions).length;
-
-    const inGroup = this.getGroupId(e) !== null;
-    if (inGroup) {
-      await e.reply(`${girl.name} 已提交（${done}/${need}）。下次建议私聊我，群里容易走漏。`, 0, true);
-    } else {
-      await e.reply(`已记下：${action.label}（${done}/${need}）`);
-      await this.announce(e, session, `🤫 ${girl.name} 提交了行动（${done}/${need}）。`);
+    const lockToken = await acquireTurnLock(session);
+    if (!lockToken) {
+      await e.reply("本局正在推演或保存，请稍后重新提交。");
+      return true;
     }
 
-    if (done >= need) await this.resolveTurn(e, session);
-    return true;
+    try {
+      const current = await loadSession(session.selfId, session.groupId);
+      if (!current || ![PHASES.INVESTIGATE, PHASES.TRIAL].includes(current.phase)) {
+        await e.reply("阶段已经变化，这条行动没有提交。");
+        return true;
+      }
+      if (isTurnDeadlineExpired(current)) {
+        await e.reply("这轮已经截止，这条行动没有计入。");
+        await this.resolveTimedTurnUnderLock(e, current, lockToken);
+        return true;
+      }
+      const currentGirl = girlOfUser(current, e.user_id);
+      if (!currentGirl?.alive) return true;
+
+      const living = livingPlayers(current);
+      const livingIds = new Set(living.map((item) => item.id));
+      current.pendingActions = Object.fromEntries(
+        Object.entries(current.pendingActions || {}).filter(([id]) => livingIds.has(id))
+      );
+      current.pendingActions[currentGirl.id] = action;
+      await saveSession(current);
+
+      const need = living.length;
+      const done = Object.keys(current.pendingActions).length;
+      const inGroup = this.getGroupId(e) !== null;
+      if (inGroup) {
+        await e.reply(`已提交（${done}/${need}）。下次私聊我——在群里发，谁都知道那是你。`, 0, true);
+      } else {
+        await e.reply(`已记下：${action.label}（${done}/${need}）`);
+        await this.announce(e, current, `🤫 有人提交了行动（${done}/${need}）。`);
+      }
+
+      if (done >= need) await this.resolveTurn(e, current, lockToken);
+      return true;
+    } finally {
+      await releaseTurnLock(session, lockToken);
+    }
   }
 
   forceTurn = Command(/^#推进$/, async (e) => {
     if (!this.config.enable) return false;
     const session = await this.getGroupSession(e);
     if (!session) return false;
-    if (![PHASES.INVESTIGATE, PHASES.TRIAL].includes(session.phase)) return false;
-
-    if (session.hostId !== String(e.user_id) && !e.isAdmin) {
-      await e.reply("只有房主能强制推进。");
-      return true;
-    }
-    if (!Object.keys(session.pendingActions).length) {
-      await e.reply("还没有人提交，推进不了。");
+    const privileged = Boolean(e.isAdmin || e.isMaster);
+    if (session.hostId !== String(e.user_id) && !privileged) {
+      await e.reply("只有房主、管理员或主人能推进。");
       return true;
     }
 
-    await this.resolveTurn(e, session);
-    return true;
+    if (this.hasTimedTurn(session)) {
+      if (!session.turnDeadlineAt) {
+        const lockToken = await acquireTurnLock(session);
+        if (!lockToken) {
+          await e.reply("本局正在保存，请稍后再试。");
+          return true;
+        }
+        try {
+          const current = await loadSession(session.selfId, session.groupId);
+          if (current && this.hasTimedTurn(current) && !current.turnDeadlineAt) {
+            armTurnDeadline(current);
+            await saveSession(current);
+          }
+        } finally {
+          await releaseTurnLock(session, lockToken);
+        }
+        await e.reply("已为本回合补上截止时间，届时会自动推进。");
+        return true;
+      }
+
+      if (!privileged && !isTurnDeadlineExpired(session)) {
+        const remaining = renderTurnDeadline(session);
+        await e.reply(
+          `截止前不能提前结算，避免房主截断其他人的推理或投票。\n${remaining}\n全员提前提交仍会立即结算。`
+        );
+        return true;
+      }
+
+      const advanced = await this.advanceExpiredTurn(e, session, {
+        allowEarly: privileged,
+        reason: privileged && !isTurnDeadlineExpired(session) ? "admin" : "deadline",
+      });
+      if (!advanced) await e.reply("本局正在结算，或阶段刚刚发生了变化。");
+      return true;
+    }
+    if (session.phase === PHASES.GENERATING && session.advancePending) {
+      await this.resumePendingChapter(e, session);
+      return true;
+    }
+
+    return false;
   });
 
+  /**
+   * 把这一轮的搜查结果私聊发给各人
+   * 群里只公布谁去了哪，搜到什么必须单独告诉当事人——否则玩家做完动作
+   * 根本不知道自己拿到了什么。NPC 不需要收。
+   */
+  async sendFindings(e, session, results) {
+    for (const item of results) {
+      const girl = session.girls[item.actorId];
+      if (girl?.kind !== "player" || !girl.userId) continue;
+      try {
+        await this.sendPrivate(e, girl.userId, renderFinding(session, item));
+      } catch (error) {
+        logger.warn(`[魔女审判] 给 ${girl.userId} 发调查回执失败：${error.message}`);
+      }
+    }
+  }
+
   /** 结算一个回合，并处理阶段切换 */
-  async resolveTurn(e, session) {
-    if (!acquireTurnLock(session)) {
+  async resolveTurn(e, session, existingLockToken = null) {
+    const lockRef = session;
+    const lockToken = existingLockToken || await acquireTurnLock(lockRef);
+    if (!lockToken) {
       await this.announce(e, session, "上一个回合还在推演，稍等一下。");
       return;
     }
+    const releaseHere = !existingLockToken;
 
     try {
+      session = await loadSession(session.selfId, session.groupId);
+      if (!session || ![PHASES.INVESTIGATE, PHASES.TRIAL].includes(session.phase)) return;
       const route = session.routeId || this.getRoute();
       const actions = Object.entries(session.pendingActions).map(([girlId, action]) => ({
         girlId,
@@ -656,15 +1070,18 @@ export class WitchTrial extends plugin {
       if (session.phase === PHASES.INVESTIGATE) {
         await this.announce(e, session, "🔍 正在推演…");
         const result = await resolveInvestigateTurn({ e, route, session, actions });
-        await saveSession(session);
-        await this.announce(e, session, renderInvestigateTurn(session, result));
 
         if (result.phaseDone) {
           session.phase = PHASES.TRIAL;
           session.round = 0;
-          // 手法在开庭时公布，「能力符合手法」这一项从这一刻起才计入嫌疑值
           recomputeSuspicion(session);
-          await saveSession(session);
+        }
+        armTurnDeadline(session);
+        await saveSession(session);
+        await this.announce(e, session, renderInvestigateTurn(session, result));
+        await this.sendFindings(e, session, result.results);
+
+        if (result.phaseDone) {
           await this.announce(
             e,
             session,
@@ -677,31 +1094,62 @@ export class WitchTrial extends plugin {
       if (session.phase === PHASES.TRIAL) {
         await this.announce(e, session, "⚖ 法庭正在推演…");
         const result = await resolveTrialTurn({ e, route, session, actions });
-        await saveSession(session);
-        await this.announce(e, session, renderTrialTurn(session, result));
-
         if (result.phaseDone) {
           session.phase = PHASES.VOTING;
           session.votes = {};
-          await saveSession(session);
+        }
+        armTurnDeadline(session);
+        await saveSession(session);
+        await this.announce(e, session, renderTrialTurn(session, result));
 
+        // 被追问的玩家私聊提醒一下，免得漏看群消息白挨 12 点
+        for (const move of result.moves) {
+          if (move.kind !== "question") continue;
+          const target = session.girls[move.targetId];
+          if (target?.kind !== "player" || !target.alive) continue;
+          try {
+            await this.sendPrivate(
+              e,
+              target.userId,
+              `━━━ 你被追问了 ━━━\n\n${move.actorName} 当庭问你：${move.topic}\n\n下一轮你必须押一个**结论**表态：\n  #回应 <命题编号> <说辞>\n\n不表态就是 +12。但押上去的结论会变成靶子——\n除了真相之外，每一个结论都有证据能把它打穿。`
+            );
+          } catch (error) {
+            logger.warn(`[魔女审判] 给 ${target.userId} 发追问提醒失败：${error.message}`);
+          }
+        }
+
+        if (result.phaseDone) {
           if (result.truthEstablished) {
             // 真相是吸收态，证成即定案，不必投票
-            await this.finishChapter(e, session, {});
+            await this.finishChapter(e, session, {}, lockToken);
           } else {
-            await this.announce(e, session, renderVoteMenu(votableConclusions(session)));
+            await this.announce(
+              e,
+              session,
+              renderVoteMenu(votableConclusions(session), session)
+            );
           }
         }
       }
     } catch (error) {
       logger.error(`[魔女审判] 群 ${session.groupId} 回合结算失败：${error.stack || error}`);
+      try {
+        const retrySession = await loadSession(session.selfId, session.groupId);
+        if (retrySession && this.hasTimedTurn(retrySession)) {
+          armTurnDeadline(retrySession);
+          await saveSession(retrySession);
+          session = retrySession;
+        }
+      } catch (saveError) {
+        logger.warn(`[魔女审判] 群 ${session.groupId} 重设重试时间失败：${saveError.message}`);
+      }
       await this.announce(
         e,
         session,
-        `本回合推演失败：${error.message}\n提交都还留着，房主可以发【#推进】重试。`
+        `本回合推演失败：${error.message}\n提交仍然保留；系统会在新的截止时间重试，管理员也可紧急【#推进】。`
       );
     } finally {
-      releaseTurnLock(session);
+      if (releaseHere) await releaseTurnLock(lockRef, lockToken);
     }
   }
 
@@ -710,43 +1158,93 @@ export class WitchTrial extends plugin {
   vote = Command(/^#投票\s*(\d+)$/, async (e) => {
     const ctx = await this.requireGirl(e, [PHASES.VOTING]);
     if (!ctx) return false;
-    const { session, girl } = ctx;
-    if (!girl.alive) {
-      await e.reply("你已经不在场上了，没有投票权。");
+    const { session } = ctx;
+    const lockToken = await acquireTurnLock(session);
+    if (!lockToken) {
+      await e.reply("正在点票或保存，请稍后再试。");
       return true;
     }
 
-    const conclusions = votableConclusions(session);
-    const picked = conclusions[Number(e.match[1]) - 1];
-    if (!picked) {
-      await e.reply("没有这个编号，重新看一下投票清单。");
+    try {
+      const current = await loadSession(session.selfId, session.groupId);
+      if (!current || current.phase !== PHASES.VOTING) {
+        await e.reply("投票已经结束。");
+        return true;
+      }
+      if (isTurnDeadlineExpired(current)) {
+        await e.reply("投票已经截止，这张票没有计入。");
+        await this.resolveTimedTurnUnderLock(e, current, lockToken);
+        return true;
+      }
+      const girl = girlOfUser(current, e.user_id);
+      if (!girl?.alive) {
+        await e.reply("你已经不在场上了，没有投票权。");
+        return true;
+      }
+
+      const conclusions = votableConclusions(current);
+      const picked = conclusions[Number(e.match[1]) - 1];
+      if (!picked) {
+        await e.reply("没有这个编号，重新看一下投票清单。");
+        return true;
+      }
+
+      const living = livingPlayers(current);
+      const livingIds = new Set(living.map((item) => item.id));
+      current.votes = Object.fromEntries(
+        Object.entries(current.votes || {}).filter(([id]) => livingIds.has(id))
+      );
+      current.votes[girl.id] = picked.propId;
+      await saveSession(current);
+
+      const need = living.length;
+      const done = Object.keys(current.votes).length;
+      const progress = renderVoteProgress(current, girl);
+      if (this.getGroupId(e) !== null) {
+        await e.reply(progress);
+      } else {
+        await e.reply(`已投「${picked.text}」（${done}/${need}）`);
+        await this.announce(e, current, progress);
+      }
+
+      if (done >= need) {
+        await this.finishChapter(e, current, current.votes, lockToken);
+      }
       return true;
+    } finally {
+      await releaseTurnLock(session, lockToken);
     }
-
-    session.votes[girl.id] = picked.propId;
-    await saveSession(session);
-
-    const need = livingPlayers(session).length;
-    const done = Object.keys(session.votes).length;
-    await e.reply(`已投「${picked.text}」（${done}/${need}）`);
-
-    if (done >= need) {
-      await this.finishChapter(e, session, session.votes);
-    }
-    return true;
   });
 
   /** 收场一章：判决、处刑、然后开下一章或收尾 */
-  async finishChapter(e, session, playerVotes) {
-    if (!acquireTurnLock(session)) return;
+  async finishChapter(e, session, playerVotes, existingLockToken = null) {
+    const lockRef = session;
+    const lockToken = existingLockToken || await acquireTurnLock(lockRef);
+    if (!lockToken) return;
+    const releaseHere = !existingLockToken;
+    let settlementPersisted = false;
 
     try {
+      session = await loadSession(session.selfId, session.groupId);
+      if (!session || session.phase !== PHASES.VOTING) return;
       const route = session.routeId || this.getRoute();
       await this.announce(e, session, "📖 猫头鹰正在宣判…");
 
-      const outcome = await resolveVerdict({ e, route, session, playerVotes });
+      const outcome = await resolveVerdict({
+        e,
+        route,
+        session,
+        // 锁内重载后的票才是权威值；调用方传入的快照可能在等锁时已经过期。
+        playerVotes: session.votes ?? playerVotes ?? {},
+      });
+      const verdictMessage = renderVerdict(session, outcome);
+      session.votes = {};
+      session.advancePending = !outcome.over.over;
+      session.phase = outcome.over.over ? PHASES.ENDED : PHASES.GENERATING;
+      clearTurnDeadline(session);
       await saveSession(session);
-      await this.announce(e, session, renderVerdict(session, outcome));
+      settlementPersisted = true;
+      await this.announce(e, session, verdictMessage);
 
       if (outcome.over.over) {
         await this.announce(
@@ -764,12 +1262,54 @@ export class WitchTrial extends plugin {
         `\n夜又来了。\n\n第 ${session.chapter + 1} 章即将开始…`
       );
       await this.openChapter(e, session);
-      await saveSession(session);
     } catch (error) {
       logger.error(`[魔女审判] 群 ${session.groupId} 收场失败：${error.stack || error}`);
-      await this.announce(e, session, `宣判失败：${error.message}\n房主可以发【#推进】重试。`);
+      if (!settlementPersisted) {
+        try {
+          const retrySession = await loadSession(session.selfId, session.groupId);
+          if (retrySession?.phase === PHASES.VOTING) {
+            armTurnDeadline(retrySession);
+            await saveSession(retrySession);
+            session = retrySession;
+          }
+        } catch (saveError) {
+          logger.warn(`[魔女审判] 群 ${session.groupId} 重设宣判时间失败：${saveError.message}`);
+        }
+      }
+      const message = settlementPersisted
+        ? session?.advancePending
+          ? `下一章生成失败：${error.message}\n上一章已经安全结算，房主可发【#推进】继续生成，不会重复处刑。`
+          : `本局结束后的清理失败：${error.message}\n判决与终局状态已经安全落库，不会重复处刑。`
+        : `宣判失败：${error.message}\n投票尚未结算；系统会在新的截止时间重试，管理员也可紧急【#推进】。`;
+      await this.announce(e, session, message);
     } finally {
-      releaseTurnLock(session);
+      if (releaseHere) await releaseTurnLock(lockRef, lockToken);
+    }
+  }
+
+  /** 章间生成失败后的幂等续跑，不会重新判决上一章 */
+  async resumePendingChapter(e, session) {
+    const lockRef = session;
+    const lockToken = await acquireTurnLock(lockRef);
+    if (!lockToken) {
+      await this.announce(e, session, "下一章正在生成，稍等一下。");
+      return;
+    }
+
+    try {
+      session = await loadSession(session.selfId, session.groupId);
+      if (!session || session.phase !== PHASES.GENERATING || !session.advancePending) return;
+      await this.announce(e, session, `第 ${session.chapter + 1} 章重新生成中…`);
+      await this.openChapter(e, session);
+    } catch (error) {
+      logger.error(`[魔女审判] 群 ${session.groupId} 续章失败：${error.stack || error}`);
+      await this.announce(
+        e,
+        session,
+        `下一章生成失败：${error.message}\n状态已保留，稍后仍可发【#推进】重试。`
+      );
+    } finally {
+      await releaseTurnLock(lockRef, lockToken);
     }
   }
 
@@ -788,6 +1328,30 @@ export class WitchTrial extends plugin {
       if (ctx.inGroup) await e.reply("已私聊发送。", 0, true);
     } catch (error) {
       logger.warn(`[魔女审判] 补发少女卡给 ${e.user_id} 失败：${error.message}`);
+      await e.reply("私聊发不出去，请先加机器人好友再试。", 0, true);
+    }
+    return true;
+  });
+
+  showChapterRole = Command(/^#本章身份$/, async (e) => {
+    const ctx = await this.requireGirl(e, null);
+    if (!ctx?.session.caseFile) return false;
+    const { session, girl } = ctx;
+    const victim = session.girls[session.caseFile.victimId];
+    if (!victim) return false;
+
+    const text =
+      girl.id === session.caseFile.culpritId
+        ? renderCulpritNotice(session, session.caseFile, victim)
+        : renderInnocentNotice();
+    try {
+      await this.sendPrivate(
+        e,
+        e.user_id,
+        `${text}\n\n${renderInvestigationLeads(session, girl)}`
+      );
+      if (ctx.inGroup) await e.reply("本章身份已私聊发送。", 0, true);
+    } catch {
       await e.reply("私聊发不出去，请先加机器人好友再试。", 0, true);
     }
     return true;
@@ -857,21 +1421,34 @@ export class WitchTrial extends plugin {
 
   endGame = Command(/^#结束审判$/, async (e) => {
     if (!this.config.enable) return false;
-    const session = await this.getGroupSession(e);
+    let session = await this.getGroupSession(e);
     if (!session) return false;
 
-    if (session.hostId !== String(e.user_id) && !e.isAdmin) {
-      await e.reply("只有房主或管理员能结束本局。");
+    const lockRef = session;
+    const lockToken = await acquireTurnLock(lockRef);
+    if (!lockToken) {
+      await e.reply("本局正在生成或结算，请等当前操作完成后再结束。");
       return true;
     }
 
-    await deleteSession(session);
-    await e.reply(
-      session.prison
-        ? `《${session.prison.name}》在第 ${session.chapter} 章被中止。`
-        : "本局已解散。"
-    );
-    return true;
+    try {
+      session = await loadSession(session.selfId, session.groupId);
+      if (!session) return true;
+      if (session.hostId !== String(e.user_id) && !e.isAdmin) {
+        await e.reply("只有房主或管理员能结束本局。");
+        return true;
+      }
+
+      await deleteSession(session);
+      await e.reply(
+        session.prison
+          ? `《${session.prison.name}》在第 ${session.chapter} 章被中止。`
+          : "本局已解散。"
+      );
+      return true;
+    } finally {
+      await releaseTurnLock(lockRef, lockToken);
+    }
   });
 
   help = Command(/^#审判帮助$/, async (e) => {

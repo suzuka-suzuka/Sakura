@@ -9,17 +9,26 @@
  */
 
 import { getAI } from "../AIUtils/getAI.js";
-import { generateCase, pickVictimAndCulprit } from "./CaseGenerator.js";
+import { generateCase } from "./CaseGenerator.js";
 import {
   PENALTY,
-  REFUTE_RESULT,
+  PLAY_RESULT,
+  STANCE,
   addPenalty,
   decideVerdict,
+  isFakeExposed,
   isTruthEstablished,
-  judgeRefutation,
+  judgeEvidencePlay,
+  npcInvestigateActions,
+  npcTrialMoves,
   npcVotes,
+  pickVictimAndCulprit,
+  pickRelevantEvidence,
+  plantFakeEvidence,
   propositionStatus,
   recomputeSuspicion,
+  reserveInvestigationEvidence,
+  resolveFakeChallenge,
   standingConclusions,
 } from "./logic.js";
 import {
@@ -54,6 +63,11 @@ function locationName(session, locationId) {
   return session.prison?.locations.find((item) => item.id === locationId)?.name || "未知区域";
 }
 
+/** 代号只给玩家看，AI 的提示词里用名字就好，塞代号只会变成噪声 */
+function locationCode(session, locationId) {
+  return session.prison?.locations.find((item) => item.id === locationId)?.code || "";
+}
+
 async function narrate({ route, e, system, prompt }) {
   const result = await getAI(route, e, [{ text: prompt }], system, false, false, []);
   if (typeof result === "string") throw new Error(result);
@@ -67,10 +81,9 @@ async function narrate({ route, e, system, prompt }) {
  * @returns {Promise<{victim: object, culprit: object}>}
  */
 export async function startChapter({ e, route, session, onProgress, playerCulpritChance, suicideChance }) {
-  session.chapter += 1;
-
   const picked = pickVictimAndCulprit(session, { playerCulpritChance, suicideChance });
   if (!picked) throw new Error("NPC 少女已经不够了，开不了新的案件");
+  const chapter = session.chapter + 1;
 
   const caseFile = await generateCase({
     e,
@@ -78,9 +91,12 @@ export async function startChapter({ e, route, session, onProgress, playerCulpri
     session,
     victim: picked.victim,
     culprit: picked.culprit,
+    chapter,
     onProgress,
   });
 
+  // 生成成功后才正式消耗章节号；失败重试不会跳章
+  session.chapter = chapter;
   // 死者退场
   picked.victim.alive = false;
   picked.victim.fate = "victim";
@@ -96,6 +112,9 @@ export async function startChapter({ e, route, session, onProgress, playerCulpri
   session.questions = [];
   session.votes = {};
   session.pouch = {};
+  session.advancePending = false;
+  session.fakeUsed = false;
+  session.investigationLeads = reserveInvestigationEvidence(session, caseFile);
 
   // 行为惩罚每章清零，结构性嫌疑会重算
   for (const girl of listGirls(session)) girl.penalty = 0;
@@ -107,37 +126,50 @@ export async function startChapter({ e, route, session, onProgress, playerCulpri
 // ===== 调查阶段 =====
 
 /** 某地点当前还能被这个人搜到的证据 */
+function heldEvidenceIds(session) {
+  return new Set(Object.values(session.pouch || {}).flat());
+}
+
 function searchablePool(session, actorId, locationId) {
-  const bag = pouchOf(session, actorId);
-  return (session.caseFile.evidence || []).filter(
+  const held = heldEvidenceIds(session);
+  const pool = (session.caseFile.evidence || []).filter(
     (item) =>
       item.via === EVIDENCE_VIA.SEARCH &&
       item.location === locationId &&
       !item.fake &&
       !session.destroyedEvidence.includes(item.id) &&
-      !bag.includes(item.id)
+      !held.has(item.id) &&
+      (!item.reservedFor || item.reservedFor === actorId)
   );
+  const reserved = pool.filter((item) => item.reservedFor === actorId);
+  return reserved.length ? reserved : pool;
 }
 
 function askablePool(session, actorId, targetId) {
-  const bag = pouchOf(session, actorId);
-  return (session.caseFile.evidence || []).filter(
+  const held = heldEvidenceIds(session);
+  const pool = (session.caseFile.evidence || []).filter(
     (item) =>
       item.via === EVIDENCE_VIA.ASK &&
       item.askTarget === targetId &&
       !item.fake &&
       !session.destroyedEvidence.includes(item.id) &&
-      !bag.includes(item.id)
+      !held.has(item.id) &&
+      (!item.reservedFor || item.reservedFor === actorId)
   );
+  const reserved = pool.filter((item) => item.reservedFor === actorId);
+  return reserved.length ? reserved : pool;
 }
 
 /**
  * 结算一个调查回合
  * @param {object[]} actions [{ girlId, kind, locationId, targetId, question }]
  */
-export async function resolveInvestigateTurn({ e, route, session, actions }) {
+export async function resolveInvestigateTurn({ e, route, session, actions: playerActions }) {
   const caseFile = session.caseFile;
   const results = [];
+
+  // NPC 和玩家做一样的事。少了这一步，「谁在四处翻找」本身就是身份标签。
+  const actions = [...playerActions, ...npcInvestigateActions(session, session.round + 1)];
 
   // 先把去向登记下来，撞见判定要用
   const byLocation = new Map();
@@ -160,10 +192,17 @@ export async function resolveInvestigateTurn({ e, route, session, actions }) {
         kind: "search",
         actorId: actor.id,
         actorName: actor.name,
+        actorCode: actor.code,
         locationName: locationName(session, action.locationId),
+        locationCode: locationCode(session, action.locationId),
         found: Boolean(found),
         evidenceName: found?.name || "",
         evidenceDesc: found?.description || "",
+        relatedPropIds: found
+          ? [...new Set([...(found.supports || []), ...(found.refutes || [])])]
+          : [],
+        // 私聊回执要报出编号，玩家才知道庭上该打第几号
+        pouchIndex: found ? pouchOf(session, actor.id).indexOf(found.id) + 1 : 0,
       });
       continue;
     }
@@ -171,7 +210,7 @@ export async function resolveInvestigateTurn({ e, route, session, actions }) {
     if (action.kind === "ask") {
       const target = girlOf(session, action.targetId);
       const pool = askablePool(session, actor.id, action.targetId);
-      const found = pool.length ? pick(pool) : null;
+      const found = pickRelevantEvidence(pool, action.question);
       if (found) addToPouch(session, actor.id, found.id);
       // 证言跨章保留：这一章说的话，下一章还能翻出来对质
       session.testimony.push({
@@ -184,23 +223,32 @@ export async function resolveInvestigateTurn({ e, route, session, actions }) {
         kind: "ask",
         actorId: actor.id,
         actorName: actor.name,
+        actorCode: actor.code,
         targetName: target?.name || "某人",
+        targetCode: target?.code || "",
         question: action.question || "案发那晚的事",
         found: Boolean(found),
         evidenceName: found?.name || "",
         evidenceDesc: found?.description || "",
+        relatedPropIds: found
+          ? [...new Set([...(found.supports || []), ...(found.refutes || [])])]
+          : [],
+        pouchIndex: found ? pouchOf(session, actor.id).indexOf(found.id) + 1 : 0,
       });
       continue;
     }
 
     if (action.kind === "destroy") {
+      const held = heldEvidenceIds(session);
       const pool = (caseFile.evidence || []).filter(
         (item) =>
           item.via === EVIDENCE_VIA.SEARCH &&
           item.location === action.locationId &&
           !item.fake &&
           !session.destroyedEvidence.includes(item.id) &&
-          !session.publicEvidence.includes(item.id)
+          !session.publicEvidence.includes(item.id) &&
+          !held.has(item.id) &&
+          (!action.evidenceId || item.id === action.evidenceId)
       );
       const target = pool.length ? pick(pool) : null;
       if (target) session.destroyedEvidence.push(target.id);
@@ -210,18 +258,15 @@ export async function resolveInvestigateTurn({ e, route, session, actions }) {
         kind: "destroy",
         actorId: actor.id,
         actorName: actor.name,
+        actorCode: actor.code,
         locationName: locationName(session, action.locationId),
+        locationCode: locationCode(session, action.locationId),
         destroyed: Boolean(target),
+        evidenceName: target?.name || "",
+        evidenceDesc: target?.description || "",
         witnessed: others.length > 0,
+        witnessNames: others.map((id) => girlOf(session, id)?.name || "某人"),
       });
-    }
-  }
-
-  // NPC 凶手按开局排好的表行动，不问 AI
-  const npcPlan = (caseFile.witchPlan || []).find((item) => item.round === session.round + 1);
-  if (npcPlan?.action === "destroy" && !session.destroyedEvidence.includes(npcPlan.evidenceId)) {
-    if (!session.publicEvidence.includes(npcPlan.evidenceId)) {
-      session.destroyedEvidence.push(npcPlan.evidenceId);
     }
   }
 
@@ -231,7 +276,12 @@ export async function resolveInvestigateTurn({ e, route, session, actions }) {
     if (ids.length < 2) continue;
     encounters.push({
       locationName: locationName(session, locationId),
+      locationCode: locationCode(session, locationId),
       names: ids.map((id) => girlOf(session, id)?.name || "某人"),
+      labels: ids.map((id) => {
+        const girl = girlOf(session, id);
+        return girl ? `${girl.code} ${girl.name}` : "某人";
+      }),
     });
   }
 
@@ -243,6 +293,8 @@ export async function resolveInvestigateTurn({ e, route, session, actions }) {
     maxRounds: session.investigateRounds,
     results,
     encounters,
+    summaryLines: session.summaryLines,
+    recentLog: session.recentLog,
   });
 
   const raw = await narrate({ route, e, system: INVESTIGATE_SYSTEM, prompt });
@@ -263,20 +315,107 @@ export async function resolveInvestigateTurn({ e, route, session, actions }) {
 
 // ===== 庭审阶段 =====
 
+function syncRefutedProps(session) {
+  const shown = new Set(session.publicEvidence || []);
+  session.refutedProps = [
+    ...new Set(
+      (session.caseFile?.evidence || [])
+        .filter((item) => shown.has(item.id))
+        .flatMap((item) => item.refutes || [])
+    ),
+  ];
+}
+
+/** 只有真实公开证据会让押错结论永久吃 +10；伪证只暂时改变台面状态 */
+function realRefutedProps(session) {
+  const shown = new Set(session.publicEvidence || []);
+  return new Set(
+    (session.caseFile?.evidence || [])
+      .filter((item) => !item.fake && shown.has(item.id))
+      .flatMap((item) => item.refutes || [])
+  );
+}
+
+function penalizeNewlyBrokenClaims(session, beforeRefuted) {
+  const afterRefuted = realRefutedProps(session);
+  for (const claim of session.claims || []) {
+    if (
+      claim.chapter !== session.chapter ||
+      claim.broken ||
+      beforeRefuted.has(claim.propId) ||
+      !afterRefuted.has(claim.propId)
+    ) {
+      continue;
+    }
+    addPenalty(girlOf(session, claim.byId), PENALTY.CLAIM_BROKEN);
+    claim.broken = true;
+  }
+}
+
+function exposePublicFakes(session, moves, currentRound) {
+  const caseFile = session.caseFile;
+  const exposed = (caseFile.evidence || []).filter(
+    (item) =>
+      item.fake &&
+      isFakeExposed(caseFile, item.id, session.publicEvidence, {
+        round: currentRound,
+      })
+  );
+  if (!exposed.length) return;
+
+  const exposedIds = new Set(exposed.map((item) => item.id));
+  caseFile.evidence = caseFile.evidence.filter((item) => !exposedIds.has(item.id));
+  session.publicEvidence = session.publicEvidence.filter((id) => !exposedIds.has(id));
+
+  for (const fake of exposed) {
+    const actor = girlOf(session, fake.askTarget);
+    addPenalty(actor, PENALTY.FAKE_EXPOSED);
+    moves.push({
+      kind: "fake_exposed",
+      actorId: actor?.id || fake.askTarget,
+      actorName: actor?.name || "某人",
+      text: fake.description,
+      evidenceName:
+        evidenceOf(caseFile, fake.flawOf)?.name || "破绽证据",
+    });
+  }
+  syncRefutedProps(session);
+}
+
 /**
  * 结算一个庭审回合
  * @param {object[]} actions [{ girlId, kind, propId, evidenceId, targetId, topic, text }]
  */
-export async function resolveTrialTurn({ e, route, session, actions }) {
+export async function resolveTrialTurn({ e, route, session, actions: playerActions }) {
   const caseFile = session.caseFile;
   const moves = [];
+  syncRefutedProps(session);
 
-  // 上一轮被追问却没回应的人，先记回避
+  // NPC 也出手：主张、出示、反驳、追问、回避。它们的回避同样挨罚——
+  // 否则「从来不用正面回答的那个」就是活体身份标签。
+  const focusPropIds = playerActions
+    .filter((item) => item.kind === "claim" || item.kind === "answer")
+    .map((item) => item.propId);
+  const actions = [
+    ...playerActions,
+    ...npcTrialMoves(session, { focusPropIds }),
+  ];
+
+  // 上一轮被追问却没回应的人，先记回避（NPC 的回避由 npcTrialMoves 自己决定，这里只管玩家）
+  //
+  // 注意只认**有效**的回应：押了非结论命题的会在下面被跳过，如果这里就把它
+  // 算成已回应，等于交一条废指令就白嫖掉 12 点回避罚。
   const answered = new Set(
-    actions.filter((item) => item.kind === "answer").map((item) => item.girlId)
+    actions
+      .filter(
+        (item) =>
+          item.kind === "dodge" ||
+          (item.kind === "answer" && propositionOf(caseFile, item.propId)?.conclusion)
+      )
+      .map((item) => item.girlId)
   );
   for (const question of session.questions) {
-    if (question.answered || question.round >= session.round) continue;
+    if (question.answered || question.round > session.round) continue;
     const target = girlOf(session, question.toId);
     if (!target?.alive || target.kind !== "player") continue;
     if (answered.has(target.id)) continue;
@@ -294,12 +433,15 @@ export async function resolveTrialTurn({ e, route, session, actions }) {
       const prop = propositionOf(caseFile, action.propId);
       if (!prop) continue;
       const status = propositionStatus(caseFile, prop.id, session.publicEvidence);
+      const reallyRefuted = realRefutedProps(session).has(prop.id);
       session.claims.push({
         byId: actor.id,
         propId: prop.id,
         chapter: session.chapter,
         round: session.round + 1,
+        broken: reallyRefuted,
       });
+      if (reallyRefuted) addPenalty(actor, PENALTY.CLAIM_BROKEN);
       moves.push({
         kind: "claim",
         actorId: actor.id,
@@ -314,36 +456,40 @@ export async function resolveTrialTurn({ e, route, session, actions }) {
       continue;
     }
 
-    if (action.kind === "refute") {
-      const judged = judgeRefutation(caseFile, {
+    if (action.kind === "play") {
+      const judged = judgeEvidencePlay(caseFile, {
         evidenceId: action.evidenceId,
         propId: action.propId,
+        stance: action.stance,
         pouch: pouchOf(session, actor.id),
+        publicIds: session.publicEvidence,
+        destroyedIds: session.destroyedEvidence,
       });
-      if (judged.result === REFUTE_RESULT.UNKNOWN || judged.result === REFUTE_RESULT.NOT_OWNED) {
+      if (
+        judged.result === PLAY_RESULT.UNKNOWN ||
+        judged.result === PLAY_RESULT.NOT_OWNED ||
+        judged.result === PLAY_RESULT.UNAVAILABLE
+      ) {
         continue; // 指令层已经拦过，这里只是兜底
       }
 
-      // 无效反驳的代价是双重的：自己涨嫌疑，还白白把牌摊上桌面
+      // 打空的代价是双重的：自己涨嫌疑，牌还白白摊上了桌面
+      const beforeRefuted = realRefutedProps(session);
       publicize(session, judged.evidence.id);
-      const valid = judged.result === REFUTE_RESULT.VALID;
+      const valid = judged.result === PLAY_RESULT.VALID;
+      syncRefutedProps(session);
+      // 先撤下被这张真证据当场戳穿的伪证，再按最终台面状态处罚主张。
+      // 否则一条本来正确的主张会先被伪证判破，再在同一动作里恢复，却白吃 +10。
+      exposePublicFakes(session, moves, session.round + 1);
+      penalizeNewlyBrokenClaims(session, beforeRefuted);
 
-      if (valid) {
-        if (!session.refutedProps.includes(judged.prop.id)) {
-          session.refutedProps.push(judged.prop.id);
-        }
-        // 主张这条命题的人要担责
-        for (const claim of session.claims) {
-          if (claim.propId === judged.prop.id && claim.chapter === session.chapter) {
-            addPenalty(girlOf(session, claim.byId), PENALTY.CLAIM_BROKEN);
-          }
-        }
-      } else {
+      if (!valid) {
         addPenalty(actor, PENALTY.BACKFIRE);
       }
 
       moves.push({
-        kind: "refute",
+        kind: "play",
+        stance: action.stance,
         actorId: actor.id,
         actorName: actor.name,
         evidenceName: judged.evidence.name,
@@ -354,9 +500,58 @@ export async function resolveTrialTurn({ e, route, session, actions }) {
       continue;
     }
 
+    if (action.kind === "challenge") {
+      const beforeRefuted = realRefutedProps(session);
+      const challenged = resolveFakeChallenge(
+        session,
+        actor,
+        action.evidenceId,
+        session.round + 1
+      );
+      if (!challenged) continue;
+      syncRefutedProps(session);
+      penalizeNewlyBrokenClaims(session, beforeRefuted);
+      moves.push({
+        kind: "challenge",
+        actorId: actor.id,
+        actorName: actor.name,
+        evidenceName: challenged.evidence.name,
+        evidenceDesc: challenged.evidence.description,
+        success: challenged.success,
+        fakerId: challenged.faker?.id || "",
+        fakerName: challenged.faker?.name || "",
+      });
+      continue;
+    }
+
+    if (action.kind === "dodge") {
+      addPenalty(actor, PENALTY.DODGE);
+      for (const question of session.questions) {
+        if (
+          question.toId === actor.id &&
+          !question.answered &&
+          question.round <= session.round
+        ) {
+          question.answered = true;
+        }
+      }
+
+      // 秘密不在这里曝光。它是处刑前才翻出来的东西，用来给那个人的下场配重，
+      // 不该在庭上被当成嫌疑值筹码消耗掉。
+      moves.push({ kind: "dodge", actorId: actor.id, actorName: actor.name });
+      continue;
+    }
+
     if (action.kind === "question") {
       const target = girlOf(session, action.targetId);
       if (!target?.alive) continue;
+
+      // 追问**不撬证据**。搜证是调查阶段的事（#询问），庭上追问只施压。
+      //
+      // 一度让追问也能白拿一张牌，结果它成了唯一「零风险还有收益」的动作，
+      // 出示要担反噬、主张没收益，理性玩家只会一路追问到榨干为止。
+      // 现在它是纯粹的节奏交换：我花一个动作，逼你也花一个动作表态——
+      // 而你表的态会变成我下一轮的靶子。
       session.questions.push({
         fromId: actor.id,
         toId: target.id,
@@ -369,26 +564,55 @@ export async function resolveTrialTurn({ e, route, session, actions }) {
         actorId: actor.id,
         actorName: actor.name,
         targetName: target.name,
+        targetId: target.id,
         topic: safeString(action.topic, 60),
       });
       continue;
     }
 
     if (action.kind === "answer") {
+      // 回应必须押一个**结论型**命题——也就是必须当众说出「我认为她是怎么死的」。
+      //
+      // 只要求押任意命题的话，押一条平平无奇的事实陈述就完事了，几乎没代价，
+      // 追问也就威胁不到任何人。而按案件校验，除真相之外**每个结论都有证据能否定**，
+      // 所以站队必然承担被打穿的风险。押中真相才安全——可你怎么知道哪个是真相。
+      const prop = propositionOf(caseFile, action.propId);
+      if (!prop?.conclusion) continue;
+
       for (const question of session.questions) {
-        if (question.toId === actor.id && !question.answered) question.answered = true;
+        if (
+          question.toId === actor.id &&
+          !question.answered &&
+          question.round <= session.round
+        ) {
+          question.answered = true;
+        }
       }
+
+      const status = propositionStatus(caseFile, prop.id, session.publicEvidence);
+      const reallyRefuted = realRefutedProps(session).has(prop.id);
+      session.claims.push({
+        byId: actor.id,
+        propId: prop.id,
+        chapter: session.chapter,
+        round: session.round + 1,
+        broken: reallyRefuted,
+      });
+      if (reallyRefuted) addPenalty(actor, PENALTY.CLAIM_BROKEN);
       session.testimony.push({
         chapter: session.chapter,
         byId: actor.id,
         name: actor.name,
-        text: safeString(action.text, 120),
+        text: `${safeString(action.text, 100)}（据以辩解：${prop.text}）`,
       });
+
       moves.push({
         kind: "answer",
         actorId: actor.id,
         actorName: actor.name,
         text: safeString(action.text, 120),
+        propText: prop.text,
+        refuted: status.refuted,
       });
       continue;
     }
@@ -396,14 +620,26 @@ export async function resolveTrialTurn({ e, route, session, actions }) {
     if (action.kind === "fake") {
       const fake = plantFakeEvidence(session, actor, action);
       if (!fake) continue;
+      if (!fake.ok) {
+        if (fake.reason === "no_flaw") {
+          addPenalty(actor, PENALTY.BACKFIRE);
+          moves.push({
+            kind: "fake_failed",
+            actorId: actor.id,
+            actorName: actor.name,
+            text: safeString(action.text, 200),
+          });
+        }
+        continue;
+      }
+      syncRefutedProps(session);
       moves.push({
         kind: "fake",
         actorId: actor.id,
         actorName: actor.name,
         text: fake.description,
-        exposed: fake.exposed,
+        exposed: false,
       });
-      if (fake.exposed) addPenalty(actor, PENALTY.FAKE_EXPOSED);
     }
   }
 
@@ -430,6 +666,8 @@ export async function resolveTrialTurn({ e, route, session, actions }) {
     publicEvidence,
     standing,
     suspicionBoard,
+    summaryLines: session.summaryLines,
+    recentLog: session.recentLog,
   });
 
   const raw = await narrate({ route, e, system: TRIAL_SYSTEM, prompt });
@@ -452,44 +690,6 @@ export async function resolveTrialTurn({ e, route, session, actions }) {
   };
 }
 
-/**
- * 凶手伪造一条证据
- * 伪证带一个破绽字段，指向某条能戳破它的真证据。对方手里有那条就被反揭穿。
- */
-function plantFakeEvidence(session, actor, action) {
-  const caseFile = session.caseFile;
-  const prop = propositionOf(caseFile, action.propId);
-  if (!prop) return null;
-
-  // 破绽 = 一条支持该命题的真证据。它一旦在台面上，伪证就站不住
-  const flaw = (caseFile.evidence || []).find(
-    (item) => !item.fake && item.supports.includes(prop.id)
-  );
-
-  const fake = {
-    id: `fake_${session.chapter}_${caseFile.evidence.length + 1}`,
-    name: `${actor.name}的说辞`,
-    description: safeString(action.text, 200),
-    via: EVIDENCE_VIA.ASK,
-    location: "",
-    askTarget: actor.id,
-    supports: [],
-    refutes: [prop.id],
-    fake: true,
-    flawOf: flaw?.id || "",
-  };
-
-  const exposed = Boolean(flaw && session.publicEvidence.includes(flaw.id));
-  if (!exposed) {
-    // 没被当场识破才真的生效，否则只是一次难堪的表演
-    caseFile.evidence.push(fake);
-    session.publicEvidence.push(fake.id);
-    if (!session.refutedProps.includes(prop.id)) session.refutedProps.push(prop.id);
-  }
-
-  return { ...fake, exposed };
-}
-
 // ===== 投票与判决 =====
 
 /**
@@ -501,13 +701,22 @@ export async function resolveVerdict({ e, route, session, playerVotes }) {
   const votes = { ...npcVotes(session), ...playerVotes };
   const verdict = decideVerdict(session, votes);
 
-  const executed = verdict.executedId ? girlOf(session, verdict.executedId) : null;
-  if (executed) {
-    executed.alive = false;
-    executed.fate = "executed";
+  const executedAll = (verdict.executedIds || [])
+    .map((id) => girlOf(session, id))
+    .filter(Boolean);
+  for (const girl of executedAll) {
+    girl.alive = false;
+    girl.fate = "executed";
+    // 秘密在这一刻才被翻出来——指认结束、处刑之前。
+    // 它不是嫌疑值筹码，是给这个人的下场配重的东西：直到她要死了，
+    // 大家才知道她一直藏着什么。
+    girl.secretExposed = true;
   }
+  // 单人处刑的路径还沿用 executed；全员处刑走 executedAll
+  const executed = executedAll.length === 1 ? executedAll[0] : null;
 
-  const isFinalChapter = session.chapter >= session.maxChapters;
+  const over = checkGameOver(session, verdict);
+  const isFinalChapter = over.over;
   let text = "";
   try {
     const prompt = buildVerdictPrompt({
@@ -515,9 +724,12 @@ export async function resolveVerdict({ e, route, session, playerVotes }) {
       girls: session.girls,
       verdict,
       executed,
+      executedAll,
       truthProp: propositionOf(caseFile, caseFile.truthId),
       chapter: session.chapter,
       isFinalChapter,
+      summaryLines: session.summaryLines,
+      recentLog: session.recentLog,
     });
     const raw = await narrate({ route, e, system: null, prompt });
     text = safeString(raw, 2000);
@@ -528,7 +740,10 @@ export async function resolveVerdict({ e, route, session, playerVotes }) {
   session.history.push({
     chapter: session.chapter,
     victimName: girlOf(session, caseFile.victimId)?.name || "某人",
-    executedName: executed?.name || "",
+    executedName: verdict.collapsed
+      ? `全员（${executedAll.length}人）`
+      : executed?.name || "",
+    collapsed: verdict.collapsed,
     correct: verdict.correct,
     truthText: propositionOf(caseFile, caseFile.truthId)?.text || "",
     culpritName: girlOf(session, caseFile.culpritId)?.name || "",
@@ -540,7 +755,7 @@ export async function resolveVerdict({ e, route, session, playerVotes }) {
     confession: caseFile.motive?.confession || "",
   });
 
-  return { verdict, executed, text, over: checkGameOver(session, verdict) };
+  return { verdict, executed, text, over };
 }
 
 /**
@@ -551,6 +766,11 @@ export function checkGameOver(session, verdict) {
   const players = livingPlayers(session);
   const npcLeft = livingGirls(session).filter((girl) => girl.kind === "npc").length;
 
+  // 全员处刑要排在最前面判。真凶确实死在里面，但那是连坐不是查出来的，
+  // 落到「真凶伏法」这个好结局上就说反了。
+  if (verdict?.collapsed) {
+    return { over: true, reason: "collapse", label: "审判崩坏" };
+  }
   if (verdict && !verdict.culpritEscaped) {
     return { over: true, reason: "caught", label: "真凶伏法" };
   }
@@ -635,7 +855,7 @@ export function votableConclusions(session) {
       propId: item.id,
       text: item.text,
       type: item.conclusion.type,
-      targetName: target?.name || "",
+      targetName: target ? `${target.code} ${target.name}` : "",
       supports: status.supports,
       threshold: status.threshold,
       stands: status.stands,

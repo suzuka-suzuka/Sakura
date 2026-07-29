@@ -693,10 +693,17 @@ export const WitchTrialSchema = z.object({
     rosterSize: z.number().int().min(6).max(14).default(9).describe('牢狱总人数|玩家+NPC的目标人数。NPC数量由它减去实到玩家数算出，人多时自动少配NPC，免得一屋子角色让庭审失焦'),
     maxChapters: z.number().int().min(1).max(6).default(3).describe('章节上限|每章减员2人（1名死者+1名被处刑者），3章约等于QQ群能撑住的长度'),
     investigateRounds: z.number().int().min(1).max(8).default(3).describe('调查轮数|每章的搜证阶段有几轮'),
-    trialRounds: z.number().int().min(2).max(10).default(5).describe('庭审轮数|轮次用尽就强制投票，超时会处刑嫌疑值最高者'),
-    playerCulpritChance: z.number().int().min(0).max(100).default(50).describe('凶手是玩家的概率(%)|必须与NPC数量脱钩。按人头均分的话玩家会默认「大概率是NPC干的」，游戏就退化成合作推理了'),
-    suicideChance: z.number().int().min(0).max(50).default(15).describe('真的是自杀的概率(%)|让「自杀结论」偶尔真的成立，玩家才不敢无脑把它当逃生舱'),
+    trialRounds: z.number().int().min(2).max(10).default(5).describe('庭审轮数|轮次用尽后进入投票；投票未决会处刑嫌疑值最高者'),
+    turnTimeoutMinutes: z.number().int().min(3).max(120).default(15).describe('每回合截止时间(分钟)|全员提前提交会立即结算；截止前房主不能强推，截止后自动推进'),
+    playerCulpritChance: z.number().int().min(0).max(100).default(50).describe('真人成为凶手的最终概率(%)|这是包含自杀/意外分支后的整章绝对概率，并与NPC人数脱钩'),
+    suicideChance: z.number().int().min(0).max(50).default(15).describe('无人行凶的概率(%)|本分支由死者本人造成，真相可能是自杀或意外'),
     onlyWhiteCreate: z.boolean().default(false).describe('仅白名单可开局|开启后普通成员不能创建审判'),
+}).refine((value) => value.minPlayers <= value.maxPlayers, {
+    message: '最少开局人数不能大于最多参与人数',
+    path: ['minPlayers'],
+}).refine((value) => value.playerCulpritChance + value.suicideChance <= 100, {
+    message: '真人凶手概率与无人行凶概率之和不能超过 100%',
+    path: ['playerCulpritChance'],
 }).describe('魔女审判');
 
 export const pluginMeta = {

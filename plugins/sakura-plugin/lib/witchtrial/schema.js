@@ -107,16 +107,28 @@ function slugId(value, fallback) {
 
 // ===== 牢狱 =====
 
+/** 地点代号：A、B、C…… 打字比中文名快，也不会因为模糊匹配选错 */
+const LOCATION_CODES = "ABCDEFGHIJ";
+
 export function normalizePrison(raw) {
   const source = raw && typeof raw === "object" ? raw : {};
+  const usedLocationIds = new Set();
 
   const locations = (Array.isArray(source.locations) ? source.locations : [])
-    .slice(0, 10)
-    .map((item, index) => ({
-      id: slugId(item?.id, `loc_${index + 1}`),
-      name: safeString(item?.name, 20) || `区域${index + 1}`,
-      description: safeString(item?.description, 300),
-    }))
+    .slice(0, LOCATION_CODES.length)
+    .map((item, index) => {
+      const baseId = slugId(item?.id, `loc_${index + 1}`);
+      let id = baseId;
+      let suffix = 2;
+      while (usedLocationIds.has(id)) id = `${baseId}_${suffix++}`;
+      usedLocationIds.add(id);
+      return {
+        id,
+        code: LOCATION_CODES[index],
+        name: safeString(item?.name, 20) || `区域${index + 1}`,
+        description: safeString(item?.description, 300),
+      };
+    })
     .filter((item) => item.name);
 
   return {
@@ -149,6 +161,7 @@ export function normalizeGirl(raw, { id, kind, userId, nickname } = {}) {
 
   return {
     id: String(id ?? source.id ?? ""),
+    code: "", // 囚犯编号，全员生成完后由 assignPrisonerCodes 统一分配
     kind: kind === "player" ? "player" : "npc",
     userId: kind === "player" ? String(userId ?? "") : "",
     playerName: kind === "player" ? safeString(nickname, 40) : "",
@@ -157,13 +170,60 @@ export function normalizeGirl(raw, { id, kind, userId, nickname } = {}) {
     appearance: safeString(source.appearance, 200),
     profile: safeString(source.profile, 500),
     ability: normalizeAbility(source.ability),
-    // 秘密：无辜者也有理由撒谎的来源。被翻出来会涨嫌疑值。
+    // 秘密只用于处刑叙事，不参与庭审嫌疑值。
     secret: safeString(source.secret, 200) || "（无）",
     secretExposed: false,
     suspicion: 0,
     alive: true,
     fate: "", // "" | "victim" | "executed"
   };
+}
+
+/**
+ * 分配囚犯编号 001、002……
+ *
+ * 按姓名排序而不是按玩家/NPC 分段：分段的话编号本身就泄露了谁是玩家。
+ * 虽然图鉴里本来就标着，但让登记册看起来像真的登记册总归好一点。
+ */
+export function assignPrisonerCodes(girls) {
+  Object.values(girls)
+    .sort((a, b) => a.name.localeCompare(b.name, "zh"))
+    .forEach((girl, index) => {
+      girl.code = String(index + 1).padStart(3, "0");
+    });
+  return girls;
+}
+
+/** 按编号找人，找不到返回 null。接受 001 / 1 / #001 各种写法 */
+export function girlByCode(session, text) {
+  const match = String(text || "").trim().match(/^#?(\d{1,3})$/);
+  if (!match) return null;
+  const code = String(Number(match[1])).padStart(3, "0");
+  return Object.values(session.girls || {}).find((girl) => girl.code === code) || null;
+}
+
+/** 按代号找地点，接受大小写 */
+export function locationByCode(session, text) {
+  const match = String(text || "").trim().match(/^([A-Za-z])$/);
+  if (!match) return null;
+  const code = match[1].toUpperCase();
+  return (session.prison?.locations || []).find((item) => item.code === code) || null;
+}
+
+/**
+ * 这位少女的能力能不能做到本案的手法
+ *
+ * 这是纯集合运算，不掷骰也不问 AI——「设定系本格」的判定基础。
+ * 注意它只表示「没被排除」，不表示「有嫌疑」：做得到不等于做了。
+ */
+export function canPerformMethod(girl, caseFile) {
+  const required = caseFile?.method?.requiredAbilities || [];
+  if (!required.length) return true; // 手法没要求特殊能力，人人都做得到
+
+  const owned = [girl?.ability?.name, ...(girl?.ability?.can || [])].filter(Boolean);
+  return required.every((need) =>
+    owned.some((have) => have.includes(need) || need.includes(have))
+  );
 }
 
 /** 取全部少女，玩家在前，顺序稳定 */
@@ -231,6 +291,7 @@ function normalizeEvidence(raw, index) {
     // 伪证由凶手在庭上临时造，不出现在 AI 生成的档案里
     fake: false,
     flawOf: "",
+    reservedFor: "", // 本地分配给真人的调查线索，AI 不得指定
   };
 }
 
@@ -311,6 +372,21 @@ export function evidenceOf(caseFile, evidenceId) {
 export function validateCase(caseFile, { girls = {}, locationIds = [] } = {}) {
   const problems = [];
   const { propositions, evidence } = caseFile;
+  const duplicates = (values) => {
+    const seen = new Set();
+    return [...new Set(values.filter((value) => {
+      if (seen.has(value)) return true;
+      seen.add(value);
+      return false;
+    }))];
+  };
+
+  const duplicateProps = duplicates(propositions.map((item) => item.id));
+  const duplicateEvidence = duplicates(evidence.map((item) => item.id));
+  const duplicateLocations = duplicates(locationIds);
+  if (duplicateProps.length) problems.push(`命题 id 重复：${duplicateProps.join("、")}`);
+  if (duplicateEvidence.length) problems.push(`证据 id 重复：${duplicateEvidence.join("、")}`);
+  if (duplicateLocations.length) problems.push(`地点 id 重复：${duplicateLocations.join("、")}`);
 
   // --- 结构完整性 ---
   const truth = propositionOf(caseFile, caseFile.truthId);
@@ -326,10 +402,25 @@ export function validateCase(caseFile, { girls = {}, locationIds = [] } = {}) {
   const conclusions = conclusionsOf(caseFile);
   if (conclusions.length < 3) problems.push("候选结论少于 3 个");
   if (propositions.length < 6) problems.push("命题少于 6 条");
-  if (evidence.length < 8) problems.push("证据少于 8 条");
+  if (evidence.length < 10) problems.push("证据少于 10 条");
+
+  const accusationTargets = conclusions
+    .filter((item) => item.conclusion.type === VERDICT.ACCUSE)
+    .map((item) => item.conclusion.targetId);
+  const duplicateTargets = duplicates(accusationTargets);
+  if (duplicateTargets.length) {
+    problems.push(`多个指认结论指向同一人：${duplicateTargets.join("、")}`);
+  }
 
   if (!girls[caseFile.victimId]) problems.push("死者不在少女名册里");
+  else if (!girls[caseFile.victimId].alive) problems.push("死者在本章开始前已经退场");
   if (!girls[caseFile.culpritId]) problems.push("凶手不在少女名册里");
+  else if (
+    caseFile.culpritId !== caseFile.victimId &&
+    !girls[caseFile.culpritId].alive
+  ) {
+    problems.push("凶手在本章开始前已经退场");
+  }
 
   // 真相与凶手必须对得上，否则处刑结算会自相矛盾
   if (truth.conclusion.type === VERDICT.ACCUSE) {
@@ -347,6 +438,8 @@ export function validateCase(caseFile, { girls = {}, locationIds = [] } = {}) {
     if (!target) problems.push(`结论「${item.text}」指认了名册外的人`);
     else if (item.conclusion.targetId === caseFile.victimId) {
       problems.push(`结论「${item.text}」指认了死者本人`);
+    } else if (!target.alive) {
+      problems.push(`结论「${item.text}」指认了前几章已经退场的人`);
     }
   }
 
@@ -371,7 +464,21 @@ export function validateCase(caseFile, { girls = {}, locationIds = [] } = {}) {
 
   // 3. 每条证据都可达
   const validLocations = new Set(locationIds);
+  if (!validLocations.has(caseFile.discovery.location)) {
+    problems.push("尸体发现地点不存在");
+  }
+  const finder = girls[caseFile.discovery.finder];
+  if (!finder || !finder.alive || finder.id === caseFile.victimId) {
+    problems.push("第一发现者不是仍在场的少女");
+  }
   for (const item of evidence) {
+    if (!item.supports.length && !item.refutes.length) {
+      problems.push(`证据「${item.name}」不支持也不否定任何命题`);
+    }
+    const contradictions = item.supports.filter((id) => item.refutes.includes(id));
+    if (contradictions.length) {
+      problems.push(`证据「${item.name}」同时支持并否定同一命题`);
+    }
     if (item.via === EVIDENCE_VIA.SEARCH) {
       if (!validLocations.has(item.location)) {
         problems.push(`证据「${item.name}」挂在不存在的地点上`);
@@ -386,24 +493,52 @@ export function validateCase(caseFile, { girls = {}, locationIds = [] } = {}) {
     }
   }
 
-  // 4. 真相可证成
-  const supportsTruth = evidence.filter((item) => item.supports.includes(truth.id)).length;
-  const threshold = SUPPORT_THRESHOLD[truth.conclusion.type];
-  if (supportsTruth < threshold) {
-    problems.push(`支持真相的证据只有 ${supportsTruth} 条，不足 ${threshold} 条`);
+  const searchEvidence = evidence.filter((item) => item.via === EVIDENCE_VIA.SEARCH);
+  const askEvidence = evidence.filter((item) => item.via === EVIDENCE_VIA.ASK);
+  if (searchEvidence.length < 3) problems.push("可搜查证据少于 3 条");
+  if (askEvidence.length < 3) problems.push("可询问证言少于 3 条");
+  if (new Set(searchEvidence.map((item) => item.location)).size < 3) {
+    problems.push("可搜查证据没有分布到至少 3 个地点");
+  }
+  if (new Set(askEvidence.map((item) => item.askTarget)).size < 2) {
+    problems.push("可询问证言没有分布到至少 2 位少女");
   }
 
-  // 手法必须真的只有凶手能做到，不然「设定系本格」就落空了
-  const culprit = girls[caseFile.culpritId];
-  const required = caseFile.method.requiredAbilities;
-  if (culprit && required.length) {
-    const owned = [culprit.ability?.name, ...(culprit.ability?.can || [])].filter(Boolean);
-    const covered = required.every((need) =>
-      owned.some((have) => have.includes(need) || need.includes(have))
-    );
-    if (!covered) {
-      problems.push(`手法需要「${required.join("、")}」，但凶手的能力做不到`);
+  // 4. 每一个候选结论都必须真的有机会成立。
+  // 只有反证、没有足够支持牌的“陪跑答案”会让投票菜单看似有选择，实则只有一个按钮。
+  for (const item of conclusions) {
+    const supports = evidence.filter((e) => e.supports.includes(item.id)).length;
+    const threshold = SUPPORT_THRESHOLD[item.conclusion.type];
+    if (supports < threshold) {
+      problems.push(
+        `支持结论「${item.text}」的证据只有 ${supports} 条，不足 ${threshold} 条`
+      );
     }
+  }
+
+  // 凶手当然得做得到自己干过的事
+  const culprit = girls[caseFile.culpritId];
+  if (culprit && !canPerformMethod(culprit, caseFile)) {
+    problems.push(`手法需要「${caseFile.method.requiredAbilities.join("、")}」，但凶手的能力做不到`);
+  }
+
+  // 但也不能只有凶手做得到。
+  // 玩家从尸体与证物推出所需能力后，如果范围只圈得住一个人，
+  // 仍然等于直接念出凶手的名字。
+  // 「设定系本格」是用物理约束**缩小**嫌疑范围，不是锁定一个人。
+  const candidates = Object.values(girls).filter(
+    (girl) => girl.alive && girl.id !== caseFile.victimId && canPerformMethod(girl, caseFile)
+  );
+  const inPlay = Object.values(girls).filter(
+    (girl) => girl.alive && girl.id !== caseFile.victimId
+  ).length;
+
+  if (candidates.length < 2) {
+    problems.push(
+      `手法只有 ${candidates.length} 个人做得到，玩家推断出能力后会直接锁定凶手`
+    );
+  } else if (inPlay >= 4 && candidates.length > Math.ceil(inPlay * 0.6)) {
+    problems.push(`手法有 ${candidates.length}/${inPlay} 人做得到，范围太宽，能力筛选失去意义`);
   }
 
   return { ok: problems.length === 0, problems };

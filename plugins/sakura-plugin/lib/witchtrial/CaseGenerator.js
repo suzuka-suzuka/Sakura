@@ -11,6 +11,7 @@
 
 import { getAI } from "../AIUtils/getAI.js";
 import { planWitchActions } from "./logic.js";
+export { pickVictimAndCulprit } from "./logic.js";
 import {
   CASE_SYSTEM,
   SETUP_SYSTEM,
@@ -18,6 +19,7 @@ import {
   buildSetupPrompt,
 } from "./prompts.js";
 import {
+  assignPrisonerCodes,
   extractJson,
   normalizeCase,
   normalizeGirl,
@@ -28,10 +30,6 @@ import {
 } from "./schema.js";
 
 const MAX_ATTEMPTS = 3;
-
-function pick(list) {
-  return list[Math.floor(Math.random() * list.length)];
-}
 
 async function askAI({ route, e, system, prompt }) {
   const result = await getAI(route, e, [{ text: prompt }], system, false, false, []);
@@ -72,7 +70,17 @@ export async function generateSetup({ e, route, players, npcCount, theme, onProg
     }
 
     parsed = extractJson(text);
-    if (parsed?.prison && Array.isArray(parsed.playerGirls)) break;
+    if (
+      parsed?.prison &&
+      Array.isArray(parsed.playerGirls) &&
+      parsed.playerGirls.length >= players.length &&
+      Array.isArray(parsed.npcGirls) &&
+      parsed.npcGirls.length >= npcCount &&
+      Array.isArray(parsed.prison.locations) &&
+      parsed.prison.locations.length >= 3
+    ) {
+      break;
+    }
 
     logger.warn(`[魔女审判] 开局第 ${attempt} 次输出无法解析`);
     parsed = null;
@@ -115,15 +123,19 @@ export async function generateSetup({ e, route, players, npcCount, theme, onProg
   const rawNpcs = Array.isArray(parsed.npcGirls) ? parsed.npcGirls : [];
   rawNpcs.slice(0, npcCount).forEach((item, index) => {
     const raw = String(item?.id ?? "").trim();
-    const id = raw.startsWith("n:") ? raw : toNpcId(`girl_${index + 1}`);
-    if (girls[id]) return; // id 撞车就丢弃，宁可少一个也不要覆盖玩家
+    const baseId = raw.startsWith("n:") ? raw : toNpcId(`girl_${index + 1}`);
+    let id = baseId;
+    let suffix = 2;
+    while (girls[id]) id = `${baseId}_${suffix++}`;
     girls[id] = normalizeGirl(item, { id, kind: "npc" });
   });
 
   const npcTotal = Object.values(girls).filter((girl) => girl.kind === "npc").length;
-  if (npcTotal < 3) {
-    throw new Error(`NPC 少女只生成了 ${npcTotal} 位，不足以开一场审判`);
+  if (npcTotal < npcCount) {
+    throw new Error(`NPC 少女只生成了 ${npcTotal} 位，需要 ${npcCount} 位`);
   }
+
+  assignPrisonerCodes(girls);
 
   logger.info(
     `[魔女审判] 牢狱《${prison.name}》就位，地点 ${prison.locations.length} 个，少女 ${Object.keys(girls).length} 位`
@@ -132,49 +144,20 @@ export async function generateSetup({ e, route, players, npcCount, theme, onProg
 }
 
 /**
- * 本地掷定本章的死者与凶手
- *
- * - 死者永远是 NPC：玩家不会因为运气差就被踢出局，只会因为输掉审判而死。
- * - 凶手落在玩家身上的概率固定，与 NPC 数量无关。
- * - 小概率真的是自杀，这时凶手就是死者本人——让「自杀结论」偶尔真的成立，
- *   玩家才不敢无脑把它当逃生舱。
- */
-export function pickVictimAndCulprit(session, { playerCulpritChance = 0.5, suicideChance = 0.15 } = {}) {
-  const living = Object.values(session.girls).filter((girl) => girl.alive);
-  const npcs = living.filter((girl) => girl.kind === "npc");
-  const players = living.filter((girl) => girl.kind === "player");
-
-  if (!npcs.length) return null; // NPC 池干了，没人可当死者
-  const victim = pick(npcs);
-
-  if (Math.random() < suicideChance) {
-    return { victim, culprit: victim };
-  }
-
-  const rest = living.filter((girl) => girl.id !== victim.id);
-  const playerPool = rest.filter((girl) => girl.kind === "player");
-  const npcPool = rest.filter((girl) => girl.kind === "npc");
-
-  let culprit;
-  if (playerPool.length && (Math.random() < playerCulpritChance || !npcPool.length)) {
-    culprit = pick(playerPool);
-  } else if (npcPool.length) {
-    culprit = pick(npcPool);
-  } else {
-    culprit = pick(players.length ? players : npcs);
-  }
-
-  return { victim, culprit };
-}
-
-/**
  * 生成一章的案件档案，带一致性校验重试
  *
  * 我们不需要 AI 写出一个好推理，只需要它随机吐结构，本地筛掉不自洽的。
  * 生成几次总能过一次。
  */
-export async function generateCase({ e, route, session, victim, culprit, onProgress }) {
-  const chapter = session.chapter;
+export async function generateCase({
+  e,
+  route,
+  session,
+  victim,
+  culprit,
+  chapter = session.chapter,
+  onProgress,
+}) {
   const locationIds = session.prison.locations.map((item) => item.id);
   let lastProblems = null;
 
