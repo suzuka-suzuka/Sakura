@@ -76,7 +76,7 @@ export const commandNames = {
     "pixivSearch.viewRanking": "p站排行榜",
     "pixivSearch.getRankingItem": "p站排行榜详情",
     "SearchImage.imageSearch": "搜图",
-    "Trpg.startGame": "开始跑团",
+    "WitchTrial.startGame": "开始审判",
 };
 
 export const manualCommandNames = [
@@ -685,15 +685,19 @@ export const ReminderTaskSchema = z.object({
 
 
 
-export const TrpgSchema = z.object({
-    enable: z.boolean().default(true).describe('启用AI跑团|关闭后所有跑团指令不响应'),
-    route: z.string().default('').describe('模型路由|#routeSelect|出模组和当KP用的路由，留空则跟随 AI 设定里的通用路由'),
-    minPlayers: z.number().int().min(1).max(12).default(2).describe('最少开局人数|不足这个人数无法开始'),
-    maxPlayers: z.number().int().min(1).max(12).default(6).describe('最多参与人数|人数越多出模组越慢、越费token'),
-    maxRounds: z.number().int().min(0).max(200).default(30).describe('回合上限|跑到这个回合数强制收场，0 表示不限制'),
-    onlyWhiteCreate: z.boolean().default(false).describe('仅白名单可开局|开启后普通成员不能创建跑团'),
-    enableFreeDice: z.boolean().default(true).describe('启用自由掷骰|响应 .r 1d100 这类指令'),
-}).describe('AI跑团');
+export const WitchTrialSchema = z.object({
+    enable: z.boolean().default(true).describe('启用魔女审判|关闭后所有审判指令不响应'),
+    route: z.string().default('').describe('模型路由|#routeSelect|出案件和当叙述者用的路由，留空则跟随 AI 设定里的通用路由'),
+    minPlayers: z.number().int().min(2).max(12).default(2).describe('最少开局人数|两人也能玩，一个是凶手的概率仍然存在'),
+    maxPlayers: z.number().int().min(2).max(12).default(6).describe('最多参与人数|人数越多出案件越慢、越费token'),
+    npcCount: z.number().int().min(3).max(12).default(6).describe('NPC少女数量|凑成一屋子人。死者永远从NPC里出，所以玩家不会因为运气差被踢出局'),
+    maxChapters: z.number().int().min(1).max(6).default(3).describe('章节上限|每章减员2人（1名死者+1名被处刑者），3章约等于QQ群能撑住的长度'),
+    investigateRounds: z.number().int().min(1).max(8).default(3).describe('调查轮数|每章的搜证阶段有几轮'),
+    trialRounds: z.number().int().min(2).max(10).default(5).describe('庭审轮数|轮次用尽就强制投票，超时会处刑嫌疑值最高者'),
+    playerCulpritChance: z.number().int().min(0).max(100).default(50).describe('凶手是玩家的概率(%)|必须与NPC数量脱钩。按人头均分的话玩家会默认「大概率是NPC干的」，游戏就退化成合作推理了'),
+    suicideChance: z.number().int().min(0).max(50).default(15).describe('真的是自杀的概率(%)|让「自杀结论」偶尔真的成立，玩家才不敢无脑把它当逃生舱'),
+    onlyWhiteCreate: z.boolean().default(false).describe('仅白名单可开局|开启后普通成员不能创建审判'),
+}).describe('魔女审判');
 
 export const pluginMeta = {
     displayName: '樱花插件',
@@ -733,7 +737,7 @@ export const configSchema = {
     'summary': SummarySchema,
     'teatime': TeatimeSchema,
     'reminderTask': ReminderTaskSchema,
-    'trpg': TrpgSchema,
+    'witchtrial': WitchTrialSchema,
 };
 
 
@@ -745,7 +749,7 @@ export const schemaCategories = {
     '戳一戳': ['poke'],
     '图片功能': ['ImageChannels', 'CliProxyMedia', 'EditImage', 'nai', 'pixiv', 'r18', 'summary', 'SearchImage', 'cool', 'teatime', 'EmojiThief'],
     '经济系统': ['economy'],
-    '游戏玩法': ['trpg'],
+    '游戏玩法': ['witchtrial'],
     '其他功能': ['60sNews', 'GroupInsight', 'AutoCleanup', 'forwardMessage', 'groupnotice', 'repeat', 'recall', 'bilicookie', 'VoxCPMVoice', 'reminderTask'],
 };
 
@@ -780,7 +784,7 @@ export const schemaLabels = {
     'SearchImage': '统一搜图',
     'summary': '图片外显',
     'teatime': '下午茶推送',
-    'trpg': 'AI 跑团',
+    'witchtrial': '魔女审判',
     'reminderTask': '重复提醒任务',
 };
 
