@@ -15,7 +15,11 @@ import {
   PHASES,
   turnDeadlineRemainingMs,
 } from "./SessionStore.js";
-import { VERDICT } from "./schema.js";
+import {
+  VERDICT,
+  comparePrisonerCode,
+  girlsByPrisonerCode,
+} from "./schema.js";
 
 const VERDICT_LABEL = {
   [VERDICT.ACCUSE]: "指认",
@@ -228,7 +232,7 @@ ${caseFile.discovery.body}
 ${session.prison.locations.map((item) => `${item.code}. ${item.name}`).join("　")}
 
 【在场囚犯】
-${Object.values(session.girls).filter((girl) => girl.alive).map((girl) => `${girl.code} ${girl.name}`).join("　")}
+${girlsByPrisonerCode(session.girls).filter((girl) => girl.alive).map((girl) => `${girl.code} ${girl.name}`).join("　")}
 
 搜到什么只有你自己知道。群里只会公布谁去了哪。
 ${renderTurnDeadline(session)}
@@ -403,9 +407,9 @@ export function renderTrialTurn(session, result) {
 }
 
 export function renderSuspicionBoard(session) {
-  const board = Object.values(session.girls)
+  const board = girlsByPrisonerCode(session.girls)
     .filter((girl) => girl.alive)
-    .sort((a, b) => b.suspicion - a.suspicion)
+    .sort((a, b) => b.suspicion - a.suspicion || comparePrisonerCode(a, b))
     .map((girl, index) => {
       const mark = index === 0 ? "⚠" : "·";
       return `${mark} ${girl.code} ${girl.name} ${girl.suspicion}`;
@@ -424,7 +428,7 @@ export function renderSuspicionBoard(session) {
  * 唯一不进图鉴的是秘密，那是各人自己的事。
  */
 export function renderCodex(session) {
-  const girls = Object.values(session.girls || {});
+  const girls = girlsByPrisonerCode(session.girls);
   const alive = girls.filter((girl) => girl.alive);
   const gone = girls.filter((girl) => !girl.alive);
 
@@ -446,16 +450,17 @@ ${session.prison?.name || "孤岛牢狱"}　第 ${session.chapter} 章
 
 在场 ${alive.length} 人，退场 ${gone.length} 人。
 能力是公开的——谁做得到、谁做不到，都写在这里。
+名册统一按固定囚犯编号排列；退场者保留原号，所以在场页可能会跳号。
 
 ⚠ 册子上不写谁是活人玩的、谁是这座牢狱自己长出来的。
 　 你们之中有几个是真的，没有人知道——包括你以为你知道的那几个。
 
 指令里可以直接打囚犯编号，比如【#询问 003 案发那晚你在哪】。`,
-    `【在场】\n\n${alive.map(entry).join("\n\n") || "（无）"}`,
+    `【在场 · 按编号】\n\n${alive.map(entry).join("\n\n") || "（无）"}`,
   ];
 
   if (gone.length) {
-    pages.push(`【已退场】\n\n${gone.map(entry).join("\n\n")}`);
+    pages.push(`【已退场 · 保留原编号】\n\n${gone.map(entry).join("\n\n")}`);
   }
 
   if (session.prison?.locations?.length) {
@@ -696,8 +701,7 @@ ${roster}
 
   // 逐人标「已提交/未提交」会直接点破谁是玩家——只有玩家需要提交。
   // 所以这里不给个人标记，只给总数。
-  const roster = Object.values(session.girls)
-    .sort((a, b) => b.suspicion - a.suspicion)
+  const roster = girlsByPrisonerCode(session.girls)
     .map((girl) => {
       const mark = !girl.alive ? (girl.fate === "victim" ? "💀" : "⚰") : "·";
       const state = girl.alive ? `嫌疑 ${girl.suspicion}` : girl.fate === "victim" ? "已死亡" : "已处刑";
@@ -811,7 +815,7 @@ ${voteBlock}`,
 }
 
 export function renderFinale(session, reason, closingText) {
-  const survivors = Object.values(session.girls).filter(
+  const survivors = girlsByPrisonerCode(session.girls).filter(
     (girl) => girl.alive && girl.kind === "player"
   );
 
@@ -871,6 +875,8 @@ ${survivors.length ? survivors.map((girl) => girl.name).join("、") : "无人生
 }
 
 export const HELP_TEXT = `【魔女审判 · 指令】
+
+以下所有命令前的【#】都可以省略；带 # 和不带 # 的写法完全等价。
 
 一群被检测出魔女因子的少女被关进孤岛牢狱。
 有人死了。猫头鹰要你们投票选出一个「魔女」送上处刑台。

@@ -339,7 +339,7 @@ export class WitchTrial extends plugin {
 
   // ===== 开局 =====
 
-  createGame = Command(/^#创建审判(?:\s+(.+))?$/, async (e) => {
+  createGame = Command(/^#?创建审判(?:\s+(.+))?$/, async (e) => {
     if (!this.config.enable) return false;
     const groupId = this.getGroupId(e);
     if (!groupId) {
@@ -407,7 +407,7 @@ export class WitchTrial extends plugin {
     }
   });
 
-  joinGame = Command(/^#加入审判$/, async (e) => {
+  joinGame = Command(/^#?加入审判$/, async (e) => {
     if (!this.config.enable) return false;
     const groupId = this.getGroupId(e);
     if (!groupId) return false;
@@ -467,7 +467,7 @@ export class WitchTrial extends plugin {
     }
   });
 
-  leaveGame = Command(/^#退出审判$/, async (e) => {
+  leaveGame = Command(/^#?退出审判$/, async (e) => {
     if (!this.config.enable) return false;
     const groupId = this.getGroupId(e);
     if (!groupId) return false;
@@ -516,7 +516,7 @@ export class WitchTrial extends plugin {
 
   // 开局是最烧钱的动作（出牢狱 + 出全体少女 + 出第一章案件），扣费挂在这里
   startGame = Command(
-    /^#开始审判$/,
+    /^#?开始审判$/,
     { economy: { command: "开始审判", refundOnFalse: true } },
     async (e) => {
       if (!this.config.enable) return false;
@@ -669,7 +669,7 @@ export class WitchTrial extends plugin {
 
   // ===== 调查阶段 =====
 
-  investigate = Command(/^#调查\s*(.+)$/, async (e) => {
+  investigate = Command(/^#?调查\s*(.+)$/, async (e) => {
     const ctx = await this.requireGirl(e, [PHASES.INVESTIGATE]);
     if (!ctx) return false;
     const { session, girl } = ctx;
@@ -693,7 +693,7 @@ export class WitchTrial extends plugin {
     });
   });
 
-  ask = Command(/^#询问\s*(\S+)\s*(.*)$/, async (e) => {
+  ask = Command(/^#?询问\s*(\S+)\s*(.*)$/, async (e) => {
     const ctx = await this.requireGirl(e, [PHASES.INVESTIGATE]);
     if (!ctx) return false;
     const { session, girl } = ctx;
@@ -721,7 +721,7 @@ export class WitchTrial extends plugin {
     });
   });
 
-  destroy = Command(/^#湮灭\s*(.+)$/, async (e) => {
+  destroy = Command(/^#?湮灭\s*(.+)$/, async (e) => {
     const ctx = await this.requireGirl(e, [PHASES.INVESTIGATE]);
     if (!ctx) return false;
     const { session, girl } = ctx;
@@ -747,7 +747,7 @@ export class WitchTrial extends plugin {
 
   // ===== 庭审阶段 =====
 
-  claim = Command(/^#主张\s*(\d+)$/, async (e) => {
+  claim = Command(/^#?主张\s*(\d+)$/, async (e) => {
     const ctx = await this.requireGirl(e, [PHASES.TRIAL]);
     if (!ctx) return false;
     const { session, girl } = ctx;
@@ -772,7 +772,7 @@ export class WitchTrial extends plugin {
 
   // 出牌必须声明方向。不用声明就能公开证据的话，出牌就没有风险了——
   // 玩家只看得见证物的名字和描述，往哪打全靠推，打空要反噬。
-  playEvidence = Command(/^#出示\s*(\d+)\s*(支持|反驳|驳)\s*(\d+)$/, async (e) => {
+  playEvidence = Command(/^#?出示\s*(\d+)\s*(支持|反驳|驳)\s*(\d+)$/, async (e) => {
     const ctx = await this.requireGirl(e, [PHASES.TRIAL]);
     if (!ctx) return false;
     const { session, girl } = ctx;
@@ -807,7 +807,7 @@ export class WitchTrial extends plugin {
     });
   });
 
-  challengeFake = Command(/^#揭穿\s*(\d+)$/, async (e) => {
+  challengeFake = Command(/^#?揭穿\s*(\d+)$/, async (e) => {
     const ctx = await this.requireGirl(e, [PHASES.TRIAL]);
     if (!ctx) return false;
     const { session, girl } = ctx;
@@ -834,7 +834,7 @@ export class WitchTrial extends plugin {
     });
   });
 
-  question = Command(/^#追问\s*(\S+)\s*(.*)$/, async (e) => {
+  question = Command(/^#?追问\s*(\S+)\s*(.*)$/, async (e) => {
     const ctx = await this.requireGirl(e, [PHASES.TRIAL]);
     if (!ctx) return false;
     const { session, girl } = ctx;
@@ -860,7 +860,7 @@ export class WitchTrial extends plugin {
 
   // 回应必须押一个命题当辩解。光说漂亮话不算数——你得指出你的说法
   // 靠台面上的哪一条撑着，而那一条随即变成别人可以攻击的靶子。
-  answer = Command(/^#回应\s*(\d+)\s*([\s\S]+)$/, async (e) => {
+  answer = Command(/^#?回应\s*(\d+)\s*([\s\S]+)$/, async (e) => {
     const ctx = await this.requireGirl(e, [PHASES.TRIAL]);
     if (!ctx) return false;
     const { session, girl } = ctx;
@@ -888,7 +888,7 @@ export class WitchTrial extends plugin {
     });
   });
 
-  fake = Command(/^#伪证\s*(\d+)\s*([\s\S]+)$/, async (e) => {
+  fake = Command(/^#?伪证\s*(\d+)\s*([\s\S]+)$/, async (e) => {
     const ctx = await this.requireGirl(e, [PHASES.TRIAL]);
     if (!ctx) return false;
     const { session, girl } = ctx;
@@ -978,7 +978,7 @@ export class WitchTrial extends plugin {
     }
   }
 
-  forceTurn = Command(/^#推进$/, async (e) => {
+  forceTurn = Command(/^#?推进$/, async (e) => {
     if (!this.config.enable) return false;
     const session = await this.getGroupSession(e);
     if (!session) return false;
@@ -1155,7 +1155,7 @@ export class WitchTrial extends plugin {
 
   // ===== 投票 =====
 
-  vote = Command(/^#投票\s*(\d+)$/, async (e) => {
+  vote = Command(/^#?投票\s*(\d+)$/, async (e) => {
     const ctx = await this.requireGirl(e, [PHASES.VOTING]);
     if (!ctx) return false;
     const { session } = ctx;
@@ -1315,7 +1315,7 @@ export class WitchTrial extends plugin {
 
   // ===== 查询 =====
 
-  showCard = Command(/^#我的少女$/, async (e) => {
+  showCard = Command(/^#?我的少女$/, async (e) => {
     const ctx = await this.requireGirl(e, null);
     if (!ctx) return false;
 
@@ -1333,7 +1333,7 @@ export class WitchTrial extends plugin {
     return true;
   });
 
-  showChapterRole = Command(/^#本章身份$/, async (e) => {
+  showChapterRole = Command(/^#?本章身份$/, async (e) => {
     const ctx = await this.requireGirl(e, null);
     if (!ctx?.session.caseFile) return false;
     const { session, girl } = ctx;
@@ -1357,7 +1357,7 @@ export class WitchTrial extends plugin {
     return true;
   });
 
-  showPouch = Command(/^#证物袋$/, async (e) => {
+  showPouch = Command(/^#?证物袋$/, async (e) => {
     const ctx = await this.requireGirl(e, null);
     if (!ctx) return false;
     if (!ctx.session.caseFile) return false;
@@ -1373,7 +1373,7 @@ export class WitchTrial extends plugin {
   });
 
   // 能力是公开信息，整套推理都靠它——所以图鉴不设权限，群里私聊都能查
-  showCodex = Command(/^#图鉴\s*(.*)$/, async (e) => {
+  showCodex = Command(/^#?图鉴\s*(.*)$/, async (e) => {
     if (!this.config.enable) return false;
     const resolved = await this.resolveSession(e);
     if (!resolved?.session.prison) return false;
@@ -1398,28 +1398,28 @@ export class WitchTrial extends plugin {
     return true;
   });
 
-  showProps = Command(/^#命题$/, async (e) => {
+  showProps = Command(/^#?命题$/, async (e) => {
     const resolved = await this.resolveSession(e);
     if (!resolved?.session.caseFile) return false;
     await e.reply(renderPropositions(resolved.session));
     return true;
   });
 
-  showRecord = Command(/^#法庭记录$/, async (e) => {
+  showRecord = Command(/^#?法庭记录$/, async (e) => {
     const resolved = await this.resolveSession(e);
     if (!resolved?.session.caseFile) return false;
     await e.reply(renderCourtRecord(resolved.session));
     return true;
   });
 
-  showStatus = Command(/^#审判状态$/, async (e) => {
+  showStatus = Command(/^#?审判状态$/, async (e) => {
     const resolved = await this.resolveSession(e);
     if (!resolved) return false;
     await e.reply(renderStatus(resolved.session));
     return true;
   });
 
-  endGame = Command(/^#结束审判$/, async (e) => {
+  endGame = Command(/^#?结束审判$/, async (e) => {
     if (!this.config.enable) return false;
     let session = await this.getGroupSession(e);
     if (!session) return false;
@@ -1451,7 +1451,7 @@ export class WitchTrial extends plugin {
     }
   });
 
-  help = Command(/^#审判帮助$/, async (e) => {
+  help = Command(/^#?审判帮助$/, async (e) => {
     if (!this.config.enable) return false;
     await e.reply(HELP_TEXT);
     return true;

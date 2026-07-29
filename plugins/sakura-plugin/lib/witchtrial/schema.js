@@ -194,6 +194,32 @@ export function assignPrisonerCodes(girls) {
   return girls;
 }
 
+/**
+ * 囚犯编号是所有公开名册唯一允许使用的排序依据。
+ *
+ * 不能依赖对象的写入顺序：开局生成时真人会先写入 girls，NPC 后写入，
+ * 直接 Object.values() 就会把「谁是真人」悄悄排在最前面。
+ */
+export function comparePrisonerCode(a, b) {
+  const codeA = Number.parseInt(String(a?.code || ""), 10);
+  const codeB = Number.parseInt(String(b?.code || ""), 10);
+  const hasCodeA = Number.isFinite(codeA);
+  const hasCodeB = Number.isFinite(codeB);
+
+  if (hasCodeA && hasCodeB && codeA !== codeB) return codeA - codeB;
+  if (hasCodeA !== hasCodeB) return hasCodeA ? -1 : 1;
+
+  return (
+    String(a?.name || "").localeCompare(String(b?.name || ""), "zh") ||
+    String(a?.id || "").localeCompare(String(b?.id || ""))
+  );
+}
+
+/** 返回按 001、002……排列的新数组，不改动原始对象。 */
+export function girlsByPrisonerCode(girls) {
+  return Object.values(girls || {}).sort(comparePrisonerCode);
+}
+
 /** 按编号找人，找不到返回 null。接受 001 / 1 / #001 各种写法 */
 export function girlByCode(session, text) {
   const match = String(text || "").trim().match(/^#?(\d{1,3})$/);
@@ -226,12 +252,9 @@ export function canPerformMethod(girl, caseFile) {
   );
 }
 
-/** 取全部少女，玩家在前，顺序稳定 */
+/** 取全部少女。公开与内部统一按囚犯编号，绝不按真人/NPC 分段。 */
 export function listGirls(session) {
-  return Object.values(session.girls || {}).sort((a, b) => {
-    if (a.kind !== b.kind) return a.kind === "player" ? -1 : 1;
-    return a.name.localeCompare(b.name, "zh");
-  });
+  return girlsByPrisonerCode(session.girls);
 }
 
 export function girlOf(session, id) {

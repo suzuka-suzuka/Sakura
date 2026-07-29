@@ -13,7 +13,10 @@
  * 用集合运算算出来后交给 AI。AI 只把结果写成故事。
  */
 
-import { publicGirlView } from "./schema.js";
+import {
+  girlsByPrisonerCode,
+  publicGirlView,
+} from "./schema.js";
 
 // ===== 1. 开局 =====
 
@@ -126,7 +129,7 @@ export const CASE_SYSTEM = `你是《魔女审判》的案件作者。你要设�
 export function buildCasePrompt({ prison, girls, victim, culprit, chapter, history }) {
   // 死者此刻在数据里还是 alive（她要到案件生成完才退场），这里必须手动排掉。
   // 否则 AI 会把证言挂到她身上，而开局后没人问得到死人——那条证据就永久不可达了。
-  const roster = Object.values(girls)
+  const roster = girlsByPrisonerCode(girls)
     .filter((girl) => girl.alive && girl.id !== victim.id)
     .map(
       (girl) =>
@@ -240,7 +243,7 @@ export const INVESTIGATE_SYSTEM = `你是《魔女审判》的叙述者。现在
 5. 只输出 JSON，不要任何围栏外文字。`;
 
 function publicCastText(girls, { aliveOnly = true } = {}) {
-  return Object.values(girls || {})
+  return girlsByPrisonerCode(girls)
     .filter((girl) => !aliveOnly || girl.alive)
     .map(
       (girl) =>

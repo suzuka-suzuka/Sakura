@@ -41,6 +41,7 @@ import {
 import {
   EVIDENCE_VIA,
   VERDICT,
+  comparePrisonerCode,
   conclusionsOf,
   evidenceOf,
   girlOf,
@@ -66,6 +67,14 @@ function locationName(session, locationId) {
 /** 代号只给玩家看，AI 的提示词里用名字就好，塞代号只会变成噪声 */
 function locationCode(session, locationId) {
   return session.prison?.locations.find((item) => item.id === locationId)?.code || "";
+}
+
+/** 同一回合的公开行动按囚犯编号播报，不能保留「真人先、NPC 后」的提交拼接顺序。 */
+function compareActorCode(session, a, b) {
+  return comparePrisonerCode(
+    girlOf(session, a?.actorId || a?.girlId),
+    girlOf(session, b?.actorId || b?.girlId)
+  );
 }
 
 async function narrate({ route, e, system, prompt }) {
@@ -270,20 +279,29 @@ export async function resolveInvestigateTurn({ e, route, session, actions: playe
     }
   }
 
+  // 判定已经结束后再排序，不改变抢证据等规则，只清除公开播报里的身份顺序。
+  results.sort((a, b) => compareActorCode(session, a, b));
+
   // 撞见：同地点两人以上
   const encounters = [];
   for (const [locationId, ids] of byLocation) {
     if (ids.length < 2) continue;
+    const orderedIds = [...ids].sort((a, b) =>
+      comparePrisonerCode(girlOf(session, a), girlOf(session, b))
+    );
     encounters.push({
       locationName: locationName(session, locationId),
       locationCode: locationCode(session, locationId),
-      names: ids.map((id) => girlOf(session, id)?.name || "某人"),
-      labels: ids.map((id) => {
+      names: orderedIds.map((id) => girlOf(session, id)?.name || "某人"),
+      labels: orderedIds.map((id) => {
         const girl = girlOf(session, id);
         return girl ? `${girl.code} ${girl.name}` : "某人";
       }),
     });
   }
+  encounters.sort((a, b) =>
+    String(a.locationCode || "").localeCompare(String(b.locationCode || ""))
+  );
 
   const prompt = buildInvestigatePrompt({
     prison: session.prison,
@@ -644,6 +662,7 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
   }
 
   recomputeSuspicion(session);
+  moves.sort((a, b) => compareActorCode(session, a, b));
 
   const publicEvidence = (caseFile.evidence || []).filter((item) =>
     session.publicEvidence.includes(item.id)
@@ -652,10 +671,12 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
     text: item.prop.text,
     supports: item.status.supports,
   }));
-  const suspicionBoard = livingGirls(session).map((girl) => ({
-    name: girl.name,
-    suspicion: girl.suspicion,
-  }));
+  const suspicionBoard = livingGirls(session)
+    .sort((a, b) => b.suspicion - a.suspicion || comparePrisonerCode(a, b))
+    .map((girl) => ({
+      name: girl.name,
+      suspicion: girl.suspicion,
+    }));
 
   const prompt = buildTrialPrompt({
     caseFile,
