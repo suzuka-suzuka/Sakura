@@ -17,6 +17,7 @@ import {
   SETUP_SYSTEM,
   buildCasePrompt,
   buildSetupPrompt,
+  createAnonymousGirlIdMap,
 } from "./prompts.js";
 import {
   assignPrisonerCodes,
@@ -30,6 +31,66 @@ import {
 } from "./schema.js";
 
 const MAX_CONTENT_ATTEMPTS = 3;
+
+function setupGirlIds(count) {
+  return Array.from(
+    { length: count },
+    (_, index) => `girl_${String(index + 1).padStart(3, "0")}`
+  );
+}
+
+function orderedSetupGirls(parsed, count) {
+  if (!Array.isArray(parsed?.girls) || parsed.girls.length !== count) return null;
+
+  const byId = new Map();
+  for (const item of parsed.girls) {
+    const id = String(item?.id ?? "").trim();
+    const name = String(item?.name ?? "").trim();
+    if (!id || !name || byId.has(id)) return null;
+    byId.set(id, item);
+  }
+
+  const ordered = setupGirlIds(count).map((id) => byId.get(id));
+  if (ordered.some((item) => !item)) return null;
+
+  const names = new Set(ordered.map((item) => String(item.name).trim()));
+  return names.size === count ? ordered : null;
+}
+
+function remapCaseGirlReferences(raw, anonymousGirlIds) {
+  const internalIdByAnonymousId = new Map(
+    [...anonymousGirlIds].map(([internalId, anonymousId]) => [anonymousId, internalId])
+  );
+  const remap = (value) => {
+    const id = String(value ?? "").trim();
+    return internalIdByAnonymousId.get(id) || id;
+  };
+
+  if (raw?.discovery && typeof raw.discovery === "object") {
+    raw.discovery.finder = remap(raw.discovery.finder);
+  }
+  for (const proposition of Array.isArray(raw?.propositions) ? raw.propositions : []) {
+    if (proposition?.conclusion?.type === "accuse") {
+      proposition.conclusion.targetId = remap(proposition.conclusion.targetId);
+    }
+  }
+  for (const evidence of Array.isArray(raw?.evidence) ? raw.evidence : []) {
+    if (evidence?.via === "ask") {
+      evidence.askTarget = remap(evidence.askTarget);
+    }
+  }
+  return raw;
+}
+
+function anonymizeValidationProblems(problems, anonymousGirlIds) {
+  return problems.map((problem) => {
+    let text = String(problem);
+    for (const [internalId, anonymousId] of anonymousGirlIds) {
+      text = text.split(internalId).join(anonymousId);
+    }
+    return text;
+  });
+}
 
 async function askAI({ route, e, system, prompt }) {
   const result = await getAI(route, e, [{ text: prompt }], system, false, false, []);
@@ -51,6 +112,8 @@ async function askAI({ route, e, system, prompt }) {
  */
 export async function generateSetup({ e, route, players, npcCount, theme, onProgress }) {
   let parsed = null;
+  let generatedGirls = null;
+  const girlCount = players.length + npcCount;
 
   for (let attempt = 1; attempt <= MAX_CONTENT_ATTEMPTS; attempt++) {
     if (attempt > 1) {
@@ -62,15 +125,13 @@ export async function generateSetup({ e, route, players, npcCount, theme, onProg
       route,
       e,
       system: SETUP_SYSTEM,
-      prompt: buildSetupPrompt({ players, npcCount, theme }),
+      prompt: buildSetupPrompt({ girlCount, theme }),
     });
     parsed = extractJson(text);
+    generatedGirls = orderedSetupGirls(parsed, girlCount);
     if (
       parsed?.prison &&
-      Array.isArray(parsed.playerGirls) &&
-      parsed.playerGirls.length >= players.length &&
-      Array.isArray(parsed.npcGirls) &&
-      parsed.npcGirls.length >= npcCount &&
+      generatedGirls &&
       Array.isArray(parsed.prison.locations) &&
       parsed.prison.locations.length >= 3
     ) {
@@ -79,9 +140,12 @@ export async function generateSetup({ e, route, players, npcCount, theme, onProg
 
     logger.warn(`[魔女审判] 开局第 ${attempt} 稿格式不完整`);
     parsed = null;
+    generatedGirls = null;
   }
 
-  if (!parsed) throw new Error(`牢狱连续 ${MAX_CONTENT_ATTEMPTS} 稿格式不合格`);
+  if (!parsed || !generatedGirls) {
+    throw new Error(`牢狱连续 ${MAX_CONTENT_ATTEMPTS} 稿格式不合格`);
+  }
 
   const prison = normalizePrison(parsed.prison);
   if (prison.locations.length < 3) {
@@ -90,38 +154,18 @@ export async function generateSetup({ e, route, players, npcCount, theme, onProg
 
   const girls = {};
 
-  // 玩家少女：AI 可能把 id 写错或顺序打乱，先按 id 精确匹配，匹配不到的按顺序兜底
-  const rawPlayers = Array.isArray(parsed.playerGirls) ? parsed.playerGirls : [];
-  const byId = new Map();
-  for (const item of rawPlayers) {
-    const key = String(item?.id ?? "").trim();
-    if (key && !byId.has(key)) byId.set(key, item);
-  }
-  const leftovers = rawPlayers.filter((item) => {
-    const key = String(item?.id ?? "").trim();
-    return !key || !players.some((player) => toPlayerId(player.userId) === key);
-  });
-
+  // AI 只生成一份不区分真人/NPC 的少女名单；角色归属在本地按槽位绑定。
   players.forEach((player, index) => {
     const id = toPlayerId(player.userId);
-    const matched = byId.get(id) || leftovers.shift() || rawPlayers[index];
-    if (!matched) logger.warn(`[魔女审判] 玩家 ${player.userId} 没分到少女设定，使用本地兜底`);
-    girls[id] = normalizeGirl(matched, {
+    girls[id] = normalizeGirl(generatedGirls[index], {
       id,
       kind: "player",
       userId: player.userId,
-      nickname: player.nickname,
     });
   });
 
-  // NPC 少女
-  const rawNpcs = Array.isArray(parsed.npcGirls) ? parsed.npcGirls : [];
-  rawNpcs.slice(0, npcCount).forEach((item, index) => {
-    const raw = String(item?.id ?? "").trim();
-    const baseId = raw.startsWith("n:") ? raw : toNpcId(`girl_${index + 1}`);
-    let id = baseId;
-    let suffix = 2;
-    while (girls[id]) id = `${baseId}_${suffix++}`;
+  generatedGirls.slice(players.length).forEach((item, index) => {
+    const id = toNpcId(`girl_${index + 1}`);
     girls[id] = normalizeGirl(item, { id, kind: "npc" });
   });
 
@@ -153,6 +197,7 @@ export async function generateCase({
   onProgress,
 }) {
   const locationIds = session.prison.locations.map((item) => item.id);
+  const anonymousGirlIds = createAnonymousGirlIdMap(session.girls);
   let lastProblems = null;
 
   for (let attempt = 1; attempt <= MAX_CONTENT_ATTEMPTS; attempt++) {
@@ -169,6 +214,7 @@ export async function generateCase({
       culprit,
       chapter,
       history: session.history,
+      anonymousGirlIds,
     });
     if (lastProblems) {
       prompt += `\n\n上一版有这些问题，这次必须避免：\n${lastProblems.map((item) => `- ${item}`).join("\n")}`;
@@ -183,15 +229,18 @@ export async function generateCase({
       continue;
     }
 
-    const caseFile = normalizeCase(parsed, { chapter });
+    const caseFile = normalizeCase(
+      remapCaseGirlReferences(parsed, anonymousGirlIds),
+      { chapter }
+    );
     // 死者和凶手是本地掷定的，不采信 AI 写回来的
     caseFile.victimId = victim.id;
     caseFile.culpritId = culprit.id;
 
     const { ok, problems } = validateCase(caseFile, { girls: session.girls, locationIds });
     if (!ok) {
-      lastProblems = problems;
-      logger.warn(`[魔女审判] 案件第 ${attempt} 稿校验未通过：${problems.join("、")}`);
+      lastProblems = anonymizeValidationProblems(problems, anonymousGirlIds);
+      logger.warn(`[魔女审判] 案件第 ${attempt} 稿校验未通过：${lastProblems.join("、")}`);
       continue;
     }
 

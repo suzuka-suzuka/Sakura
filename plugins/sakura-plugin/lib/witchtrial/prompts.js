@@ -13,10 +13,7 @@
  * 用集合运算算出来后交给 AI。AI 只把结果写成故事。
  */
 
-import {
-  girlsByPrisonerCode,
-  publicGirlView,
-} from "./schema.js";
+import { girlsByPrisonerCode } from "./schema.js";
 
 // ===== 1. 开局 =====
 
@@ -38,19 +35,21 @@ export const SETUP_SYSTEM = `你是《魔女审判》的设定作者。这是一
 - 每位少女要有一条见不得光的秘密。秘密和杀人无关，只在她被处刑时用于叙事。
 - 能力之间不要重复，也不要有两个人的能力互相可替代。`;
 
-export function buildSetupPrompt({ players, npcCount, theme }) {
-  const roster = players
-    .map((player, index) => `${index + 1}. id "p:${player.userId}"，玩家昵称「${player.nickname}」`)
-    .join("\n");
+export function buildSetupPrompt({ girlCount, theme }) {
+  const anonymousIds = Array.from(
+    { length: girlCount },
+    (_, index) => `girl_${String(index + 1).padStart(3, "0")}`
+  );
 
   return `请设计一座孤岛牢狱，以及关在里面的少女们。
 
 ${theme ? `题材要求：${theme}` : "题材自选，偏哥特与童话残酷感。"}
 
-本局有 ${players.length} 位玩家少女，另需 ${npcCount} 位 NPC 少女凑成一屋子。
+请生成恰好 ${girlCount} 位少女。你不会收到也不需要知道任何现实玩家资料，
+不要猜测哪些角色由真人操作，也不要提及玩家、昵称、账号或 NPC。
 
-玩家名单（id 原样抄回，一个字都不能改）：
-${roster}
+少女 id（必须逐个原样抄回）：
+${anonymousIds.map((id) => `- "${id}"`).join("\n")}
 
 按这个 JSON 结构输出：
 {
@@ -63,9 +62,9 @@ ${roster}
       { "id": "英文小写下划线id", "name": "地点名", "description": "地点描述，80-150字" }
     ]
   },
-  "playerGirls": [
+  "girls": [
     {
-      "id": "对应玩家的 id，原样抄回",
+      "id": "上面给定的匿名 id，原样抄回",
       "name": "少女姓名",
       "age": 年龄数字（12-19）,
       "appearance": "外貌，一两句",
@@ -73,24 +72,13 @@ ${roster}
       "ability": { "name": "能力名", "can": ["能做到的事，写具体"], "limit": "硬性限制" },
       "secret": "一条见不得光的秘密，和杀人无关"
     }
-  ],
-  "npcGirls": [
-    {
-      "id": "n:拼音小写",
-      "name": "少女姓名",
-      "age": 年龄数字,
-      "appearance": "外貌，一两句",
-      "profile": "身世与性格，150-250字",
-      "ability": { "name": "能力名", "can": ["能做到的事"], "limit": "硬性限制" },
-      "secret": "一条见不得光的秘密"
-    }
   ]
 }
 
 要求：
 - 地点 5-7 个，要能藏东西、能发生事。
-- playerGirls 的数量和 id 必须与玩家名单完全一致。
-- npcGirls 恰好 ${npcCount} 位，id 用 "n:" 开头。
+- girls 恰好 ${girlCount} 位，id 必须与给定的匿名 id 完全一致。
+- 每位少女都必须有不同且完整的姓名；姓名只按世界观创作，不得参考现实用户。
 - 能力设计要为推理服务：想象一下「什么样的案件手法只有拥有这个能力的人能做到」。`;
 
 }
@@ -126,14 +114,33 @@ export const CASE_SYSTEM = `你是《魔女审判》的案件作者。你要设�
 
 只输出 JSON，不要任何解释。`;
 
-export function buildCasePrompt({ prison, girls, victim, culprit, chapter, history }) {
+export function createAnonymousGirlIdMap(girls) {
+  return new Map(
+    girlsByPrisonerCode(girls).map((girl, index) => [
+      girl.id,
+      `girl_${String(index + 1).padStart(3, "0")}`,
+    ])
+  );
+}
+
+export function buildCasePrompt({
+  prison,
+  girls,
+  victim,
+  culprit,
+  chapter,
+  history,
+  anonymousGirlIds = createAnonymousGirlIdMap(girls),
+}) {
+  const anonymousId = (girl) => anonymousGirlIds.get(girl.id) || "girl_unknown";
+
   // 死者此刻在数据里还是 alive（她要到案件生成完才退场），这里必须手动排掉。
   // 否则 AI 会把证言挂到她身上，而开局后没人问得到死人——那条证据就永久不可达了。
   const roster = girlsByPrisonerCode(girls)
     .filter((girl) => girl.alive && girl.id !== victim.id)
     .map(
       (girl) =>
-        `- id "${girl.id}" ${girl.name}：能力「${girl.ability.name}」，可以${girl.ability.can.join("、") || "（未定义）"}，限制：${girl.ability.limit}`
+        `- id "${anonymousId(girl)}" ${girl.name}：能力「${girl.ability.name}」，可以${girl.ability.can.join("、") || "（未定义）"}，限制：${girl.ability.limit}`
     )
     .join("\n");
 
@@ -158,9 +165,9 @@ ${locations}
 ${roster}
 
 ## 本案已经定好的部分（不可更改）
-死者：${victim.name}（id "${victim.id}"，能力「${victim.ability.name}"）
+死者：${victim.name}（id "${anonymousId(victim)}"，能力「${victim.ability.name}"）
 　　　身世：${victim.profile}
-凶手：${culprit.name}（id "${culprit.id}"，能力「${culprit.ability.name}」，可以${culprit.ability.can.join("、")}，限制：${culprit.ability.limit}）
+凶手：${culprit.name}（id "${anonymousId(culprit)}"，能力「${culprit.ability.name}」，可以${culprit.ability.can.join("、")}，限制：${culprit.ability.limit}）
 　　　身世：${culprit.profile}
 　　　她藏着的事：${culprit.secret}
 
@@ -225,6 +232,7 @@ ${historyText}
 - evidence 10-14 条；search 至少 3 条并分散到至少 3 个地点，ask 至少 3 条并分散到至少 2 位在场少女。
 - **每一个结论**都要达到自己的支持门槛：accuse 至少 2 条，suicide/accident 至少 3 条。
 - 每条证据至少支持或否定一个命题；description 必须让玩家看得出这种关系的理由。
+- girl_ 开头的匿名 id 只能出现在 finder、targetId、askTarget 等结构字段中；所有可读文本一律写少女姓名。
 
 再检查一遍五条铁律，特别是第 2、3 条：
 把每条结论拿出来，确认它既有足够支持证据能成立；如果不是真相，又至少有一条证据能否定。`;

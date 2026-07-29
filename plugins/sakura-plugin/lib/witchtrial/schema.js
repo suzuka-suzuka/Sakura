@@ -156,7 +156,7 @@ function normalizeAbility(raw) {
   };
 }
 
-export function normalizeGirl(raw, { id, kind, userId, nickname } = {}) {
+export function normalizeGirl(raw, { id, kind, userId } = {}) {
   const source = raw && typeof raw === "object" ? raw : {};
 
   return {
@@ -164,8 +164,7 @@ export function normalizeGirl(raw, { id, kind, userId, nickname } = {}) {
     code: "", // 囚犯编号，全员生成完后由 assignPrisonerCodes 统一分配
     kind: kind === "player" ? "player" : "npc",
     userId: kind === "player" ? String(userId ?? "") : "",
-    playerName: kind === "player" ? safeString(nickname, 40) : "",
-    name: safeString(source.name, 20) || safeString(nickname, 20) || "无名少女",
+    name: safeString(source.name, 20) || "无名少女",
     age: safeInt(source.age, { min: 12, max: 19, fallback: 16 }),
     appearance: safeString(source.appearance, 200),
     profile: safeString(source.profile, 500),
@@ -183,7 +182,7 @@ export function normalizeGirl(raw, { id, kind, userId, nickname } = {}) {
  * 分配囚犯编号 001、002……
  *
  * 按姓名排序而不是按玩家/NPC 分段：分段的话编号本身就泄露了谁是玩家。
- * 虽然图鉴里本来就标着，但让登记册看起来像真的登记册总归好一点。
+ * 图鉴不会标出角色归属，编号本身也不能留下真人先写入的痕迹。
  */
 export function assignPrisonerCodes(girls) {
   Object.values(girls)
@@ -572,7 +571,7 @@ export function validateCase(caseFile, { girls = {}, locationIds = [] } = {}) {
 /** 少女的公开视图：所有人都能看到的部分 */
 export function publicGirlView(girl) {
   return {
-    id: girl.id,
+    id: girl.code ? `girl_${girl.code}` : "girl_unknown",
     姓名: girl.name,
     能力: `${girl.ability.name}（${girl.ability.can.join("、") || "未知"}；限制：${girl.ability.limit}）`,
     嫌疑值: girl.suspicion,
