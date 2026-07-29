@@ -378,6 +378,11 @@ export function validateCase(caseFile, { girls = {}, locationIds = [] } = {}) {
       }
     } else if (!girls[item.askTarget]) {
       problems.push(`证据「${item.name}」要问一个名册外的人`);
+    } else if (item.askTarget === caseFile.victimId) {
+      // 死者在校验这一刻还是 alive（她要到案件生成完才退场），得单独挡
+      problems.push(`证据「${item.name}」要问死者本人，永远问不到`);
+    } else if (!girls[item.askTarget].alive) {
+      problems.push(`证据「${item.name}」要问一个前几章已经退场的人`);
     }
   }
 

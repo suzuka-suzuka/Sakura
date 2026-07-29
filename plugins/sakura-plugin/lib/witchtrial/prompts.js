@@ -114,8 +114,10 @@ export const CASE_SYSTEM = `你是《魔女审判》的案件作者。你要设�
 只输出 JSON，不要任何解释。`;
 
 export function buildCasePrompt({ prison, girls, victim, culprit, chapter, history }) {
+  // 死者此刻在数据里还是 alive（她要到案件生成完才退场），这里必须手动排掉。
+  // 否则 AI 会把证言挂到她身上，而开局后没人问得到死人——那条证据就永久不可达了。
   const roster = Object.values(girls)
-    .filter((girl) => girl.alive)
+    .filter((girl) => girl.alive && girl.id !== victim.id)
     .map(
       (girl) =>
         `- id "${girl.id}" ${girl.name}：能力「${girl.ability.name}」，可以${girl.ability.can.join("、") || "（未定义）"}，限制：${girl.ability.limit}`
@@ -281,6 +283,9 @@ export const TRIAL_SYSTEM = `你是《魔女审判》的法庭叙述者。你要
 6. 只输出 JSON，不要任何围栏外文字。`;
 
 export function buildTrialPrompt({ caseFile, girls, round, maxRounds, moves, publicEvidence, standing, suspicionBoard }) {
+  // NPC 会被逐章消耗（每章一个死者，被处刑的也可能是 NPC）。
+  // 打到后面可能一个 NPC 都不剩，这时候不能再要它写 NPC 台词。
+  const livingNpcs = Object.values(girls).filter((girl) => girl.alive && girl.kind === "npc");
   const moveLines = moves
     .map((item) => {
       switch (item.kind) {
@@ -346,8 +351,15 @@ ${moveLines || "（本回合没有人出手）"}
   "summary": "本轮的要点，一句话"
 }
 
-npcLines 给 2-3 条，挑本轮最该有反应的 NPC。她们可以撒谎、可以互相攀咬，
-但不能说出台面上没有的证据内容。
+${
+  livingNpcs.length
+    ? `npcLines 给 2-3 条，只能从这些还活着的 NPC 里挑：${livingNpcs.map((girl) => `${girl.name}(${girl.id})`).join("、")}
+她们可以撒谎、可以互相攀咬，但不能说出台面上没有的证据内容。
+**绝对不许让已经死掉或被处刑的少女开口。**`
+    : `**这座牢狱里已经一个 NPC 都不剩了。npcLines 给空数组。**
+法庭上只有玩家和猫头鹰。写出那种没人可以躲在别人后面的窒息感——
+以前还能把话头甩给旁人，现在每一句话都必然落在在座某个人头上。`
+}
 
 ${round >= maxRounds ? "**这是庭审最后一轮，写出猫头鹰即将要求投票的压迫感。**" : ""}`;
 }
