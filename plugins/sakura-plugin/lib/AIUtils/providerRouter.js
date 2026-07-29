@@ -204,6 +204,7 @@ function buildRequestConfig(route, target, provider, credential) {
     providerId: provider.id,
     credentialId: credential.id,
     targetId: target.id,
+    timeoutMs: route.timeoutMs,
   };
 }
 

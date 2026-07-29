@@ -352,6 +352,7 @@ const RouteSchema = z.object({
     reasoningLevel: z.enum(COMMON_REASONING_LEVELS).default('default').describe('统一思考等级|Target 可转换或覆盖为供应商原生参数'),
     maxAttempts: z.number().int().min(1).default(3).describe('最大尝试次数|一次请求最多尝试的目标与 Key 组合数'),
     retryDelayMs: z.number().int().min(0).default(1000).describe('重试间隔|毫秒'),
+    timeoutMs: z.number().int().min(1000).default(300000).describe('单目标请求超时|毫秒；超时后由路由尝试下一个目标或 Key'),
     targets: z.array(RouteTargetSchema).min(1, '至少配置一个路由目标').describe('路由目标|#nameField:id'),
 }).superRefine((route, ctx) => {
     addUniqueFieldIssues(route.targets, 'id', ctx, ['targets']);

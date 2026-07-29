@@ -29,7 +29,7 @@ import {
   validateCase,
 } from "./schema.js";
 
-const MAX_ATTEMPTS = 3;
+const MAX_CONTENT_ATTEMPTS = 3;
 
 async function askAI({ route, e, system, prompt }) {
   const result = await getAI(route, e, [{ text: prompt }], system, false, false, []);
@@ -52,23 +52,18 @@ async function askAI({ route, e, system, prompt }) {
 export async function generateSetup({ e, route, players, npcCount, theme, onProgress }) {
   let parsed = null;
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    if (attempt > 1) await onProgress?.(`牢狱第 ${attempt - 1} 稿没成，正在重写…`);
-
-    let text;
-    try {
-      text = await askAI({
-        route,
-        e,
-        system: SETUP_SYSTEM,
-        prompt: buildSetupPrompt({ players, npcCount, theme }),
-      });
-    } catch (error) {
-      logger.warn(`[魔女审判] 开局生成第 ${attempt} 次调用失败：${error.message}`);
-      if (attempt === MAX_ATTEMPTS) throw error;
-      continue;
+  for (let attempt = 1; attempt <= MAX_CONTENT_ATTEMPTS; attempt++) {
+    if (attempt > 1) {
+      await onProgress?.(`牢狱第 ${attempt - 1} 稿格式不完整，正在重写…`);
     }
 
+    // API 与传输错误不在这里捕获或重试，统一交给 AI 路由处理。
+    const text = await askAI({
+      route,
+      e,
+      system: SETUP_SYSTEM,
+      prompt: buildSetupPrompt({ players, npcCount, theme }),
+    });
     parsed = extractJson(text);
     if (
       parsed?.prison &&
@@ -82,11 +77,11 @@ export async function generateSetup({ e, route, players, npcCount, theme, onProg
       break;
     }
 
-    logger.warn(`[魔女审判] 开局第 ${attempt} 次输出无法解析`);
+    logger.warn(`[魔女审判] 开局第 ${attempt} 稿格式不完整`);
     parsed = null;
   }
 
-  if (!parsed) throw new Error(`牢狱连续 ${MAX_ATTEMPTS} 次生成失败`);
+  if (!parsed) throw new Error(`牢狱连续 ${MAX_CONTENT_ATTEMPTS} 稿格式不合格`);
 
   const prison = normalizePrison(parsed.prison);
   if (prison.locations.length < 3) {
@@ -144,10 +139,9 @@ export async function generateSetup({ e, route, players, npcCount, theme, onProg
 }
 
 /**
- * 生成一章的案件档案，带一致性校验重试
+ * 生成一章的案件档案，并在本地做一致性校验。
  *
- * 我们不需要 AI 写出一个好推理，只需要它随机吐结构，本地筛掉不自洽的。
- * 生成几次总能过一次。
+ * API 与传输失败交给路由层；只有拿到内容后解析或校验不通过，才重写下一稿。
  */
 export async function generateCase({
   e,
@@ -161,10 +155,11 @@ export async function generateCase({
   const locationIds = session.prison.locations.map((item) => item.id);
   let lastProblems = null;
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= MAX_CONTENT_ATTEMPTS; attempt++) {
     if (attempt > 1) {
-      const reason = lastProblems?.length ? lastProblems.slice(0, 2).join("、") : "上一次调用失败";
-      await onProgress?.(`案件第 ${attempt - 1} 稿逻辑不自洽（${reason}），正在重写…`);
+      await onProgress?.(
+        `案件第 ${attempt - 1} 稿不合格（${lastProblems.slice(0, 2).join("、")}），正在重写…`
+      );
     }
 
     let prompt = buildCasePrompt({
@@ -179,19 +174,12 @@ export async function generateCase({
       prompt += `\n\n上一版有这些问题，这次必须避免：\n${lastProblems.map((item) => `- ${item}`).join("\n")}`;
     }
 
-    let text;
-    try {
-      text = await askAI({ route, e, system: CASE_SYSTEM, prompt });
-    } catch (error) {
-      logger.warn(`[魔女审判] 案件生成第 ${attempt} 次调用失败：${error.message}`);
-      if (attempt === MAX_ATTEMPTS) throw error;
-      continue;
-    }
-
+    // API 与传输错误不在这里捕获或重试，统一交给 AI 路由处理。
+    const text = await askAI({ route, e, system: CASE_SYSTEM, prompt });
     const parsed = extractJson(text);
     if (!parsed) {
       lastProblems = ["输出不是合法 JSON"];
-      logger.warn(`[魔女审判] 案件第 ${attempt} 次返回的不是 JSON`);
+      logger.warn(`[魔女审判] 案件第 ${attempt} 稿不是合法 JSON`);
       continue;
     }
 
@@ -201,20 +189,23 @@ export async function generateCase({
     caseFile.culpritId = culprit.id;
 
     const { ok, problems } = validateCase(caseFile, { girls: session.girls, locationIds });
-    if (ok) {
-      // NPC 凶手的行动排程在这里一次性定死，绝不让 AI 每回合即兴决定毁什么
-      if (culprit.kind === "npc") {
-        caseFile.witchPlan = planWitchActions(caseFile, { rounds: session.investigateRounds });
-      }
-      logger.info(
-        `[魔女审判] 第 ${chapter} 章案件就位：死者 ${victim.name}，凶手 ${culprit.name}（${culprit.kind}），证据 ${caseFile.evidence.length} 条`
-      );
-      return caseFile;
+    if (!ok) {
+      lastProblems = problems;
+      logger.warn(`[魔女审判] 案件第 ${attempt} 稿校验未通过：${problems.join("、")}`);
+      continue;
     }
 
-    lastProblems = problems;
-    logger.warn(`[魔女审判] 案件第 ${attempt} 稿校验未通过：${problems.join("、")}`);
+    // NPC 凶手的行动排程在这里一次性定死，绝不让 AI 每回合即兴决定毁什么
+    if (culprit.kind === "npc") {
+      caseFile.witchPlan = planWitchActions(caseFile, { rounds: session.investigateRounds });
+    }
+    logger.info(
+      `[魔女审判] 第 ${chapter} 章案件就位：死者 ${victim.name}，凶手 ${culprit.name}（${culprit.kind}），证据 ${caseFile.evidence.length} 条`
+    );
+    return caseFile;
   }
 
-  throw new Error(`案件连续 ${MAX_ATTEMPTS} 次生成失败：${lastProblems?.join("、") || "未知原因"}`);
+  throw new Error(
+    `案件连续 ${MAX_CONTENT_ATTEMPTS} 稿内容不合格：${lastProblems?.join("、") || "未知原因"}`
+  );
 }

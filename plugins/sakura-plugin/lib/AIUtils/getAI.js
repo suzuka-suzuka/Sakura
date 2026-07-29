@@ -173,10 +173,12 @@ async function _getOpenAIResponse(
     return errorMessage;
   }
 
+  const timeoutMs = Number(channel.timeoutMs);
   const openai = new OpenAI({
     apiKey: channel.apiKey,
     ...(channel.baseURL?.trim() && { baseURL: channel.baseURL.trim() }),
     maxRetries: 0,
+    ...(Number.isFinite(timeoutMs) && timeoutMs > 0 && { timeout: Math.trunc(timeoutMs) }),
   });
 
   try {
@@ -461,6 +463,10 @@ async function _getGeminiResponse(
     };
 
     const requestConfig = {};
+    const timeoutMs = Number(channel.timeoutMs);
+    if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+      requestConfig.abortSignal = AbortSignal.timeout(Math.trunc(timeoutMs));
+    }
 
     if (Number.isFinite(channel.temperature)) {
       requestConfig.temperature = channel.temperature;
@@ -634,7 +640,7 @@ export async function getAI(
     const attempt = plan.attempts[index];
     const config = attempt.requestConfig;
     logger.info(
-      `[AI Router] route=${routeId} target=${attempt.target.id} provider=${attempt.provider.id} credential=${attempt.credential.id} model=${config.model}`
+      `[AI Router] route=${routeId} target=${attempt.target.id} provider=${attempt.provider.id} credential=${attempt.credential.id} model=${config.model} timeoutMs=${config.timeoutMs}`
     );
 
     try {
