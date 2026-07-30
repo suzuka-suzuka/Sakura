@@ -76,7 +76,6 @@ export const commandNames = {
     "pixivSearch.viewRanking": "p站排行榜",
     "pixivSearch.getRankingItem": "p站排行榜详情",
     "SearchImage.imageSearch": "搜图",
-    "WitchTrial.startGame": "开始审判",
 };
 
 export const manualCommandNames = [
@@ -685,29 +684,6 @@ export const ReminderTaskSchema = z.object({
     tasks: z.array(ReminderTaskItemSchema).default([]).describe('提醒任务列表|#nameField:id|可配置多个重复提醒任务'),
 }).describe('重复提醒任务');
 
-
-
-export const WitchTrialSchema = z.object({
-    enable: z.boolean().default(true).describe('启用魔女审判|关闭后所有审判指令不响应'),
-    route: z.string().default('').describe('模型路由|#routeSelect|出案件和当叙述者用的路由，留空则跟随 AI 设定里的通用路由'),
-    minPlayers: z.number().int().min(2).max(12).default(2).describe('最少开局人数|两人也能玩，一个是凶手的概率仍然存在'),
-    maxPlayers: z.number().int().min(2).max(12).default(6).describe('最多参与人数|人数越多出案件越慢、越费token'),
-    rosterSize: z.number().int().min(6).max(14).default(9).describe('牢狱总人数|玩家+NPC的目标人数。NPC数量由它减去实到玩家数算出，人多时自动少配NPC，免得一屋子角色让庭审失焦'),
-    maxChapters: z.number().int().min(1).max(6).default(3).describe('章节上限|每章减员2人（1名死者+1名被处刑者），3章约等于QQ群能撑住的长度'),
-    investigateRounds: z.number().int().min(1).max(8).default(3).describe('调查轮数|每章的搜证阶段有几轮'),
-    trialRounds: z.number().int().min(2).max(10).default(5).describe('庭审轮数|轮次用尽后进入投票；投票未决会处刑嫌疑值最高者'),
-    turnTimeoutMinutes: z.number().int().min(3).max(120).default(15).describe('每回合截止时间(分钟)|全员提前提交会立即结算；截止前房主不能强推，截止后自动推进'),
-    playerCulpritChance: z.number().int().min(0).max(100).default(50).describe('真人成为凶手的最终概率(%)|这是包含极罕见自杀分支后的整章绝对概率，并与NPC人数脱钩'),
-    suicideChance: z.number().int().min(0).max(2).default(1).describe('自杀真相概率(%)|默认每章仅1%，最多2%；除此之外真相一定是指认某位凶手'),
-    onlyWhiteCreate: z.boolean().default(false).describe('仅白名单可开局|开启后普通成员不能创建审判'),
-}).refine((value) => value.minPlayers <= value.maxPlayers, {
-    message: '最少开局人数不能大于最多参与人数',
-    path: ['minPlayers'],
-}).refine((value) => value.playerCulpritChance + value.suicideChance <= 100, {
-    message: '真人凶手概率与自杀真相概率之和不能超过 100%',
-    path: ['playerCulpritChance'],
-}).describe('魔女审判');
-
 export const pluginMeta = {
     displayName: '樱花插件',
     icon: '🌸',
@@ -746,7 +722,6 @@ export const configSchema = {
     'summary': SummarySchema,
     'teatime': TeatimeSchema,
     'reminderTask': ReminderTaskSchema,
-    'witchtrial': WitchTrialSchema,
 };
 
 
@@ -758,7 +733,6 @@ export const schemaCategories = {
     '戳一戳': ['poke'],
     '图片功能': ['ImageChannels', 'CliProxyMedia', 'EditImage', 'nai', 'pixiv', 'r18', 'summary', 'SearchImage', 'cool', 'teatime', 'EmojiThief'],
     '经济系统': ['economy'],
-    '游戏玩法': ['witchtrial'],
     '其他功能': ['60sNews', 'GroupInsight', 'AutoCleanup', 'forwardMessage', 'groupnotice', 'repeat', 'recall', 'bilicookie', 'VoxCPMVoice', 'reminderTask'],
 };
 
@@ -793,7 +767,6 @@ export const schemaLabels = {
     'SearchImage': '统一搜图',
     'summary': '图片外显',
     'teatime': '下午茶推送',
-    'witchtrial': '魔女审判',
     'reminderTask': '重复提醒任务',
 };
 
