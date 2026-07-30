@@ -10,17 +10,25 @@
 
 import {
   EVIDENCE_VIA,
+  FACT_EFFECT_STANCE,
+  FACT_EFFECT_WHEN,
   SUPPORT_THRESHOLD,
   VERDICT,
   canPerformMethod,
+  canPresentEvidenceOn,
   conclusionsOf,
+  evidenceActivatesFactEffect,
+  evidenceCanSupportConclusion,
   evidenceOf,
   listGirls,
   livingGirls,
   livingPlayers,
   propositionOf,
-  safeString,
 } from "./schema.js";
+import {
+  publicize,
+  withdrawPublicEvidence,
+} from "./SessionStore.js";
 
 export { canPerformMethod };
 
@@ -120,13 +128,13 @@ export function reserveInvestigationEvidence(
 }
 
 /**
- * 本地掷定死者与凶手。真人概率是整章最终概率，因此要扣除无人行凶分支后换算。
+ * 本地掷定死者与凶手。真人概率是整章最终概率，因此要扣除极罕见自杀分支后换算。
  */
 export function pickVictimAndCulprit(
   session,
   {
     playerCulpritChance = 0.5,
-    suicideChance = 0.15,
+    suicideChance = 0.01,
     random = Math.random,
   } = {}
 ) {
@@ -166,36 +174,202 @@ export function pickVictimAndCulprit(
 // ===== 结论判定 =====
 
 /**
- * 某个命题在当前已公开证据下的状态
+ * 取已经通过当庭行动建立到某个命题上的证据。
+ */
+export function linkedEvidence(
+  caseFile,
+  propId,
+  evidenceLinks = [],
+  stance = STANCE.SUPPORT
+) {
+  const linkedIds = new Set(
+    evidenceLinks
+      .filter(
+        (item) =>
+          item.propId === propId &&
+          item.stance === stance
+      )
+      .map((item) => item.evidenceId)
+  );
+
+  return (caseFile?.evidence || []).filter((item) => {
+    const relation =
+      stance === STANCE.SUPPORT ? item.supports || [] : item.refutes || [];
+    if (!relation.includes(propId)) return false;
+    return linkedIds.has(item.id);
+  });
+}
+
+/** 一条“证据—方向—命题”的论证是否已经建立 */
+export function hasEvidenceLink(session, evidenceId, propId, stance) {
+  return session.evidenceLinks.some(
+    (item) =>
+      item.evidenceId === evidenceId &&
+      item.propId === propId &&
+      item.stance === stance &&
+      item.chapter === session.chapter
+  );
+}
+
+/** 建立一条有效论证；相同关系只记录一次 */
+export function addEvidenceLink(
+  session,
+  { evidenceId, propId, stance, byId = "", round = session.round + 1 }
+) {
+  const evidence = evidenceOf(session?.caseFile, evidenceId);
+  const prop = propositionOf(session?.caseFile, propId);
+  const relation =
+    stance === STANCE.SUPPORT ? evidence?.supports || [] : evidence?.refutes || [];
+  if (!evidence || !prop || !relation.includes(propId)) return false;
+  if (hasEvidenceLink(session, evidenceId, propId, stance)) return false;
+
+  session.evidenceLinks.push({
+    evidenceId,
+    propId,
+    stance,
+    byId,
+    chapter: session.chapter,
+    round,
+  });
+  return true;
+}
+
+function directPropositionArguments(caseFile, propId, evidenceLinks = []) {
+  const supporters = linkedEvidence(
+    caseFile,
+    propId,
+    evidenceLinks,
+    STANCE.SUPPORT
+  );
+  const refuters = linkedEvidence(
+    caseFile,
+    propId,
+    evidenceLinks,
+    STANCE.REFUTE
+  );
+  return { supporters, refuters };
+}
+
+/** 当前已经由真实出牌激活的“事实状态 → 结论”关系 */
+export function activeFactEffects(caseFile, evidenceLinks = []) {
+  return (caseFile?.factEffects || [])
+    .filter((effect) => {
+      const fact = propositionOf(caseFile, effect.factPropId);
+      if (!fact || fact.conclusion) return false;
+      const { supporters, refuters } = directPropositionArguments(
+        caseFile,
+        fact.id,
+        evidenceLinks
+      );
+      const established = supporters.length >= 1 && refuters.length === 0;
+      const refuted = refuters.length > 0;
+      return effect.when === FACT_EFFECT_WHEN.REFUTED
+        ? refuted
+        : established;
+    })
+    .map((effect) => ({
+      ...effect,
+      factText: propositionOf(caseFile, effect.factPropId)?.text || "",
+    }));
+}
+
+/**
+ * 某个命题在当前已建立论证下的状态
  * @param {object} caseFile 案件档案
  * @param {string} propId 命题 id
- * @param {string[]} publicIds 已公开证据 id（集合 P）
+ * @param {object[]} evidenceLinks 已明确建立的证据关系
  */
-export function propositionStatus(caseFile, propId, publicIds = []) {
-  const shown = new Set(publicIds);
-  const evidence = (caseFile?.evidence || []).filter((item) => shown.has(item.id));
-
-  const supporters = evidence.filter((item) => item.supports.includes(propId));
-  const refuters = evidence.filter((item) => item.refutes.includes(propId));
-
+export function propositionStatus(
+  caseFile,
+  propId,
+  evidenceLinks = [],
+  { includeIndirect = true } = {}
+) {
+  const { supporters, refuters } = directPropositionArguments(
+    caseFile,
+    propId,
+    evidenceLinks
+  );
   const prop = propositionOf(caseFile, propId);
   const threshold = prop?.conclusion ? SUPPORT_THRESHOLD[prop.conclusion.type] : 1;
+  const indirect = prop?.conclusion && includeIndirect
+    ? activeFactEffects(caseFile, evidenceLinks).filter(
+        (effect) => effect.conclusionPropId === propId
+      )
+    : [];
+  const indirectSupportEffects = indirect.filter(
+    (effect) => effect.stance === FACT_EFFECT_STANCE.SUPPORT
+  );
+  const indirectRefuteEffects = indirect.filter(
+    (effect) => effect.stance === FACT_EFFECT_STANCE.REFUTE
+  );
+  const supportCount = supporters.length + indirectSupportEffects.length;
+  const refuted = refuters.length > 0 || indirectRefuteEffects.length > 0;
+  const hasRequiredFactSupport =
+    !prop?.conclusion || indirectSupportEffects.length > 0;
 
   return {
     propId,
-    supports: supporters.length,
+    supports: supportCount,
+    directSupports: supporters.length,
+    indirectSupports: indirectSupportEffects.length,
+    supportedBy: supporters.map((item) => item.id),
+    indirectSupportedBy: indirectSupportEffects.map((item) => item.factPropId),
+    indirectSupportEffects,
     threshold,
-    refuted: refuters.length > 0,
+    refuted,
     refutedBy: refuters.map((item) => item.id),
-    // 成立 = 支持够门槛 且 无矛盾
-    stands: supporters.length >= threshold && refuters.length === 0,
+    indirectRefutedBy: indirectRefuteEffects.map((item) => item.factPropId),
+    indirectRefuteEffects,
+    hasRequiredFactSupport,
+    // 结论必须有至少一条已经激活的事实支持；直接堆证物不能绕过推理链。
+    stands:
+      supportCount >= threshold &&
+      !refuted &&
+      hasRequiredFactSupport,
   };
 }
 
+/** 运行中只让已经正式主张并开放的结论接收事实效果。 */
+export function propositionStatusForSession(session, propId) {
+  const prop = propositionOf(session?.caseFile, propId);
+  return propositionStatus(
+    session?.caseFile,
+    propId,
+    session?.evidenceLinks || [],
+    {
+      includeIndirect:
+        !prop?.conclusion || canPresentEvidenceOn(session, propId),
+    }
+  );
+}
+
+/** 只返回当前已经开放结论上的事实效果，供公开记录与回合播报使用。 */
+export function activeFactEffectsForSession(session) {
+  return activeFactEffects(
+    session?.caseFile,
+    session?.evidenceLinks || []
+  ).filter((effect) =>
+    canPresentEvidenceOn(session, effect.conclusionPropId)
+  );
+}
+
 /** 当前所有能站住的结论 */
-export function standingConclusions(caseFile, publicIds = []) {
+export function standingConclusions(caseFile, evidenceLinks = []) {
   return conclusionsOf(caseFile)
-    .map((item) => ({ prop: item, status: propositionStatus(caseFile, item.id, publicIds) }))
+    .map((item) => ({
+      prop: item,
+      status: propositionStatus(caseFile, item.id, evidenceLinks),
+    }))
+    .filter((item) => item.status.stands);
+}
+
+export function standingConclusionsForSession(session) {
+  return conclusionsOf(session?.caseFile)
+    .map((item) => ({
+      prop: item,
+      status: propositionStatusForSession(session, item.id),
+    }))
     .filter((item) => item.status.stands);
 }
 
@@ -204,22 +378,23 @@ export function standingConclusions(caseFile, publicIds = []) {
  * 真相是吸收态：一旦证成就没有任何证据能推翻它（那样的证据按定义不存在），
  * 所以这里返回 true 时可以直接跳过投票定案。
  */
-export function isTruthEstablished(caseFile, publicIds = []) {
+export function isTruthEstablished(caseFile, evidenceLinks = []) {
   if (!caseFile?.truthId) return false;
-  return propositionStatus(caseFile, caseFile.truthId, publicIds).stands;
+  return propositionStatus(caseFile, caseFile.truthId, evidenceLinks).stands;
+}
+
+export function isTruthEstablishedForSession(session) {
+  if (!session?.caseFile?.truthId) return false;
+  return propositionStatusForSession(session, session.caseFile.truthId).stands;
 }
 
 /**
  * 可行结论集合的大小
- * 随着证据公开单调收缩——凶手的全部工作就是阻止这个收缩
+ * 随着有效反驳被明确建立而单调收缩
  */
-export function viableConclusionCount(caseFile, publicIds = []) {
-  const shown = new Set(publicIds);
+export function viableConclusionCount(caseFile, evidenceLinks = []) {
   return conclusionsOf(caseFile).filter(
-    (item) =>
-      !(caseFile.evidence || []).some(
-        (e) => shown.has(e.id) && e.refutes.includes(item.id)
-      )
+    (item) => !propositionStatus(caseFile, item.id, evidenceLinks).refuted
   ).length;
 }
 
@@ -230,13 +405,23 @@ export const PLAY_RESULT = {
   INVALID: "invalid",     // 打空，反噬
   UNKNOWN: "unknown",     // 证据或命题不存在
   NOT_OWNED: "not_owned", // 证据不在手上
-  UNAVAILABLE: "unavailable", // 已公开或已被销毁，不能重复出牌
+  UNAVAILABLE: "unavailable", // 已被销毁，不能出牌
 };
 
 export const STANCE = {
   SUPPORT: "support",
   REFUTE: "refute",
 };
+
+/** 某人当前是否欠着上一轮的追问回应 */
+export function hasPendingQuestion(session, girlId) {
+  return (session.questions || []).some(
+    (item) =>
+      !item.answered &&
+      item.toId === girlId &&
+      item.round <= session.round
+  );
+}
 
 /**
  * 出示一条证据，声明它支持或否定某个命题
@@ -245,17 +430,17 @@ export const STANCE = {
  * 玩家只看得见证物的名字和描述，看不见它在档案里的 supports/refutes，
  * 往哪打全靠从描述推。不用声明就能公开证据的话，出牌就没有风险了。
  *
- * 打空的代价是双重的：自己涨嫌疑，牌还白白摊在了桌面上。
+ * 打空时自己会涨嫌疑，证物也仍会进入公共池，交给其他人继续判断。
  */
 export function judgeEvidencePlay(
   caseFile,
-  { evidenceId, propId, stance, pouch = [], publicIds = [], destroyedIds = [] }
+  { evidenceId, propId, stance, pouch = [], destroyedIds = [] }
 ) {
   const evidence = evidenceOf(caseFile, evidenceId);
   const prop = propositionOf(caseFile, propId);
   if (!evidence || !prop) return { result: PLAY_RESULT.UNKNOWN, evidence, prop, stance };
   if (!pouch.includes(evidenceId)) return { result: PLAY_RESULT.NOT_OWNED, evidence, prop, stance };
-  if (publicIds.includes(evidenceId) || destroyedIds.includes(evidenceId)) {
+  if (destroyedIds.includes(evidenceId)) {
     return { result: PLAY_RESULT.UNAVAILABLE, evidence, prop, stance };
   }
 
@@ -273,86 +458,127 @@ export function judgeEvidencePlay(
 }
 
 /**
- * 伪证是否被已经公开的破绽揭穿。
- * “别人手里有破绽”只代表存在反制机会，不再自动翻牌；持有者必须主动揭穿或出示。
+ * 找出当前确实能发动的预制伪证方案。
+ * 破绽必须尚未公开、未被销毁，并且确实握在另一位在场者手中。
  */
-export function isFakeExposed(
-  caseFile,
-  fakeEvidenceId,
-  publicIds = [],
-  { round } = {}
-) {
-  const fake = evidenceOf(caseFile, fakeEvidenceId);
-  if (!fake?.fake || !fake.flawOf) return false;
+function isHeldByOtherLiving(session, actor, evidenceId) {
+  const otherLiving = new Set(
+    livingGirls(session)
+      .filter((girl) => girl.id !== actor.id)
+      .map((girl) => girl.id)
+  );
+  return Object.entries(session.pouch || {}).some(
+    ([girlId, bag]) =>
+      otherLiving.has(girlId) &&
+      Array.isArray(bag) &&
+      bag.includes(evidenceId)
+  );
+}
+
+export function availableForgeryPlans(session, actor, propId) {
+  const caseFile = session.caseFile;
+  const prop = propositionOf(caseFile, propId);
   if (
-    Number.isFinite(fake.challengeUntilRound) &&
-    Number.isFinite(round) &&
-    round > fake.challengeUntilRound
+    session.fakeUsed ||
+    !actor?.alive ||
+    actor.id !== caseFile.culpritId ||
+    !prop?.conclusion ||
+    session.round >= session.trialRounds - 1
   ) {
-    return false;
+    return [];
   }
-  return publicIds.includes(fake.flawOf);
+
+  return caseFile.forgeryPlans.filter((plan) => {
+    if (plan.targetPropId !== prop.id) return false;
+    const flaw = evidenceOf(caseFile, plan.flawEvidenceId);
+    return Boolean(
+      flaw &&
+      !flaw.fake &&
+      evidenceCanSupportConclusion(caseFile, flaw, prop.id) &&
+      !(session.publicEvidence || []).includes(flaw.id) &&
+      !(session.destroyedEvidence || []).includes(flaw.id) &&
+      isHeldByOtherLiving(session, actor, flaw.id)
+    );
+  });
+}
+
+/** 从可用方案中选一套，并把选择冻结进待结算行动。 */
+export function selectForgeryPlan(
+  session,
+  actor,
+  propId,
+  random = Math.random
+) {
+  const candidates = availableForgeryPlans(session, actor, propId);
+  if (!candidates.length) return null;
+  return candidates[Math.floor(random() * candidates.length)] || null;
 }
 
 /**
- * 尝试落下一条可反制的伪证。
- * 每章只有一次有效尝试；只有另一位在场者手里确实有破绽时才允许它进入台面。
+ * 启用一条可反制的预制伪证。
+ * 玩家不能自由编造文本；公开证物只使用案件生成时已校验过的普通名称与描述。
  */
-export function plantFakeEvidence(session, actor, action, random = Math.random) {
+export function plantFakeEvidence(session, actor, action) {
   const caseFile = session.caseFile;
   const prop = propositionOf(caseFile, action.propId);
-  const text = safeString(action.text, 200);
+  const plan = caseFile.forgeryPlans.find(
+    (item) =>
+      item.id === action.forgeryPlanId &&
+      item.targetPropId === action.propId
+  );
+  const flaw = plan ? evidenceOf(caseFile, plan.flawEvidenceId) : null;
   if (
     session.fakeUsed ||
+    !actor?.alive ||
+    actor.id !== caseFile.culpritId ||
     !prop?.conclusion ||
-    text.replace(/\s/g, "").length < 12 ||
+    !plan ||
+    !flaw ||
+    flaw.fake ||
+    !evidenceCanSupportConclusion(caseFile, flaw, prop.id) ||
+    (session.publicEvidence || []).includes(flaw.id) ||
+    (session.destroyedEvidence || []).includes(flaw.id) ||
+    !isHeldByOtherLiving(session, actor, flaw.id) ||
     session.round >= session.trialRounds - 1
   ) {
     return { ok: false, reason: "invalid" };
   }
 
   session.fakeUsed = true;
-  const otherLiving = new Set(
-    livingGirls(session)
-      .filter((girl) => girl.id !== actor.id)
-      .map((girl) => girl.id)
-  );
-  const heldByOther = (evidenceId) =>
-    Object.entries(session.pouch || {}).some(
-      ([girlId, bag]) =>
-        otherLiving.has(girlId) &&
-        Array.isArray(bag) &&
-        bag.includes(evidenceId)
-    );
-  const candidates = (caseFile.evidence || []).filter(
-    (item) =>
-      !item.fake &&
-      item.supports.includes(prop.id) &&
-      !session.publicEvidence.includes(item.id) &&
-      !session.destroyedEvidence.includes(item.id) &&
-      heldByOther(item.id)
-  );
-  const flaw = candidates[Math.floor(random() * candidates.length)];
-  if (!flaw) return { ok: false, reason: "no_flaw" };
-
+  const idBase = `court_${session.chapter}_${session.round + 1}`;
+  let evidenceId = idBase;
+  let suffix = 2;
+  while (evidenceOf(caseFile, evidenceId)) {
+    evidenceId = `${idBase}_${suffix}`;
+    suffix += 1;
+  }
   const fake = {
-    id: `fake_${session.chapter}_${caseFile.evidence.length + 1}`,
-    name: `${actor.name}的说辞`,
-    description: text,
-    via: EVIDENCE_VIA.ASK,
+    id: evidenceId,
+    name: plan.name,
+    description: plan.description,
+    via: EVIDENCE_VIA.SEARCH,
     location: "",
-    askTarget: actor.id,
+    askTarget: "",
     supports: [],
     refutes: [prop.id],
     fake: true,
     flawOf: flaw.id,
+    forgedById: actor.id,
+    forgeryPlanId: plan.id,
+    exposureText: plan.exposureText,
     reservedFor: "",
     createdRound: session.round + 1,
     challengeUntilRound: session.round + 2,
   };
   caseFile.evidence.push(fake);
-  session.publicEvidence ||= [];
-  if (!session.publicEvidence.includes(fake.id)) session.publicEvidence.push(fake.id);
+  publicize(session, fake.id);
+  addEvidenceLink(session, {
+    evidenceId: fake.id,
+    propId: prop.id,
+    stance: STANCE.REFUTE,
+    byId: actor.id,
+    round: session.round + 1,
+  });
   return { ...fake, ok: true };
 }
 
@@ -388,10 +614,6 @@ export function recomputeSuspicion(session) {
   const caseFile = session.caseFile;
   if (!caseFile) return;
 
-  const publicIds = session.publicEvidence || [];
-  const shown = new Set(publicIds);
-  const evidence = (caseFile.evidence || []).filter((item) => shown.has(item.id));
-
   // 指认每个人的结论，预先索引好
   const accuseProp = new Map();
   for (const item of conclusionsOf(caseFile)) {
@@ -412,9 +634,9 @@ export function recomputeSuspicion(session) {
     if (propId) {
       // 一条有效反证已经把整项指认打倒，结构性嫌疑就应归零；
       // 不能让“两条支持 - 一条反证”还残留 9 点，仿佛被否定的指控仍有一半成立。
-      const refuted = evidence.some((item) => item.refutes.includes(propId));
-      if (!refuted) {
-        score += evidence.filter((item) => item.supports.includes(propId)).length * PER_SUPPORT;
+      const status = propositionStatusForSession(session, propId);
+      if (!status.refuted) {
+        score += status.supports * PER_SUPPORT;
       }
     }
 
@@ -428,51 +650,58 @@ export function addPenalty(girl, amount) {
 }
 
 /**
- * 用手中一条真证据检验公开说辞。
- * 无论成败证据都会公开；命中处罚伪造者，猜错处罚挑战者。
+ * 指定一件可疑公共证物，再用手中另一件证物检验它。
+ * 无论成败，作为破绽提交的证物都会公开；命中处罚伪造者，猜错处罚挑战者。
  */
 export function resolveFakeChallenge(
   session,
   actor,
-  evidenceId,
+  suspectEvidenceId,
+  flawEvidenceId,
   currentRound = session.round + 1
 ) {
   const caseFile = session.caseFile;
-  const evidence = evidenceOf(caseFile, evidenceId);
+  const suspect = evidenceOf(caseFile, suspectEvidenceId);
+  const flaw = evidenceOf(caseFile, flawEvidenceId);
   const bag = session.pouch?.[actor.id] || [];
   if (
-    !evidence ||
-    evidence.fake ||
-    !bag.includes(evidence.id) ||
-    (session.publicEvidence || []).includes(evidence.id) ||
-    (session.destroyedEvidence || []).includes(evidence.id)
+    !suspect ||
+    !flaw ||
+    suspect.id === flaw.id ||
+    !(session.publicEvidence || []).includes(suspect.id) ||
+    !bag.includes(suspect.id) ||
+    !bag.includes(flaw.id) ||
+    (session.destroyedEvidence || []).includes(suspect.id) ||
+    (session.destroyedEvidence || []).includes(flaw.id)
   ) {
     return null;
   }
 
-  const fake = (caseFile.evidence || []).find(
-    (item) =>
-      item.fake &&
-      (session.publicEvidence || []).includes(item.id) &&
-      item.flawOf === evidence.id &&
-      (!Number.isFinite(item.challengeUntilRound) ||
-        currentRound <= item.challengeUntilRound)
-  );
-  session.publicEvidence ||= [];
-  session.publicEvidence.push(evidence.id);
+  const fake =
+    suspect.fake &&
+    suspect.flawOf === flaw.id &&
+    (!Number.isFinite(suspect.challengeUntilRound) ||
+      currentRound <= suspect.challengeUntilRound)
+      ? suspect
+      : null;
+  publicize(session, flaw.id);
 
   let faker = null;
   if (fake) {
-    faker = session.girls?.[fake.askTarget] || null;
+    faker = session.girls?.[fake.forgedById] || null;
     caseFile.evidence = caseFile.evidence.filter((item) => item.id !== fake.id);
-    session.publicEvidence = session.publicEvidence.filter((id) => id !== fake.id);
+    withdrawPublicEvidence(session, fake.id);
+    session.evidenceLinks = session.evidenceLinks.filter(
+      (item) => item.evidenceId !== fake.id
+    );
     addPenalty(faker, PENALTY.FAKE_EXPOSED);
   } else {
     addPenalty(actor, PENALTY.BACKFIRE);
   }
 
   return {
-    evidence,
+    suspect,
+    flaw,
     fake: fake || null,
     faker,
     success: Boolean(fake),
@@ -517,8 +746,7 @@ export const VERDICT_SOURCE = {
  */
 export function npcVotes(session) {
   const caseFile = session.caseFile;
-  const publicIds = session.publicEvidence || [];
-  const standing = standingConclusions(caseFile, publicIds);
+  const standing = standingConclusionsForSession(session);
 
   const votes = {};
   for (const girl of livingGirls(session)) {
@@ -585,7 +813,7 @@ export function tallyVotes(votes) {
  *
  * 三条出路：
  *   指认某人  → 该人被处刑，其余全活
- *   自杀/意外 → 全员存活（但凶手也活着，下一章照样死人）
+ *   自杀      → 全员存活
  *   超时未决  → 处刑当前嫌疑值最高者
  *
  * @param {object} session
@@ -593,7 +821,6 @@ export function tallyVotes(votes) {
  */
 export function decideVerdict(session, votes) {
   const caseFile = session.caseFile;
-  const publicIds = session.publicEvidence || [];
   const living = livingGirls(session);
   const voterById = new Map(living.map((girl) => [girl.id, girl]));
   const conclusionIds = new Set(conclusionsOf(caseFile).map((item) => item.id));
@@ -610,7 +837,7 @@ export function decideVerdict(session, votes) {
   const humanCount = living.filter((girl) => girl.kind === "player").length;
 
   // 真相已证成：吸收态，直接定案，不走投票
-  if (isTruthEstablished(caseFile, publicIds)) {
+  if (isTruthEstablishedForSession(session)) {
     const truth = propositionOf(caseFile, caseFile.truthId);
     return buildVerdict(session, {
       source: VERDICT_SOURCE.TRUTH,
@@ -628,7 +855,7 @@ export function decideVerdict(session, votes) {
   // NPC 票用于叙事与展示，但不能替玩家作出最终选择。
   // 采纳结论必须先获得仍在场玩家的过半票。
   if (playerCounted.top && playerCounted.topCount >= playerMajority) {
-    const status = propositionStatus(caseFile, playerCounted.top, publicIds);
+    const status = propositionStatusForSession(session, playerCounted.top);
     if (status.stands) {
       return buildVerdict(session, {
         source: VERDICT_SOURCE.VOTE,
@@ -665,7 +892,7 @@ function buildVerdict(session, { source, prop, votes, tally, playerTally }) {
   } else if (prop?.conclusion?.type === VERDICT.ACCUSE) {
     executedIds = [prop.conclusion.targetId];
   }
-  // 自杀/意外结论不处刑任何人
+  // 自杀结论不处刑任何人。
 
   const collapsed = source === VERDICT_SOURCE.COLLAPSE;
 
@@ -716,10 +943,23 @@ const NPC_MISFIRE_CHANCE = 0.18;
  * 要是 NPC 永远打不空，「从不反噬的那个」立刻又成了身份标签。
  * 所以让它按一定概率也看走眼一次。
  */
-function npcPlay(caseFile, npc, evidence, propId, stance) {
+function npcPlay(
+  caseFile,
+  npc,
+  evidence,
+  propId,
+  stance,
+  playablePropIds = null
+) {
   let target = propId;
   if (Math.random() < NPC_MISFIRE_CHANCE) {
-    const wrong = pickRandom((caseFile.propositions || []).filter((item) => item.id !== propId));
+    const wrong = pickRandom(
+      (caseFile.propositions || []).filter(
+        (item) =>
+          item.id !== propId &&
+          (!playablePropIds || playablePropIds.has(item.id))
+      )
+    );
     if (wrong) target = wrong.id;
   }
   return { girlId: npc.id, kind: "play", evidenceId: evidence.id, propId: target, stance };
@@ -732,6 +972,81 @@ function accusationAgainst(caseFile, girlId) {
       (item) => item.conclusion.type === VERDICT.ACCUSE && item.conclusion.targetId === girlId
     ) || null
   );
+}
+
+/**
+ * 一件证物可以通过哪些有效出牌路线影响候选结论。
+ *
+ * 直接路线把证物打向结论；间接路线先把证物打向事实。NPC 只拿这些
+ * 路线做策略选择，真正能否命中仍由与玩家相同的 judgeEvidencePlay 判定。
+ */
+function evidenceConclusionRoutes(session, evidence) {
+  const caseFile = session.caseFile;
+  const routes = [];
+
+  for (const conclusion of conclusionsOf(caseFile)) {
+    for (const stance of [STANCE.SUPPORT, STANCE.REFUTE]) {
+      const relation =
+        stance === STANCE.SUPPORT
+          ? evidence.supports || []
+          : evidence.refutes || [];
+      if (
+        relation.includes(conclusion.id) &&
+        !hasEvidenceLink(session, evidence.id, conclusion.id, stance)
+      ) {
+        routes.push({
+          conclusionId: conclusion.id,
+          conclusionStance: stance,
+          propId: conclusion.id,
+          stance,
+        });
+      }
+    }
+  }
+
+  for (const effect of caseFile.factEffects || []) {
+    if (!evidenceActivatesFactEffect(evidence, effect)) continue;
+    const stance =
+      effect.when === FACT_EFFECT_WHEN.REFUTED
+        ? STANCE.REFUTE
+        : STANCE.SUPPORT;
+    if (hasEvidenceLink(session, evidence.id, effect.factPropId, stance)) {
+      continue;
+    }
+
+    // 已触发的事实不会因为再堆一件同向证物而重复贡献。
+    const factStatus = propositionStatus(
+      caseFile,
+      effect.factPropId,
+      session.evidenceLinks,
+      { includeIndirect: false }
+    );
+    const alreadyActive =
+      effect.when === FACT_EFFECT_WHEN.REFUTED
+        ? factStatus.refuted
+        : factStatus.stands;
+    if (alreadyActive) continue;
+
+    routes.push({
+      conclusionId: effect.conclusionPropId,
+      conclusionStance: effect.stance,
+      propId: effect.factPropId,
+      stance,
+    });
+  }
+
+  const seen = new Set();
+  return routes.filter((route) => {
+    const key = [
+      route.conclusionId,
+      route.conclusionStance,
+      route.propId,
+      route.stance,
+    ].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /**
@@ -818,7 +1133,7 @@ export function npcInvestigateActions(session, round) {
 /**
  * NPC 的庭审行动
  *
- * 优先级：自保 → 进攻 → 施压。凶手 NPC 多一条：手里攥着能指认自己的牌就绝不打出去。
+ * 优先级：自保 → 进攻 → 施压。凶手 NPC 不会主动建立指向自己的支持论证。
  */
 export function npcTrialMoves(session, { focusPropIds = [] } = {}) {
   const caseFile = session.caseFile;
@@ -829,6 +1144,16 @@ export function npcTrialMoves(session, { focusPropIds = [] } = {}) {
       focusPropIds.filter((propId) => propositionOf(caseFile, propId))
     ),
   ];
+  const playablePropIds = new Set(
+    (caseFile.propositions || [])
+      .filter(
+        (prop) =>
+          !prop.conclusion ||
+          canPresentEvidenceOn(session, prop.id) ||
+          focus.includes(prop.id)
+      )
+      .map((prop) => prop.id)
+  );
   const moves = [];
   let fakeChallengeClaimed = false;
   const actionRound = session.round + 1;
@@ -848,7 +1173,6 @@ export function npcTrialMoves(session, { focusPropIds = [] } = {}) {
       .filter(
         (item) =>
           item &&
-          !publicIds.includes(item.id) &&
           !(session.destroyedEvidence || []).includes(item.id)
       );
     const isCulprit = npc.id === caseFile.culpritId;
@@ -859,7 +1183,9 @@ export function npcTrialMoves(session, { focusPropIds = [] } = {}) {
     if (owed.has(npc.id)) {
       const dodgeChance = isCulprit ? 0.45 : 0.15;
       const shelter =
-        standingConclusions(caseFile, publicIds).find((item) => item.prop.id !== accuseMe?.id)?.prop ||
+        standingConclusionsForSession(session).find(
+          (item) => item.prop.id !== accuseMe?.id
+        )?.prop ||
         pickRandom(
           conclusionsOf(caseFile).filter(
             (item) => item.id !== accuseMe?.id && !refuted.has(item.id)
@@ -880,13 +1206,36 @@ export function npcTrialMoves(session, { focusPropIds = [] } = {}) {
     }
 
     // 1. 自保：有人在指认我，而我手里正好有能否定它的牌
-    if (accuseMe && !refuted.has(accuseMe.id)) {
-      const status = propositionStatus(caseFile, accuseMe.id, publicIds);
+    if (
+      accuseMe &&
+      playablePropIds.has(accuseMe.id) &&
+      !refuted.has(accuseMe.id)
+    ) {
+      const status = propositionStatusForSession(session, accuseMe.id);
       if (status.supports > 0) {
-        const card = bag.find((item) => item.refutes.includes(accuseMe.id));
-        if (card) {
+        const option = bag
+          .flatMap((evidence) =>
+            evidenceConclusionRoutes(session, evidence).map((route) => ({
+              evidence,
+              route,
+            }))
+          )
+          .find(
+            ({ route }) =>
+              route.conclusionId === accuseMe.id &&
+              route.conclusionStance === STANCE.REFUTE &&
+              playablePropIds.has(route.propId)
+          );
+        if (option) {
           moves.push(
-            npcPlay(caseFile, npc, card, accuseMe.id, STANCE.REFUTE)
+            npcPlay(
+              caseFile,
+              npc,
+              option.evidence,
+              option.route.propId,
+              option.route.stance,
+              playablePropIds
+            )
           );
           continue;
         }
@@ -909,68 +1258,102 @@ export function npcTrialMoves(session, { focusPropIds = [] } = {}) {
         moves.push({
           girlId: npc.id,
           kind: "challenge",
-          evidenceId: fake.flawOf,
+          suspectEvidenceId: fake.id,
+          flawEvidenceId: fake.flawOf,
         });
         continue;
       }
     }
 
-    // 3. 回应焦点：真人本轮提出主张/回应后，NPC 优先翻自己手里的相关牌。
+    // 3. 回应焦点：真人本轮正式主张后，NPC 优先翻自己手里的相关牌。
     //    这让“主张”成为能驱动台面信息的动作，而不是只有押错惩罚的空按钮。
-    const focused = bag.find((item) =>
-      focus.some(
-        (propId) =>
-          (!accuseMe || propId !== accuseMe.id || !item.supports.includes(propId)) &&
-          (item.supports.includes(propId) || item.refutes.includes(propId))
+    const focused = bag
+      .flatMap((evidence) =>
+        evidenceConclusionRoutes(session, evidence).map((route) => ({
+          evidence,
+          route,
+        }))
       )
-    );
-    if (focused) {
-      const supporting = focus.find(
-        (propId) =>
-          focused.supports.includes(propId) &&
-          (!accuseMe || propId !== accuseMe.id)
-      );
-      const refuting = focus.find((propId) => focused.refutes.includes(propId));
-      const propId = supporting || refuting;
-      if (propId) {
-        moves.push(
-          npcPlay(
-            caseFile,
-            npc,
-            focused,
-            propId,
-            supporting ? STANCE.SUPPORT : STANCE.REFUTE
+      .find(
+        ({ route }) =>
+          focus.includes(route.conclusionId) &&
+          playablePropIds.has(route.propId) &&
+          !(
+            accuseMe &&
+            route.conclusionId === accuseMe.id &&
+            route.conclusionStance === STANCE.SUPPORT
           )
-        );
-        continue;
-      }
-    }
-
-    // 4. 进攻：打掉一个还站着的、不指向自己的命题
-    const attack = bag.find((item) =>
-      item.refutes.some((propId) => {
-        if (refuted.has(propId)) return false;
-        if (propId === accuseMe?.id) return false;
-        return propositionStatus(caseFile, propId, publicIds).supports > 0;
-      })
-    );
-    if (attack) {
-      const propId = attack.refutes.find((id) => !refuted.has(id) && id !== accuseMe?.id);
-      moves.push(npcPlay(caseFile, npc, attack, propId, STANCE.REFUTE));
+      );
+    if (focused) {
+      moves.push(
+        npcPlay(
+          caseFile,
+          npc,
+          focused.evidence,
+          focused.route.propId,
+          focused.route.stance,
+          playablePropIds
+        )
+      );
       continue;
     }
 
-    // 5. 摊牌：拿一张不指认自己的牌去支持它所支持的命题
-    //    凶手绝不打出能指向自己的牌
-    const safe = bag.find(
-      (item) =>
-        !publicIds.includes(item.id) &&
-        (!accuseMe || !item.supports.includes(accuseMe.id)) &&
-        item.supports.length > 0
-    );
+    // 4. 进攻：打掉一个还站着的、不指向自己的命题
+    const attack = bag
+      .flatMap((evidence) =>
+        evidenceConclusionRoutes(session, evidence).map((route) => ({
+          evidence,
+          route,
+        }))
+      )
+      .find(
+        ({ route }) =>
+          route.conclusionStance === STANCE.REFUTE &&
+          !refuted.has(route.conclusionId) &&
+          route.conclusionId !== accuseMe?.id &&
+          playablePropIds.has(route.propId) &&
+          propositionStatusForSession(session, route.conclusionId).supports > 0
+      );
+    if (attack) {
+      moves.push(
+        npcPlay(
+          caseFile,
+          npc,
+          attack.evidence,
+          attack.route.propId,
+          attack.route.stance,
+          playablePropIds
+        )
+      );
+      continue;
+    }
+
+    // 5. 摊牌：用一张证物去建立尚未出现、且不指认自己的支持论证。
+    //    证物即使还关联别的命题，公开本身也不会让那些关系自动生效。
+    const safe = bag
+      .flatMap((evidence) =>
+        evidenceConclusionRoutes(session, evidence).map((route) => ({
+          evidence,
+          route,
+        }))
+      )
+      .find(
+        ({ route }) =>
+          route.conclusionStance === STANCE.SUPPORT &&
+          route.conclusionId !== accuseMe?.id &&
+          playablePropIds.has(route.propId)
+      );
     if (safe) {
-      const propId = safe.supports.find((id) => id !== accuseMe?.id) || safe.supports[0];
-      moves.push(npcPlay(caseFile, npc, safe, propId, STANCE.SUPPORT));
+      moves.push(
+        npcPlay(
+          caseFile,
+          npc,
+          safe.evidence,
+          safe.route.propId,
+          safe.route.stance,
+          playablePropIds
+        )
+      );
       continue;
     }
 
@@ -986,10 +1369,24 @@ export function npcTrialMoves(session, { focusPropIds = [] } = {}) {
       continue;
     }
 
-    // 7. 主张一个当前支持最多、且不指向自己的结论
-    const pushable = standingConclusions(caseFile, publicIds).filter(
-      (item) => item.prop.id !== accuseMe?.id
-    );
+    // 7. 主张一个已经出现推理基础、且不指向自己的结论。
+    //    未开题结论尚不能“站住”，但 NPC 仍应能主动把它开出来。
+    const pushable = conclusionsOf(caseFile)
+      .map((prop) => ({
+        prop,
+        status: propositionStatus(caseFile, prop.id, session.evidenceLinks),
+      }))
+      .filter(
+        (item) =>
+          item.prop.id !== accuseMe?.id &&
+          !item.status.refuted &&
+          item.status.supports > 0
+      )
+      .sort(
+        (a, b) =>
+          Number(b.status.stands) - Number(a.status.stands) ||
+          b.status.supports - a.status.supports
+      );
     if (pushable.length) {
       moves.push({ girlId: npc.id, kind: "claim", propId: pushable[0].prop.id });
     }
@@ -1015,32 +1412,47 @@ export function planWitchActions(caseFile, { rounds = 3 } = {}) {
   );
   if (!accuseProp) return [];
 
-  // 越是同时「支持指认凶手」又「否定其他结论」的证据越致命，优先毁掉
+  // 越是能直接或经由事实支持「指认凶手」、又能否定其他结论的证物越致命。
   const deadly = (caseFile.evidence || [])
     .filter(
       (item) =>
         item.via === EVIDENCE_VIA.SEARCH &&
-        item.supports.includes(accuseProp.id)
+        evidenceCanSupportConclusion(caseFile, item, accuseProp.id)
     )
     .sort((a, b) => b.refutes.length - a.refutes.length);
 
-  // 每回合最多毁一条，且留一手：不把支持真相的证据毁绝，否则案子无解
-  const truthSupport = (caseFile.evidence || []).filter((item) =>
-    item.supports.includes(caseFile.truthId)
-  );
-  const keepAtLeast = Math.max(
-    SUPPORT_THRESHOLD[propositionOf(caseFile, caseFile.truthId)?.conclusion?.type] || 2,
-    2
-  );
+  const truth = propositionOf(caseFile, caseFile.truthId);
+  const truthThreshold = SUPPORT_THRESHOLD[truth?.conclusion?.type] || 2;
+  const potentialTruthSupport = (destroyedIds) => {
+    const available = (caseFile.evidence || []).filter(
+      (item) => !destroyedIds.has(item.id)
+    );
+    const direct = available.filter((item) =>
+      (item.supports || []).includes(caseFile.truthId)
+    ).length;
+    const indirect = (caseFile.factEffects || []).filter(
+      (effect) =>
+        effect.conclusionPropId === caseFile.truthId &&
+        effect.stance === FACT_EFFECT_STANCE.SUPPORT &&
+        available.some((item) => evidenceActivatesFactEffect(item, effect))
+    ).length;
+    return { total: direct + indirect, indirect };
+  };
 
   const plan = [];
-  let destroyedTruthSupport = 0;
+  const destroyedIds = new Set();
   for (const item of deadly) {
     if (plan.length >= rounds) break;
-    const isTruthSupport = truthSupport.some((e) => e.id === item.id);
-    if (isTruthSupport && truthSupport.length - destroyedTruthSupport <= keepAtLeast) continue;
-    if (isTruthSupport) destroyedTruthSupport += 1;
+    const nextDestroyed = new Set([...destroyedIds, item.id]);
+    const remaining = potentialTruthSupport(nextDestroyed);
+    if (
+      remaining.total < truthThreshold ||
+      remaining.indirect < 1
+    ) {
+      continue;
+    }
 
+    destroyedIds.add(item.id);
     plan.push({ round: plan.length + 1, action: "destroy", evidenceId: item.id });
   }
   return plan;

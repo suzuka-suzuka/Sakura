@@ -35,8 +35,15 @@ import {
   renderVoteMenu,
   renderVoteProgress,
 } from "../lib/witchtrial/render.js";
-import { STANCE, recomputeSuspicion } from "../lib/witchtrial/logic.js";
 import {
+  STANCE,
+  hasEvidenceLink,
+  hasPendingQuestion,
+  recomputeSuspicion,
+  selectForgeryPlan,
+} from "../lib/witchtrial/logic.js";
+import {
+  canPresentEvidenceOn,
   girlByCode,
   girlOfUser,
   livingPlayers,
@@ -79,7 +86,7 @@ const CONFIG_DEFAULTS = {
   trialRounds: 5,
   turnTimeoutMinutes: 15,
   playerCulpritChance: 50,
-  suicideChance: 15,
+  suicideChance: 1,
   onlyWhiteCreate: false,
 };
 
@@ -89,7 +96,6 @@ export class WitchTrial extends plugin {
       name: "魔女审判",
       event: "message",
       priority: 1130,
-      configWatch: "witchtrial",
     });
   }
 
@@ -106,6 +112,12 @@ export class WitchTrial extends plugin {
   configuredTurnTimeoutMs() {
     const minutes = Number(this.config.turnTimeoutMinutes);
     return (Number.isFinite(minutes) ? Math.max(3, Math.min(120, minutes)) : 15) * 60_000;
+  }
+
+  /** 自杀真相是极罕见分支；旧配置即使仍写着 15，也不会突破 2%。 */
+  configuredSuicideChance() {
+    const percent = Number(this.config.suicideChance);
+    return (Number.isFinite(percent) ? Math.max(0, Math.min(2, percent)) : 1) / 100;
   }
 
   /**
@@ -246,12 +258,6 @@ export class WitchTrial extends plugin {
       const current = await loadSession(session.selfId, session.groupId);
       if (!current || !this.hasTimedTurn(current)) return false;
 
-      // 旧会话第一次被扫描时只补时钟，不把它当成已经超时。
-      if (!current.turnDeadlineAt) {
-        armTurnDeadline(current);
-        await saveSession(current);
-        return false;
-      }
       if (!allowEarly && !isTurnDeadlineExpired(current)) return false;
 
       return await this.resolveTimedTurnUnderLock(e, current, lockToken, { reason });
@@ -650,7 +656,7 @@ export class WitchTrial extends plugin {
       route,
       session,
       playerCulpritChance: this.config.playerCulpritChance / 100,
-      suicideChance: this.config.suicideChance / 100,
+      suicideChance: this.configuredSuicideChance(),
       onProgress: async (text) => {
         await assertSessionActive(session);
         return this.announce(e, session, text).catch(() => {});
@@ -745,7 +751,8 @@ export class WitchTrial extends plugin {
     });
   });
 
-  destroy = Command(/^#?湮灭\s*(.+)$/, async (e) => {
+  // `destroy()` 是插件卸载生命周期；指令字段不能同名，否则热重载会把它无参数执行。
+  destroyEvidence = Command(/^#?湮灭\s*(.+)$/, async (e) => {
     const ctx = await this.requireGirl(e, [PHASES.INVESTIGATE]);
     if (!ctx) return false;
     const { session, girl } = ctx;
@@ -783,7 +790,7 @@ export class WitchTrial extends plugin {
       return true;
     }
     if (!prop.conclusion) {
-      await e.reply("主张必须选择标有【指认】【自杀】或【意外】的结论。");
+      await e.reply("主张必须选择标有【指认】或【自杀】的结论。");
       return true;
     }
 
@@ -796,6 +803,7 @@ export class WitchTrial extends plugin {
 
   // 出牌必须声明方向。不用声明就能公开证据的话，出牌就没有风险了——
   // 玩家只看得见证物的名字和描述，往哪打全靠推，打空要反噬。
+  // 公开后的证物会同步给所有人，但不会自动建立任何其他关系。
   playEvidence = Command(/^#?出示\s*(\d+)\s*(支持|反驳|驳)\s*(\d+)$/, async (e) => {
     const ctx = await this.requireGirl(e, [PHASES.TRIAL]);
     if (!ctx) return false;
@@ -808,11 +816,8 @@ export class WitchTrial extends plugin {
       await e.reply("你证物袋里没有这个编号，发【#证物袋】看看手里有什么。");
       return true;
     }
-    if (
-      session.publicEvidence.includes(evidenceId) ||
-      session.destroyedEvidence.includes(evidenceId)
-    ) {
-      await e.reply("这条证据已经公开或被销毁，不能重复出示。");
+    if (session.destroyedEvidence.includes(evidenceId)) {
+      await e.reply("这条证据已经被销毁，不能出示。");
       return true;
     }
     const prop = session.caseFile.propositions[Number(e.match[3]) - 1];
@@ -831,30 +836,40 @@ export class WitchTrial extends plugin {
     });
   });
 
-  challengeFake = Command(/^#?揭穿\s*(\d+)$/, async (e) => {
+  challengeFake = Command(/^#?揭穿\s*(\d+)\s+(\d+)$/, async (e) => {
     const ctx = await this.requireGirl(e, [PHASES.TRIAL]);
     if (!ctx) return false;
     const { session, girl } = ctx;
     if (!girl.alive) return false;
 
     const bag = pouchOf(session, girl.id);
-    const evidenceId = bag[Number(e.match[1]) - 1];
-    if (!evidenceId) {
+    const suspectEvidenceId = bag[Number(e.match[1]) - 1];
+    const flawEvidenceId = bag[Number(e.match[2]) - 1];
+    if (!suspectEvidenceId || !flawEvidenceId) {
       await e.reply("你证物袋里没有这个编号，发【#证物袋】核对。");
       return true;
     }
+    if (suspectEvidenceId === flawEvidenceId) {
+      await e.reply("必须指定两件不同的证物：先填要质疑的公共证物，再填用于指出矛盾的证物。");
+      return true;
+    }
+    if (!session.publicEvidence.includes(suspectEvidenceId)) {
+      await e.reply("第一个编号必须是已经公开的证物。发【#证物袋】查看公开状态。");
+      return true;
+    }
     if (
-      session.publicEvidence.includes(evidenceId) ||
-      session.destroyedEvidence.includes(evidenceId)
+      session.destroyedEvidence.includes(suspectEvidenceId) ||
+      session.destroyedEvidence.includes(flawEvidenceId)
     ) {
-      await e.reply("这条证据已经公开或被销毁，不能再拿来揭穿。");
+      await e.reply("其中一件证物已经被销毁，不能再拿来揭穿。");
       return true;
     }
 
     return this.submitAction(e, session, girl, {
       kind: "challenge",
-      evidenceId,
-      label: "尝试揭穿台面上的伪证",
+      suspectEvidenceId,
+      flawEvidenceId,
+      label: "用两件证物检验矛盾",
     });
   });
 
@@ -889,6 +904,10 @@ export class WitchTrial extends plugin {
     if (!ctx) return false;
     const { session, girl } = ctx;
     if (!girl.alive) return false;
+    if (!hasPendingQuestion(session, girl.id)) {
+      await e.reply("你当前没有待回应的追问，不能使用【#回应】。");
+      return true;
+    }
 
     const prop = session.caseFile.propositions[Number(e.match[1]) - 1];
     if (!prop) {
@@ -897,7 +916,7 @@ export class WitchTrial extends plugin {
     }
     if (!prop.conclusion) {
       await e.reply(
-        "回应必须押一个**结论**——就是那些标着【指认】【自杀】【意外】的。\n" +
+        "回应必须押一个**结论**——就是那些标着【指认】【自杀】的。\n" +
           "被追问了，你得当众说出你认为她是怎么死的，不能拿一句无关痛痒的事实搪塞。\n" +
           "发【#命题】看哪几条是结论。"
       );
@@ -912,7 +931,7 @@ export class WitchTrial extends plugin {
     });
   });
 
-  fake = Command(/^#?伪证\s*(\d+)\s*([\s\S]+)$/, async (e) => {
+  fake = Command(/^#?伪证\s*(\d+)$/, async (e) => {
     const ctx = await this.requireGirl(e, [PHASES.TRIAL]);
     if (!ctx) return false;
     const { session, girl } = ctx;
@@ -933,20 +952,14 @@ export class WitchTrial extends plugin {
       return true;
     }
     if (!prop.conclusion) {
-      await e.reply("伪证只能用来否定一个【指认】【自杀】或【意外】结论。");
-      return true;
-    }
-    const text = safeString(e.match?.[2], 200);
-    if (text.replace(/\s/g, "").length < 12) {
-      await e.reply("说辞太短，至少写 12 个有效字符，让它成为一条可以被核验的具体陈述。");
+      await e.reply("伪证只能用来否定一个【指认】或【自杀】结论。");
       return true;
     }
 
     return this.submitAction(e, session, girl, {
       kind: "fake",
       propId: prop.id,
-      text,
-      label: "抛出一条说辞",
+      label: "启用一件可核验证物",
     });
   });
 
@@ -976,6 +989,77 @@ export class WitchTrial extends plugin {
       }
       const currentGirl = girlOfUser(current, e.user_id);
       if (!currentGirl?.alive) return true;
+      if (
+        current.phase === PHASES.TRIAL &&
+        action.kind === "answer" &&
+        !hasPendingQuestion(current, currentGirl.id)
+      ) {
+        await e.reply("你当前没有待回应的追问，这条回应没有提交。");
+        return true;
+      }
+
+      if (
+        current.phase === PHASES.TRIAL &&
+        (action.kind === "play" || action.kind === "fake") &&
+        !canPresentEvidenceOn(current, action.propId)
+      ) {
+        await e.reply(
+          "这个结论还没有正式开题。请先用【#主张 <命题编号>】提出它；主张所在回合结算后，从下一轮起才能围绕它举证。普通事实命题不受限制。"
+        );
+        return true;
+      }
+      if (current.phase === PHASES.TRIAL && action.kind === "challenge") {
+        const currentBag = pouchOf(current, currentGirl.id);
+        if (
+          action.suspectEvidenceId === action.flawEvidenceId ||
+          !currentBag.includes(action.suspectEvidenceId) ||
+          !currentBag.includes(action.flawEvidenceId) ||
+          !current.publicEvidence.includes(action.suspectEvidenceId) ||
+          current.destroyedEvidence.includes(action.suspectEvidenceId) ||
+          current.destroyedEvidence.includes(action.flawEvidenceId)
+        ) {
+          await e.reply("证物状态已经变化，这次揭穿没有提交。请重新查看【#证物袋】。");
+          return true;
+        }
+      }
+      if (current.phase === PHASES.TRIAL && action.kind === "fake") {
+        if (
+          currentGirl.id !== current.caseFile?.culpritId ||
+          current.fakeUsed ||
+          current.round >= current.trialRounds - 1
+        ) {
+          await e.reply("当前不能使用这项能力，这条行动没有提交。");
+          return true;
+        }
+        const plan = selectForgeryPlan(
+          current,
+          currentGirl,
+          action.propId
+        );
+        if (!plan) {
+          await e.reply(
+            "目前没有满足反制条件的证物，这项能力没有发动、次数也没有消耗。你仍可提交其他行动。"
+          );
+          return true;
+        }
+        action.forgeryPlanId = plan.id;
+        action.label = `出示「${plan.name}」反驳命题`;
+      }
+      if (
+        current.phase === PHASES.TRIAL &&
+        action.kind === "play" &&
+        hasEvidenceLink(
+          current,
+          action.evidenceId,
+          action.propId,
+          action.stance
+        )
+      ) {
+        await e.reply(
+          "这条证据与该命题的这层关系已经在法庭上建立过了，不需要重复论证。你仍可以用它尝试支持或反驳其他命题。"
+        );
+        return true;
+      }
 
       const living = livingPlayers(current);
       const livingIds = new Set(living.map((item) => item.id));
@@ -1017,25 +1101,6 @@ export class WitchTrial extends plugin {
     }
 
     if (this.hasTimedTurn(session)) {
-      if (!session.turnDeadlineAt) {
-        const lockToken = await acquireTurnLock(session);
-        if (!lockToken) {
-          await e.reply("本局正在保存，请稍后再试。");
-          return true;
-        }
-        try {
-          const current = await loadSession(session.selfId, session.groupId);
-          if (current && this.hasTimedTurn(current) && !current.turnDeadlineAt) {
-            armTurnDeadline(current);
-            await saveSession(current);
-          }
-        } finally {
-          await releaseTurnLock(session, lockToken);
-        }
-        await e.reply("已为本回合补上截止时间，届时会自动推进。");
-        return true;
-      }
-
       if (!privileged && !isTurnDeadlineExpired(session)) {
         const remaining = renderTurnDeadline(session);
         await e.reply(

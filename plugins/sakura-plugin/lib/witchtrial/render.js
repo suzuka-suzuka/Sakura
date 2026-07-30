@@ -16,15 +16,22 @@ import {
   turnDeadlineRemainingMs,
 } from "./SessionStore.js";
 import {
+  FACT_EFFECT_WHEN,
   VERDICT,
+  canPresentEvidenceOn,
   comparePrisonerCode,
   girlsByPrisonerCode,
 } from "./schema.js";
+import {
+  STANCE,
+  activeFactEffectsForSession,
+  linkedEvidence,
+  propositionStatusForSession,
+} from "./logic.js";
 
 const VERDICT_LABEL = {
   [VERDICT.ACCUSE]: "指认",
   [VERDICT.SUICIDE]: "自杀",
-  [VERDICT.ACCIDENT]: "意外",
 };
 
 /** 囚犯编号前缀，指令里可以直接打这个号 */
@@ -110,7 +117,22 @@ ${girl.secret}
 
 /** 私聊告知本章的凶手 */
 export function renderCulpritNotice(session, caseFile, victim) {
-  const method = caseFile.method.description;
+  const method = caseFile.method || {};
+  const misdirection = method.misdirection || null;
+  const framedGirl = misdirection?.targetId
+    ? session.girls?.[misdirection.targetId]
+    : null;
+  const methodDetails = [
+    method.causeOfDeath && `真实死因：${method.causeOfDeath}`,
+    method.killingAction && `致死动作：${method.killingAction}`,
+    method.magicRole && `魔法用途：${method.magicRole}`,
+    misdirection?.apparentAbility &&
+      `伪造的能力指向：${misdirection.apparentAbility}（嫁祸给${framedGirl?.name || "另一位少女"}）`,
+    misdirection?.description && `误导设计：${misdirection.description}`,
+    method.description && `完整经过：${method.description}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
   const motive = caseFile.motive || {};
   const traces = caseFile.evidence
     .filter((item) => item.supports.includes(caseFile.truthId))
@@ -129,20 +151,21 @@ ${motive.trigger || "（想不起来了。只记得那一刻什么东西断了�
 ${motive.backstory || ""}
 
 【你做了什么】
-${method}
+${methodDetails || "（记忆里只剩下一片空白。）"}
 
 【你留下的痕迹】
 ${traces || "（似乎什么都没留下——但别太乐观）"}
 
 ━━━━━━━━━━
 
-审判开始后，你可以：
-  #湮灭 <地点>　　销毁那个地点上一条还没被发现的证据
-  #伪证 <命题编号> <说辞>　　庭上临时造一条证据去否定某个命题
+本章中，你可以：
+  调查阶段：#湮灭 <地点>　　　销毁该地点一条还没被发现的证据
+  庭审阶段：#伪证 <命题编号>　启用一件预先设计、可被核验的证物去反驳结论
 
-每章只能尝试一次伪证，而且最后一轮禁用。
-它只有在另一位在场者确实握有破绽时才会落地；对方下一轮若用
-【#揭穿 <证据编号>】命中，你会 +25。没有破绽可供反制，尝试本身就会失败并 +8。
+伪证成功发动后，在名称、描述、出示播报和所有人的证物袋里都与普通证物完全一样。
+每章只能成功发动一次，而且最后一轮禁用。只有另一位在场者确实握有破绽时才会发动；
+条件不满足会私下驳回且不消耗次数。对方必须用
+【#揭穿 <可疑公共证物编号> <破绽证物编号>】准确指出两件证物的矛盾，命中后你会 +25。
 在证据被挖尽之前，让某个不指向你的结论站住——那是你唯一的活路。`;
 }
 
@@ -304,31 +327,44 @@ ${propositions.map((item, index) => `${index + 1}. ${item.text}${item.conclusion
 
 庭审共 ${session.trialRounds} 轮。**指令私聊我**，每轮一个：
 
-  #主张 <命题编号>　　　　　　　　　把一个结论推上台面
+  #主张 <命题编号>　　　　　　　　　设为焦点，催相关 NPC 围绕它出牌
   #出示 <证据编号> 支持 <命题编号>　用它撑起某个命题
   #出示 <证据编号> 反驳 <命题编号>　用它击碎某个命题
-  #揭穿 <证据编号>　　　　　　　　拿一条牌检验台面上的可疑说辞
+  #揭穿 <公共证物编号> <证物编号>　用后者检验前者是否存在矛盾
   #追问 001 <关于什么>　　　　　　　逼对方当众表态
   #回应 <结论编号> <说辞>　　　　　　被追问时用，不表态 +12
 
-⚠ 主张或回应押中的结论会成为本轮焦点。
-　 持有相关证据的 NPC 会优先围绕它出牌，所以主张能把藏在别人手里的信息逼上桌，
-　 但如果你押错，真实反证出现时仍会 +10。
+⚠ 只有正式主张会为结论开题。主张当轮，持有相关证据的 NPC 可以立即响应；
+　 该轮结算后，结论从下一轮起向玩家开放举证，并持续到本章结束。
+　 普通事实命题不用主张，可以直接支持或反驳。回应追问只是表态，不会开题。
+　 如果你主张错了，真实反证出现时仍会 +10。
+
+⚠ 推理分两层：先用证物证实或反驳普通事实，再由事实影响已经开题的结论。
+　 一个结论除了达到支持门槛，还必须至少有一条已经激活的“事实支持”才能采纳；
+　 只把证物直接堆到结论上不够。发【#命题】会列出已经激活的事实链，
+　 但不会提前公开尚未触发的关系。
 
 ⚠ 追问不会给你带来证据——搜证是调查阶段的事。它是节奏交换：
 　 你花一个动作，逼对方也花一个动作，而对方表的态会变成你下一轮的靶子。
 
-⚠ 回应必须押一个**结论**（标着【指认】【自杀】【意外】的那些），
+⚠ 回应必须押一个**结论**（标着【指认】【自杀】的那些），
 　 也就是当众说出「我认为她是怎么死的」，不能拿无关的事实搪塞。
-　 除了真相之外，**每一个结论都有证据能把它打穿**——
+　 除了真相之外，**每一个结论都有直接或经由事实的反驳路径**——
 　 押错了，别人一张牌下来你就是 +10。押对了，你等于替大家指了路。
 　 不表态就是稳吃 +12。三条路都不好走，这是刻意的。
 
 ⚠ 出牌必须声明方向，而且可能打空。
 　 你只看得见证物的名字和描述，看不见它到底能撑起什么、能击碎什么——
-　 那要你自己从描述里推。推错了，牌白扔，人还多背一份嫌疑。
+　 那要你自己从描述里推。推错了，人会多背一份嫌疑。
 
-⚠ 反驳打不中会反噬：你涨嫌疑，牌还白白摊在了桌面上。
+⚠ 证物一经出示就会进入所有人的证物袋，但公开本身不会自动证明任何命题。
+　 只有这次明确声明的支持或反驳命中时，系统才建立这一条论证关系。
+　 此后任何人都能继续拿这件公共证物论证其他命题；同一关系不重复计算。
+
+⚠ 如果你认为一件公共证物与另一件证物矛盾，可以用【#揭穿 前者编号 后者编号】。
+　 后者无论成败都会公开；指出正确矛盾会撤下前者，猜错则自己 +8。
+
+⚠ 出牌打不中会反噬：你涨嫌疑，但证物仍会公开，交给所有人继续判断。
 
 ${renderTurnDeadline(session)}
 全员提前提交会立即结算；未提交者到点按放弃本轮处理。`;
@@ -352,30 +388,37 @@ export function renderTrialTurn(session, result) {
         case "play": {
           const dir = item.stance === "support" ? "支持" : "反驳";
           const tail = item.valid
-            ? item.stance === "support"
-              ? "——成立"
-              : "——命中，命题倒台"
+            ? item.linked
+              ? item.stance === "support"
+                ? "——命中，建立支持论证"
+                : "——命中，建立反驳论证"
+              : "——关系已经建立，不重复记录"
             : "——落空，反噬";
           return `${item.valid ? "✅" : "❌"} ${item.actorName} 出示「${item.evidenceName}」${dir}「${item.propText}」${tail}`;
         }
-        case "claim":
-          return `${item.stands ? "📌" : "💬"} ${item.actorName} 主张「${item.propText}」（支持 ${item.supports}/${item.threshold}${item.refuted ? "，已被否定" : ""}）`;
+        case "claim": {
+          const state = item.refuted
+            ? "已被反驳"
+            : item.stands
+              ? "当前论证足以采纳"
+              : item.supports >= item.threshold &&
+                  !item.hasRequiredFactSupport
+                ? "直接证物已够，但还缺事实链支持"
+              : item.supports > 0
+                ? "已有支持，但尚不足以采纳"
+                : "尚无有效支持";
+          return `${item.stands ? "📌" : "💬"} ${item.actorName} 主张「${item.propText}」（${state}）`;
+        }
         case "question":
           return `❓ ${item.actorName} 追问 ${item.targetName}：${item.topic}\n　　└ 对方下一轮必须押一个结论表态，否则 +12`;
         case "answer":
           return `💬 ${item.actorName} 押「${item.propText}」表态${item.refuted ? "——可那条早就被推翻了" : ""}`;
         case "dodge":
           return `🙈 ${item.actorName} 回避了追问，嫌疑 +12`;
-        case "fake":
-          return `💬 ${item.actorName} 提出了一条暂时被法庭采信的说辞`;
-        case "fake_failed":
-          return `❌ ${item.actorName} 的说辞找不到任何可核验支点，当场被驳回，嫌疑 +8`;
         case "challenge":
           return item.success
-            ? `🔥 ${item.actorName} 出示「${item.evidenceName}」揭穿了 ${item.fakerName} 的说辞；伪证撤下，伪造者 +25`
-            : `❌ ${item.actorName} 用「${item.evidenceName}」揭穿失败；证据仍被公开，自己 +8`;
-        case "fake_exposed":
-          return `🔥 ${item.actorName} 先前的说辞被「${item.evidenceName}」戳穿并撤下，嫌疑 +25`;
+            ? `🔥 ${item.actorName} 用「${item.flawEvidenceName}」揭穿了公共证物「${item.suspectEvidenceName}」\n　　└ ${item.exposureText}；证物撤下，制造者 ${item.fakerName} +25`
+            : `❌ ${item.actorName} 用「${item.flawEvidenceName}」质疑公共证物「${item.suspectEvidenceName}」失败；前者仍被公开，自己 +8`;
         default:
           return "";
       }
@@ -383,9 +426,22 @@ export function renderTrialTurn(session, result) {
     .filter(Boolean);
   if (judged.length) parts.push(`【本轮判定】\n${judged.join("\n")}`);
 
+  const factChainChanges = (result.factChainChanges || []).map((effect) => {
+    const factState =
+      effect.when === FACT_EFFECT_WHEN.REFUTED ? "被反驳" : "被证实";
+    const direction =
+      effect.stance === STANCE.SUPPORT ? "支持" : "反驳";
+    return effect.active
+      ? `🔗 事实「${effect.factText}」${factState}，开始${direction}结论「${effect.conclusionText}」\n　　└ ${effect.reason}`
+      : `⛓ 事实「${effect.factText}」的状态改变，不再${direction}结论「${effect.conclusionText}」`;
+  });
+  if (factChainChanges.length) {
+    parts.push(`【事实链变化】\n${factChainChanges.join("\n")}`);
+  }
+
   if (result.standing.length) {
     parts.push(
-      `【当前站得住的结论】\n${result.standing.map((item) => `· ${item.text}（支持 ${item.supports}）`).join("\n")}`
+      `【当前站得住的结论】\n${result.standing.map((item) => `· ${item.text}`).join("\n")}`
     );
   } else {
     parts.push("【当前站得住的结论】\n（一个都没有）");
@@ -564,7 +620,7 @@ ${evidence.map((item, index) => {
   const state = session.destroyedEvidence?.includes(item.id)
     ? "　【已销毁】"
     : session.publicEvidence?.includes(item.id)
-      ? "　【已公开】"
+      ? "　【公共证物】"
       : "";
   const related = [...new Set([...(item.supports || []), ...(item.refutes || [])])]
     .map((propId) => session.caseFile?.propositions?.findIndex((prop) => prop.id === propId) + 1)
@@ -572,29 +628,100 @@ ${evidence.map((item, index) => {
   const relation = related.length
     ? `\n   涉及命题：${related.join("、")}（支持或反驳仍要自己判断）`
     : "";
-  return `${index + 1}. 「${item.name}」${state}\n   ${item.description}${relation}`;
+  const established = session.evidenceLinks
+    .filter(
+      (link) =>
+        link.evidenceId === item.id &&
+        link.chapter === session.chapter
+    )
+    .map((link) => {
+      const propIndex =
+        session.caseFile?.propositions?.findIndex(
+          (prop) => prop.id === link.propId
+        ) + 1;
+      if (propIndex <= 0) return "";
+      return `${link.stance === STANCE.SUPPORT ? "支持" : "反驳"}命题 ${propIndex}`;
+    })
+    .filter(Boolean);
+  const establishedLine = established.length
+    ? `\n   已建立论证：${established.join("、")}`
+    : "";
+  return `${index + 1}. 「${item.name}」${state}\n   ${item.description}${relation}${establishedLine}`;
 }).join("\n\n")}
 
 ━━━━━━━━━━
 出示时用这里的序号：#出示 <序号> 反驳 <命题编号>
-这些编号只对你有效，别人的证物袋是另一套。`;
+这些编号只对你有效，别人的证物袋是另一套。
+【公共证物】已经同步给所有人，仍可拿来建立尚未出现的其他论证。
+证物公开不等于命题成立；只有明确支持或反驳成功的那一条关系才生效。
+若认为一件公共证物与另一件证物矛盾：#揭穿 <公共证物序号> <破绽证物序号>
+结论须先正式主张，并从下一轮起开放举证；普通事实命题可以直接出示。`;
 }
 
 export function renderPropositions(session) {
   const props = session.caseFile?.propositions || [];
-  const publicIds = session.publicEvidence || [];
-  const refuted = new Set(session.refutedProps || []);
+  const evidenceLinks = session.evidenceLinks;
+  const factArgument = (effect) =>
+    `事实「${effect.factText}」${
+      effect.when === FACT_EFFECT_WHEN.REFUTED ? "已被反驳" : "已证实"
+    }（${effect.reason}）`;
 
   const lines = props.map((item, index) => {
-    const supports = (session.caseFile.evidence || []).filter(
-      (e) => publicIds.includes(e.id) && e.supports.includes(item.id)
-    ).length;
-    const mark = refuted.has(item.id) ? "❌" : item.conclusion ? "⚖" : "·";
+    const status = propositionStatusForSession(session, item.id);
+    const supporters = linkedEvidence(
+      session.caseFile,
+      item.id,
+      evidenceLinks,
+      STANCE.SUPPORT
+    );
+    const refuters = linkedEvidence(
+      session.caseFile,
+      item.id,
+      evidenceLinks,
+      STANCE.REFUTE
+    );
+    const mark = status.refuted ? "❌" : item.conclusion ? "⚖" : "·";
     const tag = item.conclusion ? `【${VERDICT_LABEL[item.conclusion.type]}】` : "";
-    return `${index + 1}. ${mark} ${item.text}${tag}　支持 ${supports}`;
+    const proofState = status.refuted
+      ? "【已反驳】"
+      : status.stands
+        ? item.conclusion
+          ? "【已达到采纳条件】"
+          : "【已证实】"
+        : item.conclusion &&
+            status.supports >= status.threshold &&
+            !status.hasRequiredFactSupport
+          ? "【缺少事实链】"
+        : status.supports > 0
+          ? "【尚未达到采纳条件】"
+          : "【未论证】";
+    const openState = item.conclusion
+      ? canPresentEvidenceOn(session, item.id)
+        ? "　【已开放举证】"
+        : "　【未主张】"
+      : "";
+    const directSupportText = supporters.length
+      ? supporters.map((evidence) => `「${evidence.name}」`).join("、")
+      : "无";
+    const directRefuteText = refuters.length
+      ? refuters.map((evidence) => `「${evidence.name}」`).join("、")
+      : "无";
+    const indirectSupportText = status.indirectSupportEffects.length
+      ? status.indirectSupportEffects.map(factArgument).join("；")
+      : "无";
+    const indirectRefuteText = status.indirectRefuteEffects.length
+      ? status.indirectRefuteEffects.map(factArgument).join("；")
+      : "无";
+    const directLines =
+      `   直接支持：${directSupportText}\n` +
+      `   直接反驳：${directRefuteText}`;
+    const indirectLines = item.conclusion
+      ? `\n   事实支持：${indirectSupportText}\n   事实反驳：${indirectRefuteText}`
+      : "";
+    return `${index + 1}. ${mark} ${item.text}${tag}　${proofState}${openState}\n${directLines}${indirectLines}`;
   });
 
-  return `【命题清单】\n\n${lines.join("\n")}\n\n❌ 已被证据否定　⚖ 可以被投票采纳`;
+  return `【命题清单】\n\n${lines.join("\n\n")}\n\n这里只显示已经建立的直接论证，以及结论开放后已经激活的事实链；不会公开尚未触发的隐藏关系。\n事实被证实或反驳后，才会按案件逻辑给结论提供一次“事实支持”或“事实反驳”。同一事实对同一结论只计一次。\n结论即使直接证物已经够门槛，也必须至少有一条事实支持才能采纳；【已达到采纳条件】仍不表示它就是真相。\n【未主张】须先主张，结算后的下一轮才开放；普通事实命题可直接举证。`;
 }
 
 export function renderCourtRecord(session) {
@@ -605,13 +732,53 @@ export function renderCourtRecord(session) {
     session.publicEvidence.includes(item.id)
   );
 
-  const claims = session.claims
-    .filter((item) => item.chapter === session.chapter)
+  const claims = (session.claims || [])
+    .filter(
+      (item) =>
+        item.chapter === session.chapter &&
+        item.opensEvidence === true
+    )
     .map((item) => {
       const prop = caseFile.propositions.find((p) => p.id === item.propId);
       const by = session.girls[item.byId];
       return `· ${by?.name || "某人"} 主张「${prop?.text || "?"}」`;
     });
+
+  const argumentsMade = session.evidenceLinks
+    .filter((item) => item.chapter === session.chapter)
+    .map((item) => {
+      const evidence = caseFile.evidence.find(
+        (entry) => entry.id === item.evidenceId
+      );
+      const propIndex =
+        caseFile.propositions.findIndex((entry) => entry.id === item.propId) + 1;
+      const by = session.girls[item.byId];
+      if (!evidence || propIndex <= 0 || !by) return "";
+      const actor = `${by.code} ${by.name}`;
+      const direction =
+        item.stance === STANCE.SUPPORT ? "支持" : "反驳";
+      return `· ${actor} 用「${evidence.name}」${direction}命题 ${propIndex}`;
+    })
+    .filter(Boolean);
+
+  const factChains = activeFactEffectsForSession(session)
+    .map((effect) => {
+      const factIndex =
+        caseFile.propositions.findIndex(
+          (entry) => entry.id === effect.factPropId
+        ) + 1;
+      const conclusionIndex =
+        caseFile.propositions.findIndex(
+          (entry) => entry.id === effect.conclusionPropId
+        ) + 1;
+      if (factIndex <= 0 || conclusionIndex <= 0) return "";
+      const factState =
+        effect.when === FACT_EFFECT_WHEN.REFUTED ? "被反驳" : "被证实";
+      const direction =
+        effect.stance === STANCE.SUPPORT ? "支持" : "反驳";
+      return `· 事实命题 ${factIndex}「${effect.factText}」${factState} → ${direction}结论命题 ${conclusionIndex}\n  └ ${effect.reason}`;
+    })
+    .filter(Boolean);
 
   const testimony = session.testimony
     .slice(-8)
@@ -620,7 +787,13 @@ export function renderCourtRecord(session) {
   return `【法庭记录 · 第 ${session.chapter} 章】
 
 ▎台面上的证据（${publicEvidence.length}）
-${publicEvidence.length ? publicEvidence.map((item) => `· 「${item.name}」${item.description}`).join("\n") : "（无）"}
+${publicEvidence.length ? publicEvidence.map((item) => `· 「${item.name}」：${item.description}`).join("\n") : "（无）"}
+
+▎已建立的论证
+${argumentsMade.length ? argumentsMade.join("\n") : "（无）"}
+
+▎已激活的事实链
+${factChains.length ? factChains.join("\n") : "（无）"}
 
 ▎已提出的主张
 ${claims.length ? claims.join("\n") : "（无）"}
@@ -633,7 +806,31 @@ export function renderVoteMenu(conclusions, session = null) {
   const lines = conclusions.map((item, index) => {
     const mark = item.refuted ? "❌" : item.stands ? "✅" : "⏳";
     const target = item.targetName ? `（${item.targetName}）` : "";
-    return `${index + 1}. ${mark} ${item.text}${target}\n   支持 ${item.supports}/${item.threshold}${item.refuted ? "　已被否定" : item.stands ? "　可以采纳" : "　证据不足"}`;
+    const directSupport = item.supportEvidenceNames?.length
+      ? item.supportEvidenceNames.map((name) => `「${name}」`).join("、")
+      : "无";
+    const directRefute = item.refuteEvidenceNames?.length
+      ? item.refuteEvidenceNames.map((name) => `「${name}」`).join("、")
+      : "无";
+    const formatFactArgument = (argument) =>
+      `事实「${argument.factText}」${
+        argument.when === FACT_EFFECT_WHEN.REFUTED ? "已被反驳" : "已证实"
+      }（${argument.reason}）`;
+    const factSupport = item.supportFactArguments?.length
+      ? item.supportFactArguments.map(formatFactArgument).join("；")
+      : "无";
+    const factRefute = item.refuteFactArguments?.length
+      ? item.refuteFactArguments.map(formatFactArgument).join("；")
+      : "无";
+    const state = item.refuted
+      ? "已被否定"
+      : item.stands
+        ? "可以采纳"
+        : item.supports >= item.threshold &&
+            !item.hasRequiredFactSupport
+          ? "缺少事实链"
+          : "论证不足";
+    return `${index + 1}. ${mark} ${item.text}${target}　【${state}】\n   直接支持：${directSupport}\n   事实支持：${factSupport}\n   直接反驳：${directRefute}\n   事实反驳：${factRefute}`;
   });
 
   return `━━━ 投票 ━━━
@@ -644,6 +841,7 @@ ${lines.join("\n")}
 
 发【#投票 <编号>】。
 ✅ 才是能被采纳的。投一个证据不足或已被否定的，等于弃权。
+结论必须至少有一条已经激活的事实支持；只堆直接证物也不能绕过推理链。
 
 采纳要获得**仍在场玩家票的过半数**，所以平票是没用的。
 NPC 也会投票并在宣判时公开票型，但不能替玩家决定结论。
@@ -803,7 +1001,7 @@ ${voteBlock}`,
   } else if (verdict.correct && executed) {
     parts.push(`⚖ 判决正确。真凶就是 ${executed.name}。`);
   } else if (verdict.correct) {
-    // 自杀/意外被正确认定：没有人被处刑，但这一章也结束了
+    // 自杀被正确认定：没有人被处刑，但这一章也结束了
     parts.push("⚖ 判决正确。没有凶手——从一开始就没有。");
   } else if (verdict.executedId) {
     parts.push("⚖ 猫头鹰接受了这个说法。\n\n审判结束了。");
@@ -822,10 +1020,9 @@ export function renderFinale(session, reason, closingText) {
   // 判错的章节，动机当时没人听见。这里一次性摊开——包括那些没被讲出来的。
   const truthBlock = session.history
     .map((item) => {
-      // 自杀/意外的章节没有凶手，死者就是"凶手"，措辞要换掉
-      const selfInflicted = item.truthType === VERDICT.SUICIDE || item.truthType === VERDICT.ACCIDENT;
+      const selfInflicted = item.truthType === VERDICT.SUICIDE;
       const culpritLine = selfInflicted
-        ? `　真相：${item.truthType === VERDICT.SUICIDE ? "自杀" : "意外"}，没有凶手`
+        ? "　真相：自杀，没有凶手"
         : `　真凶：${item.culpritName}`;
 
       // 「她是无辜的」只在真的处刑了人、且判错时才成立
@@ -900,16 +1097,28 @@ export const HELP_TEXT = `【魔女审判 · 指令】
   #湮灭 A　　　　　　　 仅凶手：销毁一条未被发现的证据
 
 庭审阶段（私聊提交）
-  #主张 <命题编号>　　　　　　　把结论推上台面
-  #出示 <证据编号> 支持 <命题编号>
-  #出示 <证据编号> 反驳 <命题编号>
-  #揭穿 <证据编号>　　　　　　　检验一条可疑说辞；猜错会公开牌并 +8
+  #主张 <命题编号>　　　　　　　为结论开题；结算后从下一轮开放举证
+  #出示 <证据编号> 支持 <命题编号>　结论须已开放；事实命题可直接举证
+  #出示 <证据编号> 反驳 <命题编号>　结论须已开放；事实命题可直接举证
+  #揭穿 <公共证物编号> <证物编号>　用后者检验前者；猜错后者仍公开且自己 +8
   #追问 001 <关于什么>　　　　　 逼对方当众表态
   #回应 <结论编号> <说辞>　　　 押一个结论表态，不表态 +12
-  #伪证 <命题编号> <说辞>　　　 仅凶手；每章一次，最后一轮不可用
+  #伪证 <命题编号>　　　　　　　仅凶手；启用预制证物，结论须开放，每章一次，末轮不可用
 
-  主张不是空喊：本轮被主张或回应押中的结论会成为焦点，
-  持有相关证据的 NPC 会优先围绕它出牌。
+  主张不是空喊：本轮被正式主张的结论会成为焦点，持有相关证据的 NPC
+  可以当轮响应；玩家从下一轮起才能向它举证。回应追问只表态，不会开题。
+
+  证物第一次出示后会进入所有人的证物袋，但不会自动支持或反驳任何命题。
+  只有明确声明的方向和目标命中时，才建立这一条论证。之后任何人都能继续
+  用同一件公共证物论证其他命题；已经建立过的同一关系不能重复计算。
+
+【证物、事实与结论】
+  普通事实可以直接举证：有支持且没有反驳时为“已证实”，出现有效反驳时
+  为“已反驳”。事实进入这些状态后，才会按案件预设的逻辑去支持或反驳
+  已经开题的结论；事实被反驳不等于系统自动相信它的反面，只触发明确写好的关系。
+  同一事实对同一结论只计一次，不会因堆更多同向证物重复加进度。
+  每个结论都必须至少得到一条已激活的事实支持，并达到总支持门槛且没有反驳，
+  才能采纳。发【#命题】可看已激活的具体事实链，未触发关系不会提前透露。
 
 【询问 vs 追问】
   #询问 只能在调查阶段用，是**搜证**：私下问出来的证言只进你的袋子。
@@ -919,7 +1128,7 @@ export const HELP_TEXT = `【魔女审判 · 指令】
 
 【三种代价】
   出牌打空　　+8　　你看不见证物的真实关系，方向得自己推
-  押的结论被打穿　+10　除真相外每个结论都有证据能否定它
+  押的结论被打穿　+10　除真相外每个结论都有直接或事实链反驳路径
   回避追问　　+12　　不表态最贵，所以哪怕站不稳也该开口
 
 秘密不影响任何判定，也问不出来。它只在你被处刑时才会被翻出来。
@@ -934,8 +1143,8 @@ export const HELP_TEXT = `【魔女审判 · 指令】
   #我的少女　　查看自己的能力与秘密
   #本章身份　　补领本章的凶手/无事发生私聊通知
   #证物袋　　　查看手里的牌
-  #命题　　　　查看全部命题与支持数
-  #法庭记录　　台面上的证据与证言
+  #命题　　　　查看直接论据、已激活事实链与开放状态
+  #法庭记录　　公共证物、直接论证、已激活事实链与证言
   #审判状态　　嫌疑排行与进度
 
 其他

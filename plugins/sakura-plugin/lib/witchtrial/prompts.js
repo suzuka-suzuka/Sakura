@@ -1,9 +1,11 @@
 /**
  * 提示词
  *
+ * 案件蓝图与证据填文单独放在 CasePrompts.js；这里保留设定、回合叙事和收场提示词。
+ *
  * 分五类：
  * 1. 开局   —— 一次，出牢狱设定 + 全体少女（含能力与秘密）
- * 2. 案件   —— 每章一次，出案件档案。死者和凶手由本地掷好后指定，AI 只负责编手法和证据
+ * 2. 案件   —— 每章两步，先出蓝图，再为本地锁定的证据图填文
  * 3. 调查   —— 每回合一次，把本地算好的搜查结果写成叙事
  * 4. 庭审   —— 每回合一次，把本地算好的攻防写成庭审对白
  * 5. 判决   —— 收场一次，写宣判与处刑
@@ -27,13 +29,11 @@ export const SETUP_SYSTEM = `你是《魔女审判》的设定作者。这是一
 
 硬性要求：
 - 只输出 JSON，不要任何解释、前言或代码围栏之外的文字。
-- 每位少女的魔法能力必须写成**可判定的规则**，不是模糊的形容。
-  好例子：能力「漂浮」，can: ["不留脚印移动"]，limit: "离地不超过十厘米"
-  坏例子：能力「风之力」，can: ["操控风"]，limit: "很累"
-- 能力的 limit 必须是硬性物理限制，因为它会被用来排除嫌疑。写「需要接触目标三秒」
-  「一次只能移动五公斤以内的东西」这种，不要写「精神消耗大」。
+- 每位少女的魔法能力必须写成**可判定的规则**，can 要说明具体能对什么对象做什么，
+  limit 要写可观察、可验证的硬性物理边界；不要只写宽泛效果或主观消耗。
 - 每位少女要有一条见不得光的秘密。秘密和杀人无关，只在她被处刑时用于叙事。
-- 能力之间不要重复，也不要有两个人的能力互相可替代。`;
+- 能力不能完全重复，但不同能力可以产生部分相同的物理结果。能力线索应当能缩小范围，
+  不能天然只指向唯一一人；公开能力也可能被凶手拿来布置错误答案。`;
 
 export function buildSetupPrompt({ girlCount, theme }) {
   const anonymousIds = Array.from(
@@ -79,40 +79,14 @@ ${anonymousIds.map((id) => `- "${id}"`).join("\n")}
 - 地点 5-7 个，要能藏东西、能发生事。
 - girls 恰好 ${girlCount} 位，id 必须与给定的匿名 id 完全一致。
 - 每位少女都必须有不同且完整的姓名；姓名只按世界观创作，不得参考现实用户。
-- 能力设计要为推理服务：想象一下「什么样的案件手法只有拥有这个能力的人能做到」。`;
+- 所有少女的能力都会公开。能力既可以成为真实的作案条件，也可以成为别人布置假象时
+  用来转移嫌疑的目标；不要把公开能力写成永远不会被误读的标准答案。
+- 能力设计要为推理服务：能力既可以直接影响死亡，也可以搬动尸体、伪造现场、
+  隐藏痕迹或制造错误印象；不要把每种能力都设计成单纯的杀人魔法。`;
 
 }
 
-// ===== 2. 案件 =====
-
-export const CASE_SYSTEM = `你是《魔女审判》的案件作者。你要设计一起可以被严格推理的命案。
-
-这个游戏的判定完全由程序完成，所以你的输出必须是**逻辑自洽的结构**，不是好看的文字。
-
-核心概念：
-- 「命题」是一句可判真假的陈述，比如「案发时希罗在钟楼」。
-- 其中一部分命题是「结论」，即审判可以采纳的死因。结论分三类：
-  accuse（指认某人）、suicide（自杀）、accident（意外）。
-- 「证据」通过 supports / refutes 指向命题：它支持哪些命题、否定哪些命题。
-
-三条铁律：
-1. **真相不能被任何一条证据否定。** 真相的 id 绝不能出现在任何证据的 refutes 里。
-2. **每一个非真相的结论，都必须至少有一条证据能否定它。** 否则案件有二义性，
-   玩家推到一半会发现两个答案都成立，这个案子就废了。
-3. **每一个候选结论都必须有足够证据支持到成立门槛。**
-   指认结论至少 2 条支持；自杀/意外结论至少 3 条支持。
-   不允许写只有反证、永远不可能被采纳的“陪跑选项”。
-4. **同一个人最多只能被一条指认结论指向。** 不要换个说法重复指认同一人。
-5. **手法要能缩小嫌疑范围，但不能锁定一个人。**
-   requiredAbilities 必须对得上凶手的能力，同时**还要对得上另外 1-2 个人**，
-   而对不上剩下的人。
-   玩家会从尸体和证据推断"手法需要什么能力"；如果推出来后范围只圈得住一个人，
-   就等于直接念出凶手的名字——这个案子就废了。
-   物理约束负责排除掉一部分人，剩下谁干的，要靠证据分辨。
-   这才是「设定系本格」：只能漂浮十厘米的少女在脚印案里"没被排除"，
-   不等于"她就是凶手"。
-
-只输出 JSON，不要任何解释。`;
+// 案件生成已拆到 CasePrompts.js；本文件从这里开始只保留回合叙事提示词。
 
 export function createAnonymousGirlIdMap(girls) {
   return new Map(
@@ -121,121 +95,6 @@ export function createAnonymousGirlIdMap(girls) {
       `girl_${String(index + 1).padStart(3, "0")}`,
     ])
   );
-}
-
-export function buildCasePrompt({
-  prison,
-  girls,
-  victim,
-  culprit,
-  chapter,
-  history,
-  anonymousGirlIds = createAnonymousGirlIdMap(girls),
-}) {
-  const anonymousId = (girl) => anonymousGirlIds.get(girl.id) || "girl_unknown";
-
-  // 死者此刻在数据里还是 alive（她要到案件生成完才退场），这里必须手动排掉。
-  // 否则 AI 会把证言挂到她身上，而开局后没人问得到死人——那条证据就永久不可达了。
-  const roster = girlsByPrisonerCode(girls)
-    .filter((girl) => girl.alive && girl.id !== victim.id)
-    .map(
-      (girl) =>
-        `- id "${anonymousId(girl)}" ${girl.name}：能力「${girl.ability.name}」，可以${girl.ability.can.join("、") || "（未定义）"}，限制：${girl.ability.limit}`
-    )
-    .join("\n");
-
-  const locations = prison.locations
-    .map((item) => `- id "${item.id}" ${item.name}：${item.description.slice(0, 60)}`)
-    .join("\n");
-
-  const historyText = history?.length
-    ? history
-        .map((item) => `第${item.chapter}章：${item.victimName} 死亡，${item.executedName || "无人"} 被处刑，${item.correct ? "判对了" : "判错了"}`)
-        .join("\n")
-    : "（这是第一起案件）";
-
-  return `请为第 ${chapter} 章设计一起命案。
-
-## 牢狱
-${prison.name}
-地点：
-${locations}
-
-## 在场的少女
-${roster}
-
-## 本案已经定好的部分（不可更改）
-死者：${victim.name}（id "${anonymousId(victim)}"，能力「${victim.ability.name}"）
-　　　身世：${victim.profile}
-凶手：${culprit.name}（id "${anonymousId(culprit)}"，能力「${culprit.ability.name}」，可以${culprit.ability.can.join("、")}，限制：${culprit.ability.limit}）
-　　　身世：${culprit.profile}
-　　　她藏着的事：${culprit.secret}
-
-${culprit.id === victim.id ? "注意：凶手就是死者本人，所以真相是 suicide 或 accident。" : "注意：真相必须是 accuse 类型，且 targetId 为凶手的 id。"}
-
-## 前几章发生过什么
-${historyText}
-
-## 输出
-{
-  "discovery": {
-    "location": "尸体被发现的地点 id",
-    "time": "发现时间，如 第三日清晨",
-    "finder": "第一发现者的少女 id",
-    "body": "尸体状态的客观描述，150-250字。只写看得见的，不要写死因结论"
-  },
-  "method": {
-    "description": "真实手法，200-300字，写清楚凶手具体怎么做的",
-    "requiredAbilities": ["这个手法必须用到的能力名，1-2个"]
-  },
-  "motive": {
-    "trigger": "压垮她的那一件事，100-150字。要具体到某个瞬间，不要写成长期积怨",
-    "backstory": "动机背后的来龙去脉，300-450字。从她的身世里长出来，写清楚她和死者之间到底发生过什么",
-    "confession": "她被拆穿时说的话，100-200字。第一人称，不要辩解，也不要忏悔得太干净"
-  },
-  "truthId": "真相那条结论的 id",
-  "propositions": [
-    { "id": "p1", "text": "一句可判真假的陈述", "conclusion": null },
-    { "id": "p2", "text": "结论型命题的陈述", "conclusion": { "type": "accuse", "targetId": "被指认者的少女 id" } },
-    { "id": "p3", "text": "死者自行了断", "conclusion": { "type": "suicide", "targetId": "" } }
-  ],
-  "evidence": [
-    {
-      "id": "e1",
-      "name": "证物名，10字以内",
-      "description": "这条证据是什么、为何能支持或否定所列命题，80-150字；关系必须能从字面推出来，不能只靠下方数组硬指定",
-      "via": "search 或 ask",
-      "location": "via 为 search 时填地点 id，否则留空",
-      "askTarget": "via 为 ask 时填要问的少女 id，否则留空",
-      "supports": ["这条证据支持的命题 id"],
-      "refutes": ["这条证据否定的命题 id"]
-    }
-  ]
-}
-
-**手法绝不会被直接告知玩家**——requiredAbilities 只给程序用来校验，不会公布。
-所以尸体状态（discovery.body）和至少 2-3 条证据，必须让人**推得出**这个手法
-需要什么样的本事，但都不许直接点破能力名。
-  好例子：「肺里全是水，是活着时吸进去的」「池边地上有一圈恰好五升的水痕，
-  　　　　却没有任何脚印或拖拽痕迹」——读的人自己会想到「有人隔空动了水」。
-  坏例子：「现场残留着液体操作的魔力痕迹」——这是把答案写在脸上。
-
-关于动机：
-- 动机是这一章的情感落点，处刑前才会被讲出来，所以要写足。
-- 它必须从凶手的身世里长出来，不能是临时安排的巧合。
-- **动机不是证据**：不要把它写进 evidence，也不要让任何命题依赖它。
-  有动机不等于是凶手——真正定罪的永远是手法和物证。
-
-数量要求：
-- propositions 8-12 条，其中结论型（conclusion 不为 null）3-5 条。
-- 结论里必须包含：真相、至少一个指认别人的错误结论、以及 suicide 或 accident 之一。
-- evidence 10-14 条；search 至少 3 条并分散到至少 3 个地点，ask 至少 3 条并分散到至少 2 位在场少女。
-- **每一个结论**都要达到自己的支持门槛：accuse 至少 2 条，suicide/accident 至少 3 条。
-- 每条证据至少支持或否定一个命题；description 必须让玩家看得出这种关系的理由。
-- girl_ 开头的匿名 id 只能出现在 finder、targetId、askTarget 等结构字段中；所有可读文本一律写少女姓名。
-
-再检查一遍五条铁律，特别是第 2、3 条：
-把每条结论拿出来，确认它既有足够支持证据能成立；如果不是真相，又至少有一条证据能否定。`;
 }
 
 // ===== 3. 调查 =====
@@ -348,17 +207,22 @@ ${encounterText}
 export const TRIAL_SYSTEM = `你是《魔女审判》的法庭叙述者。你要扮演典狱长猫头鹰，并把系统已判定的所有行动写成法庭戏。
 
 铁律：
-1. 每一次反驳有效还是无效，已经由系统判定好了，一并发给你。你只能照着写。
-   系统说反驳有效，你就写那个命题被击碎；系统说无效，你就写反驳落空、场面难堪。
+1. 每一次支持或反驳有效还是无效，已经由系统判定好并发给你。你只能照着写。
+   系统说有效，就写这条明确论证成立；系统说无效，就写行动落空、场面难堪。
    **绝对不许改判。**
-2. 你无权宣布审判结束，也无权宣布谁是凶手。那是系统的事。
-3. 系统动作里的少女可以说谎、回避、反咬，但：
+2. 证物出现在“台面上的证据”里只代表所有人都能看见和使用，不代表它自动
+   支持或反驳任何命题。只能承认系统动作中明确判定成功的论证关系。
+   即使某条普通事实被证实或反驳，也不要自行宣布它会影响哪个结论；
+   事实链由系统另行公开，叙述者不能猜测或补写。
+   在系统明确给出“揭穿成功”之前，也不许自行暗示任何证物可疑、虚假或出自谁手。
+3. 你无权宣布审判结束，也无权宣布谁是凶手。那是系统的事。
+4. 系统动作里的少女可以说谎、回避、反咬，但：
    - 不许说出未公开的证据内容
    - 不许凭空捏造新证物
    - 不许直接点破真相
-4. 不要自行判断谁是玩家、NPC 或凶手，也不要在系统动作之外额外指定某位少女发言。
-5. 不要提到「嫌疑值」「命题 id」「回合」这类术语。
-6. 只输出 JSON，不要任何围栏外文字。`;
+5. 不要自行判断谁是玩家、NPC 或凶手，也不要在系统动作之外额外指定某位少女发言。
+6. 不要提到「嫌疑值」「命题 id」「回合」这类术语。
+7. 只输出 JSON，不要任何围栏外文字。`;
 
 export function buildTrialPrompt({
   caseFile,
@@ -375,14 +239,27 @@ export function buildTrialPrompt({
   const moveLines = moves
     .map((item) => {
       switch (item.kind) {
-        case "claim":
-          return `【${item.actorName}】主张：「${item.propText}」\n  系统判定：${item.stands ? `已成立（支持 ${item.supports}/${item.threshold}）` : `尚未成立（支持 ${item.supports}/${item.threshold}${item.refuted ? "，且已被证据否定" : ""}）`}`;
+        case "claim": {
+          const state = item.refuted
+            ? "已被明确论证反驳"
+            : item.stands
+              ? "当前论证足以采纳"
+              : item.supports >= item.threshold &&
+                  !item.hasRequiredFactSupport
+                ? "直接证物已够，但缺少事实链支持，仍不能采纳"
+              : item.supports > 0
+                ? "已有有效支持，但尚不足以采纳"
+                : "尚无有效支持";
+          return `【${item.actorName}】主张：「${item.propText}」\n  系统判定：${state}`;
+        }
         case "play": {
           const dir = item.stance === "support" ? "支持" : "反驳";
           const verdict = item.valid
-            ? item.stance === "support"
-              ? "✅ 成立，该命题得到了这条证据的支持"
-              : "✅ 有效，该命题被击碎"
+            ? item.linked
+              ? item.stance === "support"
+                ? "✅ 命中，建立了这条支持论证"
+                : "✅ 命中，建立了这条反驳论证"
+              : "✅ 方向正确，但相同论证已经建立，不重复记录"
             : `❌ 无效，这条证据${dir}不了那个命题，出牌落空，当众难堪`;
           return `【${item.actorName}】出示「${item.evidenceName}」${dir}「${item.propText}」\n  系统判定：${verdict}\n  证据内容：${item.evidenceDesc}`;
         }
@@ -392,16 +269,10 @@ export function buildTrialPrompt({
           return `【${item.actorName}】回应追问，把辩解押在「${item.propText}」上。玩家提供的说辞文本：${JSON.stringify(item.text)}\n  系统判定：${item.refuted ? "❌ 她押的那条命题早已被证据推翻，这番话站不住" : "这条命题目前还没被推翻"}`;
         case "dodge":
           return `【${item.actorName}】回避了上一轮的追问，没有正面回答。写出她躲闪的样子，以及旁人怎么看她`;
-        case "fake":
-          return `【${item.actorName}】提出一条新说辞。文本：${JSON.stringify(item.text)}\n  系统判定：法庭暂时采信。叙事中只能称“说辞”或“陈述”，绝不能提前叫它伪证`;
-        case "fake_failed":
-          return `【${item.actorName}】试图提出一条新说辞。文本：${JSON.stringify(item.text)}\n  系统判定：这番话没有任何可核验支点，当场被猫头鹰驳回，她因冒进而增加嫌疑。不要称她为凶手`;
         case "challenge":
           return item.success
-            ? `【${item.actorName}】出示「${item.evidenceName}」检验先前说辞\n  证据内容：${item.evidenceDesc}\n  系统判定：🔥 揭穿成功，${item.fakerName} 的说辞已被认定为伪造并撤下`
-            : `【${item.actorName}】出示「${item.evidenceName}」试图揭穿说辞\n  证据内容：${item.evidenceDesc}\n  系统判定：❌ 揭穿失败，这条证据仍公开，她因错误指控增加嫌疑`;
-        case "fake_exposed":
-          return `【${item.actorName}】先前的说辞被新公开的「${item.evidenceName}」戳穿，系统已经撤下伪证并处罚她`;
+            ? `【${item.actorName}】用「${item.flawEvidenceName}」检验公共证物「${item.suspectEvidenceName}」\n  被质疑证物：${item.suspectEvidenceDesc}\n  用于检验的证物：${item.flawEvidenceDesc}\n  矛盾：${item.exposureText}\n  系统判定：🔥 揭穿成功；前者被认定为 ${item.fakerName} 制造的伪造证物并撤下`
+            : `【${item.actorName}】用「${item.flawEvidenceName}」质疑公共证物「${item.suspectEvidenceName}」\n  被质疑证物：${item.suspectEvidenceDesc}\n  用于检验的证物：${item.flawEvidenceDesc}\n  系统判定：❌ 两者不足以构成揭穿；后者仍会公开，她因错误质疑增加嫌疑。不要暗示被质疑证物究竟是真是假`;
         default:
           return `【${item.actorName}】${item.text || ""}`;
       }
@@ -413,7 +284,7 @@ export function buildTrialPrompt({
     : "（台面上还没有证据）";
 
   const standingLines = standing.length
-    ? standing.map((item) => `- ${item.text}（支持 ${item.supports} 条）`).join("\n")
+    ? standing.map((item) => `- ${item.text}（已由明确论证证成）`).join("\n")
     : "（目前没有任何结论能站得住）";
 
   const boardLines = suspicionBoard
@@ -514,12 +385,24 @@ ${executedAll.map((girl) => `　${girl.name}：能力「${girl.ability.name}」�
 真相随她们一起烂在这座岛上。`;
   }
 
+  const misdirection = caseFile.method?.misdirection || null;
+  const framedGirl = misdirection?.targetId ? girls?.[misdirection.targetId] : null;
+  const misdirectionBlock = misdirection
+    ? `表面上似乎必需的能力：${misdirection.apparentAbility || "（未记录）"}
+被嫁祸者：${framedGirl?.name || "（未记录）"}
+误导是如何成立、又如何被拆穿的：${misdirection.description || "（未记录）"}`
+    : "";
+
   // 判错时**不把动机和手法喂进提示词**。不给它，它就漏不出去——
   // 这比写十条「不许透露」的禁令都可靠。
   const truthBlock = verdict.correct
     ? `## 真相（判对了，可以全部写出来）
 ${truthProp?.text || "（未知）"}
-手法：${caseFile.method.description}
+真实死因：${caseFile.method?.causeOfDeath || "（未单独记录）"}
+致死动作：${caseFile.method?.killingAction || "（未单独记录）"}
+魔法用途：${caseFile.method?.magicRole || "（未单独记录）"}
+${misdirectionBlock}
+完整经过：${caseFile.method?.description || "（未记录）"}
 
 ## 她为什么这么做
 压垮她的那件事：${caseFile.motive?.trigger || "（未记录）"}
@@ -554,7 +437,7 @@ ${truthBlock}
 
 ${
   verdict.correct && !executed
-    ? `这一章判对了——真相就是自杀或意外，所以没有人被处刑。写 500-700 字，分两段：
+    ? `这一章判对了——真相就是那场极罕见的自杀，所以没有人被处刑。写 500-700 字，分两段：
 
 **第一段·宣判**
 猫头鹰接受了这个结论。它有点意兴阑珊，因为今天没有人可以杀。

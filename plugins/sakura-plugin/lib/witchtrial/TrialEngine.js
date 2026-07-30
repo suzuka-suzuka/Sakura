@@ -14,10 +14,12 @@ import {
   PENALTY,
   PLAY_RESULT,
   STANCE,
+  activeFactEffectsForSession,
+  addEvidenceLink,
   addPenalty,
   decideVerdict,
-  isFakeExposed,
-  isTruthEstablished,
+  hasPendingQuestion,
+  isTruthEstablishedForSession,
   judgeEvidencePlay,
   npcInvestigateActions,
   npcTrialMoves,
@@ -26,10 +28,11 @@ import {
   pickRelevantEvidence,
   plantFakeEvidence,
   propositionStatus,
+  propositionStatusForSession,
   recomputeSuspicion,
   reserveInvestigationEvidence,
   resolveFakeChallenge,
-  standingConclusions,
+  standingConclusionsForSession,
 } from "./logic.js";
 import {
   INVESTIGATE_SYSTEM,
@@ -41,6 +44,7 @@ import {
 import {
   EVIDENCE_VIA,
   VERDICT,
+  canPresentEvidenceOn,
   comparePrisonerCode,
   conclusionsOf,
   evidenceOf,
@@ -51,10 +55,23 @@ import {
   propositionOf,
   safeString,
 } from "./schema.js";
-import { PHASES, addToPouch, pouchOf, publicize } from "./SessionStore.js";
+import {
+  PHASES,
+  addToPouch,
+  pouchOf,
+  publicize,
+} from "./SessionStore.js";
 
 const MAX_SUMMARY_LINES = 12;
 const RECENT_LOG_SIZE = 3;
+
+const factEffectKey = (effect) =>
+  [
+    effect.factPropId,
+    effect.when,
+    effect.conclusionPropId,
+    effect.stance,
+  ].join("|");
 
 function pick(list) {
   return list[Math.floor(Math.random() * list.length)];
@@ -115,6 +132,7 @@ export async function startChapter({ e, route, session, onProgress, playerCulpri
   session.round = 0;
   session.pendingActions = {};
   session.publicEvidence = [];
+  session.evidenceLinks = [];
   session.destroyedEvidence = [];
   session.refutedProps = [];
   session.claims = [];
@@ -334,23 +352,36 @@ export async function resolveInvestigateTurn({ e, route, session, actions: playe
 // ===== 庭审阶段 =====
 
 function syncRefutedProps(session) {
-  const shown = new Set(session.publicEvidence || []);
-  session.refutedProps = [
-    ...new Set(
-      (session.caseFile?.evidence || [])
-        .filter((item) => shown.has(item.id))
-        .flatMap((item) => item.refutes || [])
-    ),
-  ];
+  session.refutedProps = (session.caseFile?.propositions || [])
+    .filter((item) => propositionStatusForSession(session, item.id).refuted)
+    .map((item) => item.id);
 }
 
-/** 只有真实公开证据会让押错结论永久吃 +10；伪证只暂时改变台面状态 */
+/** 只有真实且已明确建立的反驳会让押错结论永久吃 +10 */
 function realRefutedProps(session) {
-  const shown = new Set(session.publicEvidence || []);
-  return new Set(
+  const realEvidenceIds = new Set(
     (session.caseFile?.evidence || [])
-      .filter((item) => !item.fake && shown.has(item.id))
-      .flatMap((item) => item.refutes || [])
+      .filter((item) => !item.fake)
+      .map((item) => item.id)
+  );
+  const realLinks = session.evidenceLinks.filter((item) =>
+    realEvidenceIds.has(item.evidenceId)
+  );
+  return new Set(
+    (session.caseFile?.propositions || [])
+      .filter((item) =>
+        propositionStatus(
+          session.caseFile,
+          item.id,
+          realLinks,
+          {
+            includeIndirect:
+              !item.conclusion ||
+              canPresentEvidenceOn(session, item.id),
+          }
+        ).refuted
+      )
+      .map((item) => item.id)
   );
 }
 
@@ -370,49 +401,26 @@ function penalizeNewlyBrokenClaims(session, beforeRefuted) {
   }
 }
 
-function exposePublicFakes(session, moves, currentRound) {
-  const caseFile = session.caseFile;
-  const exposed = (caseFile.evidence || []).filter(
-    (item) =>
-      item.fake &&
-      isFakeExposed(caseFile, item.id, session.publicEvidence, {
-        round: currentRound,
-      })
-  );
-  if (!exposed.length) return;
-
-  const exposedIds = new Set(exposed.map((item) => item.id));
-  caseFile.evidence = caseFile.evidence.filter((item) => !exposedIds.has(item.id));
-  session.publicEvidence = session.publicEvidence.filter((id) => !exposedIds.has(id));
-
-  for (const fake of exposed) {
-    const actor = girlOf(session, fake.askTarget);
-    addPenalty(actor, PENALTY.FAKE_EXPOSED);
-    moves.push({
-      kind: "fake_exposed",
-      actorId: actor?.id || fake.askTarget,
-      actorName: actor?.name || "某人",
-      text: fake.description,
-      evidenceName:
-        evidenceOf(caseFile, fake.flawOf)?.name || "破绽证据",
-    });
-  }
-  syncRefutedProps(session);
-}
-
 /**
  * 结算一个庭审回合
- * @param {object[]} actions [{ girlId, kind, propId, evidenceId, targetId, topic, text }]
+ * @param {object[]} actions 玩家与 NPC 的结构化行动
  */
 export async function resolveTrialTurn({ e, route, session, actions: playerActions }) {
   const caseFile = session.caseFile;
   const moves = [];
   syncRefutedProps(session);
+  const beforeRoundRefuted = realRefutedProps(session);
+  const beforeFactEffects = new Map(
+    activeFactEffectsForSession(session).map((effect) => [
+      factEffectKey(effect),
+      effect,
+    ])
+  );
 
   // NPC 也出手：主张、出示、反驳、追问、回避。它们的回避同样挨罚——
   // 否则「从来不用正面回答的那个」就是活体身份标签。
   const focusPropIds = playerActions
-    .filter((item) => item.kind === "claim" || item.kind === "answer")
+    .filter((item) => item.kind === "claim")
     .map((item) => item.propId);
   const actions = [
     ...playerActions,
@@ -428,7 +436,11 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
       .filter(
         (item) =>
           item.kind === "dodge" ||
-          (item.kind === "answer" && propositionOf(caseFile, item.propId)?.conclusion)
+          (
+            item.kind === "answer" &&
+            hasPendingQuestion(session, item.girlId) &&
+            propositionOf(caseFile, item.propId)?.conclusion
+          )
       )
       .map((item) => item.girlId)
   );
@@ -450,7 +462,7 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
     if (action.kind === "claim") {
       const prop = propositionOf(caseFile, action.propId);
       if (!prop) continue;
-      const status = propositionStatus(caseFile, prop.id, session.publicEvidence);
+      const status = propositionStatusForSession(session, prop.id);
       const reallyRefuted = realRefutedProps(session).has(prop.id);
       session.claims.push({
         byId: actor.id,
@@ -458,6 +470,7 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
         chapter: session.chapter,
         round: session.round + 1,
         broken: reallyRefuted,
+        opensEvidence: true,
       });
       if (reallyRefuted) addPenalty(actor, PENALTY.CLAIM_BROKEN);
       moves.push({
@@ -468,6 +481,9 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
         propText: prop.text,
         stands: status.stands,
         supports: status.supports,
+        directSupports: status.directSupports,
+        indirectSupports: status.indirectSupports,
+        hasRequiredFactSupport: status.hasRequiredFactSupport,
         threshold: status.threshold,
         refuted: status.refuted,
       });
@@ -475,12 +491,17 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
     }
 
     if (action.kind === "play") {
+      // 指令入口已经会拦截；引擎仍需维护规则边界，防止直接调用绕过。
+      // NPC 对本轮正式主张的即时响应仍由 npcTrialMoves 处理。
+      if (actor.kind === "player" && !canPresentEvidenceOn(session, action.propId)) {
+        continue;
+      }
+
       const judged = judgeEvidencePlay(caseFile, {
         evidenceId: action.evidenceId,
         propId: action.propId,
         stance: action.stance,
         pouch: pouchOf(session, actor.id),
-        publicIds: session.publicEvidence,
         destroyedIds: session.destroyedEvidence,
       });
       if (
@@ -491,14 +512,21 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
         continue; // 指令层已经拦过，这里只是兜底
       }
 
-      // 打空的代价是双重的：自己涨嫌疑，牌还白白摊上了桌面
+      // 无论是否命中，证物都会进入全体证物袋；只有命中时才建立这条
+      // “证据—方向—命题”关系。公开本身不再自动作用于其他命题。
       const beforeRefuted = realRefutedProps(session);
       publicize(session, judged.evidence.id);
       const valid = judged.result === PLAY_RESULT.VALID;
+      const linked =
+        valid &&
+        addEvidenceLink(session, {
+          evidenceId: judged.evidence.id,
+          propId: judged.prop.id,
+          stance: action.stance,
+          byId: actor.id,
+          round: session.round + 1,
+        });
       syncRefutedProps(session);
-      // 先撤下被这张真证据当场戳穿的伪证，再按最终台面状态处罚主张。
-      // 否则一条本来正确的主张会先被伪证判破，再在同一动作里恢复，却白吃 +10。
-      exposePublicFakes(session, moves, session.round + 1);
       penalizeNewlyBrokenClaims(session, beforeRefuted);
 
       if (!valid) {
@@ -514,6 +542,7 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
         evidenceDesc: judged.evidence.description,
         propText: judged.prop.text,
         valid,
+        linked,
       });
       continue;
     }
@@ -523,7 +552,8 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
       const challenged = resolveFakeChallenge(
         session,
         actor,
-        action.evidenceId,
+        action.suspectEvidenceId,
+        action.flawEvidenceId,
         session.round + 1
       );
       if (!challenged) continue;
@@ -533,10 +563,12 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
         kind: "challenge",
         actorId: actor.id,
         actorName: actor.name,
-        evidenceName: challenged.evidence.name,
-        evidenceDesc: challenged.evidence.description,
+        suspectEvidenceName: challenged.suspect.name,
+        suspectEvidenceDesc: challenged.suspect.description,
+        flawEvidenceName: challenged.flaw.name,
+        flawEvidenceDesc: challenged.flaw.description,
+        exposureText: challenged.fake?.exposureText || "",
         success: challenged.success,
-        fakerId: challenged.faker?.id || "",
         fakerName: challenged.faker?.name || "",
       });
       continue;
@@ -589,6 +621,8 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
     }
 
     if (action.kind === "answer") {
+      if (!hasPendingQuestion(session, actor.id)) continue;
+
       // 回应必须押一个**结论型**命题——也就是必须当众说出「我认为她是怎么死的」。
       //
       // 只要求押任意命题的话，押一条平平无奇的事实陈述就完事了，几乎没代价，
@@ -607,7 +641,7 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
         }
       }
 
-      const status = propositionStatus(caseFile, prop.id, session.publicEvidence);
+      const status = propositionStatusForSession(session, prop.id);
       const reallyRefuted = realRefutedProps(session).has(prop.id);
       session.claims.push({
         byId: actor.id,
@@ -615,6 +649,7 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
         chapter: session.chapter,
         round: session.round + 1,
         broken: reallyRefuted,
+        opensEvidence: false,
       });
       if (reallyRefuted) addPenalty(actor, PENALTY.CLAIM_BROKEN);
       session.testimony.push({
@@ -636,29 +671,44 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
     }
 
     if (action.kind === "fake") {
-      const fake = plantFakeEvidence(session, actor, action);
-      if (!fake) continue;
-      if (!fake.ok) {
-        if (fake.reason === "no_flaw") {
-          addPenalty(actor, PENALTY.BACKFIRE);
-          moves.push({
-            kind: "fake_failed",
-            actorId: actor.id,
-            actorName: actor.name,
-            text: safeString(action.text, 200),
-          });
-        }
+      if (
+        actor.kind === "player" &&
+        !canPresentEvidenceOn(session, action.propId)
+      ) {
         continue;
       }
+      const fake = plantFakeEvidence(session, actor, action);
+      if (!fake?.ok) continue;
       syncRefutedProps(session);
+      // 对公共界面和叙事 AI 来说，这就是一次普通的反驳出示。
+      // 制造者、预制方案和破绽证据只留在 fake 对象的服务器内部字段里。
       moves.push({
-        kind: "fake",
+        kind: "play",
+        stance: STANCE.REFUTE,
         actorId: actor.id,
         actorName: actor.name,
-        text: fake.description,
-        exposed: false,
+        evidenceName: fake.name,
+        evidenceDesc: fake.description,
+        propText: propositionOf(caseFile, action.propId)?.text || "",
+        valid: true,
+        linked: true,
       });
     }
+  }
+
+  // 玩家主张会先进入动作队列，NPC 才根据这个焦点出牌。
+  // 因此主张刚处理时记录的是旧快照；播报前按整轮最终论证刷新，
+  // 才不会出现 NPC 已经响应出牌，主张行却仍显示未被论证。
+  for (const move of moves) {
+    if (move.kind !== "claim") continue;
+    const status = propositionStatusForSession(session, move.propId);
+    move.stands = status.stands;
+    move.supports = status.supports;
+    move.directSupports = status.directSupports;
+    move.indirectSupports = status.indirectSupports;
+    move.hasRequiredFactSupport = status.hasRequiredFactSupport;
+    move.threshold = status.threshold;
+    move.refuted = status.refuted;
   }
 
   recomputeSuspicion(session);
@@ -667,9 +717,8 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
   const publicEvidence = (caseFile.evidence || []).filter((item) =>
     session.publicEvidence.includes(item.id)
   );
-  const standing = standingConclusions(caseFile, session.publicEvidence).map((item) => ({
+  const standingForNarration = standingConclusionsForSession(session).map((item) => ({
     text: item.prop.text,
-    supports: item.status.supports,
   }));
   const suspicionBoard = livingGirls(session)
     .sort((a, b) => b.suspicion - a.suspicion || comparePrisonerCode(a, b))
@@ -685,7 +734,7 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
     maxRounds: session.trialRounds,
     moves,
     publicEvidence,
-    standing,
+    standing: standingForNarration,
     suspicionBoard,
     summaryLines: session.summaryLines,
     recentLog: session.recentLog,
@@ -697,15 +746,52 @@ export async function resolveTrialTurn({ e, route, session, actions: playerActio
   session.round += 1;
   session.pendingActions = {};
   pushLog(session, parsed);
+  // 本轮正式主张从这一刻起开放事实链；立即补算由此显现的反驳与嫌疑。
+  penalizeNewlyBrokenClaims(session, beforeRoundRefuted);
+  syncRefutedProps(session);
+  recomputeSuspicion(session);
+  for (const move of moves) {
+    if (move.kind !== "claim") continue;
+    const status = propositionStatusForSession(session, move.propId);
+    move.stands = status.stands;
+    move.supports = status.supports;
+    move.directSupports = status.directSupports;
+    move.indirectSupports = status.indirectSupports;
+    move.hasRequiredFactSupport = status.hasRequiredFactSupport;
+    move.threshold = status.threshold;
+    move.refuted = status.refuted;
+  }
 
   // 真相是吸收态：一旦证成就没有证据能推翻它，可以直接跳过投票定案
-  const truthDone = isTruthEstablished(caseFile, session.publicEvidence);
+  const truthDone = isTruthEstablishedForSession(session);
+  const standing = standingConclusionsForSession(session).map((item) => ({
+    text: item.prop.text,
+  }));
+  const afterFactEffects = new Map(
+    activeFactEffectsForSession(session).map((effect) => [
+      factEffectKey(effect),
+      effect,
+    ])
+  );
+  const factChainChanges = [
+    ...[...afterFactEffects.entries()]
+      .filter(([key]) => !beforeFactEffects.has(key))
+      .map(([, effect]) => ({ ...effect, active: true })),
+    ...[...beforeFactEffects.entries()]
+      .filter(([key]) => !afterFactEffects.has(key))
+      .map(([, effect]) => ({ ...effect, active: false })),
+  ].map((effect) => ({
+    ...effect,
+    conclusionText:
+      propositionOf(caseFile, effect.conclusionPropId)?.text || "",
+  }));
 
   return {
     narration: parsed.narration,
     npcLines: parsed.npcLines,
     moves,
     standing,
+    factChainChanges,
     truthEstablished: truthDone,
     phaseDone: truthDone || session.round >= session.trialRounds,
   };
@@ -768,7 +854,7 @@ export async function resolveVerdict({ e, route, session, playerVotes }) {
     correct: verdict.correct,
     truthText: propositionOf(caseFile, caseFile.truthId)?.text || "",
     culpritName: girlOf(session, caseFile.culpritId)?.name || "",
-    // 自杀/意外的章节里「凶手」就是死者本人，终局表要按这个改写措辞，
+    // 自杀章节里「凶手」就是死者本人，终局表要按这个改写措辞，
     // 否则会打出「死者：梅露露　真凶：梅露露」这种胡话
     truthType: propositionOf(caseFile, caseFile.truthId)?.conclusion?.type || "",
     // 判错的那几章，动机当时没被讲出来。留到终局一次性摊开。
@@ -869,7 +955,7 @@ function pushLog(session, parsed) {
 export function votableConclusions(session) {
   const caseFile = session.caseFile;
   return conclusionsOf(caseFile).map((item) => {
-    const status = propositionStatus(caseFile, item.id, session.publicEvidence);
+    const status = propositionStatusForSession(session, item.id);
     const target =
       item.conclusion.type === VERDICT.ACCUSE ? girlOf(session, item.conclusion.targetId) : null;
     return {
@@ -881,6 +967,23 @@ export function votableConclusions(session) {
       threshold: status.threshold,
       stands: status.stands,
       refuted: status.refuted,
+      supportEvidenceNames: status.supportedBy
+        .map((id) => evidenceOf(caseFile, id)?.name)
+        .filter(Boolean),
+      supportFactArguments: status.indirectSupportEffects.map((effect) => ({
+        factText: effect.factText,
+        when: effect.when,
+        reason: effect.reason,
+      })),
+      refuteEvidenceNames: status.refutedBy
+        .map((id) => evidenceOf(caseFile, id)?.name)
+        .filter(Boolean),
+      refuteFactArguments: status.indirectRefuteEffects.map((effect) => ({
+        factText: effect.factText,
+        when: effect.when,
+        reason: effect.reason,
+      })),
+      hasRequiredFactSupport: status.hasRequiredFactSupport,
     };
   });
 }

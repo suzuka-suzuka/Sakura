@@ -180,6 +180,7 @@ export function resolveGenerationSettings(route, target) {
     topP: configuredNumber(target.topPOverride, route.topP),
     openaiEnableThinking: target.openaiEnableThinking === true,
     openaiReasoningEffort,
+    stream: target.stream === true,
     geminiThinkingLevel,
     geminiThinkingBudget,
   };

@@ -339,6 +339,7 @@ const RouteTargetSchema = z.object({
     topPOverride: z.number().min(-1).max(1).default(-1).describe('Top-P 覆盖|设为 -1 继承路由；建议不要和温度同时调整'),
     openaiEnableThinking: z.boolean().default(false).describe('OpenAI 兼容思考开关|向兼容端点传入非标准 enable_thinking'),
     openaiReasoningEffort: z.enum(OPENAI_REASONING_EFFORT_OPTIONS).default('inherit').describe('OpenAI 思考等级|inherit 使用路由统一等级；default 不传 reasoning_effort'),
+    stream: z.boolean().default(false).describe('流式响应|OpenAI 兼容端点使用 SSE，Gemini/Vertex 使用 generateContentStream；服务端拼接完成后再回复，并记录不含正文的时序诊断'),
     geminiThinkingLevel: z.enum(GEMINI_THINKING_LEVEL_OPTIONS).default('inherit').describe('Gemini 思考等级|inherit 使用路由统一等级；default 不传 thinkingConfig'),
     geminiThinkingBudget: z.number().int().min(-2).default(-2).describe('Gemini 思考预算|-2 忽略固定预算，改用 Gemini 思考等级；等级为 inherit 时继承路由统一思考等级。-1 由模型动态决定；0 关闭；正数为固定 token 预算'),
     nativeWebSearch: z.boolean().default(false).describe('原生联网搜索|OpenAI 兼容端点传入 web_search；Gemini 3 / Vertex AI 传入 Google Search，并可与自定义工具混用'),
@@ -696,14 +697,14 @@ export const WitchTrialSchema = z.object({
     investigateRounds: z.number().int().min(1).max(8).default(3).describe('调查轮数|每章的搜证阶段有几轮'),
     trialRounds: z.number().int().min(2).max(10).default(5).describe('庭审轮数|轮次用尽后进入投票；投票未决会处刑嫌疑值最高者'),
     turnTimeoutMinutes: z.number().int().min(3).max(120).default(15).describe('每回合截止时间(分钟)|全员提前提交会立即结算；截止前房主不能强推，截止后自动推进'),
-    playerCulpritChance: z.number().int().min(0).max(100).default(50).describe('真人成为凶手的最终概率(%)|这是包含自杀/意外分支后的整章绝对概率，并与NPC人数脱钩'),
-    suicideChance: z.number().int().min(0).max(50).default(15).describe('无人行凶的概率(%)|本分支由死者本人造成，真相可能是自杀或意外'),
+    playerCulpritChance: z.number().int().min(0).max(100).default(50).describe('真人成为凶手的最终概率(%)|这是包含极罕见自杀分支后的整章绝对概率，并与NPC人数脱钩'),
+    suicideChance: z.number().int().min(0).max(2).default(1).describe('自杀真相概率(%)|默认每章仅1%，最多2%；除此之外真相一定是指认某位凶手'),
     onlyWhiteCreate: z.boolean().default(false).describe('仅白名单可开局|开启后普通成员不能创建审判'),
 }).refine((value) => value.minPlayers <= value.maxPlayers, {
     message: '最少开局人数不能大于最多参与人数',
     path: ['minPlayers'],
 }).refine((value) => value.playerCulpritChance + value.suicideChance <= 100, {
-    message: '真人凶手概率与无人行凶概率之和不能超过 100%',
+    message: '真人凶手概率与自杀真相概率之和不能超过 100%',
     path: ['playerCulpritChance'],
 }).describe('魔女审判');
 

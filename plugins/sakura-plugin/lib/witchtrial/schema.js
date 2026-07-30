@@ -5,10 +5,14 @@
  * 案件档案额外要过一遍逻辑一致性校验——那才是这个游戏能不能玩的关键。
  *
  * 【真相的形式定义】
- *   证据全集 E，已公开集合 P ⊆ E
- *   结论 C 成立：∃ 足够多 e ∈ P 使 C ∈ e.supports，且 ∄ e ∈ P 使 C ∈ e.refutes
- *   真相 T：∄ e ∈ E 使 T ∈ e.refutes            —— 吸收态，证成即不可反驳
- *   假结论 F：∃ e ∈ E 使 F ∈ e.refutes，但那条 e 未必在 P 里 —— 不稳定态
+ *   证据全集 E，已公开集合 P ⊆ E，已明确建立的论证关系 L
+ *   事实 F 成立：L 中至少有一条证据支持 F，且没有任何一条关系反驳 F
+ *   事实效果 R：F 成立或被反驳时，按案件预设向结论产生一次间接支持或反驳
+ *   结论 C 成立：直接证据与已激活事实效果达到门槛、至少有一条间接事实支持，
+ *                且没有任何直接或间接反驳
+ *   真相 T：不存在能够直接或间接反驳 T 的真实论证路径 —— 吸收态，证成即不可反驳
+ *
+ * 证物进入 P 只代表所有人都能看见和复用；它不会因此自动产生 L 中的关系。
  *
  * 「真相一旦被推出来就无法反驳」不是特殊规则，是这个定义的直接推论：
  * 想反驳真相就得掏出一条否定它的证据，而那条证据按定义不存在。
@@ -18,23 +22,33 @@
 export const VERDICT = {
   ACCUSE: "accuse",     // 指认某人
   SUICIDE: "suicide",   // 自杀
-  ACCIDENT: "accident", // 意外
 };
 
 /**
- * 各类结论成立所需的支持证据条数
- * 自杀/意外门槛更高——它让全员存活，不能太好拿
+ * 各类结论成立所需的支持论据数（直接证物 + 已激活事实效果）
+ * 自杀门槛更高——它让全员存活，不能太好拿
  */
 export const SUPPORT_THRESHOLD = {
   [VERDICT.ACCUSE]: 2,
   [VERDICT.SUICIDE]: 3,
-  [VERDICT.ACCIDENT]: 3,
 };
 
 /** 证据的获取途径 */
 export const EVIDENCE_VIA = {
   SEARCH: "search", // 搜查某地点
   ASK: "ask",       // 询问某位少女
+};
+
+/** 事实处于哪种已判定状态时触发结论效果 */
+export const FACT_EFFECT_WHEN = {
+  ESTABLISHED: "established",
+  REFUTED: "refuted",
+};
+
+/** 事实对结论产生的论证方向；与庭审出示方向使用相同字符串 */
+export const FACT_EFFECT_STANCE = {
+  SUPPORT: "support",
+  REFUTE: "refute",
 };
 
 // ===== id 约定 =====
@@ -144,8 +158,8 @@ export function normalizePrison(raw) {
 
 /**
  * 魔法能力写成结构化规则而不是数值
- * 它既是作案手法的可能性，也是被指控的理由——这是「设定系本格」的落点。
- * 手法可行性因此是集合运算，不是掷骰，AI 无从干预。
+ * 它既是完整犯罪方案的可能性，也是被指控的理由——这是「设定系本格」的落点。
+ * 方案可行性因此是集合运算，不是掷骰，AI 无从干预。
  */
 function normalizeAbility(raw) {
   const source = raw && typeof raw === "object" ? raw : {};
@@ -236,19 +250,29 @@ export function locationByCode(session, text) {
 }
 
 /**
- * 这位少女的能力能不能做到本案的手法
+ * 这位少女的能力能不能完成本案里不可缺少的魔法部分
  *
  * 这是纯集合运算，不掷骰也不问 AI——「设定系本格」的判定基础。
  * 注意它只表示「没被排除」，不表示「有嫌疑」：做得到不等于做了。
  */
-export function canPerformMethod(girl, caseFile) {
-  const required = caseFile?.method?.requiredAbilities || [];
-  if (!required.length) return true; // 手法没要求特殊能力，人人都做得到
-
+function canUseAbilities(girl, required = []) {
+  if (!required.length) return true;
   const owned = [girl?.ability?.name, ...(girl?.ability?.can || [])].filter(Boolean);
   return required.every((need) =>
     owned.some((have) => have.includes(need) || need.includes(have))
   );
+}
+
+function abilityTextsOverlap(left, right) {
+  const a = String(left ?? "").trim();
+  const b = String(right ?? "").trim();
+  return Boolean(a && b && (a.includes(b) || b.includes(a)));
+}
+
+export function canPerformMethod(girl, caseFile) {
+  const required = caseFile?.method?.requiredAbilities || [];
+  // 普通的致死动作或不依赖魔法的方案对所有人开放。
+  return canUseAbilities(girl, required);
 }
 
 /** 取全部少女。公开与内部统一按囚犯编号，绝不按真人/NPC 分段。 */
@@ -310,15 +334,73 @@ function normalizeEvidence(raw, index) {
     askTarget: via === EVIDENCE_VIA.ASK ? safeString(source.askTarget, 40) : "",
     supports: normalizeStringArray(source.supports, { limit: 6, maxLength: 40 }),
     refutes: normalizeStringArray(source.refutes, { limit: 6, maxLength: 40 }),
-    // 伪证由凶手在庭上临时造，不出现在 AI 生成的档案里
+    // 运行时证物的内部字段；普通案件证据一律保持为空
     fake: false,
     flawOf: "",
+    forgedById: "",
+    forgeryPlanId: "",
+    exposureText: "",
     reservedFor: "", // 本地分配给真人的调查线索，AI 不得指定
+  };
+}
+
+function normalizeForgeryPlan(raw, index) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  return {
+    id: slugId(source.id, `fp_${index + 1}`),
+    targetPropId: slugId(source.targetPropId, ""),
+    name: safeString(source.name, 24),
+    description: safeString(source.description, 300),
+    flawEvidenceId: slugId(source.flawEvidenceId, ""),
+    exposureText: safeString(source.exposureText, 300),
+  };
+}
+
+function normalizeFactEffect(raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  return {
+    factPropId: slugId(source.factPropId, ""),
+    when:
+      source.when === FACT_EFFECT_WHEN.REFUTED
+        ? FACT_EFFECT_WHEN.REFUTED
+        : FACT_EFFECT_WHEN.ESTABLISHED,
+    conclusionPropId: slugId(source.conclusionPropId, ""),
+    stance:
+      source.stance === FACT_EFFECT_STANCE.REFUTE
+        ? FACT_EFFECT_STANCE.REFUTE
+        : FACT_EFFECT_STANCE.SUPPORT,
+    reason: safeString(source.reason, 200),
   };
 }
 
 export function normalizeCase(raw, { chapter = 1 } = {}) {
   const source = raw && typeof raw === "object" ? raw : {};
+  const methodSource =
+    source.method && typeof source.method === "object" ? source.method : {};
+  const misdirectionSource =
+    methodSource.misdirection && typeof methodSource.misdirection === "object"
+      ? methodSource.misdirection
+      : null;
+  const misdirection = misdirectionSource
+    ? {
+        description: safeString(misdirectionSource.description, 500),
+        apparentAbility: safeString(misdirectionSource.apparentAbility, 40),
+        targetId: safeString(misdirectionSource.targetId, 40),
+      }
+    : null;
+  const normalizedMisdirection =
+    misdirection &&
+    (misdirection.description || misdirection.apparentAbility || misdirection.targetId)
+      ? misdirection
+      : null;
+  const causeOfDeath = safeString(methodSource.causeOfDeath, 160);
+  const killingAction = safeString(methodSource.killingAction, 300);
+  const magicRole = safeString(methodSource.magicRole, 300);
+  const methodDescription =
+    safeString(methodSource.description, 500) ||
+    [causeOfDeath, killingAction, magicRole, normalizedMisdirection?.description]
+      .filter(Boolean)
+      .join("；");
 
   const propositions = (Array.isArray(source.propositions) ? source.propositions : [])
     .slice(0, 16)
@@ -329,6 +411,15 @@ export function normalizeCase(raw, { chapter = 1 } = {}) {
     .slice(0, 20)
     .map(normalizeEvidence)
     .filter((item) => item.description);
+
+  const forgeryPlans = (Array.isArray(source.forgeryPlans) ? source.forgeryPlans : [])
+    .slice(0, 12)
+    .map(normalizeForgeryPlan)
+    .filter((item) => item.name && item.description);
+
+  const factEffects = (Array.isArray(source.factEffects) ? source.factEffects : [])
+    .slice(0, 40)
+    .map(normalizeFactEffect);
 
   // 悬空引用直接剪掉，后面的逻辑层就不用到处判空
   const propIds = new Set(propositions.map((item) => item.id));
@@ -349,8 +440,12 @@ export function normalizeCase(raw, { chapter = 1 } = {}) {
       finder: safeString(source.discovery?.finder, 40),
     },
     method: {
-      description: safeString(source.method?.description, 400),
-      requiredAbilities: normalizeStringArray(source.method?.requiredAbilities, {
+      causeOfDeath,
+      killingAction,
+      magicRole,
+      misdirection: normalizedMisdirection,
+      description: methodDescription,
+      requiredAbilities: normalizeStringArray(methodSource.requiredAbilities, {
         limit: 4,
         maxLength: 20,
       }),
@@ -364,6 +459,10 @@ export function normalizeCase(raw, { chapter = 1 } = {}) {
     },
     propositions,
     evidence,
+    // 事实只有在被证实或反驳后才激活这些效果；公开界面只展示已经激活的关系
+    factEffects,
+    // 仅供服务器在凶手发动能力时选用；公开案件视图和叙事 AI 均看不到
+    forgeryPlans,
     // NPC 凶手的行动排程本地生成，不来自 AI
     witchPlan: [],
   };
@@ -378,8 +477,52 @@ export function propositionOf(caseFile, propId) {
   return (caseFile?.propositions || []).find((item) => item.id === propId) || null;
 }
 
+/**
+ * 玩家当前是否可以把证据直接打向某个命题。
+ *
+ * 事实命题始终可以举证；结论必须先经过一次正式主张，并等主张所在回合
+ * 结算后才开放。回应追问只是被迫表态，不会替结论开题。
+ */
+export function canPresentEvidenceOn(session, propId) {
+  const prop = propositionOf(session?.caseFile, propId);
+  if (!prop) return false;
+  if (!prop.conclusion) return true;
+
+  const currentRound = Number(session?.round);
+  return (session?.claims || []).some((claim) => {
+    if (
+      claim.chapter !== session.chapter ||
+      claim.propId !== propId ||
+      claim.opensEvidence !== true
+    ) {
+      return false;
+    }
+    return Number(claim.round) <= currentRound;
+  });
+}
+
 export function evidenceOf(caseFile, evidenceId) {
   return (caseFile?.evidence || []).find((item) => item.id === evidenceId) || null;
+}
+
+/** 一件证物按哪个方向打向事实，才能触发指定的事实效果 */
+export function evidenceActivatesFactEffect(evidence, effect) {
+  if (!evidence || !effect?.factPropId) return false;
+  return effect.when === FACT_EFFECT_WHEN.REFUTED
+    ? (evidence.refutes || []).includes(effect.factPropId)
+    : (evidence.supports || []).includes(effect.factPropId);
+}
+
+/** 一件真实证物是否存在直接或经由事实支持某个结论的路径 */
+export function evidenceCanSupportConclusion(caseFile, evidence, conclusionPropId) {
+  if (!evidence) return false;
+  if ((evidence.supports || []).includes(conclusionPropId)) return true;
+  return (caseFile?.factEffects || []).some(
+    (effect) =>
+      effect.conclusionPropId === conclusionPropId &&
+      effect.stance === FACT_EFFECT_STANCE.SUPPORT &&
+      evidenceActivatesFactEffect(evidence, effect)
+  );
 }
 
 /**
@@ -393,7 +536,7 @@ export function evidenceOf(caseFile, evidenceId) {
  */
 export function validateCase(caseFile, { girls = {}, locationIds = [] } = {}) {
   const problems = [];
-  const { propositions, evidence } = caseFile;
+  const { propositions, evidence, factEffects, forgeryPlans } = caseFile;
   const duplicates = (values) => {
     const seen = new Set();
     return [...new Set(values.filter((value) => {
@@ -405,9 +548,25 @@ export function validateCase(caseFile, { girls = {}, locationIds = [] } = {}) {
 
   const duplicateProps = duplicates(propositions.map((item) => item.id));
   const duplicateEvidence = duplicates(evidence.map((item) => item.id));
+  const duplicateFactEffects = duplicates(
+    factEffects.map(
+      (item) => `${item.factPropId}|${item.when}|${item.conclusionPropId}`
+    )
+  );
+  const duplicateForgeryPlans = duplicates(forgeryPlans.map((item) => item.id));
+  const duplicateForgeryNames = duplicates(forgeryPlans.map((item) => item.name));
   const duplicateLocations = duplicates(locationIds);
   if (duplicateProps.length) problems.push(`命题 id 重复：${duplicateProps.join("、")}`);
   if (duplicateEvidence.length) problems.push(`证据 id 重复：${duplicateEvidence.join("、")}`);
+  if (duplicateFactEffects.length) {
+    problems.push(`同一事实状态对同一结论配置了多个效果：${duplicateFactEffects.join("、")}`);
+  }
+  if (duplicateForgeryPlans.length) {
+    problems.push(`伪证方案 id 重复：${duplicateForgeryPlans.join("、")}`);
+  }
+  if (duplicateForgeryNames.length) {
+    problems.push(`伪证方案公开名称重复：${duplicateForgeryNames.join("、")}`);
+  }
   if (duplicateLocations.length) problems.push(`地点 id 重复：${duplicateLocations.join("、")}`);
 
   // --- 结构完整性 ---
@@ -422,9 +581,30 @@ export function validateCase(caseFile, { girls = {}, locationIds = [] } = {}) {
   }
 
   const conclusions = conclusionsOf(caseFile);
+  const facts = propositions.filter((item) => !item.conclusion);
   if (conclusions.length < 3) problems.push("候选结论少于 3 个");
   if (propositions.length < 6) problems.push("命题少于 6 条");
   if (evidence.length < 10) problems.push("证据少于 10 条");
+
+  const invalidConclusionTypes = conclusions.filter(
+    (item) =>
+      item.conclusion.type !== VERDICT.ACCUSE &&
+      item.conclusion.type !== VERDICT.SUICIDE
+  );
+  if (invalidConclusionTypes.length) {
+    problems.push(
+      `结论类型只能是指认或自杀，不能生成：${[
+        ...new Set(invalidConclusionTypes.map((item) => item.conclusion.type)),
+      ].join("、")}`
+    );
+  }
+
+  const suicideConclusions = conclusions.filter(
+    (item) => item.conclusion.type === VERDICT.SUICIDE
+  );
+  if (suicideConclusions.length !== 1) {
+    problems.push(`suicide 结论必须恰好 1 条，当前为 ${suicideConclusions.length} 条`);
+  }
 
   const accusationTargets = conclusions
     .filter((item) => item.conclusion.type === VERDICT.ACCUSE)
@@ -449,8 +629,12 @@ export function validateCase(caseFile, { girls = {}, locationIds = [] } = {}) {
     if (truth.conclusion.targetId !== caseFile.culpritId) {
       problems.push("真相指认的人不是档案里的凶手");
     }
-  } else if (caseFile.culpritId !== caseFile.victimId) {
-    problems.push("真相是自杀/意外，但凶手不是死者本人");
+  } else if (truth.conclusion.type === VERDICT.SUICIDE) {
+    if (caseFile.culpritId !== caseFile.victimId) {
+      problems.push("真相是自杀，但档案里的凶手不是死者本人");
+    }
+  } else {
+    problems.push("真相只能是指认或自杀");
   }
 
   // 指认型结论的对象必须是在场的人，且不能指认死者
@@ -465,22 +649,125 @@ export function validateCase(caseFile, { girls = {}, locationIds = [] } = {}) {
     }
   }
 
+  // --- 事实到结论的推理链 ---
+
+  const conclusionIds = new Set(conclusions.map((item) => item.id));
+  const factIds = new Set(facts.map((item) => item.id));
+  const internalCaseIds = [
+    ...propositions.map((item) => item.id),
+    ...evidence.map((item) => item.id),
+  ].filter((id) => id.length >= 3);
+  const triggerEvidence = (effect) =>
+    evidence.filter((item) => evidenceActivatesFactEffect(item, effect));
+
+  for (const effect of factEffects) {
+    const fact = propositionOf(caseFile, effect.factPropId);
+    const conclusion = propositionOf(caseFile, effect.conclusionPropId);
+    if (!factIds.has(effect.factPropId) || !fact || fact.conclusion) {
+      problems.push(`事实效果引用了不存在或并非事实的命题：${effect.factPropId}`);
+    }
+    if (!conclusionIds.has(effect.conclusionPropId) || !conclusion?.conclusion) {
+      problems.push(`事实效果没有指向候选结论：${effect.conclusionPropId}`);
+    }
+    if (effect.reason.length < 12) {
+      problems.push(
+        `事实「${fact?.text || effect.factPropId}」对结论的影响理由过短`
+      );
+    }
+    if (/girl_\d+/i.test(effect.reason)) {
+      problems.push(
+        `事实「${fact?.text || effect.factPropId}」的影响理由含有匿名少女 id`
+      );
+    }
+    if (
+      internalCaseIds.some((id) => effect.reason.includes(id)) ||
+      /正确答案|错误答案|真相结论|真正的凶手|实际凶手|隐藏动机|真实手法|未公开(?:证物|证据|内幕)/.test(
+        effect.reason
+      )
+    ) {
+      problems.push(
+        `事实「${fact?.text || effect.factPropId}」的影响理由泄露了内部答案或结构信息`
+      );
+    }
+
+    const triggers = triggerEvidence(effect);
+    if (!triggers.length) {
+      problems.push(
+        `事实「${fact?.text || effect.factPropId}」处于 ${effect.when} 时的效果没有任何证物可以触发`
+      );
+    }
+
+    // 同一件证物不能既直接作用于结论，又通过它证明的事实重复贡献同方向论据。
+    const duplicatedProvenance = triggers.filter((item) => {
+      const direct =
+        effect.stance === FACT_EFFECT_STANCE.SUPPORT
+          ? item.supports
+          : item.refutes;
+      return direct.includes(effect.conclusionPropId);
+    });
+    if (duplicatedProvenance.length) {
+      problems.push(
+        `证物「${duplicatedProvenance.map((item) => item.name).join("、")}」会对结论「${conclusion?.text || effect.conclusionPropId}」直接和间接重复计数`
+      );
+    }
+  }
+
+  for (const fact of facts) {
+    if (!factEffects.some((effect) => effect.factPropId === fact.id)) {
+      problems.push(`事实「${fact.text}」不会影响任何结论，属于无效推理支线`);
+    }
+  }
+
+  for (const fact of facts) {
+    for (const conclusion of conclusions) {
+      const pair = factEffects.filter(
+        (effect) =>
+          effect.factPropId === fact.id &&
+          effect.conclusionPropId === conclusion.id
+      );
+      if (
+        pair.length === 2 &&
+        pair[0].when !== pair[1].when &&
+        pair[0].stance === pair[1].stance
+      ) {
+        problems.push(
+          `事实「${fact.text}」无论成立还是被反驳都${pair[0].stance === FACT_EFFECT_STANCE.SUPPORT ? "支持" : "反驳"}同一结论，状态没有推理意义`
+        );
+      }
+    }
+  }
+
   // --- 四条逻辑校验 ---
 
-  // 1. 真相不被任何证据否定（真相是吸收态的定义性质）
+  // 1. 真相既不能被证物直接否定，也不能被事实状态间接否定。
   const refutesTruth = evidence.filter((item) => item.refutes.includes(truth.id));
   if (refutesTruth.length) {
     problems.push(
       `有证据否定了真相：${refutesTruth.map((item) => item.name).join("、")}`
     );
   }
+  const effectsRefutingTruth = factEffects.filter(
+    (effect) =>
+      effect.conclusionPropId === truth.id &&
+      effect.stance === FACT_EFFECT_STANCE.REFUTE
+  );
+  if (effectsRefutingTruth.length) {
+    problems.push("有事实状态能够间接反驳真相");
+  }
 
-  // 2. 唯一解：每个非真相结论至少有一条证据能否定它
+  // 2. 唯一解：每个非真相结论至少有一条直接或间接反驳路径。
   //    否则案子有二义性，玩家推到一半会发现怎么都对
   for (const item of conclusions) {
     if (item.id === truth.id) continue;
-    if (!evidence.some((e) => e.refutes.includes(item.id))) {
-      problems.push(`结论「${item.text}」无法被任何证据否定，案件有二义性`);
+    const hasDirectRefute = evidence.some((e) => e.refutes.includes(item.id));
+    const hasIndirectRefute = factEffects.some(
+      (effect) =>
+        effect.conclusionPropId === item.id &&
+        effect.stance === FACT_EFFECT_STANCE.REFUTE &&
+        triggerEvidence(effect).length > 0
+    );
+    if (!hasDirectRefute && !hasIndirectRefute) {
+      problems.push(`结论「${item.text}」没有可触发的直接或间接反驳路径，案件有二义性`);
     }
   }
 
@@ -526,41 +813,147 @@ export function validateCase(caseFile, { girls = {}, locationIds = [] } = {}) {
     problems.push("可询问证言没有分布到至少 2 位少女");
   }
 
-  // 4. 每一个候选结论都必须真的有机会成立。
-  // 只有反证、没有足够支持牌的“陪跑答案”会让投票菜单看似有选择，实则只有一个按钮。
+  // 4. 每一个候选结论都必须真的有机会通过“证物 → 事实 → 结论”成立。
   for (const item of conclusions) {
-    const supports = evidence.filter((e) => e.supports.includes(item.id)).length;
+    const directSupports = evidence.filter((e) => e.supports.includes(item.id)).length;
+    const indirectSupports = factEffects.filter(
+      (effect) =>
+        effect.conclusionPropId === item.id &&
+        effect.stance === FACT_EFFECT_STANCE.SUPPORT &&
+        triggerEvidence(effect).length > 0
+    ).length;
+    const supports = directSupports + indirectSupports;
     const threshold = SUPPORT_THRESHOLD[item.conclusion.type];
+    if (!indirectSupports) {
+      problems.push(`结论「${item.text}」没有任何可触发的间接事实支持`);
+    }
     if (supports < threshold) {
       problems.push(
-        `支持结论「${item.text}」的证据只有 ${supports} 条，不足 ${threshold} 条`
+        `支持结论「${item.text}」的潜在论据只有 ${supports} 条（直接 ${directSupports}、间接事实 ${indirectSupports}），不足 ${threshold} 条`
       );
     }
   }
 
-  // 凶手当然得做得到自己干过的事
-  const culprit = girls[caseFile.culpritId];
-  if (culprit && !canPerformMethod(culprit, caseFile)) {
-    problems.push(`手法需要「${caseFile.method.requiredAbilities.join("、")}」，但凶手的能力做不到`);
+  // 伪证不是玩家临场输入的一段无根说辞，而是案件档案里预先写好的可核验假线索。
+  // 每个候选结论各有一套方案；它表面上反驳目标结论，指定的真实证据则能揭穿它。
+  const evidenceIds = new Set(evidence.map((item) => item.id));
+  const tellWords = /伪证|伪造|假证|捏造|编造|说谎|破绽|揭穿|凶手提供|凶手制造/;
+  const personalSourceWords =
+    /说辞|证言|口供|自述|提供者|提交者|(?:由|来自).{0,12}(?:提供|递交|提交)/;
+  if (forgeryPlans.length !== conclusions.length) {
+    problems.push(
+      `伪证方案必须与候选结论一一对应，当前有 ${forgeryPlans.length} 套方案、${conclusions.length} 个结论`
+    );
+  }
+  for (const conclusion of conclusions) {
+    const matches = forgeryPlans.filter((item) => item.targetPropId === conclusion.id);
+    if (matches.length !== 1) {
+      problems.push(`结论「${conclusion.text}」必须恰好有 1 套伪证方案`);
+    }
+  }
+  for (const plan of forgeryPlans) {
+    if (!conclusionIds.has(plan.targetPropId)) {
+      problems.push(`伪证方案「${plan.id}」没有指向候选结论`);
+    }
+    const flaw = evidenceOf(caseFile, plan.flawEvidenceId);
+    if (!evidenceIds.has(plan.flawEvidenceId) || !flaw) {
+      problems.push(`伪证方案「${plan.id}」的破绽证据不存在`);
+    } else if (!evidenceCanSupportConclusion(caseFile, flaw, plan.targetPropId)) {
+      problems.push(`伪证方案「${plan.id}」的破绽证据没有直接或间接支持其目标结论的路径`);
+    }
+    if (plan.description.length < 40) {
+      problems.push(`伪证方案「${plan.id}」的公开描述过短，无法作为可推理证物`);
+    }
+    if (plan.exposureText.length < 20) {
+      problems.push(`伪证方案「${plan.id}」没有写清证物间的矛盾`);
+    }
+    if (tellWords.test(`${plan.name}${plan.description}`)) {
+      problems.push(`伪证方案「${plan.id}」的公开文本提前暴露了伪造性质`);
+    }
+    if (personalSourceWords.test(`${plan.name}${plan.description}`)) {
+      problems.push(`伪证方案「${plan.id}」的公开文本绑定了个人说辞或提供者`);
+    }
+    if (/girl_\d+/i.test(`${plan.name}${plan.description}${plan.exposureText}`)) {
+      problems.push(`伪证方案「${plan.id}」的可读文本含有匿名少女 id`);
+    }
+    if (evidence.some((item) => item.name === plan.name)) {
+      problems.push(`伪证方案「${plan.id}」与真实证据重名`);
+    }
   }
 
-  // 但也不能只有凶手做得到。
-  // 玩家从尸体与证物推出所需能力后，如果范围只圈得住一个人，
-  // 仍然等于直接念出凶手的名字。
-  // 「设定系本格」是用物理约束**缩小**嫌疑范围，不是锁定一个人。
-  const candidates = Object.values(girls).filter(
-    (girl) => girl.alive && girl.id !== caseFile.victimId && canPerformMethod(girl, caseFile)
-  );
-  const inPlay = Object.values(girls).filter(
-    (girl) => girl.alive && girl.id !== caseFile.victimId
-  ).length;
+  const requiredAbilities = caseFile.method?.requiredAbilities || [];
+  if (requiredAbilities.length) {
+    // 只校验完整方案中不可缺少的魔法部分；普通杀人动作本身不需要能力证明。
+    const culprit = girls[caseFile.culpritId];
+    if (culprit && !canPerformMethod(culprit, caseFile)) {
+      problems.push(
+        `完整犯罪方案需要「${requiredAbilities.join("、")}」，但凶手的能力做不到`
+      );
+    }
 
-  if (candidates.length < 2) {
-    problems.push(
-      `手法只有 ${candidates.length} 个人做得到，玩家推断出能力后会直接锁定凶手`
+    // 能力可以缩小范围，但不能单独念出凶手的名字。
+    const candidates = Object.values(girls).filter(
+      (girl) => girl.alive && girl.id !== caseFile.victimId && canPerformMethod(girl, caseFile)
     );
-  } else if (inPlay >= 4 && candidates.length > Math.ceil(inPlay * 0.6)) {
-    problems.push(`手法有 ${candidates.length}/${inPlay} 人做得到，范围太宽，能力筛选失去意义`);
+    const inPlay = Object.values(girls).filter(
+      (girl) => girl.alive && girl.id !== caseFile.victimId
+    ).length;
+
+    if (candidates.length < 2) {
+      problems.push(
+        `完整犯罪方案只有 ${candidates.length} 个人能完成，玩家推断出能力后会直接锁定凶手`
+      );
+    } else if (inPlay >= 4 && candidates.length > Math.ceil(inPlay * 0.6)) {
+      problems.push(
+        `完整犯罪方案有 ${candidates.length}/${inPlay} 人能完成，范围太宽，能力筛选失去意义`
+      );
+    }
+  }
+
+  const misdirection = caseFile.method?.misdirection;
+  if (misdirection) {
+    const { description, apparentAbility, targetId } = misdirection;
+    if (!description) problems.push("魔法误导没有写清假象与真实替代手段");
+    if (!apparentAbility) problems.push("魔法误导没有填写表面上必需的能力");
+    if (!targetId) problems.push("魔法误导没有填写被嫁祸者");
+
+    const target = targetId ? girls[targetId] : null;
+    if (targetId && !target) {
+      problems.push(`魔法误导指向名册外的人：${targetId}`);
+    } else if (targetId === caseFile.victimId) {
+      problems.push("魔法误导不能嫁祸给死者");
+    } else if (targetId === caseFile.culpritId) {
+      problems.push("魔法误导不能把凶手本人当作被嫁祸者");
+    } else if (target && !target.alive) {
+      problems.push(`魔法误导指向前几章已经退场的人：${targetId}`);
+    }
+
+    if (target && apparentAbility && !canUseAbilities(target, [apparentAbility])) {
+      problems.push(
+        `魔法误导声称「${targetId}」拥有「${apparentAbility}」，但其公开能力并不匹配`
+      );
+    }
+    if (
+      apparentAbility &&
+      requiredAbilities.some((actualAbility) =>
+        abilityTextsOverlap(actualAbility, apparentAbility)
+      )
+    ) {
+      problems.push(
+        `魔法误导中的「${apparentAbility}」也是实际作案所需能力，不构成错误前提`
+      );
+    }
+
+    const hasFramedConclusion =
+      targetId &&
+      conclusions.some(
+        (item) =>
+          item.conclusion?.type === VERDICT.ACCUSE &&
+          item.conclusion.targetId === targetId
+      );
+    if (targetId && !hasFramedConclusion) {
+      problems.push(`魔法误导指向「${targetId}」，但没有对应的错误指认结论`);
+    }
   }
 
   return { ok: problems.length === 0, problems };

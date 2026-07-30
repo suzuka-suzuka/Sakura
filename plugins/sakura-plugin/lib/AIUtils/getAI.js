@@ -18,6 +18,7 @@ import {
   processQueryParts,
 } from "./messageParts.js";
 import { buildOpenAICompatibleWebSearchTool } from "./openAIWebSearchTool.js";
+import { collectGeminiStream } from "./geminiStream.js";
 
 const OPENAI_REASONING_EFFORTS = new Set([
   "none",
@@ -141,6 +142,85 @@ function normalizeOpenAIMessageContent(content) {
     })
     .filter(Boolean)
     .join("");
+}
+
+function openAIStreamReasoningDelta(delta = {}) {
+  return [
+    delta.reasoning_content,
+    delta.reasoningContent,
+    delta.reasoning,
+  ]
+    .map(normalizeOpenAIMessageContent)
+    .filter(Boolean)
+    .join("");
+}
+
+function streamUsageText(usage) {
+  if (!usage || typeof usage !== "object") return "";
+  const prompt = Number(usage.prompt_tokens ?? usage.promptTokenCount);
+  const completion = Number(
+    usage.completion_tokens ?? usage.candidatesTokenCount
+  );
+  const total = Number(usage.total_tokens ?? usage.totalTokenCount);
+  const thoughts = Number(usage.thoughtsTokenCount);
+  const cached = Number(usage.cachedContentTokenCount);
+  const fields = [];
+  if (Number.isFinite(prompt)) fields.push(`prompt=${prompt}`);
+  if (Number.isFinite(completion)) fields.push(`completion=${completion}`);
+  if (Number.isFinite(thoughts)) fields.push(`thoughts=${thoughts}`);
+  if (Number.isFinite(cached)) fields.push(`cached=${cached}`);
+  if (Number.isFinite(total)) fields.push(`total=${total}`);
+  return fields.join(",");
+}
+
+function streamDiagnostic(channel, event, details = {}) {
+  const name = String(channel?.name || channel?.model || "unknown");
+  const detailText = Object.entries(details)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .map(([key, value]) => `${key}=${value}`)
+    .join(" ");
+  logger.info(`[AI Stream] ${event} channel=${name}${detailText ? ` ${detailText}` : ""}`);
+}
+
+function appendStreamToolCalls(target, fragments = []) {
+  for (const fragment of fragments) {
+    const index = Number.isInteger(fragment?.index) ? fragment.index : target.size;
+    const current = target.get(index) || {
+      id: "",
+      type: "function",
+      function: { name: "", arguments: "" },
+    };
+    if (fragment?.id) current.id = fragment.id;
+    if (fragment?.type) current.type = fragment.type;
+    if (fragment?.function?.name) current.function.name = fragment.function.name;
+    if (typeof fragment?.function?.arguments === "string") {
+      current.function.arguments += fragment.function.arguments;
+    }
+    target.set(index, current);
+  }
+}
+
+function parseOpenAIToolCalls(toolCallsArr = []) {
+  return toolCallsArr
+    .map((tc) => {
+      try {
+        return {
+          id: tc.id,
+          name: tc.function.name,
+          args:
+            typeof tc.function.arguments === "string"
+              ? JSON.parse(tc.function.arguments)
+              : tc.function.arguments || {},
+        };
+      } catch (err) {
+        logger.error(
+          `解析工具调用参数失败: ${err.message}`,
+          tc.function.arguments
+        );
+        return null;
+      }
+    })
+    .filter(Boolean);
 }
 
 export function getCurrentAndPreviousUserText(queryParts = [], historyContents = []) {
@@ -287,7 +367,7 @@ async function _getOpenAIResponse(
     const requestPayload = {
       model: channel.model,
       messages: messages,
-      stream: false,
+      stream: channel.stream === true,
     };
 
     if (channel.openaiEnableThinking === true) {
@@ -340,6 +420,117 @@ async function _getOpenAIResponse(
       requestPayload.tool_choice = "auto";
     }
 
+    if (channel.stream === true) {
+      const startedAt = Date.now();
+      const streamController = new AbortController();
+      const configuredTimeoutMs = Number(channel.timeoutMs);
+      let deadlineExceeded = false;
+      const streamDeadline = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
+        ? setTimeout(() => {
+          deadlineExceeded = true;
+          streamDiagnostic(channel, "deadline", { elapsedMs: Date.now() - startedAt });
+          streamController.abort();
+        }, Math.trunc(configuredTimeoutMs))
+        : null;
+
+      try {
+        const rawStream = await openai.chat.completions.create(requestPayload, {
+          signal: streamController.signal,
+        });
+        if (!rawStream || typeof rawStream[Symbol.asyncIterator] !== "function") {
+          throw new Error("流式请求未返回可迭代的 SSE 响应");
+        }
+
+        let chunkCount = 0;
+        let firstChunkMs = null;
+        let firstReasoningMs = null;
+        let firstTextMs = null;
+        let reasoningChars = 0;
+        let textChars = 0;
+        let finishReason = "";
+        let usage = null;
+        let extractedText = "";
+        const toolCalls = new Map();
+
+        try {
+          for await (const rawChunk of rawStream) {
+            const chunk = parseOpenAICompletionIfNeeded(rawChunk);
+            chunkCount += 1;
+            const elapsedMs = Date.now() - startedAt;
+            if (firstChunkMs == null) {
+              firstChunkMs = elapsedMs;
+              streamDiagnostic(channel, "first_chunk", { elapsedMs });
+            }
+            if (chunk?.usage) usage = chunk.usage;
+
+            const choice = chunk?.choices?.[0];
+            if (!choice) continue;
+            if (choice.finish_reason) finishReason = String(choice.finish_reason);
+            const delta = choice.delta || choice.message || {};
+
+            const reasoning = openAIStreamReasoningDelta(delta);
+            if (reasoning) {
+              reasoningChars += reasoning.length;
+              if (firstReasoningMs == null) {
+                firstReasoningMs = elapsedMs;
+                streamDiagnostic(channel, "first_reasoning", { elapsedMs });
+              }
+            }
+
+            const text = normalizeOpenAIMessageContent(delta.content);
+            if (text) {
+              extractedText += text;
+              textChars += text.length;
+              if (firstTextMs == null) {
+                firstTextMs = elapsedMs;
+                streamDiagnostic(channel, "first_text", { elapsedMs });
+              }
+            }
+
+            appendStreamToolCalls(toolCalls, delta.tool_calls || []);
+          }
+        } catch (streamError) {
+          streamDiagnostic(channel, "interrupted", {
+            elapsedMs: Date.now() - startedAt,
+            deadlineExceeded,
+            chunks: chunkCount,
+            firstChunkMs,
+            firstReasoningMs,
+            firstTextMs,
+            reasoningChars,
+            textChars,
+            finishReason,
+          });
+          throw streamError;
+        }
+
+        const toolCallsArr = [...toolCalls.entries()]
+          .sort(([left], [right]) => left - right)
+          .map(([, call]) => call);
+        streamDiagnostic(channel, "completed", {
+          elapsedMs: Date.now() - startedAt,
+          chunks: chunkCount,
+          firstChunkMs,
+          firstReasoningMs,
+          firstTextMs,
+          reasoningChars,
+          textChars,
+          finishReason,
+          usage: streamUsageText(usage),
+        });
+
+        if (!extractedText && toolCallsArr.length === 0) {
+          const errorMessage = "API 未返回任何内容。";
+          logger.warn(errorMessage);
+          return errorMessage;
+        }
+
+        return { text: extractedText, functionCalls: parseOpenAIToolCalls(toolCallsArr) };
+      } finally {
+        if (streamDeadline) clearTimeout(streamDeadline);
+      }
+    }
+
     const rawCompletion = await openai.chat.completions.create(requestPayload);
     const completion = parseOpenAICompletionIfNeeded(rawCompletion);
     
@@ -359,26 +550,7 @@ async function _getOpenAIResponse(
       return errorMessage;
     }
 
-    const functionCalls = toolCallsArr
-      .map((tc) => {
-        try {
-          return {
-            id: tc.id,
-            name: tc.function.name,
-            args:
-              typeof tc.function.arguments === "string"
-                ? JSON.parse(tc.function.arguments)
-                : tc.function.arguments || {},
-          };
-        } catch (err) {
-          logger.error(
-            `解析工具调用参数失败: ${err.message}`,
-            tc.function.arguments
-          );
-          return null;
-        }
-      })
-      .filter(Boolean);
+    const functionCalls = parseOpenAIToolCalls(toolCallsArr);
 
     return { text: extractedText, functionCalls: functionCalls };
   } catch (error) {
@@ -464,7 +636,11 @@ async function _getGeminiResponse(
 
     const requestConfig = {};
     const timeoutMs = Number(channel.timeoutMs);
-    if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    if (
+      channel.stream !== true &&
+      Number.isFinite(timeoutMs) &&
+      timeoutMs > 0
+    ) {
       requestConfig.abortSignal = AbortSignal.timeout(Math.trunc(timeoutMs));
     }
 
@@ -538,6 +714,101 @@ async function _getGeminiResponse(
       ...requestOptions,
       config: requestConfig,
     };
+
+    if (channel.stream === true) {
+      const startedAt = Date.now();
+      const streamController = new AbortController();
+      let deadlineExceeded = false;
+      requestConfig.abortSignal = streamController.signal;
+      const streamDeadline =
+        Number.isFinite(timeoutMs) && timeoutMs > 0
+          ? setTimeout(() => {
+              deadlineExceeded = true;
+              streamDiagnostic(channel, "deadline", {
+                elapsedMs: Date.now() - startedAt,
+              });
+              streamController.abort();
+            }, Math.trunc(timeoutMs))
+          : null;
+
+      try {
+        let collected;
+        try {
+          const rawStream = await ai.models.generateContentStream(
+            geminiRequestBody
+          );
+          collected = await collectGeminiStream(rawStream, {
+            startedAt,
+            onDiagnostic: (event, details) =>
+              streamDiagnostic(channel, event, details),
+          });
+        } catch (streamError) {
+          const stats = streamError?.geminiStreamStats || {};
+          streamDiagnostic(channel, "interrupted", {
+            elapsedMs: Date.now() - startedAt,
+            deadlineExceeded,
+            chunks: stats.chunkCount,
+            firstChunkMs: stats.firstChunkMs,
+            firstReasoningMs: stats.firstReasoningMs,
+            firstTextMs: stats.firstTextMs,
+            reasoningChars: stats.reasoningChars,
+            textChars: stats.textChars,
+            finishReason: stats.finishReason,
+          });
+          throw streamError;
+        }
+
+        streamDiagnostic(channel, "completed", {
+          elapsedMs: Date.now() - startedAt,
+          chunks: collected.chunkCount,
+          firstChunkMs: collected.firstChunkMs,
+          firstReasoningMs: collected.firstReasoningMs,
+          firstTextMs: collected.firstTextMs,
+          reasoningChars: collected.reasoningChars,
+          textChars: collected.textChars,
+          finishReason: collected.finishReason,
+          usage: streamUsageText(collected.usage),
+        });
+
+        if (collected.promptFeedback?.blockReason) {
+          const errorMessage = `响应被拦截，原因: ${collected.promptFeedback.blockReason}`;
+          logger.warn(errorMessage);
+          return errorMessage;
+        }
+        if (!collected.sawCandidate) {
+          const errorMessage = "响应中未包含候选内容。";
+          logger.warn(errorMessage);
+          return errorMessage;
+        }
+        if (
+          collected.finishReason &&
+          !["STOP", "MAX_TOKENS"].includes(collected.finishReason)
+        ) {
+          const suffix = collected.finishMessage
+            ? `：${collected.finishMessage}`
+            : "";
+          const errorMessage = `生成因 ${collected.finishReason} 而中止${suffix}。`;
+          logger.warn(errorMessage);
+          return errorMessage;
+        }
+        if (
+          !collected.extractedText &&
+          collected.functionCalls.length === 0
+        ) {
+          const errorMessage = "返回内容为空。";
+          logger.warn(errorMessage);
+          return errorMessage;
+        }
+
+        return {
+          text: collected.extractedText,
+          functionCalls: collected.functionCalls,
+          rawParts: collected.rawParts,
+        };
+      } finally {
+        if (streamDeadline) clearTimeout(streamDeadline);
+      }
+    }
 
     const response = await ai.models.generateContent(geminiRequestBody);
 

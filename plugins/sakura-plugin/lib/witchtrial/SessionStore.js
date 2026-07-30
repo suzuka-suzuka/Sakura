@@ -14,6 +14,7 @@ const SESSION_TTL = 7 * 24 * 60 * 60;
 const LOCK_TTL_MS = 10 * 60 * 1000;
 const LOCK_RENEW_INTERVAL_MS = 60 * 1000;
 export const DEFAULT_TURN_TIMEOUT_MS = 15 * 60 * 1000;
+export const SESSION_VERSION = 8;
 const KEY_PREFIX = "sakura:witchtrial";
 
 export const PHASES = {
@@ -54,10 +55,32 @@ function cancellationKey(selfId, groupId, sessionId) {
 }
 
 function sessionIdentity(session) {
-  return String(
-    session?.sessionId ||
-      `legacy:${session?.selfId || ""}:${session?.groupId || ""}:${session?.createdAt || 0}`
+  if (typeof session?.sessionId !== "string" || !session.sessionId) {
+    throw new TypeError("审判会话缺少 sessionId");
+  }
+  return session.sessionId;
+}
+
+function isCurrentSession(session) {
+  return (
+    session !== null &&
+    typeof session === "object" &&
+    session.version === SESSION_VERSION &&
+    typeof session.sessionId === "string" &&
+    session.sessionId.length > 0
   );
+}
+
+function assertCurrentSession(session) {
+  if (!isCurrentSession(session)) {
+    throw new TypeError(`只接受版本 ${SESSION_VERSION} 的审判会话`);
+  }
+  return session;
+}
+
+function parseCurrentSession(raw) {
+  const session = JSON.parse(raw);
+  return isCurrentSession(session) ? session : null;
 }
 
 export class SessionCancelledError extends Error {
@@ -106,7 +129,7 @@ export function createSession({
 }) {
   const now = Date.now();
   return {
-    version: 4,
+    version: SESSION_VERSION,
     sessionId: randomUUID(),
     selfId: String(selfId),
     groupId: String(groupId),
@@ -134,7 +157,8 @@ export function createSession({
     round: 0,
 
     pendingActions: {}, // girlId -> 本回合动作
-    publicEvidence: [], // 集合 P：已公开的证据 id
+    publicEvidence: [], // 集合 P：已公开、所有人都能使用的证据 id
+    evidenceLinks: [],  // 已当庭建立的论证 { evidenceId, propId, stance, byId, chapter, round }
     destroyedEvidence: [], // 被凶手销毁的，永远不会进 P
     refutedProps: [],   // 已被推翻的命题
     claims: [],         // 台面上的主张 { byId, propId, chapter, round }
@@ -156,62 +180,8 @@ export function createSession({
   };
 }
 
-function migrateSession(session) {
-  if (!session || typeof session !== "object") return session;
-  if (!Number.isFinite(session.version) || session.version < 2) {
-    session.advancePending = Boolean(session.advancePending);
-    session.pendingActions ||= {};
-    for (const action of Object.values(session.pendingActions)) {
-      if (action?.kind === "refute") {
-        action.kind = "play";
-        action.stance = "refute";
-      }
-    }
-    session.claims = (session.claims || []).map((claim) => ({
-      ...claim,
-      broken: Boolean(claim.broken),
-    }));
-
-    const locationCodes = "ABCDEFGHIJ";
-    (session.prison?.locations || []).forEach((location, index) => {
-      location.code ||= locationCodes[index] || "";
-    });
-    const girls = Object.values(session.girls || {});
-    if (girls.some((girl) => !girl.code)) {
-      girls
-        .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "zh"))
-        .forEach((girl, index) => {
-          girl.code = String(index + 1).padStart(3, "0");
-        });
-    }
-    session.version = 2;
-  }
-  if (session.version < 3) {
-    session.turnTimeoutMs =
-      Number.isFinite(session.turnTimeoutMs) && session.turnTimeoutMs > 0
-        ? session.turnTimeoutMs
-        : DEFAULT_TURN_TIMEOUT_MS;
-    session.turnDeadlineAt = Number.isFinite(session.turnDeadlineAt)
-      ? session.turnDeadlineAt
-      : 0;
-    session.investigationLeads ||= {};
-    session.fakeUsed = Boolean(session.fakeUsed);
-    session.version = 3;
-  }
-  if (session.version < 4) {
-    session.sessionId = sessionIdentity(session);
-    session.version = 4;
-  }
-  session.sessionId ||= sessionIdentity(session);
-  return session;
-}
-
 export function armTurnDeadline(session, now = Date.now()) {
-  const timeoutMs =
-    Number.isFinite(session?.turnTimeoutMs) && session.turnTimeoutMs > 0
-      ? session.turnTimeoutMs
-      : DEFAULT_TURN_TIMEOUT_MS;
-  session.turnDeadlineAt = now + timeoutMs;
+  session.turnDeadlineAt = now + session.turnTimeoutMs;
   return session.turnDeadlineAt;
 }
 
@@ -237,7 +207,7 @@ export async function loadSession(selfId, groupId) {
   if (!raw) return null;
 
   try {
-    return migrateSession(JSON.parse(raw));
+    return parseCurrentSession(raw);
   } catch (error) {
     logger.warn(`[魔女审判] 群 ${groupId} 的会话数据损坏，已丢弃：${error.message}`);
     await redis.del(sessionKey(selfId, groupId));
@@ -246,15 +216,12 @@ export async function loadSession(selfId, groupId) {
 }
 
 export async function saveSession(session) {
-  session.sessionId ||= sessionIdentity(session);
+  assertCurrentSession(session);
+  const sessionId = sessionIdentity(session);
   session.updatedAt = Date.now();
   const keys = [
     sessionKey(session.selfId, session.groupId),
-    cancellationKey(
-      session.selfId,
-      session.groupId,
-      sessionIdentity(session)
-    ),
+    cancellationKey(session.selfId, session.groupId, sessionId),
     ...session.players.map((player) => userKey(session.selfId, player.userId)),
   ];
   const saved = await redis.eval(
@@ -280,14 +247,11 @@ return 1`,
 }
 
 export async function deleteSession(session) {
-  session.sessionId ||= sessionIdentity(session);
+  assertCurrentSession(session);
+  const sessionId = sessionIdentity(session);
   const keys = [
     sessionKey(session.selfId, session.groupId),
-    cancellationKey(
-      session.selfId,
-      session.groupId,
-      sessionIdentity(session)
-    ),
+    cancellationKey(session.selfId, session.groupId, sessionId),
     ...session.players.map((player) => userKey(session.selfId, player.userId)),
   ];
   const deleted = await redis.eval(
@@ -296,7 +260,7 @@ redis.call('SET', KEYS[2], '1', 'EX', ARGV[2])
 local raw = redis.call('GET', KEYS[1])
 if raw then
   local ok, current = pcall(cjson.decode, raw)
-  if ok and current.sessionId and tostring(current.sessionId) ~= ARGV[1] then
+  if ok and tostring(current.sessionId or '') ~= ARGV[1] then
     return 0
   end
   redis.call('DEL', KEYS[1])
@@ -309,7 +273,7 @@ end
 return 1`,
     keys.length,
     ...keys,
-    sessionIdentity(session),
+    sessionId,
     String(SESSION_TTL),
     String(session.groupId)
   );
@@ -318,12 +282,9 @@ return 1`,
 
 /** 当前长任务是否已被房主/管理员终止。 */
 export async function isSessionCancelled(session) {
+  const sessionId = sessionIdentity(session);
   const cancelled = await redis.get(
-    cancellationKey(
-      session.selfId,
-      session.groupId,
-      sessionIdentity(session)
-    )
+    cancellationKey(session.selfId, session.groupId, sessionId)
   );
   return cancelled === "1";
 }
@@ -340,7 +301,7 @@ export async function assertSessionActive(session) {
  */
 export async function cancelSession(session) {
   const current = await loadSession(session.selfId, session.groupId);
-  if (current && sessionIdentity(current) === sessionIdentity(session)) {
+  if (current && current.sessionId === sessionIdentity(session)) {
     session = current;
   }
   const deleted = await deleteSession(session);
@@ -434,7 +395,7 @@ export async function listSessionsBySelfId(selfId) {
     for (const raw of values) {
       if (!raw) continue;
       try {
-        const session = migrateSession(JSON.parse(raw));
+        const session = parseCurrentSession(raw);
         if (session) sessions.push(session);
       } catch (error) {
         logger.warn(`[魔女审判] 定时扫描时遇到损坏会话：${error.message}`);
@@ -455,23 +416,43 @@ export function pouchOf(session, girlId) {
 }
 
 export function addToPouch(session, girlId, evidenceId) {
-  if (!session.pouch) session.pouch = {};
   const bag = session.pouch[girlId] || [];
   if (!bag.includes(evidenceId)) bag.push(evidenceId);
   session.pouch[girlId] = bag;
 }
 
-/** 把证据摊上台面，进入集合 P */
+/** 把证据摊上台面，进入集合 P，并追加到全体少女的证物袋 */
 export function publicize(session, evidenceId) {
-  if (!session.publicEvidence.includes(evidenceId)) {
+  const added = !session.publicEvidence.includes(evidenceId);
+  if (added) {
     session.publicEvidence.push(evidenceId);
-    return true;
   }
-  return false;
+
+  const recipients = new Set([
+    ...Object.keys(session.girls || {}),
+    ...Object.keys(session.pouch || {}),
+  ]);
+  for (const girlId of recipients) {
+    addToPouch(session, girlId, evidenceId);
+  }
+  return added;
+}
+
+/** 撤下公开证物（目前只用于被揭穿后从案件中移除的伪证） */
+export function withdrawPublicEvidence(session, evidenceId) {
+  session.publicEvidence = (session.publicEvidence || []).filter(
+    (id) => id !== evidenceId
+  );
+  for (const girlId of Object.keys(session.pouch || {})) {
+    session.pouch[girlId] = (session.pouch[girlId] || []).filter(
+      (id) => id !== evidenceId
+    );
+  }
 }
 
 /** 抢占会话写锁，覆盖提交、结算、开章与结束；返回锁令牌 */
 export async function acquireTurnLock(session) {
+  assertCurrentSession(session);
   const key = `${session.selfId}:${session.groupId}`;
   const existing = busySessions.get(key);
   if (existing) {
