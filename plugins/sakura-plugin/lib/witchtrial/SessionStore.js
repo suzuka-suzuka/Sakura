@@ -207,12 +207,41 @@ export async function loadSession(selfId, groupId) {
   if (!raw) return null;
 
   try {
-    return parseCurrentSession(raw);
+    const parsed = JSON.parse(raw);
+    if (isCurrentSession(parsed)) return parsed;
+
+    // 版本升级后旧局无法兼容，直接清掉，避免残留 key 干扰开新局
+    logger.warn(
+      `[魔女审判] 群 ${groupId} 的会话版本不兼容（version=${parsed?.version ?? "?"}，需要 ${SESSION_VERSION}），已丢弃`
+    );
+    await purgeStaleSessionArtifacts(selfId, groupId, parsed);
+    return null;
   } catch (error) {
     logger.warn(`[魔女审判] 群 ${groupId} 的会话数据损坏，已丢弃：${error.message}`);
     await redis.del(sessionKey(selfId, groupId));
     return null;
   }
+}
+
+/** 清掉不兼容会话的 session key、取消墓碑，以及仍指向该群的玩家索引 */
+async function purgeStaleSessionArtifacts(selfId, groupId, parsed) {
+  const players = Array.isArray(parsed?.players) ? parsed.players : [];
+  const pipeline = redis.multi();
+  pipeline.del(sessionKey(selfId, groupId));
+  if (parsed?.sessionId) {
+    pipeline.del(cancellationKey(selfId, groupId, parsed.sessionId));
+  }
+  // 用户索引可能已被他人覆盖，只删仍指向本群的
+  for (const player of players) {
+    if (player?.userId == null) continue;
+    pipeline.eval(
+      "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end",
+      1,
+      userKey(selfId, player.userId),
+      String(groupId)
+    );
+  }
+  await pipeline.exec();
 }
 
 export async function saveSession(session) {
@@ -392,13 +421,30 @@ export async function listSessionsBySelfId(selfId) {
     if (!keys.length) continue;
 
     const values = await redis.mget(...keys);
-    for (const raw of values) {
+    for (let i = 0; i < values.length; i++) {
+      const raw = values[i];
       if (!raw) continue;
       try {
-        const session = parseCurrentSession(raw);
-        if (session) sessions.push(session);
+        const parsed = JSON.parse(raw);
+        if (isCurrentSession(parsed)) {
+          sessions.push(parsed);
+          continue;
+        }
+        // 扫描时顺手清掉旧版本，避免定时任务反复读到垃圾数据
+        const parts = String(keys[i]).split(":");
+        // sakura:witchtrial:session:{selfId}:{groupId}
+        const groupId = parts.slice(4).join(":") || parsed?.groupId;
+        logger.warn(
+          `[魔女审判] 定时扫描丢弃不兼容会话：群 ${groupId} version=${parsed?.version ?? "?"}`
+        );
+        await purgeStaleSessionArtifacts(selfId, groupId, parsed);
       } catch (error) {
         logger.warn(`[魔女审判] 定时扫描时遇到损坏会话：${error.message}`);
+        try {
+          await redis.del(keys[i]);
+        } catch (_) {
+          /* ignore */
+        }
       }
     }
   } while (cursor !== "0");
@@ -450,16 +496,23 @@ export function withdrawPublicEvidence(session, evidenceId) {
   }
 }
 
-/** 抢占会话写锁，覆盖提交、结算、开章与结束；返回锁令牌 */
+/**
+ * 抢占会话写锁，覆盖提交、结算、开章与结束；返回锁令牌。
+ * 允许传入完整会话，或仅含 { selfId, groupId } 的锁引用（开局/加入/退出时用）。
+ */
 export async function acquireTurnLock(session) {
-  assertCurrentSession(session);
-  const key = `${session.selfId}:${session.groupId}`;
+  if (session?.selfId == null || session?.groupId == null) {
+    throw new TypeError("抢占审判锁需要 selfId 和 groupId");
+  }
+  const selfId = String(session.selfId);
+  const groupId = String(session.groupId);
+  const key = `${selfId}:${groupId}`;
   const existing = busySessions.get(key);
   if (existing) {
     const cancelled =
       Boolean(existing.sessionId) &&
       (await redis.get(
-        cancellationKey(session.selfId, session.groupId, existing.sessionId)
+        cancellationKey(selfId, groupId, existing.sessionId)
       )) === "1";
     if (!cancelled) return null;
     if (existing.timer) clearInterval(existing.timer);
@@ -467,10 +520,14 @@ export async function acquireTurnLock(session) {
   }
 
   const token = randomUUID();
-  const sessionId = sessionIdentity(session);
+  // 开局等场景还没有 sessionId；有则记入，便于取消时放行重入
+  const sessionId =
+    typeof session.sessionId === "string" && session.sessionId
+      ? session.sessionId
+      : "";
   busySessions.set(key, { token, timer: null, sessionId });
   try {
-    const redisKey = lockKey(session.selfId, session.groupId);
+    const redisKey = lockKey(selfId, groupId);
     const claimed = await redis.set(
       redisKey,
       token,
@@ -487,7 +544,7 @@ export async function acquireTurnLock(session) {
     // 续租只认自己的令牌；进程崩溃后定时器消失，锁仍会按 TTL 自动释放。
     const timer = setInterval(() => {
       compareExpire(redisKey, token, LOCK_TTL_MS).catch((error) => {
-        logger.warn(`[魔女审判] 群 ${session.groupId} 的会话锁续租失败：${error.message}`);
+        logger.warn(`[魔女审判] 群 ${groupId} 的会话锁续租失败：${error.message}`);
       });
     }, LOCK_RENEW_INTERVAL_MS);
     timer.unref?.();
@@ -501,6 +558,7 @@ export async function acquireTurnLock(session) {
 
 export async function releaseTurnLock(session, token) {
   if (!token) return;
+  if (session?.selfId == null || session?.groupId == null) return;
   const key = `${session.selfId}:${session.groupId}`;
   const held = busySessions.get(key);
   if (held?.token === token && held.timer) clearInterval(held.timer);
