@@ -1,0 +1,148 @@
+import { PHASES, PLAYER_STATUS } from "../constants.js"
+import { applyChanceCard, drawChanceCard } from "./chance.js"
+import { sendToJail } from "./movement.js"
+import {
+  createPropertyDecision,
+  rentFor,
+} from "./property.js"
+import { grantCash, settlePayment } from "./settlement.js"
+import {
+  playerById,
+  tileById,
+} from "./state.js"
+
+export function resolveCurrentTile(
+  state,
+  map,
+  playerId,
+  runtime,
+  events,
+  depth = 0
+) {
+  const player = playerById(state, playerId)
+  if (!player || player.status !== PLAYER_STATUS.ACTIVE) return
+
+  if (depth >= map.gameDefaults.maxTileResolutionDepth) {
+    events.push({
+      type: "resolution_limit_reached",
+      playerId: player.userId,
+      tileId: player.position,
+      depth,
+    })
+    return
+  }
+
+  const tile = tileById(map, player.position)
+  if (!tile) return
+
+  if (tile.type === "property") {
+    const propertyState = state.propertyStates[String(tile.id)]
+    if (propertyState.ownerId === null || propertyState.ownerId === player.userId) {
+      createPropertyDecision(
+        state,
+        map,
+        player.userId,
+        tile,
+        runtime.now,
+        events
+      )
+      return
+    }
+
+    const owner = playerById(state, propertyState.ownerId)
+    if (!owner || owner.status !== PLAYER_STATUS.ACTIVE) {
+      const previousLevel = propertyState.level
+      propertyState.ownerId = null
+      propertyState.level = 0
+      events.push({
+        type: "property_returned",
+        playerId: owner?.userId || null,
+        tileId: tile.id,
+        previousLevel,
+        reason: "invalid_owner",
+      })
+      createPropertyDecision(
+        state,
+        map,
+        player.userId,
+        tile,
+        runtime.now,
+        events
+      )
+      return
+    }
+
+    settlePayment(state, map, {
+      payerId: player.userId,
+      recipientId: owner.userId,
+      amount: rentFor(state, map, tile),
+      reason: "rent",
+      tileId: tile.id,
+      events,
+    })
+    return
+  }
+
+  if (tile.type === "chance") {
+    const card = drawChanceCard(state, map, tile.deckId, runtime, events)
+    applyChanceCard(state, map, player.userId, card, runtime, events, {
+      depth,
+      resolveDestination: (nextDepth) =>
+        resolveCurrentTile(
+          state,
+          map,
+          player.userId,
+          runtime,
+          events,
+          nextDepth
+        ),
+    })
+    return
+  }
+
+  if (tile.type === "tax") {
+    settlePayment(state, map, {
+      payerId: player.userId,
+      amount: tile.amount,
+      reason: "tax",
+      tileId: tile.id,
+      events,
+    })
+    return
+  }
+
+  if (tile.type === "bonus") {
+    grantCash(state, player.userId, tile.amount, events, "bonus", {
+      tileId: tile.id,
+    })
+    return
+  }
+
+  if (tile.type === "go_to_jail") {
+    sendToJail(
+      state,
+      map,
+      player.userId,
+      tile.targetTileId,
+      map.gameDefaults.jailSkipTurns,
+      events,
+      "tile"
+    )
+    return
+  }
+
+  if (
+    tile.type === "start" ||
+    tile.type === "jail" ||
+    tile.type === "rest"
+  ) {
+    events.push({
+      type: "tile_no_effect",
+      playerId: player.userId,
+      tileId: tile.id,
+      tileType: tile.type,
+    })
+  }
+
+  if (state.phase === PHASES.RESOLVING) state.deadlineAt = 0
+}
