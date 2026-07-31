@@ -24,7 +24,7 @@ export class MapLoader {
     return path.join(this.mapsDir, `${normalized}.json`)
   }
 
-  async load(mapFile = "default-24", { reload = false } = {}) {
+  async load(mapFile = "default-40", { reload = false } = {}) {
     if (!reload && this.cache.has(mapFile)) return this.cache.get(mapFile)
 
     const filePath = this.resolvePath(mapFile)

@@ -69,24 +69,24 @@ export class MonopolySessionStore {
     this.busySessions = new Map()
   }
 
-  sessionKey(selfId, groupId) {
-    return `${KEY_PREFIX}:session:${selfId}:${groupId}`
+  sessionKey(_selfId, groupId) {
+    return `${KEY_PREFIX}:session:${groupId}`
   }
 
   userKey(selfId, userId) {
     return `${KEY_PREFIX}:user:${selfId}:${userId}`
   }
 
-  lockKey(selfId, groupId) {
-    return `${KEY_PREFIX}:lock:${selfId}:${groupId}`
+  lockKey(_selfId, groupId) {
+    return `${KEY_PREFIX}:lock:${groupId}`
   }
 
-  cancellationKey(selfId, groupId, sessionId) {
-    return `${KEY_PREFIX}:cancelled:${selfId}:${groupId}:${sessionId}`
+  cancellationKey(_selfId, groupId, sessionId) {
+    return `${KEY_PREFIX}:cancelled:${groupId}:${sessionId}`
   }
 
-  localLockKey(selfId, groupId) {
-    return `${selfId}:${groupId}`
+  localLockKey(_selfId, groupId) {
+    return String(groupId)
   }
 
   async compareDelete(key, expected) {
@@ -320,7 +320,8 @@ return 1`,
   }
 
   async listSessionsBySelfId(selfId) {
-    const pattern = `${KEY_PREFIX}:session:${selfId}:*`
+    const normalizedSelfId = String(selfId)
+    const pattern = `${KEY_PREFIX}:session:*`
     const sessions = []
     let cursor = "0"
 
@@ -342,13 +343,17 @@ return 1`,
         try {
           const session = JSON.parse(raw)
           if (isCurrentSession(session)) {
-            sessions.push(session)
+            if (session.selfId === normalizedSelfId) sessions.push(session)
             continue
           }
           const groupId =
-            String(keys[index]).split(":").slice(4).join(":") ||
+            String(keys[index]).split(":").slice(3).join(":") ||
             session?.groupId
-          await this.purgeStaleSessionArtifacts(selfId, groupId, session)
+          await this.purgeStaleSessionArtifacts(
+            session?.selfId || normalizedSelfId,
+            groupId,
+            session
+          )
         } catch (error) {
           this.log.warn(
             `[大富翁] 扫描到损坏会话，已清理：${error.message}`
@@ -428,12 +433,9 @@ return 1`,
   }
 
   destroy() {
-    for (const [localKey, held] of this.busySessions.entries()) {
+    for (const [groupId, held] of this.busySessions.entries()) {
       if (held.timer) clearInterval(held.timer)
-      const separator = localKey.indexOf(":")
-      const selfId = localKey.slice(0, separator)
-      const groupId = localKey.slice(separator + 1)
-      void this.compareDelete(this.lockKey(selfId, groupId), held.token).catch(
+      void this.compareDelete(this.lockKey("", groupId), held.token).catch(
         () => {}
       )
     }

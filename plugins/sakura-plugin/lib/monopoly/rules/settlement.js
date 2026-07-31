@@ -1,15 +1,17 @@
-import { PLAYER_STATUS, ruleError } from "../constants.js"
+import {
+  PHASES,
+  PLAYER_STATUS,
+  ruleError,
+} from "../constants.js"
+import { returnBuildingsToBank } from "./buildings.js"
 import {
   ownedPropertyEntries,
   playerById,
 } from "./state.js"
 
 export function liquidationValue(map, tile, propertyState) {
-  const raw =
-    (tile.price + tile.upgradeCost * propertyState.level) *
-    map.gameDefaults.liquidationRate
-  const unit = map.gameDefaults.liquidationRoundingUnit
-  return Math.floor(raw / unit) * unit
+  if (propertyState.mortgaged) return tile.mortgageValue
+  return tile.price + (tile.upgradeCost || 0) * propertyState.level
 }
 
 export function returnAllPropertiesToBank(
@@ -25,13 +27,20 @@ export function returnAllPropertiesToBank(
     playerId
   )) {
     const previousLevel = propertyState.level
+    const returnedBuildings = returnBuildingsToBank(
+      state,
+      map,
+      previousLevel
+    )
     propertyState.ownerId = null
     propertyState.level = 0
+    propertyState.mortgaged = false
     events.push({
       type: "property_returned",
       playerId: String(playerId),
       tileId: tile.id,
       previousLevel,
+      returnedBuildings,
       reason,
     })
   }
@@ -87,6 +96,7 @@ export function settlePayment(
     tileId = null,
     cardId = null,
     events,
+    force = false,
   }
 ) {
   const payer = playerById(state, payerId)
@@ -104,27 +114,13 @@ export function settlePayment(
     ruleError("NOT_PLAYER", "收款玩家不存在。")
   }
 
-  const candidates = ownedPropertyEntries(state, map, payer.userId)
-    .map((entry) => ({
-      ...entry,
-      value: liquidationValue(map, entry.tile, entry.propertyState),
-    }))
-    .sort((left, right) => right.value - left.value || left.tile.id - right.tile.id)
-
-  while (payer.cash < amount && candidates.length > 0) {
-    const candidate = candidates.shift()
-    const previousLevel = candidate.propertyState.level
-    candidate.propertyState.ownerId = null
-    candidate.propertyState.level = 0
-    payer.cash += candidate.value
-    events.push({
-      type: "property_liquidated",
-      playerId: payer.userId,
-      tileId: candidate.tile.id,
-      previousLevel,
-      amount: candidate.value,
-      reason,
-    })
+  if (payer.cash < amount && !force) {
+    return {
+      due: amount,
+      paid: 0,
+      bankrupt: false,
+      needsDebtResolution: true,
+    }
   }
 
   const paid = Math.min(payer.cash, amount)
@@ -145,6 +141,100 @@ export function settlePayment(
   const bankrupt = paid < amount
   if (bankrupt) markBankrupt(state, map, payer, events, reason)
   return { due: amount, paid, bankrupt }
+}
+
+function storedPayment(payment) {
+  return {
+    payerId: String(payment.payerId),
+    recipientId:
+      payment.recipientId == null ? null : String(payment.recipientId),
+    amount: payment.amount,
+    reason: payment.reason,
+    tileId: payment.tileId ?? null,
+    cardId: payment.cardId ?? null,
+  }
+}
+
+export function processPaymentQueue(
+  state,
+  map,
+  payments,
+  events,
+  { now, allowDebt = true } = {}
+) {
+  const queue = payments.map(storedPayment)
+  for (let index = 0; index < queue.length; index++) {
+    const payment = queue[index]
+    const payer = playerById(state, payment.payerId)
+    if (!payer || payer.status !== PLAYER_STATUS.ACTIVE) continue
+    const result = settlePayment(state, map, {
+      ...payment,
+      events,
+      force: !allowDebt,
+    })
+    if (!result.needsDebtResolution) continue
+    if (!Number.isSafeInteger(now) || now < 0) {
+      ruleError("INVALID_TIME", "欠款处理需要有效的当前时间。")
+    }
+    state.phase = PHASES.AWAITING_DEBT
+    state.pendingDebt = {
+      ...payment,
+      remainingPayments: queue.slice(index + 1),
+      createdAt: now,
+    }
+    state.deadlineAt =
+      now + map.gameDefaults.debtTimeoutSeconds * 1000
+    events.push({
+      type: "debt_required",
+      ...payment,
+      cash: payer.cash,
+      shortfall: payment.amount - payer.cash,
+      deadlineAt: state.deadlineAt,
+    })
+    return { pending: true, payment: state.pendingDebt }
+  }
+  return { pending: false }
+}
+
+export function resolvePendingDebt(
+  state,
+  map,
+  events,
+  { now, automatic = false } = {}
+) {
+  const pending = state.pendingDebt
+  if (!pending || state.phase !== PHASES.AWAITING_DEBT) {
+    ruleError("NO_PENDING_DEBT", "当前没有等待处理的欠款。")
+  }
+  const currentPayment = storedPayment(pending)
+  const remainingPayments = Array.isArray(pending.remainingPayments)
+    ? pending.remainingPayments.map(storedPayment)
+    : []
+  state.pendingDebt = null
+  state.phase = PHASES.RESOLVING
+  state.deadlineAt = 0
+
+  const result = settlePayment(state, map, {
+    ...currentPayment,
+    events,
+    force: true,
+  })
+  events.push({
+    type: "debt_resolved",
+    playerId: currentPayment.payerId,
+    automatic,
+    paid: result.paid,
+    due: result.due,
+    bankrupt: result.bankrupt,
+  })
+  const queued = processPaymentQueue(
+    state,
+    map,
+    remainingPayments,
+    events,
+    { now, allowDebt: true }
+  )
+  return { ...result, pending: queued.pending }
 }
 
 export function grantCash(

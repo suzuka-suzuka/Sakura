@@ -14,13 +14,13 @@ import {
   GameRuleError,
 } from "../lib/monopoly/constants.js"
 import { GameService } from "../lib/monopoly/GameService.js"
+import { COMMAND_PATTERNS } from "../lib/monopoly/commands.js"
 import { MapLoader } from "../lib/monopoly/map/MapLoader.js"
 import { MonopolySessionStore } from "../lib/monopoly/SessionStore.js"
 import { TimeoutScheduler } from "../lib/monopoly/TimeoutScheduler.js"
 import { renderBoard } from "../lib/monopoly/presentation/BoardRenderer.js"
 import {
-  buildHelpText,
-  formatResult,
+  buildTurnPrompt,
 } from "../lib/monopoly/presentation/MessageFormatter.js"
 
 export class Monopoly extends plugin {
@@ -40,7 +40,7 @@ export class Monopoly extends plugin {
 
   async init() {
     try {
-      this.map = await new MapLoader().load("default-24")
+      this.map = await new MapLoader().load("default-40")
       this.store = new MonopolySessionStore(getRedis(), { log: logger })
       this.scheduler = new TimeoutScheduler({
         onTimeout: (token) => this.handleScheduledTimeout(token),
@@ -94,34 +94,31 @@ export class Monopoly extends plugin {
     return false
   }
 
-  async buildSegments(result) {
-    const formatted = formatResult(result, this.map)
-    const segments = []
-    if (formatted.mentionUserId) {
-      segments.push(Segment.at(formatted.mentionUserId))
-      segments.push(Segment.text(`\n${formatted.text}`))
-    } else {
-      segments.push(Segment.text(formatted.text))
+  async buildBoardSegment(result) {
+    if (!result.renderBoard) return null
+    try {
+      return Segment.image(
+        await renderBoard(result.state, this.map, { events: result.events })
+      )
+    } catch (error) {
+      logger.error(
+        `[大富翁] 群 ${result.groupId} 棋盘渲染失败：${error.stack || error}`
+      )
+      return null
     }
-
-    if (result.renderBoard) {
-      try {
-        segments.push(Segment.image(renderBoard(result.state, this.map)))
-      } catch (error) {
-        logger.error(
-          `[大富翁] 群 ${result.groupId} 棋盘渲染失败：${error.stack || error}`
-        )
-        segments.push(
-          Segment.text("\n（棋盘图片生成失败，游戏状态已经正常保存。）")
-        )
-      }
-    }
-    return segments
   }
 
   async sendResult(e, result) {
     if (!result) return
-    await e.reply(await this.buildSegments(result))
+    const board = await this.buildBoardSegment(result)
+    if (board) await e.reply([board])
+    const prompt = buildTurnPrompt(result)
+    if (prompt) {
+      await e.reply([
+        Segment.at(prompt.mentionUserId),
+        Segment.text(`\n${prompt.text}`),
+      ])
+    }
   }
 
   async sendScheduledResult(result) {
@@ -135,7 +132,15 @@ export class Monopoly extends plugin {
       )
       return
     }
-    await bot.sendGroupMsg(groupId, await this.buildSegments(result))
+    const board = await this.buildBoardSegment(result)
+    if (board) await bot.sendGroupMsg(groupId, [board])
+    const prompt = buildTurnPrompt(result)
+    if (prompt) {
+      await bot.sendGroupMsg(groupId, [
+        Segment.at(prompt.mentionUserId),
+        Segment.text(`\n${prompt.text}`),
+      ])
+    }
   }
 
   async handleScheduledTimeout(token) {
@@ -152,13 +157,28 @@ export class Monopoly extends plugin {
       return true
     } catch (error) {
       if (error instanceof GameRuleError) {
-        await e.reply(error.message)
+        try {
+          const result = await this.service.status(this.contextFromEvent(e))
+          result.events = [
+            { type: "rule_error", message: error.message },
+          ]
+          await this.sendResult(e, result)
+        } catch {
+          await e.reply(error.message)
+        }
         return true
       }
       logger.error(`[大富翁] 指令执行失败：${error.stack || error}`)
       await e.reply("大富翁操作失败，状态没有被重复结算，请稍后再试。")
       return true
     }
+  }
+
+  async executeInGame(e, callback) {
+    if (!this.ready || !this.service) return false
+    const context = this.contextFromEvent(e)
+    if (!(await this.service.hasSession(context))) return false
+    return this.execute(e, callback)
   }
 
   deadlineSweep = Cron("*/5 * * * * *", async () => {
@@ -176,36 +196,36 @@ export class Monopoly extends plugin {
     }
   })
 
-  createGame = Command(/^#创建大富翁$/, async (e) =>
+  createGame = Command(COMMAND_PATTERNS.createGame, async (e) =>
     this.execute(e, () =>
       this.service.createGame(this.contextFromEvent(e))
     )
   )
 
-  joinGame = Command(/^#加入大富翁$/, async (e) =>
-    this.execute(e, () =>
+  joinGame = Command(COMMAND_PATTERNS.joinGame, async (e) =>
+    this.executeInGame(e, () =>
       this.service.joinGame(this.contextFromEvent(e))
     )
   )
 
-  leaveLobby = Command(/^#退出大富翁$/, async (e) =>
-    this.execute(e, () =>
+  leaveLobby = Command(COMMAND_PATTERNS.leaveLobby, async (e) =>
+    this.executeInGame(e, () =>
       this.service.leaveLobby(this.contextFromEvent(e))
     )
   )
 
-  startGame = Command(/^#开始大富翁$/, async (e) =>
-    this.execute(e, () =>
+  startGame = Command(COMMAND_PATTERNS.startGame, async (e) =>
+    this.executeInGame(e, () =>
       this.service.startGame(this.contextFromEvent(e))
     )
   )
 
-  roll = Command(/^#掷骰$/, async (e) =>
-    this.execute(e, () => this.service.roll(this.contextFromEvent(e)))
+  roll = Command(COMMAND_PATTERNS.roll, async (e) =>
+    this.executeInGame(e, () => this.service.roll(this.contextFromEvent(e)))
   )
 
-  purchase = Command(/^#购买$/, async (e) =>
-    this.execute(e, () =>
+  purchase = Command(COMMAND_PATTERNS.purchase, async (e) =>
+    this.executeInGame(e, () =>
       this.service.decide(
         this.contextFromEvent(e),
         DECISIONS.PURCHASE
@@ -213,17 +233,38 @@ export class Monopoly extends plugin {
     )
   )
 
-  upgrade = Command(/^#升级$/, async (e) =>
-    this.execute(e, () =>
-      this.service.decide(
-        this.contextFromEvent(e),
-        DECISIONS.UPGRADE
-      )
+  build = Command(COMMAND_PATTERNS.build, async (e) =>
+    this.executeInGame(e, () =>
+      this.service.build(this.contextFromEvent(e), e.match[1])
     )
   )
 
-  decline = Command(/^#放弃$/, async (e) =>
-    this.execute(e, () =>
+  sellBuilding = Command(COMMAND_PATTERNS.sellBuilding, async (e) =>
+    this.executeInGame(e, () =>
+      this.service.sellBuilding(this.contextFromEvent(e), e.match[1])
+    )
+  )
+
+  mortgage = Command(COMMAND_PATTERNS.mortgage, async (e) =>
+    this.executeInGame(e, () =>
+      this.service.mortgage(this.contextFromEvent(e), e.match[1])
+    )
+  )
+
+  redeem = Command(COMMAND_PATTERNS.redeem, async (e) =>
+    this.executeInGame(e, () =>
+      this.service.redeem(this.contextFromEvent(e), e.match[1])
+    )
+  )
+
+  resolveDebt = Command(COMMAND_PATTERNS.resolveDebt, async (e) =>
+    this.executeInGame(e, () =>
+      this.service.resolveDebt(this.contextFromEvent(e))
+    )
+  )
+
+  decline = Command(COMMAND_PATTERNS.decline, async (e) =>
+    this.executeInGame(e, () =>
       this.service.decide(
         this.contextFromEvent(e),
         DECISIONS.DECLINE
@@ -231,26 +272,28 @@ export class Monopoly extends plugin {
     )
   )
 
-  surrender = Command(/^#认输$/, async (e) =>
-    this.execute(e, () =>
+  surrender = Command(COMMAND_PATTERNS.surrender, async (e) =>
+    this.executeInGame(e, () =>
       this.service.surrender(this.contextFromEvent(e))
     )
   )
 
-  status = Command(/^#(?:大富翁|大富翁状态|查看大富翁|大富翁地图)$/, async (e) =>
-    this.execute(e, () =>
+  status = Command(COMMAND_PATTERNS.status, async (e) =>
+    this.executeInGame(e, () =>
       this.service.status(this.contextFromEvent(e))
     )
   )
 
-  help = Command(/^#大富翁规则$/, async (e) => {
-    if (!(await this.ensureReady(e))) return true
-    await e.reply(buildHelpText(this.map))
-    return true
+  help = Command(COMMAND_PATTERNS.help, async (e) => {
+    return this.executeInGame(e, async () => {
+      const result = await this.service.status(this.contextFromEvent(e))
+      result.events = [{ type: "rules_requested" }]
+      return result
+    })
   })
 
-  forceEnd = Command(/^#结束大富翁$/, async (e) =>
-    this.execute(e, () =>
+  forceEnd = Command(COMMAND_PATTERNS.forceEnd, async (e) =>
+    this.executeInGame(e, () =>
       this.service.forceEnd(this.contextFromEvent(e))
     )
   )

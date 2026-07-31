@@ -7,12 +7,13 @@ import {
   PHASES,
   PLAYER_COLORS,
   PLAYER_STATUS,
+  SESSION_VERSION,
 } from "./constants.js"
 import {
   createLobbyState,
   transition,
 } from "./GameEngine.js"
-import { rollDice } from "./rules/dice.js"
+import { rollDiceSet } from "./rules/dice.js"
 
 function normalizeContext(context) {
   if (
@@ -35,6 +36,10 @@ function normalizeContext(context) {
 
 function gameError(code, message) {
   throw new GameRuleError(code, message)
+}
+
+function isPrivileged(context) {
+  return Boolean(context.isAdmin || context.isMaster || context.isWhite)
 }
 
 export function shuffle(values, randomInt = cryptoRandomInt) {
@@ -89,6 +94,7 @@ export class GameService {
 
   ensureMap(session) {
     if (
+      session.version !== SESSION_VERSION ||
       session.mapId !== this.map.id ||
       session.mapVersion !== this.map.version
     ) {
@@ -104,6 +110,15 @@ export class GameService {
     if (!session) gameError("NO_GAME", "本群还没有大富翁房间。")
     this.ensureMap(session)
     return session
+  }
+
+  async hasSession(rawContext) {
+    const context = normalizeContext(rawContext)
+    const session = await this.store.loadSession(
+      context.selfId,
+      context.groupId
+    )
+    return Boolean(session && session.phase !== PHASES.ENDED)
   }
 
   chanceOrder() {
@@ -146,7 +161,7 @@ export class GameService {
   result({
     state,
     events,
-    renderBoard = false,
+    renderBoard = true,
     scheduled = false,
     deleted = false,
   }) {
@@ -194,6 +209,12 @@ export class GameService {
 
   async createGame(rawContext) {
     const context = normalizeContext(rawContext)
+    if (!isPrivileged(context)) {
+      gameError(
+        "NOT_ALLOWED",
+        "只有群管理员或白名单用户可以创建大富翁。"
+      )
+    }
     return this.withLock(context, async () => {
       const existing = await this.store.loadSession(
         context.selfId,
@@ -204,18 +225,6 @@ export class GameService {
       }
       if (existing) await this.store.deleteSession(existing)
 
-      const ownership = await this.store.claimUserIndex(
-        context.selfId,
-        context.userId,
-        context.groupId
-      )
-      if (!ownership.ok) {
-        gameError(
-          "USER_IN_OTHER_GAME",
-          "你已经在另一个群的大富翁中，不能同时加入第二局。"
-        )
-      }
-
       const now = this.now()
       const state = createLobbyState(
         {
@@ -223,21 +232,11 @@ export class GameService {
           selfId: context.selfId,
           groupId: context.groupId,
           hostUserId: context.userId,
-          hostDisplayName: context.displayName,
         },
         this.map,
         now
       )
-      try {
-        await this.saveActiveSession(state)
-      } catch (error) {
-        await this.store.dropUserIndex(
-          context.selfId,
-          context.userId,
-          context.groupId
-        )
-        throw error
-      }
+      await this.saveActiveSession(state)
 
       return this.result({
         state,
@@ -377,7 +376,8 @@ export class GameService {
         {
           type: ACTIONS.ROLL,
           userId: context.userId,
-          dice: rollDice(
+          dice: rollDiceSet(
+            this.map.gameDefaults.diceCount,
             this.map.gameDefaults.diceSides,
             this.randomInt
           ),
@@ -429,6 +429,81 @@ export class GameService {
     })
   }
 
+  propertyTileId(name) {
+    const wanted = String(name || "").trim()
+    const tile = this.map.tiles.find(
+      (item) => item.type === "property" && item.name === wanted
+    )
+    if (!tile) gameError("PROPERTY_NOT_FOUND", `找不到地产【${wanted}】。`)
+    return tile.id
+  }
+
+  async assetAction(rawContext, type, propertyName) {
+    const context = normalizeContext(rawContext)
+    return this.withLock(context, async () => {
+      const previous = await this.requireSession(
+        context.selfId,
+        context.groupId
+      )
+      const transitionResult = transition(
+        previous,
+        {
+          type,
+          userId: context.userId,
+          tileId: this.propertyTileId(propertyName),
+        },
+        this.map,
+        this.runtime(previous)
+      )
+      const { deleted } = await this.commitTransition(
+        previous,
+        transitionResult
+      )
+      return this.result({ ...transitionResult, deleted })
+    })
+  }
+
+  build(rawContext, propertyName) {
+    return this.assetAction(rawContext, ACTIONS.BUILD, propertyName)
+  }
+
+  sellBuilding(rawContext, propertyName) {
+    return this.assetAction(
+      rawContext,
+      ACTIONS.SELL_BUILDING,
+      propertyName
+    )
+  }
+
+  mortgage(rawContext, propertyName) {
+    return this.assetAction(rawContext, ACTIONS.MORTGAGE, propertyName)
+  }
+
+  redeem(rawContext, propertyName) {
+    return this.assetAction(rawContext, ACTIONS.REDEEM, propertyName)
+  }
+
+  async resolveDebt(rawContext) {
+    const context = normalizeContext(rawContext)
+    return this.withLock(context, async () => {
+      const previous = await this.requireSession(
+        context.selfId,
+        context.groupId
+      )
+      const transitionResult = transition(
+        previous,
+        { type: ACTIONS.RESOLVE_DEBT, userId: context.userId },
+        this.map,
+        this.runtime(previous)
+      )
+      const { deleted } = await this.commitTransition(
+        previous,
+        transitionResult
+      )
+      return this.result({ ...transitionResult, deleted })
+    })
+  }
+
   async surrender(rawContext) {
     const context = normalizeContext(rawContext)
     return this.withLock(context, async () => {
@@ -465,16 +540,14 @@ export class GameService {
         context.groupId
       )
       if (!previous) gameError("NO_GAME", "本群还没有大富翁房间。")
-      const privileged = Boolean(
-        context.isAdmin || context.isMaster || context.isWhite
-      )
-      if (previous.hostUserId !== context.userId && !privileged) {
+      if (!isPrivileged(context)) {
         gameError(
           "NOT_ALLOWED",
-          "只有房主、群管理员或白名单用户可以结束本局。"
+          "只有群管理员或白名单用户可以强行结束本局。"
         )
       }
       if (
+        previous.version !== SESSION_VERSION ||
         previous.mapId !== this.map.id ||
         previous.mapVersion !== this.map.version
       ) {
@@ -507,7 +580,7 @@ export class GameService {
               rankings: [],
             },
           ],
-          renderBoard: false,
+          renderBoard: true,
           deleted: true,
         })
       }
@@ -524,7 +597,7 @@ export class GameService {
       )
       return this.result({
         ...transitionResult,
-        renderBoard: previous.phase !== PHASES.LOBBY,
+        renderBoard: true,
         deleted,
       })
     })
@@ -536,7 +609,7 @@ export class GameService {
     return this.result({
       state,
       events: [{ type: "status_requested", playerId: context.userId }],
-      renderBoard: state.phase !== PHASES.LOBBY,
+      renderBoard: true,
     })
   }
 
@@ -607,16 +680,18 @@ export class GameService {
       if (previous.phase === PHASES.AWAITING_ROLL) {
         action = {
           type: ACTIONS.ROLL_TIMEOUT,
-          dice: rollDice(
+          dice: rollDiceSet(
+            this.map.gameDefaults.diceCount,
             this.map.gameDefaults.diceSides,
             this.randomInt
           ),
         }
       } else if (
-        previous.phase === PHASES.AWAITING_PURCHASE ||
-        previous.phase === PHASES.AWAITING_UPGRADE
+        previous.phase === PHASES.AWAITING_PURCHASE
       ) {
         action = { type: ACTIONS.DECISION_TIMEOUT }
+      } else if (previous.phase === PHASES.AWAITING_DEBT) {
+        action = { type: ACTIONS.DEBT_TIMEOUT }
       } else {
         return null
       }

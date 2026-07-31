@@ -1,11 +1,15 @@
 import { PHASES, PLAYER_STATUS } from "../constants.js"
 import { applyChanceCard, drawChanceCard } from "./chance.js"
+import { returnBuildingsToBank } from "./buildings.js"
 import { sendToJail } from "./movement.js"
 import {
   createPropertyDecision,
   rentFor,
 } from "./property.js"
-import { grantCash, settlePayment } from "./settlement.js"
+import {
+  grantCash,
+  processPaymentQueue,
+} from "./settlement.js"
 import {
   playerById,
   tileById,
@@ -52,13 +56,20 @@ export function resolveCurrentTile(
     const owner = playerById(state, propertyState.ownerId)
     if (!owner || owner.status !== PLAYER_STATUS.ACTIVE) {
       const previousLevel = propertyState.level
+      const returnedBuildings = returnBuildingsToBank(
+        state,
+        map,
+        previousLevel
+      )
       propertyState.ownerId = null
       propertyState.level = 0
+      propertyState.mortgaged = false
       events.push({
         type: "property_returned",
         playerId: owner?.userId || null,
         tileId: tile.id,
         previousLevel,
+        returnedBuildings,
         reason: "invalid_owner",
       })
       createPropertyDecision(
@@ -72,14 +83,30 @@ export function resolveCurrentTile(
       return
     }
 
-    settlePayment(state, map, {
-      payerId: player.userId,
-      recipientId: owner.userId,
-      amount: rentFor(state, map, tile),
-      reason: "rent",
-      tileId: tile.id,
+    if (propertyState.mortgaged) {
+      events.push({
+        type: "mortgaged_property_visited",
+        playerId: player.userId,
+        ownerId: owner.userId,
+        tileId: tile.id,
+      })
+      return
+    }
+    processPaymentQueue(
+      state,
+      map,
+      [
+        {
+          payerId: player.userId,
+          recipientId: owner.userId,
+          amount: rentFor(state, map, tile),
+          reason: "rent",
+          tileId: tile.id,
+        },
+      ],
       events,
-    })
+      { now: runtime.now }
+    )
     return
   }
 
@@ -101,13 +128,20 @@ export function resolveCurrentTile(
   }
 
   if (tile.type === "tax") {
-    settlePayment(state, map, {
-      payerId: player.userId,
-      amount: tile.amount,
-      reason: "tax",
-      tileId: tile.id,
+    processPaymentQueue(
+      state,
+      map,
+      [
+        {
+          payerId: player.userId,
+          amount: tile.amount,
+          reason: "tax",
+          tileId: tile.id,
+        },
+      ],
       events,
-    })
+      { now: runtime.now }
+    )
     return
   }
 

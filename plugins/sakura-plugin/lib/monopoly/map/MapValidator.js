@@ -16,18 +16,22 @@ const GAME_DEFAULT_FIELDS = new Set([
   "minPlayers",
   "maxPlayers",
   "startingCash",
-  "targetTotalTurns",
-  "maxRoundsCap",
   "diceSides",
+  "diceCount",
+  "maxConsecutiveDoubles",
   "rollTimeoutSeconds",
   "decisionTimeoutSeconds",
+  "debtTimeoutSeconds",
   "maxConsecutiveRollTimeouts",
   "lobbyTimeoutSeconds",
   "passStartReward",
   "maxPropertyLevel",
+  "housesPerHotel",
+  "houseSupply",
+  "hotelSupply",
   "completeSetRentMultiplier",
-  "liquidationRate",
-  "liquidationRoundingUnit",
+  "buildingSaleRate",
+  "mortgageInterestRate",
   "jailSkipTurns",
   "maxTileResolutionDepth",
 ])
@@ -62,10 +66,14 @@ const TILE_FIELDS = Object.freeze({
   start: new Set(BASE_TILE_FIELDS),
   property: new Set([
     ...BASE_TILE_FIELDS,
+    "propertyKind",
     "groupId",
     "price",
+    "mortgageValue",
     "upgradeCost",
     "rentByLevel",
+    "rentByOwnedCount",
+    "rentDiceMultipliers",
   ]),
   chance: new Set([...BASE_TILE_FIELDS, "deckId"]),
   tax: new Set([...BASE_TILE_FIELDS, "amount"]),
@@ -218,15 +226,14 @@ function validateDefaults(defaults, errors) {
     min: 100,
     max: 1_000_000,
   })
-  requireInteger(defaults.targetTotalTurns, "targetTotalTurns", errors, {
-    min: 12,
-    max: 500,
-  })
-  requireInteger(defaults.maxRoundsCap, "maxRoundsCap", errors, {
-    min: 1,
-    max: 100,
-  })
   requireInteger(defaults.diceSides, "diceSides", errors, { min: 2, max: 20 })
+  requireInteger(defaults.diceCount, "diceCount", errors, { min: 2, max: 4 })
+  requireInteger(
+    defaults.maxConsecutiveDoubles,
+    "maxConsecutiveDoubles",
+    errors,
+    { min: 2, max: 6 }
+  )
   requireInteger(defaults.rollTimeoutSeconds, "rollTimeoutSeconds", errors, {
     min: 10,
     max: 600,
@@ -236,6 +243,12 @@ function validateDefaults(defaults, errors) {
     "decisionTimeoutSeconds",
     errors,
     { min: 5, max: 300 }
+  )
+  requireInteger(
+    defaults.debtTimeoutSeconds,
+    "debtTimeoutSeconds",
+    errors,
+    { min: 10, max: 600 }
   )
   requireInteger(
     defaults.maxConsecutiveRollTimeouts,
@@ -255,21 +268,60 @@ function validateDefaults(defaults, errors) {
     min: 0,
     max: 10,
   })
+  const buildingFields = [
+    "housesPerHotel",
+    "houseSupply",
+    "hotelSupply",
+  ]
+  const configuredBuildingFields = buildingFields.filter((field) =>
+    Object.hasOwn(defaults, field)
+  )
+  if (
+    configuredBuildingFields.length > 0 &&
+    configuredBuildingFields.length !== buildingFields.length
+  ) {
+    errors.push("房屋库存配置必须同时提供 housesPerHotel、houseSupply 和 hotelSupply")
+  }
+  if (Object.hasOwn(defaults, "housesPerHotel")) {
+    requireInteger(defaults.housesPerHotel, "housesPerHotel", errors, {
+      min: 1,
+      max: 8,
+    })
+  }
+  if (Object.hasOwn(defaults, "houseSupply")) {
+    requireInteger(defaults.houseSupply, "houseSupply", errors, {
+      min: 1,
+      max: 500,
+    })
+  }
+  if (Object.hasOwn(defaults, "hotelSupply")) {
+    requireInteger(defaults.hotelSupply, "hotelSupply", errors, {
+      min: 1,
+      max: 100,
+    })
+  }
+  if (
+    Number.isInteger(defaults.housesPerHotel) &&
+    Number.isInteger(defaults.maxPropertyLevel) &&
+    defaults.maxPropertyLevel !== defaults.housesPerHotel + 1
+  ) {
+    errors.push("maxPropertyLevel 必须等于 housesPerHotel + 1")
+  }
   requireNumber(
     defaults.completeSetRentMultiplier,
     "completeSetRentMultiplier",
     errors,
     { min: 1, max: 10 }
   )
-  requireNumber(defaults.liquidationRate, "liquidationRate", errors, {
+  requireNumber(defaults.buildingSaleRate, "buildingSaleRate", errors, {
     min: 0.01,
     max: 1,
   })
-  requireInteger(
-    defaults.liquidationRoundingUnit,
-    "liquidationRoundingUnit",
+  requireNumber(
+    defaults.mortgageInterestRate,
+    "mortgageInterestRate",
     errors,
-    { min: 1, max: 100_000 }
+    { min: 0, max: 1 }
   )
   requireInteger(defaults.jailSkipTurns, "jailSkipTurns", errors, {
     min: 1,
@@ -288,7 +340,6 @@ function validateBoard(board, errors) {
   collectUnknownFields(board, BOARD_FIELDS, "board", errors)
 
   requireInteger(board.size, "board.size", errors, { min: 4, max: 200 })
-  if (board.size !== 24) errors.push("MVP 地图的 board.size 必须为 24")
   requireInteger(board.startTileId, "board.startTileId", errors)
   requireInteger(board.jailTileId, "board.jailTileId", errors)
   requireArray(board.path, "board.path", errors)
@@ -307,8 +358,16 @@ function validateBoard(board, errors) {
     max: 30,
   })
   requireBoolean(board.layout.clockwise, "board.layout.clockwise", errors)
-  if (board.layout.columns !== 7 || board.layout.rows !== 7) {
-    errors.push("MVP 棋盘布局必须是 7×7")
+  if (
+    Number.isInteger(board.size) &&
+    Number.isInteger(board.layout.columns) &&
+    Number.isInteger(board.layout.rows)
+  ) {
+    const perimeterSize =
+      board.layout.columns * 2 + board.layout.rows * 2 - 4
+    if (board.size !== perimeterSize) {
+      errors.push("board.size 必须等于外圈布局的格子数量")
+    }
   }
   if (board.layout.clockwise !== true) {
     errors.push("MVP 棋盘路径必须按顺时针布局")
@@ -325,6 +384,12 @@ function validateTileShape(tile, index, defaults, errors) {
   collectUnknownFields(tile, TILE_FIELDS[tile.type], label, errors)
   requireInteger(tile.id, `${label}.id`, errors, { min: 0, max: 10_000 })
   requireString(tile.name, `${label}.name`, errors, { maxLength: 30 })
+  if (
+    typeof tile.name === "string" &&
+    Array.from(tile.name).length > 4
+  ) {
+    errors.push(`${label}.name 最多只能有 4 个字符`)
+  }
   requireString(tile.description, `${label}.description`, errors, {
     maxLength: 120,
   })
@@ -346,6 +411,12 @@ function validateTileShape(tile, index, defaults, errors) {
   }
 
   if (tile.type === "property") {
+    const propertyKind = tile.propertyKind || "street"
+    if (!["street", "station", "utility"].includes(propertyKind)) {
+      errors.push(
+        `${label}.propertyKind 只能是 street、station 或 utility`
+      )
+    }
     requireString(tile.groupId, `${label}.groupId`, errors, {
       pattern: /^[a-z][a-z0-9_]*$/,
     })
@@ -353,16 +424,76 @@ function validateTileShape(tile, index, defaults, errors) {
       min: 1,
       max: 1_000_000,
     })
-    requireInteger(tile.upgradeCost, `${label}.upgradeCost`, errors, {
+    requireInteger(tile.mortgageValue, `${label}.mortgageValue`, errors, {
       min: 1,
       max: 1_000_000,
     })
-    if (requireArray(tile.rentByLevel, `${label}.rentByLevel`, errors)) {
-      if (tile.rentByLevel.length !== defaults.maxPropertyLevel + 1) {
-        errors.push(
-          `${label}.rentByLevel 长度必须等于 maxPropertyLevel + 1`
-        )
+    if (propertyKind === "street") {
+      requireInteger(tile.upgradeCost, `${label}.upgradeCost`, errors, {
+        min: 1,
+        max: 1_000_000,
+      })
+      if (requireArray(tile.rentByLevel, `${label}.rentByLevel`, errors)) {
+        if (tile.rentByLevel.length !== defaults.maxPropertyLevel + 1) {
+          errors.push(
+            `${label}.rentByLevel 长度必须等于 maxPropertyLevel + 1`
+          )
+        }
+        for (const [rentIndex, rent] of tile.rentByLevel.entries()) {
+          requireInteger(rent, `${label}.rentByLevel[${rentIndex}]`, errors, {
+            min: 0,
+            max: 10_000_000,
+          })
+        }
       }
+    } else if (propertyKind === "station") {
+      if (
+        requireArray(
+          tile.rentByOwnedCount,
+          `${label}.rentByOwnedCount`,
+          errors
+        )
+      ) {
+        if (tile.rentByOwnedCount.length !== 4) {
+          errors.push(`${label}.rentByOwnedCount 必须包含 4 档租金`)
+        }
+        for (const [rentIndex, rent] of tile.rentByOwnedCount.entries()) {
+          requireInteger(
+            rent,
+            `${label}.rentByOwnedCount[${rentIndex}]`,
+            errors,
+            {
+              min: 0,
+              max: 10_000_000,
+            }
+          )
+        }
+      }
+    } else if (propertyKind === "utility") {
+      if (
+        requireArray(
+          tile.rentDiceMultipliers,
+          `${label}.rentDiceMultipliers`,
+          errors
+        )
+      ) {
+        if (tile.rentDiceMultipliers.length !== 2) {
+          errors.push(`${label}.rentDiceMultipliers 必须包含 2 档倍数`)
+        }
+        for (const [rentIndex, multiplier] of
+          tile.rentDiceMultipliers.entries()) {
+          requireInteger(
+            multiplier,
+            `${label}.rentDiceMultipliers[${rentIndex}]`,
+            errors,
+            {
+              min: 1,
+              max: 100_000,
+            }
+          )
+        }
+      }
+    } else if (Array.isArray(tile.rentByLevel)) {
       for (const [rentIndex, rent] of tile.rentByLevel.entries()) {
         requireInteger(rent, `${label}.rentByLevel[${rentIndex}]`, errors, {
           min: 0,
@@ -468,8 +599,8 @@ function validateGroups(map, tileById, errors) {
       maxLength: 7,
     })
     if (!requireArray(group.tileIds, `${label}.tileIds`, errors)) continue
-    if (group.tileIds.length !== 2) {
-      errors.push(`${label}.tileIds 在 MVP 中必须恰好包含 2 块地产`)
+    if (group.tileIds.length < 2 || group.tileIds.length > 4) {
+      errors.push(`${label}.tileIds 必须包含 2～4 块地产`)
     }
     for (const tileId of group.tileIds) {
       requireInteger(tileId, `${label}.tileIds`, errors)
@@ -477,6 +608,25 @@ function validateGroups(map, tileById, errors) {
       if (tileById.get(tileId)?.type !== "property") {
         errors.push(`${label} 引用了不存在或不是地产的格子 ${tileId}`)
       }
+    }
+    const propertyKinds = new Set(
+      group.tileIds
+        .map((tileId) => tileById.get(tileId))
+        .filter((tile) => tile?.type === "property")
+        .map((tile) => tile.propertyKind || "street")
+    )
+    if (propertyKinds.size > 1) {
+      errors.push(`${label} 不能混合不同类型的地产`)
+    }
+    const [propertyKind] = propertyKinds
+    if (propertyKind === "street" && ![2, 3].includes(group.tileIds.length)) {
+      errors.push(`${label} 的街区必须包含 2 或 3 块地产`)
+    }
+    if (propertyKind === "station" && group.tileIds.length !== 4) {
+      errors.push(`${label} 的车站组必须包含 4 块地产`)
+    }
+    if (propertyKind === "utility" && group.tileIds.length !== 2) {
+      errors.push(`${label} 的公共设施组必须包含 2 块地产`)
     }
   }
 
@@ -656,8 +806,8 @@ export function validateMap(map) {
   requireInteger(map.version, "version", errors, { min: 1, max: 10_000 })
   requireString(map.name, "name", errors, { maxLength: 40 })
   requireString(map.description, "description", errors, { maxLength: 200 })
-  if (map.ruleset !== "qq-monopoly-mvp-v1") {
-    errors.push("ruleset 目前只支持 qq-monopoly-mvp-v1")
+  if (map.ruleset !== "qq-monopoly-turn-v4") {
+    errors.push("ruleset 目前只支持 qq-monopoly-turn-v4")
   }
 
   validateDefaults(map.gameDefaults, errors)

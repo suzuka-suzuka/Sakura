@@ -7,12 +7,20 @@ import {
   SESSION_VERSION,
   ruleError,
 } from "./constants.js"
-import { validateDice } from "./rules/dice.js"
-import { moveBy } from "./rules/movement.js"
+import { validateDiceSet } from "./rules/dice.js"
+import { moveBy, sendToJail } from "./rules/movement.js"
 import {
   resolvePropertyDecision,
 } from "./rules/property.js"
 import {
+  buildOnProperty,
+  mortgageProperty,
+  redeemProperty,
+  sellBuilding,
+} from "./rules/assets.js"
+import { createBuildingSupply } from "./rules/buildings.js"
+import {
+  resolvePendingDebt,
   surrenderPlayer,
 } from "./rules/settlement.js"
 import {
@@ -50,6 +58,7 @@ function createPlayer({ userId, displayName, joinOrder }, map) {
     position: map.board.startTileId,
     jailTurns: 0,
     consecutiveRollTimeouts: 0,
+    consecutiveDoubles: 0,
     status: PLAYER_STATUS.ACTIVE,
   }
 }
@@ -58,7 +67,7 @@ function createPropertyStates(map) {
   return Object.fromEntries(
     propertyTiles(map).map((tile) => [
       String(tile.id),
-      { ownerId: null, level: 0 },
+      { ownerId: null, level: 0, mortgaged: false },
     ])
   )
 }
@@ -69,7 +78,6 @@ export function createLobbyState(
     selfId,
     groupId,
     hostUserId,
-    hostDisplayName,
   },
   map,
   now
@@ -84,26 +92,17 @@ export function createLobbyState(
     phase: PHASES.LOBBY,
     hostUserId: String(hostUserId),
     turnSeq: 0,
-    round: 0,
-    roundLimit: 0,
     turnIndex: -1,
-    players: [
-      createPlayer(
-        {
-          userId: hostUserId,
-          displayName: hostDisplayName,
-          joinOrder: 0,
-        },
-        map
-      ),
-    ],
+    players: [],
     propertyStates: createPropertyStates(map),
+    buildingSupply: createBuildingSupply(map),
     chance: {
       deckId: map.chanceDecks[0].id,
       order: [],
       cursor: 0,
     },
     pendingDecision: null,
+    pendingDebt: null,
     deadlineAt: now + map.gameDefaults.lobbyTimeoutSeconds * 1000,
     lastDice: null,
     winnerIds: [],
@@ -113,6 +112,7 @@ export function createLobbyState(
     startedAt: 0,
     endedAt: 0,
     updatedAt: now,
+    lastMove: null,
   }
   return assertStateInvariants(state, map)
 }
@@ -126,15 +126,15 @@ function requirePhase(state, expected, message) {
 
 function addTurnStartedEvent(state, map, events) {
   const player = currentPlayer(state)
+  player.consecutiveDoubles = 0
   state.phase = PHASES.AWAITING_ROLL
   state.pendingDecision = null
+  state.pendingDebt = null
   state.deadlineAt =
     state.updatedAt + map.gameDefaults.rollTimeoutSeconds * 1000
   events.push({
     type: "turn_started",
     playerId: player.userId,
-    round: state.round,
-    roundLimit: state.roundLimit,
     turnSeq: state.turnSeq,
     deadlineAt: state.deadlineAt,
   })
@@ -157,10 +157,12 @@ function endGame(state, map, events, reason, runtime, { forced = false } = {}) {
   const { rankings, tieBreaks } = buildRankings(state, map, runtime)
   state.phase = PHASES.ENDED
   state.pendingDecision = null
+  state.pendingDebt = null
   state.deadlineAt = 0
   state.endReason = reason
   state.endedAt = now
   state.rankings = rankings
+  for (const player of state.players) player.consecutiveDoubles = 0
   if (forced) {
     state.winnerIds = []
   } else if (reason === END_REASONS.LAST_PLAYER) {
@@ -200,7 +202,6 @@ function beginPlayableTurn(state, map, events, runtime) {
       type: "jail_turn_skipped",
       playerId: player.userId,
       remainingTurns: player.jailTurns,
-      round: state.round,
       turnSeq: state.turnSeq,
     })
 
@@ -209,11 +210,6 @@ function beginPlayableTurn(state, map, events, runtime) {
       endGame(state, map, events, END_REASONS.LAST_PLAYER, runtime)
       return
     }
-    if (next.wrapped && state.round >= state.roundLimit) {
-      endGame(state, map, events, END_REASONS.ROUND_LIMIT, runtime)
-      return
-    }
-    if (next.wrapped) state.round += 1
     state.turnIndex = next.index
     state.turnSeq += 1
   }
@@ -221,7 +217,10 @@ function beginPlayableTurn(state, map, events, runtime) {
 }
 
 function finishPlayerTurn(state, map, events, runtime) {
+  const endingPlayer = currentPlayer(state)
+  if (endingPlayer) endingPlayer.consecutiveDoubles = 0
   state.pendingDecision = null
+  state.pendingDebt = null
   state.deadlineAt = 0
   state.phase = PHASES.RESOLVING
 
@@ -235,14 +234,37 @@ function finishPlayerTurn(state, map, events, runtime) {
     endGame(state, map, events, END_REASONS.LAST_PLAYER, runtime)
     return
   }
-  if (next.wrapped && state.round >= state.roundLimit) {
-    endGame(state, map, events, END_REASONS.ROUND_LIMIT, runtime)
-    return
-  }
-  if (next.wrapped) state.round += 1
   state.turnIndex = next.index
   state.turnSeq += 1
   beginPlayableTurn(state, map, events, runtime)
+}
+
+function finishResolvedRoll(state, map, events, runtime) {
+  const player = currentPlayer(state)
+  const lastDice = state.lastDice
+  const canRollAgain =
+    player?.status === PLAYER_STATUS.ACTIVE &&
+    player.jailTurns <= 0 &&
+    lastDice?.playerId === player.userId &&
+    lastDice.isDouble === true &&
+    player.consecutiveDoubles > 0
+
+  if (!canRollAgain) {
+    finishPlayerTurn(state, map, events, runtime)
+    return
+  }
+
+  state.phase = PHASES.AWAITING_ROLL
+  state.pendingDecision = null
+  state.pendingDebt = null
+  state.deadlineAt =
+    state.updatedAt + map.gameDefaults.rollTimeoutSeconds * 1000
+  events.push({
+    type: "extra_roll_awarded",
+    playerId: player.userId,
+    doublesCount: player.consecutiveDoubles,
+    deadlineAt: state.deadlineAt,
+  })
 }
 
 function validateStartRandomness(state, map, runtime) {
@@ -293,32 +315,30 @@ function startGame(state, map, action, runtime, events) {
     player.position = map.board.startTileId
     player.jailTurns = 0
     player.consecutiveRollTimeouts = 0
+    player.consecutiveDoubles = 0
     player.status = PLAYER_STATUS.ACTIVE
     return player
   })
   state.propertyStates = createPropertyStates(map)
+  state.buildingSupply = createBuildingSupply(map)
   state.chance = {
     deckId: map.chanceDecks[0].id,
     order: [...runtime.chanceOrder],
     cursor: 0,
   }
   state.pendingDecision = null
-  state.round = 1
-  state.roundLimit = Math.min(
-    map.gameDefaults.maxRoundsCap,
-    Math.ceil(map.gameDefaults.targetTotalTurns / state.players.length)
-  )
+  state.pendingDebt = null
   state.turnIndex = 0
   state.turnSeq = 1
   state.startedAt = asNow(runtime)
   state.lastDice = null
+  state.lastMove = null
   state.winnerIds = []
   state.rankings = []
   state.endReason = null
   events.push({
     type: "game_started",
     playerOrder: state.players.map((player) => player.userId),
-    roundLimit: state.roundLimit,
     startingCash: map.gameDefaults.startingCash,
   })
   addTurnStartedEvent(state, map, events)
@@ -333,43 +353,93 @@ function performRoll(
   events,
   { automatic = false } = {}
 ) {
-  validateDice(dice, map.gameDefaults.diceSides)
+  const values = validateDiceSet(
+    dice,
+    map.gameDefaults.diceCount,
+    map.gameDefaults.diceSides
+  )
+  const total = values.reduce((sum, value) => sum + value, 0)
+  const isDouble = values.every((value) => value === values[0])
+  const fromTileId = player.position
   state.phase = PHASES.RESOLVING
   state.deadlineAt = 0
   state.pendingDecision = null
+  player.consecutiveDoubles = isDouble
+    ? player.consecutiveDoubles + 1
+    : 0
   state.lastDice = {
     playerId: player.userId,
-    value: dice,
+    values: [...values],
+    total,
+    isDouble,
     turnSeq: state.turnSeq,
   }
   events.push({
     type: "dice_rolled",
     playerId: player.userId,
-    value: dice,
+    values: [...values],
+    total,
+    isDouble,
+    doublesCount: player.consecutiveDoubles,
     automatic,
   })
-  moveBy(state, map, player.userId, dice, {
+
+  if (
+    isDouble &&
+    player.consecutiveDoubles >=
+      map.gameDefaults.maxConsecutiveDoubles
+  ) {
+    events.push({
+      type: "triple_doubles_jail",
+      playerId: player.userId,
+      doublesCount: player.consecutiveDoubles,
+    })
+    sendToJail(
+      state,
+      map,
+      player.userId,
+      map.board.jailTileId,
+      map.gameDefaults.jailSkipTurns,
+      events,
+      "consecutive_doubles"
+    )
+    state.lastMove = {
+      playerId: player.userId,
+      fromTileId,
+      toTileId: player.position,
+      turnSeq: state.turnSeq,
+    }
+    player.consecutiveDoubles = 0
+    finishPlayerTurn(state, map, events, runtime)
+    return
+  }
+
+  moveBy(state, map, player.userId, total, {
     collectStartReward: true,
     events,
     reason: automatic ? "timeout_roll" : "dice",
   })
   resolveCurrentTile(state, map, player.userId, runtime, events)
+  state.lastMove = {
+    playerId: player.userId,
+    fromTileId,
+    toTileId: player.position,
+    turnSeq: state.turnSeq,
+  }
+
+  if (state.phase === PHASES.AWAITING_DEBT) return
 
   if (hasAtMostOneActivePlayer(state)) {
     endGame(state, map, events, END_REASONS.LAST_PLAYER, runtime)
     return
   }
 
-  if (
-    state.phase === PHASES.AWAITING_PURCHASE ||
-    state.phase === PHASES.AWAITING_UPGRADE
-  ) {
+  if (state.phase === PHASES.AWAITING_PURCHASE) {
     if (!automatic) return
     const pending = state.pendingDecision
     const offerIndex = events.findLastIndex(
       (event) =>
-        (event.type === "purchase_offered" ||
-          event.type === "upgrade_offered") &&
+        event.type === "purchase_offered" &&
         event.playerId === pending?.playerId &&
         event.tileId === pending?.tileId
     )
@@ -384,7 +454,7 @@ function performRoll(
     )
     state.pendingDecision = null
   }
-  finishPlayerTurn(state, map, events, runtime)
+  finishResolvedRoll(state, map, events, runtime)
 }
 
 function joinLobby(state, map, action, events) {
@@ -420,7 +490,7 @@ function leaveLobby(state, map, action, runtime, events) {
   events.push({
     type: "player_left",
     playerId: player.userId,
-    displayName: player.displayName,
+    playerNumber: player.joinOrder + 1,
     playerCount: state.players.length,
   })
 
@@ -452,8 +522,8 @@ function leaveLobby(state, map, action, runtime, events) {
 function decide(state, map, action, runtime, events, automatic = false) {
   requirePhase(
     state,
-    [PHASES.AWAITING_PURCHASE, PHASES.AWAITING_UPGRADE],
-    "当前没有等待购买或升级。"
+    PHASES.AWAITING_PURCHASE,
+    "当前没有等待购买。"
   )
   const player = requireCurrentPlayer(state, action.userId)
   resolvePropertyDecision(
@@ -467,7 +537,63 @@ function decide(state, map, action, runtime, events, automatic = false) {
   state.pendingDecision = null
   state.phase = PHASES.RESOLVING
   state.deadlineAt = 0
-  finishPlayerTurn(state, map, events, runtime)
+  finishResolvedRoll(state, map, events, runtime)
+}
+
+function finishDebtResolution(state, map, runtime, events, automatic) {
+  const result = resolvePendingDebt(state, map, events, {
+    now: asNow(runtime),
+    automatic,
+  })
+  if (result.pending) return
+  finishResolvedRoll(state, map, events, runtime)
+}
+
+function performAssetAction(state, map, action, runtime, events) {
+  const resolvingDebt = state.phase === PHASES.AWAITING_DEBT
+  let player
+  if (resolvingDebt) {
+    player = requirePlayer(state, action.userId)
+    if (state.pendingDebt?.payerId !== player.userId) {
+      ruleError("NOT_DEBTOR", "只有当前欠款玩家可以处理资产。")
+    }
+    if (![ACTIONS.SELL_BUILDING, ACTIONS.MORTGAGE].includes(action.type)) {
+      ruleError("DEBT_ACTION_NOT_ALLOWED", "欠款处理中只能卖房或抵押地产。")
+    }
+  } else {
+    requirePhase(state, PHASES.AWAITING_ROLL, "只能在自己掷骰前管理资产。")
+    player = requireCurrentPlayer(state, action.userId)
+  }
+
+  if (action.type === ACTIONS.BUILD) {
+    buildOnProperty(state, map, player.userId, action.tileId, events)
+  } else if (action.type === ACTIONS.SELL_BUILDING) {
+    sellBuilding(state, map, player.userId, action.tileId, events)
+  } else if (action.type === ACTIONS.MORTGAGE) {
+    mortgageProperty(state, map, player.userId, action.tileId, events)
+  } else if (action.type === ACTIONS.REDEEM) {
+    redeemProperty(state, map, player.userId, action.tileId, events)
+  } else {
+    ruleError("UNKNOWN_ASSET_ACTION", "未知的资产操作。")
+  }
+
+  if (
+    resolvingDebt &&
+    player.cash >= (state.pendingDebt?.amount ?? Number.MAX_SAFE_INTEGER)
+  ) {
+    finishDebtResolution(state, map, runtime, events, false)
+  }
+}
+
+function resolveDebtAction(state, map, action, runtime, events, automatic) {
+  requirePhase(state, PHASES.AWAITING_DEBT, "当前没有等待处理的欠款。")
+  if (!automatic) {
+    const player = requirePlayer(state, action.userId)
+    if (state.pendingDebt?.payerId !== player.userId) {
+      ruleError("NOT_DEBTOR", "只有当前欠款玩家可以继续结算。")
+    }
+  }
+  finishDebtResolution(state, map, runtime, events, automatic)
 }
 
 function rollTimeout(state, map, action, runtime, events) {
@@ -499,7 +625,6 @@ function surrender(state, map, action, runtime, events) {
     [
       PHASES.AWAITING_ROLL,
       PHASES.AWAITING_PURCHASE,
-      PHASES.AWAITING_UPGRADE,
     ],
     "当前不能认输。"
   )
@@ -573,6 +698,18 @@ export function transition(inputState, action, map, runtime = {}) {
       )
       break
     }
+    case ACTIONS.BUILD:
+    case ACTIONS.SELL_BUILDING:
+    case ACTIONS.MORTGAGE:
+    case ACTIONS.REDEEM:
+      performAssetAction(state, map, action, runtime, events)
+      break
+    case ACTIONS.RESOLVE_DEBT:
+      resolveDebtAction(state, map, action, runtime, events, false)
+      break
+    case ACTIONS.DEBT_TIMEOUT:
+      resolveDebtAction(state, map, action, runtime, events, true)
+      break
     case ACTIONS.SURRENDER:
       surrender(state, map, action, runtime, events)
       break

@@ -18,6 +18,7 @@ plugins/sakura-plugin/
 ├─ lib/
 │  └─ monopoly/
 │     ├─ constants.js
+│     ├─ commands.js
 │     ├─ GameService.js
 │     ├─ GameEngine.js
 │     ├─ SessionStore.js
@@ -28,6 +29,8 @@ plugins/sakura-plugin/
 │     ├─ rules/
 │     │  ├─ dice.js
 │     │  ├─ movement.js
+│     │  ├─ buildings.js
+│     │  ├─ assets.js
 │     │  ├─ state.js
 │     │  ├─ tileResolver.js
 │     │  ├─ property.js
@@ -41,17 +44,19 @@ plugins/sakura-plugin/
 ├─ resources/
 │  └─ monopoly/
 │     └─ maps/
-│        └─ default-24.json
+│        └─ default-40.json
 
 test/                         # 本地目录，受 .gitignore 排除
 └─ monopoly/
    ├─ helpers.js
    ├─ map-validator.test.js
+   ├─ building-rules.test.js
    ├─ game-engine.test.js
    ├─ settlement.test.js
    ├─ game-service.test.js
    ├─ session-store.test.js
    ├─ timeout-scheduler.test.js
+   ├─ command-patterns.test.js
    ├─ board-renderer.test.js
    └─ simulation.test.js
 ```
@@ -63,15 +68,17 @@ test/                         # 本地目录，受 .gitignore 排除
 ### `apps/monopoly.js`
 
 - 注册群命令；
-- 使用 `selfId + groupId` 形成机器人账号隔离的群作用域；
+- 所有命令接受可选 `#` 前缀；除创建外，没有本群会话时直接返回 `false`；
+- 以 `groupId` 形成全机器人账号共享的唯一群会话作用域；
 - 把 `selfId`、`groupId`、`userId` 和命令参数交给 `GameService`；
-- 将服务返回的消息、提及和图片发到群内；
+- 将每次结果渲染为独立图片；只有新回合开始时另发下一名玩家的提及；
 - 不直接访问 Redis，不直接掷骰，不修改玩家现金。
 
 ### `GameService.js`
 
 - 大富翁的应用服务和唯一写入口；
-- 创建、加入、退出、开始、掷骰、选择、认输和强制结束；
+- 创建、加入、退出、开始、资产操作、掷骰、购买、欠款处理、认输和强制结束；
+- 创建时不自动加入创建者；创建和强制结束只允许管理员或白名单用户；
 - 获取群锁、加载会话、调用纯规则引擎、保存会话、释放锁；
 - 校验调用者、当前状态和当前玩家回合；
 - 保存成功后返回结构化的展示事件；
@@ -85,7 +92,12 @@ joinGame(context)
 leaveLobby(context)
 startGame(context)
 roll(context)
-decide(context, "purchase" | "upgrade" | "decline")
+decide(context, "purchase" | "decline")
+build(context, propertyName)
+sellBuilding(context, propertyName)
+mortgage(context, propertyName)
+redeem(context, propertyName)
+resolveDebt(context)
 surrender(context)
 status(context)
 forceEnd(context)
@@ -97,7 +109,7 @@ handleTimeout(timeoutToken)
 - 接收旧状态和一个明确动作，返回新状态与领域事件；
 - 不读取系统时间、Redis、QQ 资料或随机数；
 - 骰子点数、洗牌结果和当前时间都由调用方作为输入传入；
-- 负责状态机、玩家回合与轮次推进、不变量检查和连锁效果上限。
+- 负责状态机、玩家回合推进、不变量检查和连锁效果上限；游戏不设置轮数上限。
 
 建议入口：
 
@@ -116,7 +128,7 @@ transition(state, action, map, runtimeInput)
 
 ### `SessionStore.js`
 
-- Redis 键必须同时包含 `selfId` 和 `groupId`；
+- 会话键和群锁只按 `groupId` 唯一，确保同一群即使接入多个机器人账号也只能开一局；
 - 保存完整 JSON 会话并校验 `sessionId`；
 - 用 Lua 或事务保证旧任务不能覆盖新会话；
 - 提供群会话锁和玩家所在局索引；
@@ -127,10 +139,10 @@ transition(state, action, map, runtimeInput)
 建议键名：
 
 ```text
-sakura:monopoly:session:{selfId}:{groupId}
-sakura:monopoly:lock:{selfId}:{groupId}
+sakura:monopoly:session:{groupId}
+sakura:monopoly:lock:{groupId}
 sakura:monopoly:user:{selfId}:{userId}
-sakura:monopoly:cancelled:{selfId}:{groupId}:{sessionId}
+sakura:monopoly:cancelled:{groupId}:{sessionId}
 ```
 
 建议接口：
@@ -163,19 +175,20 @@ releaseSessionLock({ selfId, groupId }, token)
 
 最低校验项：
 
-- `path` 恰好包含 24 个不重复格子，并首尾形成逻辑闭环；
+- `path` 数量与外圈布局一致，默认地图恰好包含 40 个不重复格子并首尾闭环；
 - `tiles` 的 ID、路径和坐标一一对应；
-- 坐标都位于 7×7 外圈且不重复；
+- 坐标都位于声明的外圈网格且不重复，默认地图为 11×11；
 - 起点、看守所和前往看守所引用有效；
 - 每块地产只属于一个有效色组；
-- `rentByLevel` 长度等于最高等级加一，且数值为非负整数；
+- 街区 `rentByLevel` 覆盖空地、1～4 间房和旅馆；车站与公共设施使用各自租金表；
+- 房屋和旅馆库存配置完整，并与棋盘建筑数量保持守恒；
 - 卡牌只使用允许的效果类型，移动目标存在；
-- 玩家数、超时、金额、倍率和回收率处于合理范围；
+- 玩家数、超时、金额、租金倍率、建筑售价和抵押利率处于合理范围；
 - 不允许未知字段悄悄生效，错误必须阻止开局。
 
 ### `rules/dice.js`
 
-- 校验服务端传入的骰子结果；
+- 生成并校验两枚六面骰结果，移动使用两枚骰子的总点数；
 - 生产环境随机数由 `crypto.randomInt(1, 7)` 生成；
 - 测试使用固定点数，不在规则内部伪造随机。
 
@@ -189,23 +202,26 @@ releaseSessionLock({ selfId, groupId }, token)
 ### `rules/tileResolver.js`
 
 - 按格子类型分发；
-- 创建购买或升级决策；
+- 创建落地购买决策并处理租金、税费和欠款暂停；
 - 控制移动后的再次解析；
 - 限制单次行动最多解析 4 个格子。
 
-### `rules/property.js`
+### `rules/buildings.js`、`rules/property.js` 与 `rules/assets.js`
 
-- 购买、升级、所有权和同色组判定；
-- 计算当前租金；
+- 管理 32 间房、12 家旅馆的银行库存和建筑归还；
+- 购买、自由建造、反向均衡卖房、抵押和赎回；
+- 资产操作只允许在当前玩家掷骰前，欠款中只允许欠款人卖房或抵押；
+- 计算街区、车站和公共设施的当前租金；
 - 保证一块地产最多只有一个所有者；
 - 不直接完成现金不足时的破产处理。
 
 ### `rules/settlement.js`
 
 - 所有现金转移的统一入口；
-- 税费、租金、卡牌付款共用同一套强制变卖规则；
+- 税费、租金和卡牌付款共用同一套欠款队列；
+- 现金不足时持久化欠款和剩余付款，等待玩家卖房、抵押或继续结算；
 - 保证现金不为负、收款不超过实际支付；
-- 输出变卖、付款和破产领域事件。
+- 输出欠款、付款和破产领域事件。
 
 ### `rules/chance.js`
 
@@ -216,29 +232,32 @@ releaseSessionLock({ selfId, groupId }, token)
 
 ### `rules/victory.js`
 
-- 检查仅剩一人和轮次上限；
-- 计算强制变卖口径的净资产；
+- 检查是否仅剩一名在场玩家；
+- 按现金、地产价值、建筑成本和抵押价值计算净资产；
 - 生成排名与需要自动进行的平局骰子。
 
 ### `presentation/PublicView.js`
 
 - 从真实会话生成只读公开视图；
 - 隐去锁令牌、超时任务、内部版本和幂等字段；
-- 给文字格式化和图片渲染提供同一份输入。
+- 给棋盘渲染和下一回合提及提供同一份输入。
 
 ### `presentation/BoardRenderer.js`
 
 - 使用现有 `@napi-rs/canvas`；
-- 将 7×7 外圈坐标渲染为 24 格棋盘；
-- 显示棋子、地产颜色、所有者、等级、轮次和当前玩家；
-- MVP 不远程加载 QQ 头像，直接使用颜色棋子和昵称首字，避免网络资源阻断玩家回合。
+- 将 11×11 外圈坐标渲染为 40 格棋盘；
+- 地名最多 4 个字符并居中，金额以同字号只显示数字，玩家颜色棋子位于数字下方；无金额格只显示名称；
+- 未购买格子保持白色，购买后按所有者颜色着色并在外圈显示占领条；只有可建房街区显示朝向棋盘内圈的色组线，车站和公共设施不显示；
+- 本回合起点失焦，以灰点和虚线箭头连向深色描边的终点；情境状态只放在棋盘中央信息区；
+- 中央顶部先显示当前玩家颜色和阶段，再复用飞行棋骰面资源显示双骰、总点数、移动起终点、购买或结算状态、无 `#` 的按钮式命令、拆分卡片后的当前玩家资产，以及分开的房屋和旅馆库存；抵押地产直接标为“抵押”；
+- 在棋盘下方纵向显示净资产排名，每名玩家只显示固定颜色名、净资产和当前现金；
+- MVP 不远程加载 QQ 头像，直接使用颜色棋子，避免网络资源阻断玩家回合。
 
 ### `presentation/MessageFormatter.js`
 
-- 把领域事件合并为一条简短结算摘要；
-- 只在需要操作时提及当前玩家；
-- 购买、升级和超时提示必须明确可用命令；
-- 不输出 Redis 键、内部状态名或堆栈错误。
+- 不再生成普通文字结算；
+- 只从 `turn_started` 事件生成下一名玩家的提及和简短掷骰提示；
+- 显示名只使用棋子颜色，不使用 QQ 昵称。
 
 ## 4. 核心会话结构
 
@@ -246,33 +265,36 @@ releaseSessionLock({ selfId, groupId }, token)
 
 ```json
 {
-  "version": 1,
+  "version": 4,
   "sessionId": "uuid",
   "selfId": "bot qq",
   "groupId": "group qq",
-  "mapId": "sakura-city-24",
-  "mapVersion": 1,
+  "mapId": "sakura-city-40",
+  "mapVersion": 4,
   "phase": "awaiting_roll",
   "hostUserId": "qq",
   "turnSeq": 12,
-  "round": 3,
-  "roundLimit": 18,
   "turnIndex": 1,
   "players": [
     {
       "userId": "qq",
       "displayName": "snapshot only",
       "color": "#EF5350",
-      "cash": 7200,
+      "cash": 720,
       "position": 7,
       "jailTurns": 0,
+      "consecutiveDoubles": 1,
       "consecutiveRollTimeouts": 0,
       "status": "active"
     }
   ],
   "propertyStates": {
-    "1": { "ownerId": "qq", "level": 1 },
-    "3": { "ownerId": null, "level": 0 }
+    "1": { "ownerId": "qq", "level": 1, "mortgaged": false },
+    "3": { "ownerId": null, "level": 0, "mortgaged": false }
+  },
+  "buildingSupply": {
+    "houses": 31,
+    "hotels": 12
   },
   "chance": {
     "deckId": "city_chance",
@@ -280,15 +302,23 @@ releaseSessionLock({ selfId, groupId }, token)
     "cursor": 0
   },
   "pendingDecision": null,
+  "pendingDebt": null,
+  "lastDice": {
+    "playerId": "qq",
+    "values": [3, 3],
+    "total": 6,
+    "isDouble": true,
+    "turnSeq": 12
+  },
   "deadlineAt": 0,
   "createdAt": 0,
   "updatedAt": 0
 }
 ```
 
-QQ 昵称只用于展示快照，玩家身份始终以字符串化的 `userId` 判断。
+QQ 昵称只保留在内部会话快照中，不用于对局展示；界面和提示统一用固定颜色名指代玩家，身份仍以字符串化的 `userId` 判断。
 
-`propertyStates` 是地产归属和等级的唯一事实来源；玩家地产列表、地产数量和净资产全部在读取时派生，不能再在玩家对象里保存一份可变副本。`round` 表示当前轮次，`turnSeq` 是每次玩家回合递增的单调序号。
+`propertyStates` 是地产归属、建筑阶段和抵押状态的唯一事实来源，`level` 的 0～4 表示空地或房屋数，5 表示旅馆；`buildingSupply` 是银行剩余实体房屋和旅馆库存。`pendingDebt` 保存当前付款及后续付款队列。`lastDice` 保存两枚骰面、总点数和对子状态，`consecutiveDoubles` 只在同一个玩家回合中累计。玩家资产和净资产均在读取时派生。`turnSeq` 只在进入新的玩家回合时递增，对子额外掷骰不会递增；会话不保存轮数或轮数上限。
 
 ## 5. 一次命令的处理链
 
@@ -301,31 +331,33 @@ QQ事件
   -> SessionStore 原子保存
   -> TimeoutScheduler 更新截止任务
   -> 释放群锁
-  -> MessageFormatter / BoardRenderer
-  -> 回复群消息
+  -> BoardRenderer 生成独立棋盘图片
+  -> 如有 turn_started，再由 MessageFormatter 生成下一玩家提及
+  -> 依次回复群消息
 ```
 
-渲染失败不能回滚已完成的游戏状态；此时发送纯文字结果，并记录可定位的错误日志。
+渲染失败不能回滚已完成的游戏状态；入口记录可定位的错误日志，不回退到普通文字结算。
 
 ## 6. 测试边界
 
 ### 地图
 
-- 24 个格子、路径、坐标和色组全覆盖；
+- 40 个格子、路径、坐标、色组、车站和公共设施全覆盖；
 - 非法移动目标、重复格子和非法卡牌效果拒绝加载。
 
 ### 规则引擎
 
-- 固定骰子下的位置、起点奖励、玩家回合和轮次推进；
-- 购买、升级、同色租金和满级；
-- 强制变卖顺序、部分付款和破产；
+- 固定双骰下的位置、起点奖励、对子额外掷骰、连续三次对子入狱和玩家回合推进；
+- 购买、均衡建房、4 房升级旅馆、库存限制和同色租金；
+- 半价反向均衡卖房、旅馆降级、抵押、赎回和免租；
+- 欠款暂停、自救、后续付款队列、强制结算和破产；
 - 卡牌移动连锁与 4 次上限；
 - 看守所跳过一个玩家回合；
-- 动态轮次上限、净资产排名和平局处理。
+- 无轮数上限的持续对局、净资产排名和平局处理。
 
 ### 会话可靠性
 
-- 同群并发两条 `#掷骰` 只结算一次；
+- 同群并发两条 `掷骰` 只结算一次，跨机器人账号也不能重复建局；
 - 旧局超时不能修改新局；
 - 保存后模拟重启可以恢复；
 - 玩家索引在认输、破产和结束时正确清理。
@@ -333,10 +365,12 @@ QQ事件
 ### 命令
 
 - 非当前玩家不能操作；
+- 所有命令的带 `#` 和不带 `#` 形式等价，无会话时除创建外均返回 `false`；
+- 创建者不会自动加入，创建和强停权限只授予管理员或白名单用户；
 - 裸“是/否”和裸数字不会触发；
 - 管理员权限、房主移交和人数限制正确；
-- 掷骰移动完成后生成棋盘；存在购买或升级选择时，选择完成后再生成更新棋盘。
+- 每个有效命令都生成独立棋盘图片；只有 `turn_started` 事件产生额外提及文字。
 
 ## 7. 实现状态
 
-地图校验、纯规则引擎、Redis 会话与群锁、命令入口、截止恢复和 Canvas 棋盘均已实现。下一阶段是部署到测试群，根据真实局长、破产率和购买率调整地图 JSON 中的经济数值。
+40 格地图、经典金额、双骰与对子规则、资产与欠款规则、Redis 会话与群锁、截止恢复和 Canvas 棋盘均已实现。玩家交易、拍卖和道具暂不进入本阶段。

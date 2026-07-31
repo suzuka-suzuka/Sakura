@@ -1,0 +1,18 @@
+export const COMMAND_PATTERNS = Object.freeze({
+  createGame: /^#?创建大富翁$/,
+  joinGame: /^#?加入大富翁$/,
+  leaveLobby: /^#?退出大富翁$/,
+  startGame: /^#?开始大富翁$/,
+  roll: /^#?掷骰$/,
+  purchase: /^#?购买$/,
+  build: /^#?(?:建房|升级)\s+(\S+)$/,
+  sellBuilding: /^#?卖房\s+(\S+)$/,
+  mortgage: /^#?抵押\s+(\S+)$/,
+  redeem: /^#?赎回\s+(\S+)$/,
+  resolveDebt: /^#?继续结算$/,
+  decline: /^#?放弃$/,
+  surrender: /^#?认输$/,
+  status: /^#?(?:大富翁|大富翁状态|查看大富翁|大富翁地图)$/,
+  help: /^#?大富翁规则$/,
+  forceEnd: /^#?结束大富翁$/,
+})

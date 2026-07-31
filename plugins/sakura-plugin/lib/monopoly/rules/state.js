@@ -4,6 +4,10 @@ import {
   GameRuleError,
   ruleError,
 } from "../constants.js"
+import {
+  buildingCountsForLevel,
+  buildingStock,
+} from "./buildings.js"
 
 export function cloneState(state) {
   return structuredClone(state)
@@ -116,9 +120,70 @@ export function assertStateInvariants(state, map) {
         `玩家 ${player.userId} 的超时计数无效。`
       )
     }
+    if (
+      !Number.isSafeInteger(player.consecutiveDoubles) ||
+      player.consecutiveDoubles < 0 ||
+      player.consecutiveDoubles >=
+        map.gameDefaults.maxConsecutiveDoubles
+    ) {
+      throw new GameRuleError(
+        "INVALID_STATE",
+        `玩家 ${player.userId} 的连续对子计数无效。`
+      )
+    }
+  }
+
+  if (state.lastDice != null) {
+    const dice = state.lastDice
+    const validValues =
+      Array.isArray(dice.values) &&
+      dice.values.length === map.gameDefaults.diceCount &&
+      dice.values.every(
+        (value) =>
+          Number.isSafeInteger(value) &&
+          value >= 1 &&
+          value <= map.gameDefaults.diceSides
+      )
+    if (
+      !dice ||
+      typeof dice !== "object" ||
+      !userIds.includes(String(dice.playerId)) ||
+      !validValues ||
+      !Number.isSafeInteger(dice.total) ||
+      dice.total !== dice.values.reduce((sum, value) => sum + value, 0) ||
+      typeof dice.isDouble !== "boolean" ||
+      dice.isDouble !== dice.values.every((value) => value === dice.values[0]) ||
+      !Number.isSafeInteger(dice.turnSeq) ||
+      dice.turnSeq < 1
+    ) {
+      throw new GameRuleError(
+        "INVALID_STATE",
+        "最近一次双骰结果无效。"
+      )
+    }
+  }
+
+  if (state.lastMove != null) {
+    const move = state.lastMove
+    if (
+      !move ||
+      typeof move !== "object" ||
+      !userIds.includes(String(move.playerId)) ||
+      !validTileIds.has(move.fromTileId) ||
+      !validTileIds.has(move.toTileId) ||
+      !Number.isSafeInteger(move.turnSeq) ||
+      move.turnSeq < 1
+    ) {
+      throw new GameRuleError(
+        "INVALID_STATE",
+        "本回合移动焦点无效。"
+      )
+    }
   }
 
   const validOwners = new Set(userIds)
+  let housesOnBoard = 0
+  let hotelsOnBoard = 0
   for (const tile of propertyTiles(map)) {
     const propertyState = state.propertyStates?.[String(tile.id)]
     if (!propertyState) {
@@ -146,16 +211,89 @@ export function assertStateInvariants(state, map) {
         `地产 ${tile.id} 的等级无效。`
       )
     }
+    if (typeof propertyState.mortgaged !== "boolean") {
+      throw new GameRuleError(
+        "INVALID_STATE",
+        `地产 ${tile.id} 的抵押状态无效。`
+      )
+    }
     if (propertyState.ownerId === null && propertyState.level !== 0) {
       throw new GameRuleError(
         "INVALID_STATE",
         `无主地产 ${tile.id} 不能保留等级。`
       )
     }
+    if (propertyState.ownerId === null && propertyState.mortgaged) {
+      throw new GameRuleError(
+        "INVALID_STATE",
+        `无主地产 ${tile.id} 不能处于抵押状态。`
+      )
+    }
+    if (propertyState.mortgaged && propertyState.level !== 0) {
+      throw new GameRuleError(
+        "INVALID_STATE",
+        `抵押地产 ${tile.id} 不能保留建筑。`
+      )
+    }
+    if (
+      (tile.propertyKind || "street") !== "street" &&
+      propertyState.level !== 0
+    ) {
+      throw new GameRuleError(
+        "INVALID_STATE",
+        `非街区地产 ${tile.id} 不能建造房屋。`
+      )
+    }
+    const buildingCounts = buildingCountsForLevel(
+      map,
+      propertyState.level
+    )
+    housesOnBoard += buildingCounts.houses
+    hotelsOnBoard += buildingCounts.hotels
+  }
+
+  for (const group of map.propertyGroups) {
+    const tiles = group.tileIds.map((tileId) => tileById(map, tileId))
+    if ((tiles[0]?.propertyKind || "street") !== "street") continue
+    const states = group.tileIds.map(
+      (tileId) => state.propertyStates[String(tileId)]
+    )
+    if (!states.some((entry) => entry.level > 0)) continue
+    const ownerId = states[0].ownerId
+    if (
+      ownerId === null ||
+      states.some(
+        (entry) => entry.ownerId !== ownerId || entry.mortgaged
+      ) ||
+      Math.max(...states.map((entry) => entry.level)) -
+        Math.min(...states.map((entry) => entry.level)) >
+        1
+    ) {
+      throw new GameRuleError(
+        "INVALID_STATE",
+        `色组 ${group.id} 的建筑、归属或抵押状态不合法。`
+      )
+    }
+  }
+
+  const stock = buildingStock(map)
+  if (
+    !state.buildingSupply ||
+    !Number.isSafeInteger(state.buildingSupply.houses) ||
+    !Number.isSafeInteger(state.buildingSupply.hotels) ||
+    state.buildingSupply.houses < 0 ||
+    state.buildingSupply.hotels < 0 ||
+    state.buildingSupply.houses + housesOnBoard !== stock.houses ||
+    state.buildingSupply.hotels + hotelsOnBoard !== stock.hotels
+  ) {
+    throw new GameRuleError(
+      "INVALID_STATE",
+      "银行房屋或旅馆库存与棋盘建筑数量不一致。"
+    )
   }
 
   if (state.phase === PHASES.LOBBY) {
-    if (state.turnIndex !== -1 || state.round !== 0) {
+    if (state.turnIndex !== -1) {
       throw new GameRuleError("INVALID_STATE", "等待房间不应存在进行中的轮次。")
     }
   } else if (state.phase !== PHASES.ENDED) {
@@ -169,16 +307,30 @@ export function assertStateInvariants(state, map) {
     if (!isActivePlayer(currentPlayer(state))) {
       throw new GameRuleError("INVALID_STATE", "当前行动者已经不在场。")
     }
-    if (!Number.isInteger(state.round) || state.round < 1) {
-      throw new GameRuleError("INVALID_STATE", "当前轮次无效。")
-    }
   }
 
-  const pendingPhase =
-    state.phase === PHASES.AWAITING_PURCHASE ||
-    state.phase === PHASES.AWAITING_UPGRADE
-  if (pendingPhase !== Boolean(state.pendingDecision)) {
+  const purchasePhase = state.phase === PHASES.AWAITING_PURCHASE
+  if (purchasePhase !== Boolean(state.pendingDecision)) {
     throw new GameRuleError("INVALID_STATE", "选择状态与待处理选择不一致。")
+  }
+  const debtPhase = state.phase === PHASES.AWAITING_DEBT
+  if (debtPhase !== Boolean(state.pendingDebt)) {
+    throw new GameRuleError("INVALID_STATE", "欠款状态与待处理欠款不一致。")
+  }
+  if (state.pendingDebt) {
+    const debt = state.pendingDebt
+    const payer = playerById(state, debt.payerId)
+    if (
+      !payer ||
+      payer.status !== PLAYER_STATUS.ACTIVE ||
+      !Number.isSafeInteger(debt.amount) ||
+      debt.amount <= 0 ||
+      !Array.isArray(debt.remainingPayments) ||
+      !Number.isSafeInteger(debt.createdAt) ||
+      debt.createdAt < 0
+    ) {
+      throw new GameRuleError("INVALID_STATE", "待处理欠款内容无效。")
+    }
   }
 
   return state

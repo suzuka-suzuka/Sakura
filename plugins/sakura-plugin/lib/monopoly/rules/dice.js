@@ -18,3 +18,17 @@ export function validateDice(value, sides) {
   }
   return value
 }
+
+export function rollDiceSet(count, sides, randomInt) {
+  if (!Number.isSafeInteger(count) || count < 1 || count > 10) {
+    throw new TypeError("骰子数量无效")
+  }
+  return Array.from({ length: count }, () => rollDice(sides, randomInt))
+}
+
+export function validateDiceSet(values, count, sides) {
+  if (!Array.isArray(values) || values.length !== count) {
+    throw new RangeError(`必须提供 ${count} 颗骰子的点数`)
+  }
+  return values.map((value) => validateDice(value, sides))
+}

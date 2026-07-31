@@ -1,6 +1,9 @@
 import { PLAYER_STATUS, ruleError } from "../constants.js"
 import { moveBy, moveTo, sendToJail } from "./movement.js"
-import { grantCash, settlePayment } from "./settlement.js"
+import {
+  grantCash,
+  processPaymentQueue,
+} from "./settlement.js"
 import {
   activePlayers,
   deckById,
@@ -70,13 +73,20 @@ export function applyChanceCard(
         cardId: card.id,
       })
     } else {
-      settlePayment(state, map, {
-        payerId: player.userId,
-        amount: -effect.amount,
-        reason: "chance",
-        cardId: card.id,
+      processPaymentQueue(
+        state,
+        map,
+        [
+          {
+            payerId: player.userId,
+            amount: -effect.amount,
+            reason: "chance",
+            cardId: card.id,
+          },
+        ],
         events,
-      })
+        { now: runtime.now }
+      )
     }
     return
   }
@@ -123,31 +133,35 @@ export function applyChanceCard(
       (other) => other.userId !== player.userId
     )
     if (effect.direction === "from_others") {
-      for (const other of others) {
-        if (other.status !== PLAYER_STATUS.ACTIVE) continue
-        settlePayment(state, map, {
+      processPaymentQueue(
+        state,
+        map,
+        others.map((other) => ({
           payerId: other.userId,
           recipientId: player.userId,
           amount: effect.amount,
           reason: "chance_transfer",
           cardId: card.id,
-          events,
-        })
-      }
+        })),
+        events,
+        { now: runtime.now }
+      )
       return
     }
 
-    for (const other of others) {
-      if (player.status !== PLAYER_STATUS.ACTIVE) break
-      settlePayment(state, map, {
+    processPaymentQueue(
+      state,
+      map,
+      others.map((other) => ({
         payerId: player.userId,
         recipientId: other.userId,
         amount: effect.amount,
         reason: "chance_transfer",
         cardId: card.id,
-        events,
-      })
-    }
+      })),
+      events,
+      { now: runtime.now }
+    )
     return
   }
 

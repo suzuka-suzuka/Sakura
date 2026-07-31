@@ -2,10 +2,16 @@ import {
   PHASE_LABELS,
   PHASES,
   PLAYER_STATUS,
+  playerPublicLabel,
 } from "../constants.js"
 import {
   liquidationValue,
 } from "../rules/settlement.js"
+import {
+  buildingCountsForLevel,
+  buildingLabel,
+} from "../rules/buildings.js"
+import { rentFor } from "../rules/property.js"
 import {
   currentPlayer,
   ownedPropertyEntries,
@@ -13,25 +19,47 @@ import {
 } from "../rules/state.js"
 
 export function buildPublicView(state, map) {
-  const players = state.players.map((player) => {
+  const players = state.players.map((player, index) => {
     const owned = ownedPropertyEntries(state, map, player.userId)
+    const ranking = state.rankings?.find(
+      (entry) => entry.userId === player.userId
+    )
     const propertyValue = owned.reduce(
       (sum, { tile, propertyState }) =>
         sum + liquidationValue(map, tile, propertyState),
       0
     )
+    const buildings = owned.reduce(
+      (total, { propertyState }) => {
+        const counts = buildingCountsForLevel(
+          map,
+          propertyState.level
+        )
+        total.houses += counts.houses
+        total.hotels += counts.hotels
+        return total
+      },
+      { houses: 0, hotels: 0 }
+    )
     return {
       userId: player.userId,
-      displayName: player.displayName,
+      label: playerPublicLabel(player, index),
       color: player.color || "#78909C",
       cash: player.cash,
       position: player.position,
       tileName: tileById(map, player.position)?.name || `格子 ${player.position}`,
       jailTurns: player.jailTurns,
       consecutiveRollTimeouts: player.consecutiveRollTimeouts,
+      consecutiveDoubles: player.consecutiveDoubles,
       status: player.status,
       active: player.status === PLAYER_STATUS.ACTIVE,
+      rank: ranking?.rank ?? null,
       propertyCount: owned.length,
+      mortgagedCount: owned.filter(
+        ({ propertyState }) => propertyState.mortgaged
+      ).length,
+      houseCount: buildings.houses,
+      hotelCount: buildings.hotels,
       propertyValue,
       netWorth: player.cash + propertyValue,
     }
@@ -47,6 +75,14 @@ export function buildPublicView(state, map) {
           {
             ownerId: stateEntry.ownerId,
             level: stateEntry.level,
+            mortgaged: stateEntry.mortgaged,
+            propertyKind: tile.propertyKind || "street",
+            building: buildingLabel(map, stateEntry.level),
+            ...buildingCountsForLevel(map, stateEntry.level),
+            rent:
+              stateEntry.ownerId === null || stateEntry.mortgaged
+                ? null
+                : rentFor(state, map, tile),
             ownerColor:
               players.find((player) => player.userId === stateEntry.ownerId)
                 ?.color || null,
@@ -64,17 +100,20 @@ export function buildPublicView(state, map) {
     phase: state.phase,
     phaseLabel: PHASE_LABELS[state.phase] || state.phase,
     hostUserId: state.hostUserId,
-    round: state.round,
-    roundLimit: state.roundLimit,
     turnSeq: state.turnSeq,
     currentPlayerId: active?.userId || null,
     deadlineAt: state.deadlineAt,
-    lastDice: state.lastDice ? { ...state.lastDice } : null,
+    lastDice: state.lastDice ? structuredClone(state.lastDice) : null,
+    lastMove: state.lastMove ? { ...state.lastMove } : null,
     pendingDecision: state.pendingDecision
       ? { ...state.pendingDecision }
       : null,
+    pendingDebt: state.pendingDebt
+      ? structuredClone(state.pendingDebt)
+      : null,
     players,
     propertyStates,
+    buildingSupply: { ...state.buildingSupply },
     rankings: Array.isArray(state.rankings)
       ? structuredClone(state.rankings)
       : [],

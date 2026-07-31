@@ -3,7 +3,15 @@ import {
   PHASES,
   ruleError,
 } from "../constants.js"
+import {
+  buildingLabel,
+  hotelLevel,
+} from "./buildings.js"
 import { playerById, tileById } from "./state.js"
+
+export function propertyKind(tile) {
+  return tile?.propertyKind || "street"
+}
 
 export function ownsCompleteGroup(state, map, playerId, groupId) {
   const group = map.propertyGroups.find((item) => item.id === groupId)
@@ -14,17 +22,94 @@ export function ownsCompleteGroup(state, map, playerId, groupId) {
   )
 }
 
+function ownedCountInGroup(state, map, playerId, groupId) {
+  const group = map.propertyGroups.find((item) => item.id === groupId)
+  if (!group) return 0
+  const wanted = String(playerId)
+  return group.tileIds.filter(
+    (tileId) => state.propertyStates[String(tileId)]?.ownerId === wanted
+  ).length
+}
+
 export function rentFor(state, map, tile) {
   const propertyState = state.propertyStates[String(tile.id)]
   if (!propertyState) ruleError("INVALID_PROPERTY", "地产状态不存在。")
+  if (propertyState.mortgaged) return 0
+  const kind = propertyKind(tile)
+  if (kind === "station") {
+    const ownedCount = ownedCountInGroup(
+      state,
+      map,
+      propertyState.ownerId,
+      tile.groupId
+    )
+    return tile.rentByOwnedCount[Math.max(0, ownedCount - 1)]
+  }
+  if (kind === "utility") {
+    const ownedCount = ownedCountInGroup(
+      state,
+      map,
+      propertyState.ownerId,
+      tile.groupId
+    )
+    const multiplier =
+      tile.rentDiceMultipliers[Math.max(0, ownedCount - 1)]
+    return (state.lastDice?.total || 0) * multiplier
+  }
+
   let rent = tile.rentByLevel[propertyState.level]
   if (
+    propertyState.level === 0 &&
     propertyState.ownerId !== null &&
     ownsCompleteGroup(state, map, propertyState.ownerId, tile.groupId)
   ) {
     rent = Math.floor(rent * map.gameDefaults.completeSetRentMultiplier)
   }
   return rent
+}
+
+export function createBuildingPlan(state, map, playerId, tile) {
+  const propertyState = state.propertyStates[String(tile.id)]
+  if (
+    !propertyState ||
+    propertyKind(tile) !== "street" ||
+    propertyState.ownerId !== String(playerId) ||
+    !ownsCompleteGroup(state, map, playerId, tile.groupId)
+  ) {
+    return null
+  }
+
+  const group = map.propertyGroups.find((item) => item.id === tile.groupId)
+  if (
+    group.tileIds.some(
+      (tileId) => state.propertyStates[String(tileId)].mortgaged
+    )
+  ) {
+    return null
+  }
+  const levels = group.tileIds.map(
+    (tileId) => state.propertyStates[String(tileId)].level
+  )
+  if (propertyState.level !== Math.min(...levels)) return null
+  if (propertyState.level >= map.gameDefaults.maxPropertyLevel) return null
+
+  const targetLevel = propertyState.level + 1
+  const buildingType =
+    targetLevel === hotelLevel(map) ? "hotel" : "house"
+  const available =
+    buildingType === "hotel"
+      ? state.buildingSupply.hotels
+      : state.buildingSupply.houses
+
+  return {
+    buildingType,
+    currentLevel: propertyState.level,
+    targetLevel,
+    currentBuilding: buildingLabel(map, propertyState.level),
+    targetBuilding: buildingLabel(map, targetLevel),
+    available,
+    allowed: available > 0,
+  }
 }
 
 export function createPropertyDecision(
@@ -56,31 +141,6 @@ export function createPropertyDecision(
       playerId: player.userId,
       tileId: tile.id,
       price: tile.price,
-      deadlineAt: state.deadlineAt,
-    })
-    return true
-  }
-
-  if (
-    propertyState.ownerId === player.userId &&
-    propertyState.level < map.gameDefaults.maxPropertyLevel &&
-    player.cash >= tile.upgradeCost
-  ) {
-    state.phase = PHASES.AWAITING_UPGRADE
-    state.pendingDecision = {
-      type: DECISIONS.UPGRADE,
-      playerId: player.userId,
-      tileId: tile.id,
-      createdAt: now,
-    }
-    state.deadlineAt =
-      now + map.gameDefaults.decisionTimeoutSeconds * 1000
-    events.push({
-      type: "upgrade_offered",
-      playerId: player.userId,
-      tileId: tile.id,
-      price: tile.upgradeCost,
-      currentLevel: propertyState.level,
       deadlineAt: state.deadlineAt,
     })
     return true
@@ -134,36 +194,12 @@ export function resolvePropertyDecision(
     player.cash -= tile.price
     propertyState.ownerId = player.userId
     propertyState.level = 0
+    propertyState.mortgaged = false
     events.push({
       type: "property_purchased",
       playerId: player.userId,
       tileId: tile.id,
       amount: tile.price,
-    })
-    return
-  }
-
-  if (pending.type === DECISIONS.UPGRADE) {
-    if (decision !== DECISIONS.UPGRADE) {
-      ruleError("WRONG_DECISION", "当前应选择升级或放弃。")
-    }
-    if (propertyState.ownerId !== player.userId) {
-      ruleError("NOT_PROPERTY_OWNER", "这块地产已经不属于你。")
-    }
-    if (propertyState.level >= map.gameDefaults.maxPropertyLevel) {
-      ruleError("PROPERTY_MAX_LEVEL", "这块地产已经满级。")
-    }
-    if (player.cash < tile.upgradeCost) {
-      ruleError("INSUFFICIENT_CASH", "你的现金已经不足以升级这块地产。")
-    }
-    player.cash -= tile.upgradeCost
-    propertyState.level += 1
-    events.push({
-      type: "property_upgraded",
-      playerId: player.userId,
-      tileId: tile.id,
-      amount: tile.upgradeCost,
-      level: propertyState.level,
     })
     return
   }

@@ -1,11 +1,11 @@
-export const SESSION_VERSION = 1
+export const SESSION_VERSION = 4
 
 export const PHASES = Object.freeze({
   LOBBY: "lobby",
   AWAITING_ROLL: "awaiting_roll",
   RESOLVING: "resolving",
   AWAITING_PURCHASE: "awaiting_purchase",
-  AWAITING_UPGRADE: "awaiting_upgrade",
+  AWAITING_DEBT: "awaiting_debt",
   ENDED: "ended",
 })
 
@@ -14,7 +14,7 @@ export const PHASE_LABELS = Object.freeze({
   [PHASES.AWAITING_ROLL]: "等待掷骰",
   [PHASES.RESOLVING]: "正在结算",
   [PHASES.AWAITING_PURCHASE]: "等待购买",
-  [PHASES.AWAITING_UPGRADE]: "等待升级",
+  [PHASES.AWAITING_DEBT]: "等待筹款",
   [PHASES.ENDED]: "已结束",
 })
 
@@ -32,19 +32,23 @@ export const ACTIONS = Object.freeze({
   ROLL_TIMEOUT: "roll_timeout",
   DECIDE: "decide",
   DECISION_TIMEOUT: "decision_timeout",
+  BUILD: "build",
+  SELL_BUILDING: "sell_building",
+  MORTGAGE: "mortgage",
+  REDEEM: "redeem",
+  RESOLVE_DEBT: "resolve_debt",
+  DEBT_TIMEOUT: "debt_timeout",
   SURRENDER: "surrender",
   FORCE_END: "force_end",
 })
 
 export const DECISIONS = Object.freeze({
   PURCHASE: "purchase",
-  UPGRADE: "upgrade",
   DECLINE: "decline",
 })
 
 export const END_REASONS = Object.freeze({
   LAST_PLAYER: "last_player",
-  ROUND_LIMIT: "round_limit",
   FORCE: "force",
   LOBBY_EMPTY: "lobby_empty",
   LOBBY_EXPIRED: "lobby_expired",
@@ -58,6 +62,25 @@ export const PLAYER_COLORS = Object.freeze([
   "#AB47BC",
   "#26A69A",
 ])
+
+export const PLAYER_COLOR_LABELS = Object.freeze({
+  "#EF5350": "红色",
+  "#42A5F5": "蓝色",
+  "#66BB6A": "绿色",
+  "#FFA726": "橙色",
+  "#AB47BC": "紫色",
+  "#26A69A": "青色",
+})
+
+export function playerPublicLabel(player, fallbackIndex = 0) {
+  const colorLabel = PLAYER_COLOR_LABELS[player?.color]
+  if (colorLabel) return colorLabel
+  const seat =
+    Number.isSafeInteger(player?.joinOrder) && player.joinOrder >= 0
+      ? player.joinOrder + 1
+      : fallbackIndex + 1
+  return `玩家${seat}`
+}
 
 export class GameRuleError extends Error {
   constructor(code, message) {
