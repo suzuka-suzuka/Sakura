@@ -6,14 +6,15 @@ import { pluginresources } from "../../path.js"
 // 所有数字、道具、色组、租金表都从地图读，改地图就自动跟着变，
 // 免得像文档那样和代码各说各话。
 //
-// 两栏是为手机看优化的：决定字在手机上多大的不是画布像素宽，
-// 而是整图横向能塞多少字——图片 fit-to-width 之后三栏会被压到三分之一。
+// 为手机看做的分页单栏：决定字在手机上多大的不是画布像素宽，而是整图
+// 横向能塞多少字——图片 fit-to-width 之后多栏会被按栏数等比压小。
+// 所以这里改成一栏到底，再按高度切成若干张，用合并转发一次发出去。
 
 const FONT_FAMILY = "MonopolyRounded"
-const MARGIN = 34
-const COLUMNS = 2
+const MARGIN = 28
 const COL_WIDTH = 600
-const COL_GAP = 26
+// 单页正文的目标高度，超过就翻页；单节本身超高时不拆，让它独占一页
+const MAX_PAGE_BODY = 1180
 const CARD_PAD = 22
 const SECTION_GAP = 20
 
@@ -479,6 +480,18 @@ function buildSections(map) {
         },
       ],
     },
+
+    {
+      accent: "#37474F",
+      title: "命令速查",
+      blocks: [
+        {
+          t: "p",
+          text: "带不带 # 都可以。局内命令只有本局在场玩家发才会被接管，其他人和路人一样静默放行。",
+        },
+        { t: "cmdgroups", groups: commandGroups() },
+      ],
+    },
   ]
 }
 
@@ -578,6 +591,13 @@ function measureBlock(ctx, block, width) {
     case "formula": {
       return block.lines.length * 28 + 24
     }
+    case "cmdgroups": {
+      // 窄栏放不下三列并排，改成分组纵向堆叠
+      return block.groups.reduce(
+        (sum, group) => sum + 34 + group.rows.length * 32 + 10,
+        6
+      )
+    }
     case "flow":
       return measureFlow(ctx, block.map, width)
     default:
@@ -593,41 +613,27 @@ function sectionHeight(ctx, section, width) {
   return height + CARD_PAD - 4
 }
 
-// 按数组顺序顺序装栏，栏高接近平均值就换栏。
-// 不打乱顺序是有意的：规则是要一节接一节读下去的，
-// 「哪节最矮就塞哪」会把开局和结算混在一起。
-function packColumns(ctx, sections, columns, width) {
-  const heights = sections.map((section) =>
-    sectionHeight(ctx, section, width)
-  )
-  const total = heights.reduce((sum, height) => sum + height + SECTION_GAP, 0)
-  const target = total / columns
+// 按数组顺序分页，装不下就翻页。一节永远不跨页拆开——规则读到一半
+// 换图最难受，宁可让某页矮一点。单节本身超过上限时独占一页。
+function paginate(ctx, sections, width) {
+  const pages = []
+  let current = []
+  let used = 0
 
-  const columnHeights = new Array(columns).fill(0)
-  const placed = []
-  let column = 0
-
-  heights.forEach((height, index) => {
-    const columnsAfter = columns - column - 1
-    const sectionsAfter = sections.length - index - 1
-    // 超过平均线过半就换栏；后面的栏一节都分不到时也提前换
-    const overflow =
-      columnHeights[column] > 0 &&
-      columnHeights[column] + height / 2 > target
-    const starve = sectionsAfter < columnsAfter
-    if (column < columns - 1 && columnHeights[column] > 0 && (overflow || starve)) {
-      column += 1
+  for (const section of sections) {
+    const height = sectionHeight(ctx, section, width)
+    if (current.length > 0 && used + height > MAX_PAGE_BODY) {
+      pages.push({ sections: current, bodyHeight: used - SECTION_GAP })
+      current = []
+      used = 0
     }
-    placed.push({
-      section: sections[index],
-      column,
-      y: columnHeights[column],
-      height,
-    })
-    columnHeights[column] += height + SECTION_GAP
-  })
-
-  return { placed, gridHeight: Math.max(...columnHeights) }
+    current.push({ section, height })
+    used += height + SECTION_GAP
+  }
+  if (current.length > 0) {
+    pages.push({ sections: current, bodyHeight: used - SECTION_GAP })
+  }
+  return pages
 }
 
 // —— 回合流程图 ——
@@ -1025,6 +1031,29 @@ function drawBlock(ctx, block, x, y, width, accent) {
       })
       break
     }
+    case "cmdgroups": {
+      let cy = y + 6
+      for (const group of block.groups) {
+        ctx.textAlign = "left"
+        ctx.font = font(18, "bold")
+        ctx.fillStyle = accent
+        ctx.fillText(group.title, left, cy + 20)
+        cy += 34
+        for (const [cmd, desc] of group.rows) {
+          fillRounded(ctx, left, cy - 2, inner, 28, 7, "#F5F1E8")
+          ctx.font = font(17, "bold")
+          ctx.fillStyle = INK
+          ctx.fillText(cmd, left + 12, cy + 18)
+          const used = ctx.measureText(cmd).width
+          ctx.font = font(15)
+          ctx.fillStyle = MUTED
+          ctx.fillText(desc, left + Math.max(used + 22, 190), cy + 18)
+          cy += 32
+        }
+        cy += 10
+      }
+      break
+    }
     case "flow": {
       drawFlow(ctx, block.map, left, y + 4, width)
       break
@@ -1093,19 +1122,22 @@ function drawHeader(ctx, map, x, y, width) {
   fillRounded(ctx, x, y, width, height, 20, "#263238")
 
   ctx.textAlign = "left"
-  ctx.font = font(40, "bold")
+  ctx.font = font(32, "bold")
   ctx.fillStyle = "#FFFFFF"
-  ctx.fillText(`${map.name} · 规则全书`, x + 34, y + 58)
+  ctx.fillText(`${map.name} · 规则全书`, x + 26, y + 50)
 
-  ctx.font = font(18)
+  ctx.font = font(16)
   ctx.fillStyle = "#90A4AE"
-  const subtitle = `${map.description || "机器人主持的严格回合制大富翁"}　|　地图 ${map.id} v${map.version}　|　群内发送【大富翁规则】随时查看`
-  ctx.fillText(wrapText(ctx, subtitle, width - 68)[0], x + 34, y + 90)
+  ctx.fillText(
+    `地图 ${map.id} v${map.version}　·　群内发送【大富翁规则】随时查看`,
+    x + 26,
+    y + 78
+  )
 
-  const cellWidth = (width - 68) / perRow
+  const cellWidth = (width - 52) / perRow
   stats.forEach(([label, value], index) => {
-    const cx = x + 34 + (index % perRow) * cellWidth
-    const cy = y + 126 + Math.floor(index / perRow) * 46
+    const cx = x + 26 + (index % perRow) * cellWidth
+    const cy = y + 116 + Math.floor(index / perRow) * 46
     ctx.font = font(15)
     ctx.fillStyle = "#78909C"
     ctx.fillText(label, cx, cy)
@@ -1116,85 +1148,63 @@ function drawHeader(ctx, map, x, y, width) {
   return height
 }
 
-function commandsHeight(ctx) {
-  const rows = Math.max(...commandGroups().map((group) => group.rows.length))
-  return 56 + rows * 34 + CARD_PAD
-}
-
-function drawCommands(ctx, x, y, width) {
-  const height = commandsHeight(ctx)
-  fillRounded(ctx, x, y, width, height, 18, "#263238")
-
+function drawPageFooter(ctx, map, x, y, width, index, total) {
   ctx.textAlign = "left"
-  ctx.font = font(23, "bold")
-  ctx.fillStyle = "#FFFFFF"
-  ctx.fillText("命令速查", x + CARD_PAD, y + 36)
-  ctx.font = font(16)
-  ctx.fillStyle = "#78909C"
-  ctx.fillText(
-    "带不带 # 都可以；局内命令只有本局在场玩家发才会被接管",
-    x + CARD_PAD + 130,
-    y + 36
-  )
-
-  const groups = commandGroups()
-  const colWidth = (width - CARD_PAD * 2 - 40) / groups.length
-  groups.forEach((group, index) => {
-    const cx = x + CARD_PAD + index * (colWidth + 20)
-    ctx.font = font(17, "bold")
-    ctx.fillStyle = "#FFD54F"
-    ctx.fillText(group.title, cx, y + 66)
-    group.rows.forEach(([cmd, desc], row) => {
-      const cy = y + 96 + row * 34
-      ctx.font = font(17, "bold")
-      ctx.fillStyle = "#ECEFF1"
-      ctx.fillText(cmd, cx, cy)
-      const used = ctx.measureText(cmd).width
-      ctx.font = font(15)
-      ctx.fillStyle = "#78909C"
-      ctx.fillText(desc, cx + Math.max(used + 14, 152), cy)
-    })
-  })
-  return height
+  ctx.font = font(15)
+  ctx.fillStyle = FAINT
+  ctx.fillText(`${map.name} · 规则`, x, y)
+  ctx.textAlign = "right"
+  ctx.fillText(`${index + 1} / ${total}`, x + width, y)
+  ctx.textAlign = "left"
 }
 
-export async function renderRules(map) {
+/**
+ * 渲染规则长图，按高度切成若干页。
+ * @returns {Promise<Array<{title: string, image: Buffer}>>} 每页的小标题和 PNG
+ */
+export async function renderRulesPages(map) {
   ensureFont()
 
-  const contentWidth = COL_WIDTH * COLUMNS + COL_GAP * (COLUMNS - 1)
   const scratch = createCanvas(10, 10).getContext("2d")
+  const pages = paginate(scratch, buildSections(map), COL_WIDTH)
+  const headerHeight = headerLayout(scratch, map, COL_WIDTH).height
+  const canvasWidth = COL_WIDTH + MARGIN * 2
+  const FOOTER = 34
 
-  const { placed, gridHeight } = packColumns(
-    scratch,
-    buildSections(map),
-    COLUMNS,
-    COL_WIDTH
-  )
+  return pages.map((page, index) => {
+    const top = index === 0 ? MARGIN + headerHeight + 20 : MARGIN
+    const canvasHeight = top + page.bodyHeight + FOOTER + MARGIN
 
-  const headerHeight = headerLayout(scratch, map, contentWidth).height
-  const cmdHeight = commandsHeight(scratch)
-  const canvasWidth = contentWidth + MARGIN * 2
-  const canvasHeight =
-    MARGIN + headerHeight + 24 + gridHeight + 4 + cmdHeight + MARGIN
+    const canvas = createCanvas(canvasWidth, canvasHeight)
+    const ctx = canvas.getContext("2d")
 
-  const canvas = createCanvas(canvasWidth, canvasHeight)
-  const ctx = canvas.getContext("2d")
+    const gradient = ctx.createLinearGradient(0, 0, canvasWidth, canvasHeight)
+    gradient.addColorStop(0, "#F7F2E8")
+    gradient.addColorStop(1, "#E8DED0")
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight)
 
-  const gradient = ctx.createLinearGradient(0, 0, canvasWidth, canvasHeight)
-  gradient.addColorStop(0, "#F7F2E8")
-  gradient.addColorStop(1, "#E8DED0")
-  ctx.fillStyle = gradient
-  ctx.fillRect(0, 0, canvasWidth, canvasHeight)
+    if (index === 0) drawHeader(ctx, map, MARGIN, MARGIN, COL_WIDTH)
 
-  drawHeader(ctx, map, MARGIN, MARGIN, contentWidth)
+    let cursor = top
+    for (const entry of page.sections) {
+      drawSection(ctx, entry.section, MARGIN, cursor, COL_WIDTH)
+      cursor += entry.height + SECTION_GAP
+    }
 
-  const gridTop = MARGIN + headerHeight + 24
-  for (const entry of placed) {
-    const x = MARGIN + entry.column * (COL_WIDTH + COL_GAP)
-    drawSection(ctx, entry.section, x, gridTop + entry.y, COL_WIDTH)
-  }
+    drawPageFooter(
+      ctx,
+      map,
+      MARGIN,
+      canvasHeight - MARGIN - 6,
+      COL_WIDTH,
+      index,
+      pages.length
+    )
 
-  drawCommands(ctx, MARGIN, gridTop + gridHeight + 4, contentWidth)
-
-  return canvas.toBuffer("image/png")
+    return {
+      title: page.sections.map((entry) => entry.section.title).join(" · "),
+      image: canvas.toBuffer("image/png"),
+    }
+  })
 }

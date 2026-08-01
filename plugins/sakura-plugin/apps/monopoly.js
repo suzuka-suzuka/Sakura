@@ -20,7 +20,7 @@ import { MapLoader } from "../lib/monopoly/map/MapLoader.js"
 import { MonopolySessionStore } from "../lib/monopoly/SessionStore.js"
 import { TimeoutScheduler } from "../lib/monopoly/TimeoutScheduler.js"
 import { renderBoard } from "../lib/monopoly/presentation/BoardRenderer.js"
-import { renderRules } from "../lib/monopoly/presentation/RulesRenderer.js"
+import { renderRulesPages } from "../lib/monopoly/presentation/RulesRenderer.js"
 import {
   buildTurnMessages,
 } from "../lib/monopoly/presentation/MessageFormatter.js"
@@ -55,7 +55,7 @@ export class Monopoly extends plugin {
     this.scheduler = null
     this.service = null
     // 规则图只跟地图有关，画一次缓存到重载为止
-    this.rulesImage = null
+    this.rulesPages = null
   }
 
   async init() {
@@ -435,11 +435,25 @@ export class Monopoly extends plugin {
     // 图较大，先贴个表情告诉用户指令已经收到
     await e.react(124).catch(() => {})
     try {
-      this.rulesImage ||= await renderRules(this.map)
-      await e.reply(Segment.image(this.rulesImage))
+      this.rulesPages ||= await renderRulesPages(this.map)
+      const count = this.rulesPages.length
+      await e.sendForwardMsg(
+        this.rulesPages.map((page) => [
+          `${page.title}\n`,
+          Segment.image(page.image),
+        ]),
+        {
+          source: `${this.map.name} · 规则全书`,
+          prompt: `🎲 点击查看大富翁规则（共 ${count} 张）`,
+          summary: `共 ${count} 张规则图`,
+          news: this.rulesPages
+            .slice(0, 4)
+            .map((page) => ({ text: page.title })),
+        }
+      )
     } catch (error) {
-      logger.error(`[大富翁] 规则图渲染失败：${error.stack || error}`)
-      await e.reply("规则图渲染失败了，请稍后再试。")
+      logger.error(`[大富翁] 规则图发送失败：${error.stack || error}`)
+      await e.reply("规则图发送失败了，请稍后再试。")
     }
     return true
   })
