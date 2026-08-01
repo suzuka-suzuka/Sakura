@@ -1,4 +1,4 @@
-import { ruleError } from "../constants.js"
+import { PLAYER_STATUS, ruleError } from "../constants.js"
 import {
   buildingLabel,
   hotelLevel,
@@ -93,7 +93,8 @@ export function buildOnProperty(state, map, playerId, tileId, events) {
   })
 }
 
-export function sellBuilding(state, map, playerId, tileId, events) {
+// 拆掉一栋建筑并把材料退回银行库存。卖房在这之上再付半价，拆迁令则一分不给
+export function demolishBuilding(state, map, playerId, tileId) {
   const { player, tile, propertyState } = requireOwnedProperty(
     state,
     map,
@@ -101,7 +102,7 @@ export function sellBuilding(state, map, playerId, tileId, events) {
     tileId
   )
   if (propertyKind(tile) !== "street" || propertyState.level <= 0) {
-    ruleError("NO_BUILDING", "这块地产没有可出售的建筑。")
+    ruleError("NO_BUILDING", "这块地产没有可拆除的建筑。")
   }
   const { states } = groupStates(state, map, tile)
   const maximumLevel = Math.max(...states.map((entry) => entry.level))
@@ -126,19 +127,31 @@ export function sellBuilding(state, map, playerId, tileId, events) {
   }
 
   propertyState.level -= 1
-  const amount = Math.floor(
-    tile.upgradeCost * map.gameDefaults.buildingSaleRate
-  )
-  player.cash += amount
-  events.push({
-    type: "building_sold",
-    playerId: player.userId,
-    tileId: tile.id,
-    amount,
+  return {
+    player,
+    tile,
+    propertyState,
     previousLevel,
-    level: propertyState.level,
     previousBuilding,
     building: buildingLabel(map, propertyState.level),
+  }
+}
+
+export function sellBuilding(state, map, playerId, tileId, events) {
+  const removed = demolishBuilding(state, map, playerId, tileId)
+  const amount = Math.floor(
+    removed.tile.upgradeCost * map.gameDefaults.buildingSaleRate
+  )
+  removed.player.cash += amount
+  events.push({
+    type: "building_sold",
+    playerId: removed.player.userId,
+    tileId: removed.tile.id,
+    amount,
+    previousLevel: removed.previousLevel,
+    level: removed.propertyState.level,
+    previousBuilding: removed.previousBuilding,
+    building: removed.building,
     buildingSupply: { ...state.buildingSupply },
   })
 }
@@ -176,6 +189,50 @@ export function redemptionCost(map, tile) {
       tile.mortgageValue * map.gameDefaults.mortgageInterestRate
     )
   )
+}
+
+// 买断过户：成交额先替银行清偿抵押（本金 + 一成利息），余额归原主，地契解除抵押。
+// 这样抵押与否不再改变这笔买卖的性价比，抵押也就当不成「免疫」
+export function buyOutProperty(
+  state,
+  map,
+  { buyerId, tileId, amount, events, reason }
+) {
+  const buyer = playerById(state, buyerId)
+  const tile = tileById(map, tileId)
+  const propertyState = state.propertyStates[String(tileId)]
+  if (!buyer || !tile || tile.type !== "property" || !propertyState) {
+    ruleError("INVALID_PROPERTY", "买断目标无效。")
+  }
+  if (!Number.isSafeInteger(amount) || amount < 0) {
+    ruleError("INVALID_PAYMENT", "买断金额必须是非负整数。")
+  }
+  if (buyer.cash < amount) {
+    ruleError("INSUFFICIENT_CASH", `买下${tile.name}需要 ${amount}。`)
+  }
+
+  const seller = playerById(state, propertyState.ownerId)
+  const payoff = propertyState.mortgaged ? redemptionCost(map, tile) : 0
+  const toSeller = Math.max(0, amount - payoff)
+
+  buyer.cash -= amount
+  if (seller && seller.status === PLAYER_STATUS.ACTIVE) {
+    seller.cash += toSeller
+  }
+  propertyState.ownerId = buyer.userId
+  propertyState.mortgaged = false
+
+  events.push({
+    type: "property_bought_out",
+    playerId: buyer.userId,
+    recipientId: seller?.userId ?? null,
+    tileId: tile.id,
+    amount,
+    payoff,
+    toSeller,
+    reason,
+  })
+  return { payoff, toSeller }
 }
 
 export function redeemProperty(state, map, playerId, tileId, events) {

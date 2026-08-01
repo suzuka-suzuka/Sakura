@@ -424,6 +424,27 @@ export class GameService {
     })
   }
 
+  async payBail(rawContext) {
+    const context = normalizeContext(rawContext)
+    return this.withLock(context, async () => {
+      const previous = await this.requireSession(
+        context.selfId,
+        context.groupId
+      )
+      const transitionResult = transition(
+        previous,
+        { type: ACTIONS.PAY_BAIL, userId: context.userId },
+        this.map,
+        this.runtime(previous)
+      )
+      const { deleted } = await this.commitTransition(
+        previous,
+        transitionResult
+      )
+      return this.result({ ...transitionResult, deleted })
+    })
+  }
+
   async decide(rawContext, decision) {
     const context = normalizeContext(rawContext)
     if (!Object.values(DECISIONS).includes(decision)) {
@@ -529,6 +550,83 @@ export class GameService {
           userId: context.userId,
           itemId,
           args,
+        },
+        this.map,
+        this.runtime(previous)
+      )
+      const { deleted } = await this.commitTransition(
+        previous,
+        transitionResult
+      )
+      return this.result({
+        ...transitionResult,
+        renderBoard: this.itemFrameRendersBoard(transitionResult),
+        deleted,
+      })
+    })
+  }
+
+  // 私聊出价：用户索引反查所在群，避免出价人还要报群号
+  async placeBid(rawContext, amount) {
+    const context = normalizeContext({ ...rawContext, groupId: "private" })
+    const session = await this.store.findSessionByUser(
+      context.selfId,
+      context.userId
+    )
+    if (!session) {
+      gameError("NO_GAME", "你现在没有进行中的大富翁对局。")
+    }
+    if (session.phase !== PHASES.AWAITING_AUCTION) {
+      gameError("NO_AUCTION", "你所在的对局现在没有正在进行的拍卖。")
+    }
+    const bidContext = { ...context, groupId: session.groupId }
+    return this.withLock(bidContext, async () => {
+      const previous = await this.requireSession(
+        bidContext.selfId,
+        bidContext.groupId
+      )
+      const transitionResult = transition(
+        previous,
+        {
+          type: ACTIONS.BID,
+          userId: bidContext.userId,
+          amount,
+        },
+        this.map,
+        this.runtime(previous)
+      )
+      await this.saveActiveSession(transitionResult.state)
+      const placed = transitionResult.events.find(
+        (event) => event.type === "bid_placed"
+      )
+      // 暗拍：出价回执只回给出价人自己，群里一个字都不播
+      return {
+        handled: true,
+        private: true,
+        state: transitionResult.state,
+        events: transitionResult.events,
+        bid: placed,
+        tileId: transitionResult.state.pendingAuction?.tileId ?? null,
+        deadlineAt: transitionResult.state.deadlineAt,
+        selfId: transitionResult.state.selfId,
+        groupId: transitionResult.state.groupId,
+      }
+    })
+  }
+
+  async forceBuy(rawContext, propertyName) {
+    const context = normalizeContext(rawContext)
+    return this.withLock(context, async () => {
+      const previous = await this.requireSession(
+        context.selfId,
+        context.groupId
+      )
+      const transitionResult = transition(
+        previous,
+        {
+          type: ACTIONS.FORCE_BUY,
+          userId: context.userId,
+          tileId: this.propertyTileId(propertyName),
         },
         this.map,
         this.runtime(previous)
@@ -829,6 +927,8 @@ export class GameService {
         action = { type: ACTIONS.DEBT_TIMEOUT }
       } else if (previous.phase === PHASES.AWAITING_COUNTER) {
         action = { type: ACTIONS.COUNTER_TIMEOUT }
+      } else if (previous.phase === PHASES.AWAITING_AUCTION) {
+        action = { type: ACTIONS.AUCTION_TIMEOUT }
       } else {
         return null
       }

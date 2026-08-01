@@ -555,7 +555,6 @@ function drawTokens(ctx, map, view) {
 // 这些事件只是回合流转或查询回执，不代表某个玩家刚刚行动过
 const NON_ACTION_EVENTS = new Set([
   "turn_started",
-  "jail_turn_skipped",
   // 开窗和弃权说的是「谁该接话」，不是「谁刚行动过」
   "counter_window_opened",
   "counter_declined",
@@ -643,6 +642,18 @@ function itemLabel(map, itemId) {
   return map.items?.find((item) => item.id === itemId)?.name || itemId
 }
 
+// 抽牌播报：牌堆名按 deckId 取，命运牌以前一律被写成「机会」
+export function drawnCardLine(events, map) {
+  const drawn = [...(events || [])]
+    .reverse()
+    .find((event) => event.type === "chance_drawn")
+  if (!drawn) return null
+  const deck = map.chanceDecks.find((item) => item.id === drawn.deckId)
+  const card = (deck?.cards || map.chanceDecks.flatMap((item) => item.cards))
+    .find((item) => item.id === drawn.cardId)
+  return `${deck?.name || "机会"} · ${card?.name || drawn.cardId}`
+}
+
 function eventNoticeLines(events, view, map) {
   const lines = []
   const tileName = (tileId) =>
@@ -682,7 +693,18 @@ function eventNoticeLines(events, view, map) {
       const recipient = event.recipientId
         ? viewPlayerLabel(view, event.recipientId)
         : "银行"
-      const reason = event.reason === "rent" ? "租金" : "费用"
+      const reason =
+        event.reason === "rent"
+          ? "租金"
+          : event.reason === "jail_bail"
+            ? "保释金"
+            : event.reason === "tax_audit"
+              ? "补税"
+              : event.reason === "auction"
+                ? "拍卖成交款"
+                : event.reason === "auction_retain"
+                  ? "保留费"
+                  : "费用"
       lines.push(
         `${viewPlayerLabel(view, event.payerId)}向${recipient}支付${reason} ${amount(event.paid)}`
       )
@@ -709,14 +731,9 @@ function eventNoticeLines(events, view, map) {
           : `${player}已完成欠款结算`
       )
     } else if (event.type === "chance_drawn") {
-      const card = map.chanceDecks
-        .flatMap((deck) => deck.cards)
-        .find((item) => item.id === event.cardId)
-      lines.push(`机会 · ${card?.name || event.cardId}`)
+      lines.push(drawnCardLine([event], map))
     } else if (event.type === "item_granted") {
       lines.push(`${player}获得道具 · ${itemLabel(map, event.itemId)}`)
-    } else if (event.type === "item_capped") {
-      lines.push(`${player}的${itemLabel(map, event.itemId)}已达上限 · 本次作废`)
     } else if (event.type === "item_used" && event.reason === "jail") {
       // 主动使用和打否决另有专门的行，这里只播报自动消耗的保释令
       lines.push(`${player}使用${itemLabel(map, event.itemId)} · 免去看守所`)
@@ -733,9 +750,18 @@ function eventNoticeLines(events, view, map) {
       lines.push(
         `否决链 ${event.depth} 层 · ${itemLabel(map, event.itemId)}最终生效`
       )
-    } else if (event.type === "property_seized") {
+    } else if (event.type === "property_bought_out") {
       lines.push(
-        `${player}征收${viewPlayerLabel(view, event.recipientId)}的${tileName(event.tileId)} · 支付 ${amount(event.amount)}`
+        `${player}以 ${amount(event.amount)} 买下${viewPlayerLabel(view, event.recipientId)}的${tileName(event.tileId)}`
+      )
+      if (event.payoff > 0) {
+        lines.push(
+          `其中 ${amount(event.payoff)} 清偿抵押 · 原主实收 ${amount(event.toSeller)}`
+        )
+      }
+    } else if (event.type === "force_buy_declared") {
+      lines.push(
+        `${player}发起强制收购${tileName(event.tileId)} · 本局还剩 ${event.remaining} 次`
       )
     } else if (event.type === "property_swapped") {
       lines.push(
@@ -743,8 +769,24 @@ function eventNoticeLines(events, view, map) {
       )
     } else if (event.type === "building_demolished") {
       lines.push(
-        `${viewPlayerLabel(view, event.recipientId)}的${tileName(event.tileId)}被拆 · 补偿 ${amount(event.amount)}`
+        `${viewPlayerLabel(view, event.recipientId)}的${tileName(event.tileId)}被强拆至${event.building} · 无补偿`
       )
+    } else if (event.type === "auction_opened") {
+      lines.push(
+        `${tileName(event.tileId)}进入暗拍 · 底价 ${amount(event.minimumBid)}`
+      )
+    } else if (event.type === "auction_resolved") {
+      // 暗拍只公布中标者和成交价，其他人的出价不进播报
+      lines.push(
+        event.keptByOwner
+          ? `${player}以 ${amount(event.amount)} 保住${tileName(event.tileId)} · 款项归银行`
+          : `${player}以 ${amount(event.amount)} 拍得${tileName(event.tileId)}`
+      )
+      if (event.interest > 0) {
+        lines.push(`接手抵押地 · 另付利息 ${amount(event.interest)}`)
+      }
+    } else if (event.type === "auction_passed") {
+      lines.push(`${tileName(event.tileId)}无人出价 · 流拍`)
     } else if (event.type === "item_fizzled") {
       lines.push(`${itemLabel(map, event.itemId)}目标已失效 · 本次落空`)
     } else if (event.type === "repairs_assessed" && event.amount > 0) {
@@ -757,7 +799,7 @@ function eventNoticeLines(events, view, map) {
       event.type === "sent_to_jail" &&
       event.reason !== "consecutive_doubles"
     ) {
-      lines.push(`${player}前往监狱 · 下回合停一次`)
+      lines.push(`${player}前往监狱 · 最多关 ${event.jailTurns} 回合`)
     } else if (event.type === "extra_roll_awarded") {
       lines.push(`${player}掷出对子 · 可以再次掷骰`)
     } else if (event.type === "triple_doubles_jail") {
@@ -766,8 +808,24 @@ function eventNoticeLines(events, view, map) {
       lines.push(`已放弃购买${tileName(event.tileId)}`)
     } else if (event.type === "roll_timed_out") {
       lines.push(`${player}掷骰超时 · ${event.count}/${event.limit}`)
-    } else if (event.type === "jail_turn_skipped") {
-      lines.push(`${player}本回合在监狱中度过`)
+    } else if (event.type === "jail_roll_failed") {
+      lines.push(
+        `${player}没能掷出对子 · 还剩 ${event.remainingTurns} 次机会`
+      )
+    } else if (
+      event.type === "jail_released" &&
+      // 用保释令出狱已经由上面的 item_used 播报过，不重复一行
+      event.reason !== "jail_free"
+    ) {
+      lines.push(
+        `${player}离开看守所 · ${
+          event.reason === "doubles"
+            ? "掷出对子"
+            : event.reason === "forced_bail"
+              ? `机会用尽 · 强制赎身 ${amount(event.paid)}`
+              : `保释 ${amount(event.paid)}`
+        }`
+      )
     } else if (event.type === "tile_no_effect") {
       lines.push(
         event.tileType === "jail"
@@ -800,6 +858,9 @@ function eventNoticeLines(events, view, map) {
       lines.push("等待超时 · 房间已自动解散")
     } else if (event.type === "rules_requested") {
       lines.push("双骰相加 · 对子再掷 · 连续三次对子入狱")
+      lines.push(
+        `看守所掷对子出狱 · 三次不中强制付 ${amount(map.gameDefaults.jailBailAmount)} · 也可提前【保释】`
+      )
       lines.push("同色组均衡建造 · 4 房升旅馆 · 卖房半价")
       lines.push("抵押不收租 · 赎回为抵押本金加一成")
     } else if (event.type === "rule_error") {
@@ -832,7 +893,14 @@ function deeperFocusAnchor(map, tile, anchor, distance = 32) {
   return { x: anchor.x - distance, y: anchor.y }
 }
 
-function drawDashedArrow(ctx, start, control1, control2, end) {
+function drawDashedArrow(
+  ctx,
+  start,
+  control1,
+  control2,
+  end,
+  { head = true } = {}
+) {
   ctx.save()
   ctx.beginPath()
   ctx.moveTo(start.x, start.y)
@@ -849,6 +917,11 @@ function drawDashedArrow(ctx, start, control1, control2, end) {
   ctx.setLineDash([6, 6])
   ctx.stroke()
   ctx.setLineDash([])
+
+  if (!head) {
+    ctx.restore()
+    return
+  }
 
   const angle = Math.atan2(
     end.y - control2.y,
@@ -870,52 +943,107 @@ function drawDashedArrow(ctx, start, control1, control2, end) {
   ctx.restore()
 }
 
+// 掷骰落点 → 卡牌落点 → …… → 最终落点，连续重复的先合并掉
+function movePathTiles(map, move) {
+  if (!move) return []
+  const ids = [
+    move.fromTileId,
+    ...(Array.isArray(move.viaTileIds) ? move.viaTileIds : []),
+    move.toTileId,
+  ]
+  const tiles = []
+  for (const id of ids) {
+    const tile = map.tiles.find((item) => item.id === id)
+    if (!tile) continue
+    if (tiles.length && tiles[tiles.length - 1].id === tile.id) continue
+    tiles.push(tile)
+  }
+  return tiles
+}
+
+function drawFadedOrigin(ctx, tile) {
+  const rect = tileRect(tile)
+  ctx.save()
+  ctx.fillStyle = "rgba(255, 255, 255, 0.52)"
+  ctx.fillRect(
+    rect.x + 2,
+    rect.y + 2,
+    rect.width - 4,
+    rect.height - 4
+  )
+  ctx.strokeStyle = "#AAB0B3"
+  ctx.lineWidth = 2
+  ctx.setLineDash([4, 4])
+  ctx.strokeRect(
+    rect.x + 3,
+    rect.y + 3,
+    rect.width - 6,
+    rect.height - 6
+  )
+  ctx.restore()
+}
+
+// 中途落点：只描一圈细虚线，不盖蒙层，免得跟终点抢注意力
+function drawViaTile(ctx, tile) {
+  const rect = tileRect(tile)
+  ctx.save()
+  ctx.strokeStyle = "#8A9093"
+  ctx.lineWidth = 1.5
+  ctx.setLineDash([3, 3])
+  ctx.strokeRect(
+    rect.x + 4,
+    rect.y + 4,
+    rect.width - 8,
+    rect.height - 8
+  )
+  ctx.restore()
+}
+
+function drawPathDot(ctx, point, { hollow = false } = {}) {
+  ctx.beginPath()
+  ctx.arc(point.x, point.y, hollow ? 4.5 : 5, 0, Math.PI * 2)
+  ctx.fillStyle = hollow ? "#FFFFFF" : "#8A9093"
+  ctx.fill()
+  ctx.strokeStyle = hollow ? "#8A9093" : "#FFFFFF"
+  ctx.lineWidth = 1.5
+  ctx.stroke()
+}
+
 function drawTurnFocus(ctx, map, view, frame) {
   const player = focusPlayer(view, frame)
   if (!player) return
   const move = frame.rollVisible ? view.lastMove : null
-  const fromTile = move
-    ? map.tiles.find((item) => item.id === move.fromTileId)
-    : null
   const toTile = map.tiles.find(
     (item) => item.id === (move?.toTileId ?? player.position)
   )
   if (!toTile) return
 
-  if (fromTile && fromTile.id !== toTile.id) {
-    const fromRect = tileRect(fromTile)
-    ctx.save()
-    ctx.fillStyle = "rgba(255, 255, 255, 0.52)"
-    ctx.fillRect(
-      fromRect.x + 2,
-      fromRect.y + 2,
-      fromRect.width - 4,
-      fromRect.height - 4
-    )
-    ctx.strokeStyle = "#AAB0B3"
-    ctx.lineWidth = 2
-    ctx.setLineDash([4, 4])
-    ctx.strokeRect(
-      fromRect.x + 3,
-      fromRect.y + 3,
-      fromRect.width - 6,
-      fromRect.height - 6
-    )
-    ctx.restore()
+  const path = movePathTiles(map, move)
+  if (path.length >= 2) {
+    const origin = path[0]
+    // 卡牌把人弹回原格时起点就是终点，这时候只保留终点高亮
+    if (origin.id !== toTile.id) drawFadedOrigin(ctx, origin)
+    for (const tile of path.slice(1, -1)) {
+      if (tile.id !== toTile.id) drawViaTile(ctx, tile)
+    }
 
-    const start = innerFocusAnchor(map, fromTile)
-    const end = innerFocusAnchor(map, toTile)
-    const control1 = deeperFocusAnchor(map, fromTile, start)
-    const control2 = deeperFocusAnchor(map, toTile, end)
-    drawDashedArrow(ctx, start, control1, control2, end)
-
-    ctx.beginPath()
-    ctx.arc(start.x, start.y, 5, 0, Math.PI * 2)
-    ctx.fillStyle = "#8A9093"
-    ctx.fill()
-    ctx.strokeStyle = "#FFFFFF"
-    ctx.lineWidth = 1.5
-    ctx.stroke()
+    const anchors = path.map((tile) => innerFocusAnchor(map, tile))
+    for (let index = 0; index < path.length - 1; index++) {
+      const start = anchors[index]
+      const end = anchors[index + 1]
+      drawDashedArrow(
+        ctx,
+        start,
+        deeperFocusAnchor(map, path[index], start),
+        deeperFocusAnchor(map, path[index + 1], end),
+        end,
+        { head: index === path.length - 2 }
+      )
+    }
+    drawPathDot(ctx, anchors[0])
+    for (let index = 1; index < anchors.length - 1; index++) {
+      drawPathDot(ctx, anchors[index], { hollow: true })
+    }
   }
 
   const rect = tileRect(toTile)
@@ -979,6 +1107,16 @@ function centerButtons(view) {
       { label: "不管", fill: "#F5F5F5", color: "#546E7A" },
     ]
   }
+  if (view.phase === PHASES.AWAITING_AUCTION) {
+    return [
+      { label: "私聊出价", fill: "#FFF8E1", color: "#B26A00" },
+      {
+        label: `底价 ${view.pendingAuction?.minimumBid ?? "?"}`,
+        fill: "#F5F5F5",
+        color: "#546E7A",
+      },
+    ]
+  }
   if (view.phase === PHASES.LOBBY) {
     return [
       { label: "加入大富翁", fill: "#E3F2FD", color: "#1565C0" },
@@ -986,6 +1124,15 @@ function centerButtons(view) {
     ]
   }
   if (view.phase === PHASES.AWAITING_ROLL) {
+    const jailed = view.players.find(
+      (player) => player.userId === view.currentPlayerId
+    )?.jailTurns
+    if (jailed > 0) {
+      return [
+        { label: "掷对子 · r", fill: "#E3F2FD", color: "#1565C0" },
+        { label: "保释", fill: "#FFF3E0", color: "#D05A00" },
+      ]
+    }
     return [
       { label: "掷骰 · r", fill: "#E3F2FD", color: "#1565C0" },
     ]
@@ -1155,14 +1302,12 @@ function drawCenter(ctx, map, view, events = [], diceImages = {}, frame) {
   const moveY = y + 236
   drawCenterCard(ctx, contentX, moveY, contentWidth, 56, "#F7F4EF")
   const shownMove = frame.rollVisible ? view.lastMove : null
-  const fromName = shownMove
-    ? map.tiles.find((tile) => tile.id === shownMove.fromTileId)?.name
-    : null
-  const toName = shownMove
-    ? map.tiles.find((tile) => tile.id === shownMove.toTileId)?.name
-    : null
+  // 中途落点也串进这一行，「3 点却跨了 6 格」才有解释
+  const movePath = movePathTiles(map, shownMove)
   const moveText =
-    fromName && toName ? `${fromName}  →  ${toName}` : "等待掷骰"
+    movePath.length >= 2
+      ? movePath.map((tile) => tile.name).join("  →  ")
+      : "等待掷骰"
   const moveSize = fitText(ctx, moveText, contentWidth - 38, 24, 15)
   ctx.textAlign = "center"
   ctx.textBaseline = "middle"
@@ -1180,36 +1325,54 @@ function drawCenter(ctx, map, view, events = [], diceImages = {}, frame) {
   ctx.textAlign = "center"
   ctx.textBaseline = "top"
   if (pendingTile && view.phase === PHASES.AWAITING_PURCHASE) {
+    // 购买卡和通知栏抢的是同一个槽位，抽到的牌只能并进副标题，否则这一帧就丢了
+    const cardLine = drawnCardLine(events, map)
+    const nameY = cardLine ? detailY + 5 : detailY + 10
+    const priceY = cardLine ? detailY + 31 : detailY + 40
     ctx.fillStyle = "#5D4037"
-    ctx.font = font(23, "bold")
-    ctx.fillText(pendingTile.name, contentX + contentWidth / 2, detailY + 10)
+    ctx.font = font(cardLine ? 21 : 23, "bold")
+    ctx.fillText(pendingTile.name, contentX + contentWidth / 2, nameY)
     ctx.fillStyle = "#D05A00"
-    ctx.font = font(19, "bold")
+    ctx.font = font(cardLine ? 18 : 19, "bold")
     ctx.fillText(
       `售价 ${pendingTile.price.toLocaleString("zh-CN")}`,
       contentX + contentWidth / 2,
-      detailY + 40
+      priceY
     )
+    if (cardLine) {
+      const size = fitText(ctx, cardLine, contentWidth - 34, 15, 11)
+      ctx.fillStyle = "#8D6E63"
+      ctx.font = font(size, "bold")
+      ctx.fillText(cardLine, contentX + contentWidth / 2, detailY + 54)
+    }
   } else if (view.pendingDebt) {
+    // 欠款面板同样顶掉通知栏，卡牌引发的欠款要把牌名带上
+    const cardLine = drawnCardLine(events, map)
     const debtor = centerAssetPlayer(view, frame)
     const shortfall = Math.max(
       0,
       view.pendingDebt.amount - (debtor?.cash || 0)
     )
     ctx.fillStyle = "#C62828"
-    ctx.font = font(21, "bold")
+    ctx.font = font(cardLine ? 19 : 21, "bold")
     ctx.fillText(
       `${debtor?.label || "玩家"}欠款 ${view.pendingDebt.amount.toLocaleString("zh-CN")}`,
       contentX + contentWidth / 2,
-      detailY + 10
+      cardLine ? detailY + 5 : detailY + 10
     )
     ctx.fillStyle = "#6D4C41"
-    ctx.font = font(17, "bold")
+    ctx.font = font(cardLine ? 16 : 17, "bold")
     ctx.fillText(
       `当前现金 ${(debtor?.cash || 0).toLocaleString("zh-CN")} · 尚缺 ${shortfall.toLocaleString("zh-CN")}`,
       contentX + contentWidth / 2,
-      detailY + 41
+      cardLine ? detailY + 31 : detailY + 41
     )
+    if (cardLine) {
+      const size = fitText(ctx, cardLine, contentWidth - 34, 15, 11)
+      ctx.fillStyle = "#8D6E63"
+      ctx.font = font(size, "bold")
+      ctx.fillText(cardLine, contentX + contentWidth / 2, detailY + 54)
+    }
   } else {
     const fallback =
       view.phase === PHASES.LOBBY

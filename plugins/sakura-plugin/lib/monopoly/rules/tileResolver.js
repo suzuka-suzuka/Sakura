@@ -161,7 +161,7 @@ export function resolveCurrentTile(
       map,
       player.userId,
       tile.targetTileId,
-      map.gameDefaults.jailSkipTurns,
+      map.gameDefaults.jailMaxTurns,
       events,
       "tile"
     )

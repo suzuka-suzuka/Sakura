@@ -7,6 +7,10 @@ import {
   SESSION_VERSION,
   ruleError,
 } from "./constants.js"
+import {
+  placeBid,
+  resolveAuction,
+} from "./rules/auction.js"
 import { validateDiceSet } from "./rules/dice.js"
 import { moveBy, sendToJail } from "./rules/movement.js"
 import {
@@ -29,7 +33,9 @@ import {
   itemAction,
 } from "./rules/itemActions.js"
 import {
+  processPaymentQueue,
   resolvePendingDebt,
+  settlePayment,
   surrenderPlayer,
 } from "./rules/settlement.js"
 import {
@@ -50,6 +56,7 @@ import {
 import { validateDeckOrder } from "./rules/chance.js"
 
 const JAIL_FREE_ITEM = "jail_free"
+const FORCE_BUY_ITEM = "force_buy"
 
 function asNow(runtime) {
   const now = runtime?.now
@@ -70,6 +77,7 @@ function createPlayer({ userId, displayName, joinOrder }, map) {
     jailTurns: 0,
     consecutiveRollTimeouts: 0,
     consecutiveDoubles: 0,
+    forceBuysUsed: 0,
     status: PLAYER_STATUS.ACTIVE,
     items: [],
   }
@@ -118,6 +126,7 @@ export function createLobbyState(
     pendingDecision: null,
     pendingDebt: null,
     pendingAction: null,
+    pendingAuction: null,
     deadlineAt: now + map.gameDefaults.lobbyTimeoutSeconds * 1000,
     lastDice: null,
     winnerIds: [],
@@ -146,6 +155,7 @@ function addTurnStartedEvent(state, map, events) {
   state.pendingDecision = null
   state.pendingDebt = null
   state.pendingAction = null
+  state.pendingAuction = null
   state.deadlineAt =
     state.updatedAt + map.gameDefaults.rollTimeoutSeconds * 1000
   events.push({
@@ -153,6 +163,8 @@ function addTurnStartedEvent(state, map, events) {
     playerId: player.userId,
     turnSeq: state.turnSeq,
     deadlineAt: state.deadlineAt,
+    // 在狱中的人这一回合也照常行动，只是掷骰按看守所规则结算
+    jailTurns: player.jailTurns,
   })
 }
 
@@ -175,6 +187,7 @@ function endGame(state, map, events, reason, runtime, { forced = false } = {}) {
   state.pendingDecision = null
   state.pendingDebt = null
   state.pendingAction = null
+  state.pendingAuction = null
   state.deadlineAt = 0
   state.endReason = reason
   state.endedAt = now
@@ -201,56 +214,13 @@ function endGame(state, map, events, reason, runtime, { forced = false } = {}) {
   })
 }
 
-function beginPlayableTurn(state, map, events, runtime) {
-  const maxSteps = state.players.length + 1
-  for (let step = 0; step < maxSteps; step++) {
-    const player = currentPlayer(state)
-    if (!player || player.status !== PLAYER_STATUS.ACTIVE) {
-      ruleError("INVALID_STATE", "无法找到下一名在场玩家。")
-    }
-
-    if (player.jailTurns <= 0) {
-      addTurnStartedEvent(state, map, events)
-      return
-    }
-
-    // 手上有保释令就自动用掉：这局待在看守所永远没有好处，不必再问一次
-    if (
-      hasItem(player, JAIL_FREE_ITEM) &&
-      consumeItem(state, map, player.userId, JAIL_FREE_ITEM, events, {
-        reason: "jail",
-      })
-    ) {
-      player.jailTurns = 0
-      addTurnStartedEvent(state, map, events)
-      return
-    }
-
-    player.jailTurns -= 1
-    events.push({
-      type: "jail_turn_skipped",
-      playerId: player.userId,
-      remainingTurns: player.jailTurns,
-      turnSeq: state.turnSeq,
-    })
-
-    const next = nextActivePointer(state)
-    if (!next) {
-      endGame(state, map, events, END_REASONS.LAST_PLAYER, runtime)
-      return
-    }
-    state.turnIndex = next.index
-    state.turnSeq += 1
-  }
-  ruleError("INVALID_STATE", "看守所自动跳过流程超过安全上限。")
-}
-
 function finishPlayerTurn(state, map, events, runtime) {
   const endingPlayer = currentPlayer(state)
   if (endingPlayer) endingPlayer.consecutiveDoubles = 0
   state.pendingDecision = null
   state.pendingDebt = null
   state.pendingAction = null
+  state.pendingAuction = null
   state.deadlineAt = 0
   state.phase = PHASES.RESOLVING
 
@@ -266,12 +236,38 @@ function finishPlayerTurn(state, map, events, runtime) {
   }
   state.turnIndex = next.index
   state.turnSeq += 1
-  beginPlayableTurn(state, map, events, runtime)
+  const player = currentPlayer(state)
+  if (!player || player.status !== PLAYER_STATUS.ACTIVE) {
+    ruleError("INVALID_STATE", "无法找到下一名在场玩家。")
+  }
+  addTurnStartedEvent(state, map, events)
+}
+
+function resumeAwaitingRoll(state, map, events) {
+  state.phase = PHASES.AWAITING_ROLL
+  state.pendingDecision = null
+  state.pendingDebt = null
+  state.pendingAction = null
+  state.pendingAuction = null
+  state.deadlineAt =
+    state.updatedAt + map.gameDefaults.rollTimeoutSeconds * 1000
+  return events
 }
 
 function finishResolvedRoll(state, map, events, runtime) {
   const player = currentPlayer(state)
   const lastDice = state.lastDice
+
+  // 掷骰前触发的结算（道具引发的欠款、拍卖开标）：回合还给当前玩家，不换人
+  if (
+    player?.status === PLAYER_STATUS.ACTIVE &&
+    (lastDice?.turnSeq !== state.turnSeq ||
+      lastDice?.playerId !== player.userId)
+  ) {
+    resumeAwaitingRoll(state, map, events)
+    return
+  }
+
   const canRollAgain =
     player?.status === PLAYER_STATUS.ACTIVE &&
     player.jailTurns <= 0 &&
@@ -348,6 +344,7 @@ function startGame(state, map, action, runtime, events) {
     player.jailTurns = 0
     player.consecutiveRollTimeouts = 0
     player.consecutiveDoubles = 0
+    player.forceBuysUsed = 0
     player.status = PLAYER_STATUS.ACTIVE
     player.items = []
     return player
@@ -363,6 +360,7 @@ function startGame(state, map, action, runtime, events) {
   state.pendingDecision = null
   state.pendingDebt = null
   state.pendingAction = null
+  state.pendingAuction = null
   state.turnIndex = 0
   state.turnSeq = 1
   state.startedAt = asNow(runtime)
@@ -377,6 +375,81 @@ function startGame(state, map, action, runtime, events) {
     startingCash: map.gameDefaults.startingCash,
   })
   addTurnStartedEvent(state, map, events)
+}
+
+// 从本次掷骰产生的事件里还原落点链，去掉最终那一站就是中途落点。
+// 连锁深度本身有上限，这里再截一次，免得棋盘上画出一串看不清的圈
+const MAX_RENDERED_HOPS = 3
+
+function intermediateHops(events, startIndex, playerId) {
+  const landings = []
+  for (let index = startIndex; index < events.length; index++) {
+    const event = events[index]
+    if (event.playerId !== playerId) continue
+    if (event.type === "moved" || event.type === "sent_to_jail") {
+      landings.push(event.toTileId)
+    }
+  }
+  return landings.slice(0, -1).slice(-MAX_RENDERED_HOPS)
+}
+
+// 狱中掷骰：对子当场释放，否则耗掉一次机会；用满上限就必须赎身。
+// 返回 true 表示人已经出来了，可以按点数继续走。
+function resolveJailRoll(state, map, player, isDouble, runtime, events) {
+  if (isDouble) {
+    player.jailTurns = 0
+    events.push({
+      type: "jail_released",
+      playerId: player.userId,
+      reason: "doubles",
+      paid: 0,
+    })
+    return true
+  }
+
+  player.jailTurns -= 1
+  if (player.jailTurns > 0) {
+    events.push({
+      type: "jail_roll_failed",
+      playerId: player.userId,
+      remainingTurns: player.jailTurns,
+      turnSeq: state.turnSeq,
+    })
+    return false
+  }
+
+  // 机会已经用尽：手上有保释令就顶掉这笔罚金，否则照价交钱
+  if (
+    consumeItem(state, map, player.userId, JAIL_FREE_ITEM, events, {
+      reason: "jail",
+    })
+  ) {
+    events.push({
+      type: "jail_released",
+      playerId: player.userId,
+      reason: "jail_free",
+      paid: 0,
+    })
+    return true
+  }
+
+  const amount = map.gameDefaults.jailBailAmount
+  const queued = processPaymentQueue(
+    state,
+    map,
+    [{ payerId: player.userId, amount, reason: "jail_bail" }],
+    events,
+    { now: runtime.now }
+  )
+  // 掏不出罚金就先进筹款流程，本回合不再移动
+  if (queued.pending) return false
+  events.push({
+    type: "jail_released",
+    playerId: player.userId,
+    reason: "forced_bail",
+    paid: amount,
+  })
+  return true
 }
 
 function performRoll(
@@ -396,12 +469,13 @@ function performRoll(
   const total = values.reduce((sum, value) => sum + value, 0)
   const isDouble = values.every((value) => value === values[0])
   const fromTileId = player.position
+  const inJail = player.jailTurns > 0
   state.phase = PHASES.RESOLVING
   state.deadlineAt = 0
   state.pendingDecision = null
-  player.consecutiveDoubles = isDouble
-    ? player.consecutiveDoubles + 1
-    : 0
+  // 狱中的对子不计连对：既不会三连入狱，出狱后也不追加一次掷骰
+  player.consecutiveDoubles =
+    !inJail && isDouble ? player.consecutiveDoubles + 1 : 0
   state.lastDice = {
     playerId: player.userId,
     values: [...values],
@@ -416,10 +490,31 @@ function performRoll(
     total,
     isDouble,
     doublesCount: player.consecutiveDoubles,
+    inJail,
     automatic,
   })
 
-  if (
+  if (inJail) {
+    const released = resolveJailRoll(
+      state,
+      map,
+      player,
+      isDouble,
+      runtime,
+      events
+    )
+    if (!released) {
+      state.lastMove = {
+        playerId: player.userId,
+        fromTileId,
+        toTileId: player.position,
+        turnSeq: state.turnSeq,
+      }
+      if (state.phase === PHASES.AWAITING_DEBT) return
+      finishPlayerTurn(state, map, events, runtime)
+      return
+    }
+  } else if (
     isDouble &&
     player.consecutiveDoubles >=
       map.gameDefaults.maxConsecutiveDoubles
@@ -434,7 +529,7 @@ function performRoll(
       map,
       player.userId,
       map.board.jailTileId,
-      map.gameDefaults.jailSkipTurns,
+      map.gameDefaults.jailMaxTurns,
       events,
       "consecutive_doubles"
     )
@@ -449,6 +544,8 @@ function performRoll(
     return
   }
 
+  // 卡牌可能在落地后把人再挪走，中途落点记下来给棋盘画分段箭头
+  const hopMark = events.length
   moveBy(state, map, player.userId, total, {
     collectStartReward: true,
     events,
@@ -459,6 +556,7 @@ function performRoll(
     playerId: player.userId,
     fromTileId,
     toTileId: player.position,
+    viaTileIds: intermediateHops(events, hopMark, player.userId),
     turnSeq: state.turnSeq,
   }
 
@@ -535,10 +633,16 @@ function resolvePendingItem(state, map, runtime, events) {
     }
   }
 
-  // 道具是在自己掷骰前用的，结算完把回合还回去，不换人
-  state.phase = PHASES.AWAITING_ROLL
-  state.deadlineAt =
-    state.updatedAt + map.gameDefaults.rollTimeoutSeconds * 1000
+  // 道具是在自己掷骰前用的，结算完把回合还回去，不换人；
+  // 但道具本身开出的新阶段（暗拍、欠款）不能被覆盖掉
+  if (
+    state.phase !== PHASES.AWAITING_DEBT &&
+    state.phase !== PHASES.AWAITING_AUCTION
+  ) {
+    state.phase = PHASES.AWAITING_ROLL
+    state.deadlineAt =
+      state.updatedAt + map.gameDefaults.rollTimeoutSeconds * 1000
+  }
 }
 
 // 只有手上真有否决令的人才值得开窗口，否则直接结算，别让全场干等
@@ -612,6 +716,44 @@ function useItem(state, map, action, runtime, events) {
     return
   }
   resolvePendingItem(state, map, runtime, events)
+}
+
+// 强制收购是常驻规则不是卡牌，但走同一条否决链：打出即算用掉一次，被否决也不退
+function forceBuy(state, map, action, runtime, events) {
+  requirePhase(state, PHASES.AWAITING_ROLL, "只能在自己掷骰前收购。")
+  const actor = requireCurrentPlayer(state, action.userId)
+  const handler = itemAction(FORCE_BUY_ITEM)
+  const prepared = handler.prepare(
+    state,
+    map,
+    actor,
+    [action.tileId],
+    runtime
+  )
+
+  actor.forceBuysUsed = (actor.forceBuysUsed ?? 0) + 1
+  events.push({
+    type: "force_buy_declared",
+    playerId: actor.userId,
+    victimId: prepared.victimId,
+    tileId: prepared.args.targetTileId,
+    price: prepared.args.price,
+    remaining: Math.max(
+      0,
+      map.gameDefaults.forceBuyLimit - actor.forceBuysUsed
+    ),
+  })
+
+  state.pendingAction = {
+    itemId: FORCE_BUY_ITEM,
+    actorId: actor.userId,
+    victimId: prepared.victimId,
+    args: prepared.args,
+    chain: [],
+    respondentId: null,
+    createdAt: asNow(runtime),
+  }
+  advanceCounter(state, map, runtime, events)
 }
 
 function counterAction(state, map, action, runtime, events, automatic) {
@@ -788,6 +930,70 @@ function resolveDebtAction(state, map, action, runtime, events, automatic) {
   finishDebtResolution(state, map, runtime, events, automatic)
 }
 
+// 主动保释：掷骰前花钱（或用掉保释令）离开看守所，之后这一回合完全照常
+function payBail(state, map, action, events) {
+  requirePhase(state, PHASES.AWAITING_ROLL, "只能在自己掷骰前保释。")
+  const player = requireCurrentPlayer(state, action.userId)
+  if (player.jailTurns <= 0) {
+    ruleError("NOT_IN_JAIL", "你现在不在看守所。")
+  }
+
+  // 保释令留着也只能用在这里，有卡就先用卡，省下现金
+  if (
+    consumeItem(state, map, player.userId, JAIL_FREE_ITEM, events, {
+      reason: "jail",
+    })
+  ) {
+    player.jailTurns = 0
+    events.push({
+      type: "jail_released",
+      playerId: player.userId,
+      reason: "jail_free",
+      paid: 0,
+    })
+    return
+  }
+
+  const amount = map.gameDefaults.jailBailAmount
+  if (player.cash < amount) {
+    ruleError("INSUFFICIENT_CASH", `保释需要 ${amount}，你的现金不够。`)
+  }
+  player.jailTurns = 0
+  settlePayment(state, map, {
+    payerId: player.userId,
+    amount,
+    reason: "jail_bail",
+    events,
+    force: true,
+  })
+  events.push({
+    type: "jail_released",
+    playerId: player.userId,
+    reason: "bail",
+    paid: amount,
+  })
+}
+
+function bidAction(state, map, action, events) {
+  requirePhase(state, PHASES.AWAITING_AUCTION, "现在没有正在进行的拍卖。")
+  placeBid(state, map, {
+    userId: action.userId,
+    amount: action.amount,
+    events,
+  })
+}
+
+// 开标：结算完把回合还给用拍卖令的人，他还没掷骰
+function finishAuction(state, map, runtime, events, automatic) {
+  requirePhase(state, PHASES.AWAITING_AUCTION, "当前没有等待开标的拍卖。")
+  resolveAuction(state, map, events, { automatic })
+  if (hasAtMostOneActivePlayer(state)) {
+    endGame(state, map, events, END_REASONS.LAST_PLAYER, runtime)
+    return
+  }
+  finishResolvedRoll(state, map, events, runtime)
+}
+
 function rollTimeout(state, map, action, runtime, events) {
   requirePhase(state, PHASES.AWAITING_ROLL, "当前不在等待掷骰。")
   const player = currentPlayer(state)
@@ -863,6 +1069,9 @@ export function transition(inputState, action, map, runtime = {}) {
     case ACTIONS.ROLL_TIMEOUT:
       rollTimeout(state, map, action, runtime, events)
       break
+    case ACTIONS.PAY_BAIL:
+      payBail(state, map, action, events)
+      break
     case ACTIONS.DECIDE:
       decide(state, map, action, runtime, events)
       break
@@ -899,6 +1108,9 @@ export function transition(inputState, action, map, runtime = {}) {
     case ACTIONS.USE_ITEM:
       useItem(state, map, action, runtime, events)
       break
+    case ACTIONS.FORCE_BUY:
+      forceBuy(state, map, action, runtime, events)
+      break
     case ACTIONS.COUNTER:
       counterAction(state, map, action, runtime, events, false)
       break
@@ -914,6 +1126,12 @@ export function transition(inputState, action, map, runtime = {}) {
       break
     case ACTIONS.COUNTER_TIMEOUT:
       counterAction(state, map, action, runtime, events, true)
+      break
+    case ACTIONS.BID:
+      bidAction(state, map, action, events)
+      break
+    case ACTIONS.AUCTION_TIMEOUT:
+      finishAuction(state, map, runtime, events, true)
       break
     case ACTIONS.RESOLVE_DEBT:
       resolveDebtAction(state, map, action, runtime, events, false)

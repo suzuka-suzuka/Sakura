@@ -4,14 +4,17 @@ export const COMMAND_PATTERNS = Object.freeze({
   leaveLobby: /^#?退出大富翁$/,
   startGame: /^#?开始大富翁$/,
   roll: /^#?(?:r|扔骰子|扔色子|扔)$/i,
+  payBail: /^#?(?:保释|赎身|交保释金)$/,
   purchase: /^#?(?:购买|y)$/i,
   build: /^#?(?:建房|升级)\s+(\S+)$/,
   sellBuilding: /^#?卖房\s+(\S+)$/,
   mortgage: /^#?抵押\s+(\S+)$/,
   redeem: /^#?赎回\s+(\S+)$/,
+  forceBuy: /^#?(?:强制收购|收购)\s+(\S+)$/,
   // 与经济系统的【使用 xx】同形，靠插件优先级（1128 < 1135）先到先得，
   // 名字不是本局道具时会 return false 放行回去
   useItem: /^#?使用\s*(\S+)(?:\s+(\S+))?(?:\s+(\S+))?$/,
+  bid: /^#?(?:出价|报价)\s*(\d+)$/,
   counter: /^#?否决$/,
   counterPass: /^#?不管$/,
   resolveDebt: /^#?强制结算$/,

@@ -1,7 +1,13 @@
 import { PLAYER_STATUS, ruleError } from "../constants.js"
-import { redemptionCost, sellBuilding } from "./assets.js"
+import {
+  buyOutProperty,
+  demolishBuilding,
+  redemptionCost,
+} from "./assets.js"
+import { minimumBid, openAuction } from "./auction.js"
 import { hotelLevel, housesPerHotel } from "./buildings.js"
 import { propertyKind } from "./property.js"
+import { processPaymentQueue } from "./settlement.js"
 import {
   ownedPropertyEntries,
   playerById,
@@ -22,18 +28,6 @@ function requireActiveOpponent(state, actorId, targetId) {
   return target
 }
 
-// 攻击类道具只能往上打：目标净资产必须高于自己，避免变成欺负落后玩家的工具
-function requireRicherTarget(state, map, actorId, targetId) {
-  const actorWorth = netWorthOf(state, map, actorId)
-  const targetWorth = netWorthOf(state, map, targetId)
-  if (targetWorth <= actorWorth) {
-    ruleError(
-      "TARGET_NOT_RICHER",
-      "只能对净资产比你高的玩家使用这张卡。"
-    )
-  }
-}
-
 function requireOwnedTile(state, map, tileId, ownerId, label) {
   const tile = tileById(map, tileId)
   const propertyState = state.propertyStates[String(tileId)]
@@ -52,6 +46,63 @@ function requireOwnedTile(state, map, tileId, ownerId, label) {
 function transferInterest(map, tile, propertyState) {
   if (!propertyState.mortgaged) return 0
   return redemptionCost(map, tile) - tile.mortgageValue
+}
+
+// 强制征收和强制收购共用的目标校验：别人的、没建筑的地产
+function requirePurchasableTarget(state, map, actor, targetTileId) {
+  const tile = tileById(map, targetTileId)
+  const propertyState = state.propertyStates[String(targetTileId)]
+  if (!tile || tile.type !== "property" || !propertyState) {
+    ruleError("INVALID_PROPERTY", "目标不是一块地产。")
+  }
+  if (propertyState.ownerId === null) {
+    ruleError("INVALID_ITEM_TARGET", `${tile.name}还没有主人。`)
+  }
+  const victim = requireActiveOpponent(
+    state,
+    actor.userId,
+    propertyState.ownerId
+  )
+  requireOwnedTile(state, map, targetTileId, victim.userId, victim.userId)
+  return { tile, propertyState, victim }
+}
+
+// 买下这块地之后是不是就凑齐了整个色组
+function completesGroupFor(state, map, playerId, tile) {
+  const group = map.propertyGroups.find((item) => item.id === tile.groupId)
+  if (!group) return false
+  const wanted = String(playerId)
+  return group.tileIds.every(
+    (tileId) =>
+      tileId === tile.id ||
+      state.propertyStates[String(tileId)]?.ownerId === wanted
+  )
+}
+
+function applyBuyOut(state, map, actor, args, events, reason) {
+  const propertyState = state.propertyStates[String(args.targetTileId)]
+  // 等待否决期间盘面可能已经变了，兜一层
+  if (
+    !propertyState ||
+    propertyState.ownerId !== args.victimId ||
+    propertyState.level > 0 ||
+    actor.cash < args.price
+  ) {
+    events.push({
+      type: "item_fizzled",
+      playerId: actor.userId,
+      itemId: reason === "seize" ? "seize_property" : "force_buy",
+      tileId: args.targetTileId,
+    })
+    return
+  }
+  buyOutProperty(state, map, {
+    buyerId: actor.userId,
+    tileId: args.targetTileId,
+    amount: args.price,
+    events,
+    reason,
+  })
 }
 
 function moveOwnership(state, map, tile, propertyState, toPlayer, events, reason) {
@@ -92,7 +143,6 @@ export const ITEM_ACTIONS = Object.freeze({
       }
       const victim = requireActiveOpponent(state, actor.userId, targetState.ownerId)
       requireOwnedTile(state, map, targetTileId, victim.userId, victim.userId)
-      requireRicherTarget(state, map, actor.userId, victim.userId)
 
       const interest = transferInterest(map, targetTile, targetState)
       if (actor.cash < interest) {
@@ -130,55 +180,66 @@ export const ITEM_ACTIONS = Object.freeze({
   seize_property: {
     argSpec: ["tile"],
     counterable: true,
-    // 强制征收：按全额售价强买一块没有建筑的地
+    // 强制征收：按全额售价强买一块没有建筑的地，是常驻强制收购的原价特权版
     prepare(state, map, actor, [targetTileId]) {
-      const targetState = state.propertyStates[String(targetTileId)]
-      const targetTile = tileById(map, targetTileId)
-      if (!targetTile || targetTile.type !== "property" || !targetState) {
-        ruleError("INVALID_PROPERTY", "目标不是一块地产。")
-      }
-      if (targetState.ownerId === null) {
-        ruleError("INVALID_ITEM_TARGET", `${targetTile.name}还没有主人。`)
-      }
-      const victim = requireActiveOpponent(state, actor.userId, targetState.ownerId)
-      requireOwnedTile(state, map, targetTileId, victim.userId, victim.userId)
-      requireRicherTarget(state, map, actor.userId, victim.userId)
-
-      const interest = transferInterest(map, targetTile, targetState)
-      if (actor.cash < targetTile.price + interest) {
-        ruleError(
-          "INSUFFICIENT_CASH",
-          `征收${targetTile.name}需要 ${targetTile.price + interest}。`
-        )
+      const { tile, victim } = requirePurchasableTarget(
+        state,
+        map,
+        actor,
+        targetTileId
+      )
+      if (actor.cash < tile.price) {
+        ruleError("INSUFFICIENT_CASH", `征收${tile.name}需要 ${tile.price}。`)
       }
       return {
         victimId: victim.userId,
-        args: { targetTileId: targetTile.id, price: targetTile.price },
+        args: { targetTileId: tile.id, price: tile.price },
       }
     },
     apply(state, map, actor, args, runtime, events) {
-      const victim = playerById(state, args.victimId)
-      const tile = tileById(map, args.targetTileId)
-      const propertyState = state.propertyStates[String(args.targetTileId)]
-      actor.cash -= args.price
-      victim.cash += args.price
-      const interest = moveOwnership(
+      applyBuyOut(state, map, actor, args, events, "seize")
+    },
+    describe(map, args) {
+      return `${tileById(map, args.targetTileId)?.name} · ${args.price}`
+    },
+  },
+
+  force_buy: {
+    argSpec: ["tile"],
+    counterable: true,
+    // 强制收购：双倍标价买下能让自己凑成完整色组的一块无建筑地，整局次数有限
+    prepare(state, map, actor, [targetTileId]) {
+      // 次数先查：用完了就别再纠结目标对不对
+      const limit = map.gameDefaults.forceBuyLimit
+      if ((actor.forceBuysUsed ?? 0) >= limit) {
+        ruleError(
+          "FORCE_BUY_EXHAUSTED",
+          `强制收购每局只能用 ${limit} 次，你已经用完了。`
+        )
+      }
+      const { tile, victim } = requirePurchasableTarget(
         state,
         map,
-        tile,
-        propertyState,
         actor,
-        events,
-        "seize"
+        targetTileId
       )
-      events.push({
-        type: "property_seized",
-        playerId: actor.userId,
-        recipientId: victim.userId,
-        tileId: tile.id,
-        amount: args.price,
-        interest,
-      })
+      if (!completesGroupFor(state, map, actor.userId, tile)) {
+        ruleError(
+          "NOT_GROUP_KEY",
+          `买下${tile.name}并不能让你凑成完整色组，强制收购只认关键地。`
+        )
+      }
+      const price = tile.price * map.gameDefaults.forceBuyPriceRate
+      if (actor.cash < price) {
+        ruleError("INSUFFICIENT_CASH", `收购${tile.name}需要 ${price}。`)
+      }
+      return {
+        victimId: victim.userId,
+        args: { targetTileId: tile.id, price },
+      }
+    },
+    apply(state, map, actor, args, runtime, events) {
+      applyBuyOut(state, map, actor, args, events, "force_buy")
     },
     describe(map, args) {
       return `${tileById(map, args.targetTileId)?.name} · ${args.price}`
@@ -188,10 +249,10 @@ export const ITEM_ACTIONS = Object.freeze({
   demolish: {
     argSpec: ["player"],
     counterable: true,
-    // 拆迁令：只指定玩家，目标房产在使用时就随机选定，让被打的人看得见自己要挨哪一刀
+    // 拆迁令：只指定玩家，目标房产在使用时就随机选定，让被打的人看得见自己要挨哪一刀。
+    // 建筑直接推平，地主拿不到任何补偿
     prepare(state, map, actor, [targetUserId], runtime) {
       const victim = requireActiveOpponent(state, actor.userId, targetUserId)
-      requireRicherTarget(state, map, actor.userId, victim.userId)
 
       const owned = ownedPropertyEntries(state, map, victim.userId).filter(
         ({ tile, propertyState }) =>
@@ -224,12 +285,7 @@ export const ITEM_ACTIONS = Object.freeze({
       const chosen = candidates[pick]
       return {
         victimId: victim.userId,
-        args: {
-          tileId: chosen.tile.id,
-          refund: Math.floor(
-            chosen.tile.upgradeCost * map.gameDefaults.buildingSaleRate
-          ),
-        },
+        args: { tileId: chosen.tile.id },
       }
     },
     apply(state, map, actor, args, runtime, events) {
@@ -244,20 +300,117 @@ export const ITEM_ACTIONS = Object.freeze({
         })
         return
       }
-      const detail = []
-      sellBuilding(state, map, args.victimId, args.tileId, detail)
-      const sold = detail.find((event) => event.type === "building_sold")
+      const removed = demolishBuilding(
+        state,
+        map,
+        args.victimId,
+        args.tileId
+      )
       events.push({
         type: "building_demolished",
         playerId: actor.userId,
         recipientId: args.victimId,
         tileId: args.tileId,
-        amount: sold?.amount ?? args.refund,
-        building: sold?.building,
+        previousBuilding: removed.previousBuilding,
+        building: removed.building,
+        buildingSupply: { ...state.buildingSupply },
       })
     },
     describe(map, args) {
       return `${tileById(map, args.tileId)?.name}`
+    },
+  },
+
+  auction: {
+    argSpec: ["tile"],
+    counterable: true,
+    // 拍卖令：把任意一块没有建筑的地挂上暗拍，谁的地都行，包括自己的和无主的
+    prepare(state, map, actor, [targetTileId]) {
+      const tile = tileById(map, targetTileId)
+      const propertyState = state.propertyStates[String(targetTileId)]
+      if (!tile || tile.type !== "property" || !propertyState) {
+        ruleError("INVALID_PROPERTY", "目标不是一块地产。")
+      }
+      if (propertyState.level > 0) {
+        ruleError("PROPERTY_HAS_BUILDINGS", `${tile.name}上有建筑，不能拍卖。`)
+      }
+      // 地是别人的才有人可以否决；无主地和自己的地直接开拍
+      const ownerId = propertyState.ownerId
+      const victim =
+        ownerId && ownerId !== actor.userId
+          ? requireActiveOpponent(state, actor.userId, ownerId)
+          : null
+      return {
+        victimId: victim?.userId ?? null,
+        args: { tileId: tile.id, minimumBid: minimumBid(map, tile) },
+      }
+    },
+    apply(state, map, actor, args, runtime, events) {
+      const propertyState = state.propertyStates[String(args.tileId)]
+      // 等待否决期间地上可能已经盖了房，兜一层
+      if (!propertyState || propertyState.level > 0) {
+        events.push({
+          type: "item_fizzled",
+          playerId: actor.userId,
+          itemId: "auction",
+          tileId: args.tileId,
+        })
+        return
+      }
+      openAuction(state, map, {
+        tileId: args.tileId,
+        initiatorId: actor.userId,
+        now: runtime.now,
+        events,
+      })
+    },
+    describe(map, args) {
+      return `${tileById(map, args.tileId)?.name} · 底价 ${args.minimumBid}`
+    },
+  },
+
+  tax_audit: {
+    argSpec: ["player"],
+    counterable: true,
+    // 税务稽查：目标按净资产的一成向银行补税，钱不进使用者口袋
+    prepare(state, map, actor, [targetUserId]) {
+      const victim = requireActiveOpponent(state, actor.userId, targetUserId)
+      const amount = Math.floor(
+        netWorthOf(state, map, victim.userId) *
+          map.gameDefaults.taxAuditRate
+      )
+      if (amount <= 0) {
+        ruleError("NOTHING_TO_AUDIT", "对方没有可以补税的资产。")
+      }
+      return { victimId: victim.userId, args: { amount } }
+    },
+    apply(state, map, actor, args, runtime, events) {
+      const victim = playerById(state, args.victimId)
+      if (!victim || victim.status !== PLAYER_STATUS.ACTIVE) {
+        events.push({
+          type: "item_fizzled",
+          playerId: actor.userId,
+          itemId: "tax_audit",
+        })
+        return
+      }
+      // 税额在打出时就已锁定，等待否决期间对方的资产变化不再重算
+      processPaymentQueue(
+        state,
+        map,
+        [
+          {
+            payerId: victim.userId,
+            amount: args.amount,
+            reason: "tax_audit",
+          },
+        ],
+        events,
+        { now: runtime.now }
+      )
+    },
+    describe(map, args) {
+      return `补税 ${args.amount}`
     },
   },
 })

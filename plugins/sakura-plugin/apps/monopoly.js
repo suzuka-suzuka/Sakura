@@ -12,6 +12,7 @@ import { logger } from "../../../src/utils/logger.js"
 import {
   DECISIONS,
   GameRuleError,
+  PHASES,
 } from "../lib/monopoly/constants.js"
 import { GameService } from "../lib/monopoly/GameService.js"
 import { COMMAND_PATTERNS } from "../lib/monopoly/commands.js"
@@ -20,7 +21,7 @@ import { MonopolySessionStore } from "../lib/monopoly/SessionStore.js"
 import { TimeoutScheduler } from "../lib/monopoly/TimeoutScheduler.js"
 import { renderBoard } from "../lib/monopoly/presentation/BoardRenderer.js"
 import {
-  buildTurnPrompt,
+  buildTurnMessages,
 } from "../lib/monopoly/presentation/MessageFormatter.js"
 
 // 这些错误只是「现在不该你发这条指令」，回一句话就够，不必再刷一张棋盘
@@ -33,6 +34,7 @@ const QUIET_RULE_ERRORS = new Set([
   "WRONG_PHASE",
   // 名字打错、参数漏了这类输入问题，回一句话就行，不必刷一张棋盘
   "UNKNOWN_ITEM",
+  "NOT_IN_JAIL",
   "MISSING_ARG",
   "INVALID_TARGET",
   "PROPERTY_NOT_FOUND",
@@ -123,17 +125,37 @@ export class Monopoly extends plugin {
     }
   }
 
+  // 拍卖公告没有特定对象，这时候只发文字不艾特
+  promptSegments(prompt) {
+    if (!prompt.mentionUserId) return [Segment.text(prompt.text)]
+    return [
+      Segment.at(prompt.mentionUserId),
+      Segment.text(`\n${prompt.text}`),
+    ]
+  }
+
+  // 先图后字。状态早在这之前就落库了，所以这里任何一条发送失败都只能记日志继续，
+  // 不能往上抛——否则玩家会收到「操作失败」，误以为这次掷骰没生效
+  async deliver(send, result, label) {
+    const board = await this.buildBoardSegment(result)
+    const messages = board ? [[board]] : []
+    for (const prompt of buildTurnMessages(result, this.map)) {
+      messages.push(this.promptSegments(prompt))
+    }
+    for (const segments of messages) {
+      try {
+        await send(segments)
+      } catch (error) {
+        logger.error(
+          `[大富翁] 群 ${result.groupId} ${label}发送失败：${error.stack || error}`
+        )
+      }
+    }
+  }
+
   async sendResult(e, result) {
     if (!result) return
-    const board = await this.buildBoardSegment(result)
-    if (board) await e.reply([board])
-    const prompt = buildTurnPrompt(result, this.map)
-    if (prompt) {
-      await e.reply([
-        Segment.at(prompt.mentionUserId),
-        Segment.text(`\n${prompt.text}`),
-      ])
-    }
+    await this.deliver((segments) => e.reply(segments), result, "结算播报")
   }
 
   async sendScheduledResult(result) {
@@ -147,15 +169,11 @@ export class Monopoly extends plugin {
       )
       return
     }
-    const board = await this.buildBoardSegment(result)
-    if (board) await bot.sendGroupMsg(groupId, [board])
-    const prompt = buildTurnPrompt(result, this.map)
-    if (prompt) {
-      await bot.sendGroupMsg(groupId, [
-        Segment.at(prompt.mentionUserId),
-        Segment.text(`\n${prompt.text}`),
-      ])
-    }
+    await this.deliver(
+      (segments) => bot.sendGroupMsg(groupId, segments),
+      result,
+      "超时播报"
+    )
   }
 
   async handleScheduledTimeout(token) {
@@ -251,6 +269,12 @@ export class Monopoly extends plugin {
     this.executeForPlayer(e, () => this.service.roll(this.contextFromEvent(e)))
   )
 
+  payBail = Command(COMMAND_PATTERNS.payBail, async (e) =>
+    this.executeForPlayer(e, () =>
+      this.service.payBail(this.contextFromEvent(e))
+    )
+  )
+
   purchase = Command(COMMAND_PATTERNS.purchase, async (e) =>
     this.executeForPlayer(e, () =>
       this.service.decide(
@@ -284,6 +308,12 @@ export class Monopoly extends plugin {
     )
   )
 
+  forceBuy = Command(COMMAND_PATTERNS.forceBuy, async (e) =>
+    this.executeForPlayer(e, () =>
+      this.service.forceBuy(this.contextFromEvent(e), e.match[1])
+    )
+  )
+
   useItem = Command(COMMAND_PATTERNS.useItem, async (e) => {
     if (!this.ready || !this.map) return false
     // 不是大富翁的道具就原样放行，让经济系统的【使用 xx】接着处理
@@ -301,6 +331,66 @@ export class Monopoly extends plugin {
         e.at
       )
     )
+  })
+
+  // 暗拍出价只认私聊：群里发就等于把底牌亮给所有人
+  bid = Command(COMMAND_PATTERNS.bid, "message.private", async (e) => {
+    if (!this.ready || !this.service) return false
+    const amount = Number(e.match[1])
+    try {
+      const result = await this.service.placeBid(
+        {
+          selfId: e.self_id,
+          groupId: null,
+          userId: e.user_id,
+          displayName: e.sender?.nickname || String(e.user_id),
+        },
+        amount
+      )
+      if (!result) return false
+      const tile = this.map.tiles.find(
+        (item) => item.id === result.tileId
+      )
+      const seconds = Math.max(
+        0,
+        Math.round((result.deadlineAt - Date.now()) / 1000)
+      )
+      await e.reply(
+        `已记下你对${tile?.name || "该地产"}的出价 ${result.bid?.amount}` +
+          `${result.bid?.replaced ? "（覆盖了之前的出价）" : ""}\n` +
+          `截止前可以重复发送修改，还剩约 ${seconds} 秒开标。`
+      )
+      return true
+    } catch (error) {
+      if (error instanceof GameRuleError) {
+        // 没有进行中的拍卖时静默放行，别打扰正常私聊
+        if (["NO_GAME", "NO_AUCTION"].includes(error.code)) return false
+        await e.reply(error.message)
+        return true
+      }
+      logger.error(`[大富翁] 私聊出价失败：${error.stack || error}`)
+      await e.reply("出价没能记录，请再发一次。")
+      return true
+    }
+  })
+
+  // 群里喊价一律不收，顺手提醒改私聊
+  bidInGroup = Command(COMMAND_PATTERNS.bid, async (e) => {
+    if (!this.ready || !this.service) return false
+    const context = this.contextFromEvent(e)
+    if (!(await this.service.isActivePlayer(context))) return false
+    try {
+      const result = await this.service.status(context)
+      if (result.state.phase !== PHASES.AWAITING_AUCTION) return false
+      await e.reply(
+        "暗拍请私聊我发送【出价 金额】，群里喊价不算数。",
+        false,
+        true
+      )
+      return true
+    } catch {
+      return false
+    }
   })
 
   counter = Command(COMMAND_PATTERNS.counter, async (e) =>

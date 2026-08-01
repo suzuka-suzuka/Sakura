@@ -131,13 +131,21 @@ export function assertStateInvariants(state, map) {
         `玩家 ${player.userId} 的连续对子计数无效。`
       )
     }
+    if (
+      player.forceBuysUsed !== undefined &&
+      (!Number.isSafeInteger(player.forceBuysUsed) || player.forceBuysUsed < 0)
+    ) {
+      throw new GameRuleError(
+        "INVALID_STATE",
+        `玩家 ${player.userId} 的强制收购次数无效。`
+      )
+    }
     if (!Array.isArray(player.items)) {
       throw new GameRuleError(
         "INVALID_STATE",
         `玩家 ${player.userId} 的道具背包不是数组。`
       )
     }
-    const heldCounts = new Map()
     for (const entry of player.items) {
       const definition = map.items?.find(
         (item) => item.id === entry?.itemId
@@ -146,14 +154,6 @@ export function assertStateInvariants(state, map) {
         throw new GameRuleError(
           "INVALID_STATE",
           `玩家 ${player.userId} 持有不存在的道具 ${entry?.itemId}。`
-        )
-      }
-      const count = (heldCounts.get(definition.id) || 0) + 1
-      heldCounts.set(definition.id, count)
-      if (count > definition.maxHeld) {
-        throw new GameRuleError(
-          "INVALID_STATE",
-          `玩家 ${player.userId} 的 ${definition.name} 超过持有上限。`
         )
       }
     }

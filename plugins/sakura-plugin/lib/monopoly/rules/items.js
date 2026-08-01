@@ -44,17 +44,7 @@ export function grantItem(
     ruleError("INVALID_ITEM", `道具 ${itemId} 不存在。`)
   }
   if (!Array.isArray(player.items)) player.items = []
-  if (heldCount(player, itemId) >= definition.maxHeld) {
-    // 到上限就作废这次发放，不排队也不折现
-    events.push({
-      type: "item_capped",
-      playerId: player.userId,
-      itemId,
-      cardId,
-      maxHeld: definition.maxHeld,
-    })
-    return false
-  }
+  // 不设持有上限：牌堆里每种道具本来就只有固定几张，抽到多少就拿多少
   player.items.push({ itemId: definition.id, cardId })
   events.push({
     type: "item_granted",

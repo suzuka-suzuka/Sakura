@@ -226,7 +226,7 @@ export function applyChanceCard(
       map,
       player.userId,
       effect.targetTileId,
-      map.gameDefaults.jailSkipTurns,
+      map.gameDefaults.jailMaxTurns,
       events,
       "chance"
     )

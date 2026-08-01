@@ -54,6 +54,10 @@ export function buildPublicView(state, map) {
       tileName: tileById(map, player.position)?.name || `格子 ${player.position}`,
       jailTurns: player.jailTurns,
       consecutiveRollTimeouts: player.consecutiveRollTimeouts,
+      forceBuysLeft: Math.max(
+        0,
+        map.gameDefaults.forceBuyLimit - (player.forceBuysUsed ?? 0)
+      ),
       consecutiveDoubles: player.consecutiveDoubles,
       status: player.status,
       active: player.status === PLAYER_STATUS.ACTIVE,
@@ -119,6 +123,17 @@ export function buildPublicView(state, map) {
       : null,
     pendingAction: state.pendingAction
       ? structuredClone(state.pendingAction)
+      : null,
+    // 暗拍：只暴露标的和底价，出价明细绝不进公开视图
+    pendingAuction: state.pendingAuction
+      ? {
+          tileId: state.pendingAuction.tileId,
+          initiatorId: state.pendingAuction.initiatorId,
+          ownerId: state.pendingAuction.ownerId,
+          mortgaged: state.pendingAuction.mortgaged,
+          minimumBid: state.pendingAuction.minimumBid,
+          bidderCount: state.pendingAuction.bids.length,
+        }
       : null,
     players,
     propertyStates,

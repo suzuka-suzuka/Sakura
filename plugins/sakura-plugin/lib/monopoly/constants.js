@@ -1,4 +1,4 @@
-export const SESSION_VERSION = 5
+export const SESSION_VERSION = 8
 
 export const PHASES = Object.freeze({
   LOBBY: "lobby",
@@ -7,6 +7,7 @@ export const PHASES = Object.freeze({
   AWAITING_PURCHASE: "awaiting_purchase",
   AWAITING_DEBT: "awaiting_debt",
   AWAITING_COUNTER: "awaiting_counter",
+  AWAITING_AUCTION: "awaiting_auction",
   ENDED: "ended",
 })
 
@@ -17,6 +18,7 @@ export const PHASE_LABELS = Object.freeze({
   [PHASES.AWAITING_PURCHASE]: "等待购买",
   [PHASES.AWAITING_DEBT]: "等待筹款",
   [PHASES.AWAITING_COUNTER]: "等待否决",
+  [PHASES.AWAITING_AUCTION]: "暗拍进行中",
   [PHASES.ENDED]: "已结束",
 })
 
@@ -32,6 +34,7 @@ export const ACTIONS = Object.freeze({
   START: "start",
   ROLL: "roll",
   ROLL_TIMEOUT: "roll_timeout",
+  PAY_BAIL: "pay_bail",
   DECIDE: "decide",
   DECISION_TIMEOUT: "decision_timeout",
   BUILD: "build",
@@ -41,9 +44,12 @@ export const ACTIONS = Object.freeze({
   RESOLVE_DEBT: "resolve_debt",
   DEBT_TIMEOUT: "debt_timeout",
   USE_ITEM: "use_item",
+  FORCE_BUY: "force_buy",
   COUNTER: "counter",
   COUNTER_PASS: "counter_pass",
   COUNTER_TIMEOUT: "counter_timeout",
+  BID: "bid",
+  AUCTION_TIMEOUT: "auction_timeout",
   SURRENDER: "surrender",
   FORCE_END: "force_end",
 })

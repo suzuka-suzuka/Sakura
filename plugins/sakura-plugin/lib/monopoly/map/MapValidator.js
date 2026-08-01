@@ -34,7 +34,12 @@ const GAME_DEFAULT_FIELDS = new Set([
   "completeSetRentMultiplier",
   "buildingSaleRate",
   "mortgageInterestRate",
-  "jailSkipTurns",
+  "jailMaxTurns",
+  "jailBailAmount",
+  "auctionTimeoutSeconds",
+  "taxAuditRate",
+  "forceBuyLimit",
+  "forceBuyPriceRate",
   "maxTileResolutionDepth",
 ])
 
@@ -56,7 +61,7 @@ const LAYOUT_FIELDS = new Set([
 const GROUP_FIELDS = new Set(["id", "name", "color", "tileIds"])
 const CARD_FIELDS = new Set(["id", "name", "description", "effect", "count"])
 const DECK_FIELDS = new Set(["id", "name", "cards"])
-const ITEM_FIELDS = new Set(["id", "name", "description", "maxHeld"])
+const ITEM_FIELDS = new Set(["id", "name", "description"])
 const MAX_DECKS = 4
 const BASE_TILE_FIELDS = [
   "id",
@@ -342,7 +347,29 @@ function validateDefaults(defaults, errors) {
     errors,
     { min: 0, max: 1 }
   )
-  requireInteger(defaults.jailSkipTurns, "jailSkipTurns", errors, {
+  requireInteger(defaults.jailMaxTurns, "jailMaxTurns", errors, {
+    min: 1,
+    max: 10,
+  })
+  requireInteger(defaults.jailBailAmount, "jailBailAmount", errors, {
+    min: 0,
+    max: 100_000,
+  })
+  requireInteger(
+    defaults.auctionTimeoutSeconds,
+    "auctionTimeoutSeconds",
+    errors,
+    { min: 10, max: 600 }
+  )
+  requireNumber(defaults.taxAuditRate, "taxAuditRate", errors, {
+    min: 0,
+    max: 1,
+  })
+  requireInteger(defaults.forceBuyLimit, "forceBuyLimit", errors, {
+    min: 0,
+    max: 20,
+  })
+  requireNumber(defaults.forceBuyPriceRate, "forceBuyPriceRate", errors, {
     min: 1,
     max: 10,
   })
@@ -656,10 +683,6 @@ function validateItems(map, errors) {
     requireString(item.name, `${label}.name`, errors, { maxLength: 20 })
     requireString(item.description, `${label}.description`, errors, {
       maxLength: 120,
-    })
-    requireInteger(item.maxHeld, `${label}.maxHeld`, errors, {
-      min: 1,
-      max: 9,
     })
   }
   for (const duplicate of duplicates(seen)) {

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "sakura-city-40",
-  "version": 6,
+  "version": 10,
   "name": "樱都经典环线",
   "description": "参考经典大富翁结构设计的40格默认地图。",
   "ruleset": "qq-monopoly-turn-v4",
@@ -22,12 +22,17 @@
     "houseSupply": 32,
     "hotelSupply": 12,
     "completeSetRentMultiplier": 2,
-    "jailSkipTurns": 1,
+    "jailMaxTurns": 3,
+    "jailBailAmount": 50,
     "maxTileResolutionDepth": 4,
     "debtTimeoutSeconds": 60,
     "buildingSaleRate": 0.5,
     "mortgageInterestRate": 0.1,
-    "counterTimeoutSeconds": 15
+    "counterTimeoutSeconds": 15,
+    "auctionTimeoutSeconds": 45,
+    "taxAuditRate": 0.1,
+    "forceBuyLimit": 3,
+    "forceBuyPriceRate": 2
   },
   "board": {
     "size": 40,
@@ -1061,7 +1066,7 @@
         {
           "id": "chance_bail_order",
           "name": "保释令",
-          "description": "获得一张保释令，进看守所时自动使用。",
+          "description": "获得一张保释令，可在看守所免费出狱。",
           "effect": {
             "type": "grant_item",
             "itemId": "jail_free"
@@ -1088,10 +1093,19 @@
         {
           "id": "demolition_order",
           "name": "拆迁令",
-          "description": "拿到一份拆迁令，可拆掉对方一栋建筑。",
+          "description": "拿到一份拆迁令，可无偿拆掉对方一栋建筑。",
           "effect": {
             "type": "grant_item",
             "itemId": "demolish"
+          }
+        },
+        {
+          "id": "auction_writ",
+          "name": "拍卖令",
+          "description": "拿到一份拍卖令，可把一块无建筑的地挂上暗拍。",
+          "effect": {
+            "type": "grant_item",
+            "itemId": "auction"
           }
         }
       ]
@@ -1224,7 +1238,7 @@
         {
           "id": "fate_bail_order",
           "name": "保释令",
-          "description": "获得一张保释令，进看守所时自动使用。",
+          "description": "获得一张保释令，可在看守所免费出狱。",
           "effect": {
             "type": "grant_item",
             "itemId": "jail_free"
@@ -1239,6 +1253,15 @@
             "itemId": "negate"
           },
           "count": 2
+        },
+        {
+          "id": "tax_audit_notice",
+          "name": "税务稽查",
+          "description": "拿到一份稽查通知，可让一名玩家按净资产补税。",
+          "effect": {
+            "type": "grant_item",
+            "itemId": "tax_audit"
+          }
         }
       ]
     }
@@ -1247,32 +1270,42 @@
     {
       "id": "jail_free",
       "name": "保释令",
-      "description": "进入看守所时自动使用，免去停留一回合。",
-      "maxHeld": 2
+      "description": "在看守所发送【保释】即可免费出狱；机会用尽时会自动顶掉罚金。"
     },
     {
       "id": "negate",
       "name": "否决令",
-      "description": "让一次针对你的道具作废，也能否决别人的否决。",
-      "maxHeld": 2
+      "description": "让一次针对你的道具作废，也能否决别人的否决。"
     },
     {
       "id": "swap_property",
       "name": "地契置换",
-      "description": "掷骰前与净资产更高的玩家交换一块没有建筑的地。",
-      "maxHeld": 1
+      "description": "掷骰前与任意玩家交换一块没有建筑的地。"
     },
     {
       "id": "seize_property",
       "name": "强制征收",
-      "description": "掷骰前按全额售价强制买下对方一块没有建筑的地。",
-      "maxHeld": 1
+      "description": "掷骰前按全额售价强制买下对方一块没有建筑的地。"
     },
     {
       "id": "demolish",
       "name": "拆迁令",
-      "description": "掷骰前拆掉对方等级最高的一栋建筑，对方获得半价补偿。",
-      "maxHeld": 1
+      "description": "掷骰前拆掉对方等级最高的一栋建筑，对方得不到任何补偿。"
+    },
+    {
+      "id": "auction",
+      "name": "拍卖令",
+      "description": "掷骰前把任意一块没有建筑的地挂上暗拍，所有人私聊出价，价高者得。"
+    },
+    {
+      "id": "tax_audit",
+      "name": "税务稽查",
+      "description": "掷骰前指定一名玩家，按其净资产的一成向银行补税。"
+    },
+    {
+      "id": "force_buy",
+      "name": "强制收购",
+      "description": "常驻规则而非卡牌：掷骰前按双倍标价买下能让你凑成完整色组的一块无建筑地。"
     }
   ]
 }

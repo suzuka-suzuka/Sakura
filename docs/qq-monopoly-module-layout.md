@@ -35,7 +35,11 @@ plugins/sakura-plugin/
 │     │  ├─ tileResolver.js
 │     │  ├─ property.js
 │     │  ├─ settlement.js
+│     │  ├─ liquidation.js
+│     │  ├─ auction.js
 │     │  ├─ chance.js
+│     │  ├─ items.js
+│     │  ├─ itemActions.js
 │     │  └─ victory.js
 │     └─ presentation/
 │        ├─ PublicView.js
@@ -71,7 +75,7 @@ test/                         # 本地目录，受 .gitignore 排除
 - 所有命令接受可选 `#` 前缀；除创建外，没有本群会话时直接返回 `false`；
 - 以 `groupId` 形成全机器人账号共享的唯一群会话作用域；
 - 把 `selfId`、`groupId`、`userId` 和命令参数交给 `GameService`；
-- 将每次结果渲染为独立图片；只有新回合开始时另发下一名玩家的提及；
+- 把改变盘面的结果渲染为独立图片，随后按顺序补发掷骰回执和下一回合提及；发送失败只记日志，不回滚已提交的状态；
 - 不直接访问 Redis，不直接掷骰，不修改玩家现金。
 
 ### `GameService.js`
@@ -92,16 +96,22 @@ joinGame(context)
 leaveLobby(context)
 startGame(context)
 roll(context)
+payBail(context)
 decide(context, "purchase" | "decline")
 build(context, propertyName)
 sellBuilding(context, propertyName)
 mortgage(context, propertyName)
 redeem(context, propertyName)
+useItem(context, itemRef, args, atUserId)
+forceBuy(context, propertyName)
+respondToCounter(context, pass)
+placeBid(context, amount)
 resolveDebt(context)
 surrender(context)
 status(context)
 forceEnd(context)
 handleTimeout(timeoutToken)
+sweep(selfId)
 ```
 
 ### `GameEngine.js`
@@ -219,7 +229,7 @@ releaseSessionLock({ selfId, groupId }, token)
 
 - 所有现金转移的统一入口；
 - 税费、租金和卡牌付款共用同一套欠款队列；
-- 现金不足时持久化欠款和剩余付款，等待玩家卖房、抵押或继续结算；
+- 现金不足时持久化欠款和剩余付款，等待玩家卖房、抵押或强制结算；强制结算前先由 `rules/liquidation.js` 自动变现；
 - 保证现金不为负、收款不超过实际支付；
 - 输出欠款、付款和破产领域事件。
 
@@ -228,7 +238,26 @@ releaseSessionLock({ selfId, groupId }, token)
 - 管理牌堆索引和重新洗牌；
 - 只解释白名单效果；
 - 卡牌需要移动时交给 `movement.js`；
-- 卡牌需要付款时交给 `settlement.js`。
+- 卡牌需要付款时交给 `settlement.js`；
+- 卡牌发放道具时交给 `items.js`。
+
+### `rules/liquidation.js`
+
+- 强制结算前的自动变现；
+- 先抵押无建筑地产，再按“每换一块钱损失多少租金”拆建筑；
+- 只输出一条汇总事件，不刷屏。
+
+### `rules/auction.js`
+
+- 暗拍的开标、出价校验和裁决；
+- 出价只存在会话里，公开视图和棋盘播报都拿不到明细；
+- 平价按提交先后裁决，保证可复现且不泄露信息。
+
+### `rules/items.js` 与 `rules/itemActions.js`
+
+- `items.js` 负责背包的发放、消耗、汇总和清空，不设持有上限；
+- `itemActions.js` 定义可主动使用道具的参数、目标校验和实际效果，强制收购与强制征收共用其中的买断过户逻辑；
+- 否决链的开窗、翻转和结算由 `GameEngine.js` 统一驱动。
 
 ### `rules/victory.js`
 
@@ -255,8 +284,8 @@ releaseSessionLock({ selfId, groupId }, token)
 
 ### `presentation/MessageFormatter.js`
 
-- 不再生成普通文字结算；
-- 只从 `turn_started` 事件生成下一名玩家的提及和简短掷骰提示；
+- 生成掷骰回执（点数、落点、结算摘要、现金与待办）和下一回合提及，收件人相同则合并成一条；
+- 否决窗口和暗拍公告也由这里出文案，暗拍公告不带提及；
 - 显示名只使用棋子颜色，不使用 QQ 昵称。
 
 ## 4. 核心会话结构
@@ -265,12 +294,12 @@ releaseSessionLock({ selfId, groupId }, token)
 
 ```json
 {
-  "version": 4,
+  "version": 8,
   "sessionId": "uuid",
   "selfId": "bot qq",
   "groupId": "group qq",
   "mapId": "sakura-city-40",
-  "mapVersion": 4,
+  "mapVersion": 10,
   "phase": "awaiting_roll",
   "hostUserId": "qq",
   "turnSeq": 12,
@@ -285,7 +314,9 @@ releaseSessionLock({ selfId, groupId }, token)
       "jailTurns": 0,
       "consecutiveDoubles": 1,
       "consecutiveRollTimeouts": 0,
-      "status": "active"
+      "forceBuysUsed": 1,
+      "status": "active",
+      "items": [{ "itemId": "negate", "cardId": "veto_writ" }]
     }
   ],
   "propertyStates": {
@@ -303,6 +334,7 @@ releaseSessionLock({ selfId, groupId }, token)
   },
   "pendingDecision": null,
   "pendingDebt": null,
+  "pendingAction": null,
   "lastDice": {
     "playerId": "qq",
     "values": [3, 3],
@@ -352,7 +384,9 @@ QQ事件
 - 半价反向均衡卖房、旅馆降级、抵押、赎回和免租；
 - 欠款暂停、自救、后续付款队列、强制结算和破产；
 - 卡牌移动连锁与 4 次上限；
-- 看守所跳过一个玩家回合；
+- 看守所 3 次掷骰机会、对子出狱、保释金与强制赎身；
+- 道具发放、主动使用和否决链翻转；
+- 强制收购的关键地判定、每局次数上限与抵押清偿；
 - 无轮数上限的持续对局、净资产排名和平局处理。
 
 ### 会话可靠性
@@ -369,8 +403,8 @@ QQ事件
 - 创建者不会自动加入，创建和强停权限只授予管理员或白名单用户；
 - 裸“是/否”和裸数字不会触发；
 - 管理员权限、房主移交和人数限制正确；
-- 每个有效命令都生成独立棋盘图片；只有 `turn_started` 事件产生额外提及文字。
+- 改变盘面的命令生成独立棋盘图片，放弃购买、开启否决窗口和道具被否决只回文字；`turn_started` 与否决窗口会产生额外提及文字。
 
 ## 7. 实现状态
 
-40 格地图、经典金额、双骰与对子规则、资产与欠款规则、Redis 会话与群锁、截止恢复和 Canvas 棋盘均已实现。玩家交易、拍卖和道具暂不进入本阶段。
+40 格地图、经典金额、双骰与对子规则、经典看守所规则、资产与欠款规则、五种道具与否决链、Redis 会话与群锁、截止恢复和 Canvas 棋盘均已实现。玩家自由交易和拍卖暂不进入本阶段。
