@@ -451,7 +451,8 @@ function buildSections(map) {
           t: "bullets",
           items: [
             `连续第 ${g.maxConsecutiveRollTimeouts} 次掷骰超时按认输处理，一次主动有效掷骰会清零计数。`,
-            `被插曲打断后回到等待掷骰，会重新给满 ${g.rollTimeoutSeconds} 秒；但建房、抵押、赎回和保释不重置倒计时。`,
+            `掷骰前每做一次操作——建房、卖房、抵押、赎回、保释，以及被插曲打断后回到等待掷骰——都重新给满 ${g.rollTimeoutSeconds} 秒。`,
+            `筹款期间同理：每卖一栋房、每押一块地，${g.debtTimeoutSeconds} 秒重新开始计时。`,
           ],
         },
       ],

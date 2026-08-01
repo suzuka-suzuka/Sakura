@@ -244,6 +244,19 @@ function finishPlayerTurn(state, map, events, runtime) {
   addTurnStartedEvent(state, map, events)
 }
 
+// 掷骰前理资产、筹款期间变卖，每操作一次都把倒计时重新给满。
+// 这些操作本身要翻棋盘、算价钱，从思考时间里扣就变成「手速赛」，
+// 一步步做下来还会被超时代掷截胡
+function refreshWaitingDeadline(state, map) {
+  if (state.phase === PHASES.AWAITING_ROLL) {
+    state.deadlineAt =
+      state.updatedAt + map.gameDefaults.rollTimeoutSeconds * 1000
+  } else if (state.phase === PHASES.AWAITING_DEBT) {
+    state.deadlineAt =
+      state.updatedAt + map.gameDefaults.debtTimeoutSeconds * 1000
+  }
+}
+
 function resumeAwaitingRoll(state, map, events) {
   state.phase = PHASES.AWAITING_ROLL
   state.pendingDecision = null
@@ -924,6 +937,7 @@ function performAssetAction(state, map, action, runtime, events) {
   ) {
     finishDebtResolution(state, map, runtime, events, false)
   }
+  refreshWaitingDeadline(state, map)
 }
 
 function resolveDebtAction(state, map, action, runtime, events, automatic) {
@@ -958,6 +972,7 @@ function payBail(state, map, action, events) {
       reason: "jail_free",
       paid: 0,
     })
+    refreshWaitingDeadline(state, map)
     return
   }
 
@@ -979,6 +994,7 @@ function payBail(state, map, action, events) {
     reason: "bail",
     paid: amount,
   })
+  refreshWaitingDeadline(state, map)
 }
 
 function bidAction(state, map, action, events) {
