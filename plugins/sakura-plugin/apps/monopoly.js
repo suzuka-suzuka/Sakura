@@ -432,6 +432,8 @@ export class Monopoly extends plugin {
   // 规则图不碰会话，群里没开局、甚至私聊都能查
   help = Command(COMMAND_PATTERNS.help, "message", async (e) => {
     if (!(await this.ensureReady(e))) return true
+    // 图较大，先贴个表情告诉用户指令已经收到
+    await e.react(124).catch(() => {})
     try {
       this.rulesImage ||= await renderRules(this.map)
       await e.reply(Segment.image(this.rulesImage))

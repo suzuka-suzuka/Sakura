@@ -5,11 +5,14 @@ import { pluginresources } from "../../path.js"
 // 规则长图：不画棋盘，只把全部规则和回合流程排成一张海报。
 // 所有数字、道具、色组、租金表都从地图读，改地图就自动跟着变，
 // 免得像文档那样和代码各说各话。
+//
+// 两栏是为手机看优化的：决定字在手机上多大的不是画布像素宽，
+// 而是整图横向能塞多少字——图片 fit-to-width 之后三栏会被压到三分之一。
 
 const FONT_FAMILY = "MonopolyRounded"
 const MARGIN = 34
-const COLUMNS = 3
-const COL_WIDTH = 620
+const COLUMNS = 2
+const COL_WIDTH = 600
 const COL_GAP = 26
 const CARD_PAD = 22
 const SECTION_GAP = 20
@@ -156,7 +159,6 @@ function buildSections(map) {
 
   return [
     {
-      column: 0,
       accent: "#42A5F5",
       title: "开局",
       blocks: [
@@ -185,14 +187,12 @@ function buildSections(map) {
     },
 
     {
-      column: 0,
       accent: "#EF5350",
       title: "回合流程",
       blocks: [{ t: "flow", map }],
     },
 
     {
-      column: 0,
       accent: "#78909C",
       title: "看守所",
       blocks: [
@@ -212,7 +212,6 @@ function buildSections(map) {
     },
 
     {
-      column: 1,
       accent: "#66BB6A",
       title: "地产与租金",
       blocks: [
@@ -263,7 +262,6 @@ function buildSections(map) {
     },
 
     {
-      column: 1,
       accent: "#FFA726",
       title: "建房与卖房",
       blocks: [
@@ -290,7 +288,6 @@ function buildSections(map) {
     },
 
     {
-      column: 1,
       accent: "#8D6E63",
       title: "抵押与赎回",
       blocks: [
@@ -308,7 +305,6 @@ function buildSections(map) {
     },
 
     {
-      column: 1,
       accent: "#AB47BC",
       title: `强制收购（常驻规则 · 每局 ${g.forceBuyLimit} 次）`,
       blocks: [
@@ -338,7 +334,6 @@ function buildSections(map) {
     },
 
     {
-      column: 2,
       accent: "#26A69A",
       title: "道具",
       blocks: [
@@ -364,8 +359,7 @@ function buildSections(map) {
     },
 
     {
-      // 紧跟强制收购：那一节最后一句就是「唯一的防御手段是否决令」
-      column: 1,
+      // 紧跟道具：否决链是道具系统的一部分，也是强制收购唯一的防御手段
       accent: "#5C6BC0",
       title: `否决链（${g.counterTimeoutSeconds} 秒）`,
       blocks: [
@@ -382,7 +376,6 @@ function buildSections(map) {
     },
 
     {
-      column: 2,
       accent: "#EC407A",
       title: `暗拍（${g.auctionTimeoutSeconds} 秒）`,
       blocks: [
@@ -410,7 +403,6 @@ function buildSections(map) {
     },
 
     {
-      column: 2,
       accent: "#EF5350",
       title: `欠款、自救与破产（${g.debtTimeoutSeconds} 秒）`,
       blocks: [
@@ -441,8 +433,6 @@ function buildSections(map) {
     },
 
     {
-      // 和回合流程、看守所同属「节奏」话题，放第一栏收尾
-      column: 0,
       accent: "#FFB300",
       title: "超时与判定",
       blocks: [
@@ -467,7 +457,6 @@ function buildSections(map) {
     },
 
     {
-      column: 2,
       accent: "#546E7A",
       title: "结束与排名",
       blocks: [
@@ -602,6 +591,43 @@ function sectionHeight(ctx, section, width) {
     height += measureBlock(ctx, block, width) + 12
   }
   return height + CARD_PAD - 4
+}
+
+// 按数组顺序顺序装栏，栏高接近平均值就换栏。
+// 不打乱顺序是有意的：规则是要一节接一节读下去的，
+// 「哪节最矮就塞哪」会把开局和结算混在一起。
+function packColumns(ctx, sections, columns, width) {
+  const heights = sections.map((section) =>
+    sectionHeight(ctx, section, width)
+  )
+  const total = heights.reduce((sum, height) => sum + height + SECTION_GAP, 0)
+  const target = total / columns
+
+  const columnHeights = new Array(columns).fill(0)
+  const placed = []
+  let column = 0
+
+  heights.forEach((height, index) => {
+    const columnsAfter = columns - column - 1
+    const sectionsAfter = sections.length - index - 1
+    // 超过平均线过半就换栏；后面的栏一节都分不到时也提前换
+    const overflow =
+      columnHeights[column] > 0 &&
+      columnHeights[column] + height / 2 > target
+    const starve = sectionsAfter < columnsAfter
+    if (column < columns - 1 && columnHeights[column] > 0 && (overflow || starve)) {
+      column += 1
+    }
+    placed.push({
+      section: sections[index],
+      column,
+      y: columnHeights[column],
+      height,
+    })
+    columnHeights[column] += height + SECTION_GAP
+  })
+
+  return { placed, gridHeight: Math.max(...columnHeights) }
 }
 
 // —— 回合流程图 ——
@@ -1044,8 +1070,26 @@ function headerStats(map) {
   ]
 }
 
+// 数字条按可用宽度折行：窄图硬塞一行会让「机会 17 / 命运 17」压到下一格
+function headerLayout(ctx, map, width) {
+  const stats = headerStats(map)
+  ctx.font = font(20, "bold")
+  const widest = Math.max(
+    ...stats.map(([, value]) => ctx.measureText(value).width)
+  )
+  const usable = width - 68
+  const fits = Math.max(
+    1,
+    Math.min(stats.length, Math.floor(usable / (widest + 28)))
+  )
+  // 先算出最多能放几个，再摊平成每行一样多，免得出现 6 + 2 这种尾巴
+  const rows = Math.ceil(stats.length / fits)
+  const perRow = Math.ceil(stats.length / rows)
+  return { stats, perRow, rows, height: 118 + rows * 46 + 6 }
+}
+
 function drawHeader(ctx, map, x, y, width) {
-  const height = 168
+  const { stats, perRow, height } = headerLayout(ctx, map, width)
   fillRounded(ctx, x, y, width, height, 20, "#263238")
 
   ctx.textAlign = "left"
@@ -1055,22 +1099,19 @@ function drawHeader(ctx, map, x, y, width) {
 
   ctx.font = font(18)
   ctx.fillStyle = "#90A4AE"
-  ctx.fillText(
-    `${map.description || "机器人主持的严格回合制大富翁"}　|　地图 ${map.id} v${map.version}　|　群内发送【大富翁规则】随时查看`,
-    x + 34,
-    y + 90
-  )
+  const subtitle = `${map.description || "机器人主持的严格回合制大富翁"}　|　地图 ${map.id} v${map.version}　|　群内发送【大富翁规则】随时查看`
+  ctx.fillText(wrapText(ctx, subtitle, width - 68)[0], x + 34, y + 90)
 
-  const stats = headerStats(map)
-  const cellWidth = (width - 68) / stats.length
+  const cellWidth = (width - 68) / perRow
   stats.forEach(([label, value], index) => {
-    const cx = x + 34 + index * cellWidth
+    const cx = x + 34 + (index % perRow) * cellWidth
+    const cy = y + 126 + Math.floor(index / perRow) * 46
     ctx.font = font(15)
     ctx.fillStyle = "#78909C"
-    ctx.fillText(label, cx, y + 126)
+    ctx.fillText(label, cx, cy)
     ctx.font = font(20, "bold")
     ctx.fillStyle = "#FFD54F"
-    ctx.fillText(value, cx, y + 152)
+    ctx.fillText(value, cx, cy + 26)
   })
   return height
 }
@@ -1123,18 +1164,14 @@ export async function renderRules(map) {
   const contentWidth = COL_WIDTH * COLUMNS + COL_GAP * (COLUMNS - 1)
   const scratch = createCanvas(10, 10).getContext("2d")
 
-  const sections = buildSections(map)
-  const columnHeights = new Array(COLUMNS).fill(0)
-  const placed = sections.map((section) => {
-    const height = sectionHeight(scratch, section, COL_WIDTH)
-    const column = section.column
-    const y = columnHeights[column]
-    columnHeights[column] += height + SECTION_GAP
-    return { section, column, y, height }
-  })
+  const { placed, gridHeight } = packColumns(
+    scratch,
+    buildSections(map),
+    COLUMNS,
+    COL_WIDTH
+  )
 
-  const headerHeight = 168
-  const gridHeight = Math.max(...columnHeights)
+  const headerHeight = headerLayout(scratch, map, contentWidth).height
   const cmdHeight = commandsHeight(scratch)
   const canvasWidth = contentWidth + MARGIN * 2
   const canvasHeight =
