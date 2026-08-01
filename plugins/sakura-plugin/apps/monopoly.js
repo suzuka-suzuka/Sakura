@@ -23,6 +23,21 @@ import {
   buildTurnPrompt,
 } from "../lib/monopoly/presentation/MessageFormatter.js"
 
+// 这些错误只是「现在不该你发这条指令」，回一句话就够，不必再刷一张棋盘
+const QUIET_RULE_ERRORS = new Set([
+  "NOT_PLAYER",
+  "NOT_CURRENT_PLAYER",
+  "NOT_DEBTOR",
+  "NOT_RESPONDENT",
+  "PLAYER_INACTIVE",
+  "WRONG_PHASE",
+  // 名字打错、参数漏了这类输入问题，回一句话就行，不必刷一张棋盘
+  "UNKNOWN_ITEM",
+  "MISSING_ARG",
+  "INVALID_TARGET",
+  "PROPERTY_NOT_FOUND",
+])
+
 export class Monopoly extends plugin {
   constructor() {
     super({
@@ -112,7 +127,7 @@ export class Monopoly extends plugin {
     if (!result) return
     const board = await this.buildBoardSegment(result)
     if (board) await e.reply([board])
-    const prompt = buildTurnPrompt(result)
+    const prompt = buildTurnPrompt(result, this.map)
     if (prompt) {
       await e.reply([
         Segment.at(prompt.mentionUserId),
@@ -134,7 +149,7 @@ export class Monopoly extends plugin {
     }
     const board = await this.buildBoardSegment(result)
     if (board) await bot.sendGroupMsg(groupId, [board])
-    const prompt = buildTurnPrompt(result)
+    const prompt = buildTurnPrompt(result, this.map)
     if (prompt) {
       await bot.sendGroupMsg(groupId, [
         Segment.at(prompt.mentionUserId),
@@ -157,6 +172,10 @@ export class Monopoly extends plugin {
       return true
     } catch (error) {
       if (error instanceof GameRuleError) {
+        if (QUIET_RULE_ERRORS.has(error.code)) {
+          await e.reply(error.message, false, true)
+          return true
+        }
         try {
           const result = await this.service.status(this.contextFromEvent(e))
           result.events = [
@@ -178,6 +197,14 @@ export class Monopoly extends plugin {
     if (!this.ready || !this.service) return false
     const context = this.contextFromEvent(e)
     if (!(await this.service.hasSession(context))) return false
+    return this.execute(e, callback)
+  }
+
+  // 局内指令：不是本局在场玩家就静默放行，避免路人打个 r / y / n 就被回执刷屏
+  async executeForPlayer(e, callback) {
+    if (!this.ready || !this.service) return false
+    const context = this.contextFromEvent(e)
+    if (!(await this.service.isActivePlayer(context))) return false
     return this.execute(e, callback)
   }
 
@@ -209,7 +236,7 @@ export class Monopoly extends plugin {
   )
 
   leaveLobby = Command(COMMAND_PATTERNS.leaveLobby, async (e) =>
-    this.executeInGame(e, () =>
+    this.executeForPlayer(e, () =>
       this.service.leaveLobby(this.contextFromEvent(e))
     )
   )
@@ -221,11 +248,11 @@ export class Monopoly extends plugin {
   )
 
   roll = Command(COMMAND_PATTERNS.roll, async (e) =>
-    this.executeInGame(e, () => this.service.roll(this.contextFromEvent(e)))
+    this.executeForPlayer(e, () => this.service.roll(this.contextFromEvent(e)))
   )
 
   purchase = Command(COMMAND_PATTERNS.purchase, async (e) =>
-    this.executeInGame(e, () =>
+    this.executeForPlayer(e, () =>
       this.service.decide(
         this.contextFromEvent(e),
         DECISIONS.PURCHASE
@@ -234,37 +261,68 @@ export class Monopoly extends plugin {
   )
 
   build = Command(COMMAND_PATTERNS.build, async (e) =>
-    this.executeInGame(e, () =>
+    this.executeForPlayer(e, () =>
       this.service.build(this.contextFromEvent(e), e.match[1])
     )
   )
 
   sellBuilding = Command(COMMAND_PATTERNS.sellBuilding, async (e) =>
-    this.executeInGame(e, () =>
+    this.executeForPlayer(e, () =>
       this.service.sellBuilding(this.contextFromEvent(e), e.match[1])
     )
   )
 
   mortgage = Command(COMMAND_PATTERNS.mortgage, async (e) =>
-    this.executeInGame(e, () =>
+    this.executeForPlayer(e, () =>
       this.service.mortgage(this.contextFromEvent(e), e.match[1])
     )
   )
 
   redeem = Command(COMMAND_PATTERNS.redeem, async (e) =>
-    this.executeInGame(e, () =>
+    this.executeForPlayer(e, () =>
       this.service.redeem(this.contextFromEvent(e), e.match[1])
     )
   )
 
+  useItem = Command(COMMAND_PATTERNS.useItem, async (e) => {
+    if (!this.ready || !this.map) return false
+    // 不是大富翁的道具就原样放行，让经济系统的【使用 xx】接着处理
+    const name = e.match[1]
+    const known = this.map.items?.some(
+      (item) => item.name === name || item.id === name
+    )
+    if (!known) return false
+    return this.executeForPlayer(e, () =>
+      this.service.useItem(
+        this.contextFromEvent(e),
+        name,
+        [e.match[2], e.match[3]],
+        // 艾特出来的人优先当作目标玩家，省得再打一遍颜色名
+        e.at
+      )
+    )
+  })
+
+  counter = Command(COMMAND_PATTERNS.counter, async (e) =>
+    this.executeForPlayer(e, () =>
+      this.service.respondToCounter(this.contextFromEvent(e), false)
+    )
+  )
+
+  counterPass = Command(COMMAND_PATTERNS.counterPass, async (e) =>
+    this.executeForPlayer(e, () =>
+      this.service.respondToCounter(this.contextFromEvent(e), true)
+    )
+  )
+
   resolveDebt = Command(COMMAND_PATTERNS.resolveDebt, async (e) =>
-    this.executeInGame(e, () =>
+    this.executeForPlayer(e, () =>
       this.service.resolveDebt(this.contextFromEvent(e))
     )
   )
 
   decline = Command(COMMAND_PATTERNS.decline, async (e) =>
-    this.executeInGame(e, () =>
+    this.executeForPlayer(e, () =>
       this.service.decide(
         this.contextFromEvent(e),
         DECISIONS.DECLINE
@@ -273,14 +331,8 @@ export class Monopoly extends plugin {
   )
 
   surrender = Command(COMMAND_PATTERNS.surrender, async (e) =>
-    this.executeInGame(e, () =>
+    this.executeForPlayer(e, () =>
       this.service.surrender(this.contextFromEvent(e))
-    )
-  )
-
-  status = Command(COMMAND_PATTERNS.status, async (e) =>
-    this.executeInGame(e, () =>
-      this.service.status(this.contextFromEvent(e))
     )
   )
 

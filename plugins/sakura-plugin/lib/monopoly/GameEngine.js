@@ -20,6 +20,15 @@ import {
 } from "./rules/assets.js"
 import { createBuildingSupply } from "./rules/buildings.js"
 import {
+  consumeItem,
+  hasItem,
+  itemById,
+} from "./rules/items.js"
+import {
+  NEGATE_ITEM,
+  itemAction,
+} from "./rules/itemActions.js"
+import {
   resolvePendingDebt,
   surrenderPlayer,
 } from "./rules/settlement.js"
@@ -39,6 +48,8 @@ import {
   soleActivePlayer,
 } from "./rules/victory.js"
 import { validateDeckOrder } from "./rules/chance.js"
+
+const JAIL_FREE_ITEM = "jail_free"
 
 function asNow(runtime) {
   const now = runtime?.now
@@ -60,7 +71,14 @@ function createPlayer({ userId, displayName, joinOrder }, map) {
     consecutiveRollTimeouts: 0,
     consecutiveDoubles: 0,
     status: PLAYER_STATUS.ACTIVE,
+    items: [],
   }
+}
+
+function createDeckStates(map) {
+  return Object.fromEntries(
+    map.chanceDecks.map((deck) => [deck.id, { order: [], cursor: 0 }])
+  )
 }
 
 function createPropertyStates(map) {
@@ -96,13 +114,10 @@ export function createLobbyState(
     players: [],
     propertyStates: createPropertyStates(map),
     buildingSupply: createBuildingSupply(map),
-    chance: {
-      deckId: map.chanceDecks[0].id,
-      order: [],
-      cursor: 0,
-    },
+    decks: createDeckStates(map),
     pendingDecision: null,
     pendingDebt: null,
+    pendingAction: null,
     deadlineAt: now + map.gameDefaults.lobbyTimeoutSeconds * 1000,
     lastDice: null,
     winnerIds: [],
@@ -130,6 +145,7 @@ function addTurnStartedEvent(state, map, events) {
   state.phase = PHASES.AWAITING_ROLL
   state.pendingDecision = null
   state.pendingDebt = null
+  state.pendingAction = null
   state.deadlineAt =
     state.updatedAt + map.gameDefaults.rollTimeoutSeconds * 1000
   events.push({
@@ -158,6 +174,7 @@ function endGame(state, map, events, reason, runtime, { forced = false } = {}) {
   state.phase = PHASES.ENDED
   state.pendingDecision = null
   state.pendingDebt = null
+  state.pendingAction = null
   state.deadlineAt = 0
   state.endReason = reason
   state.endedAt = now
@@ -197,6 +214,18 @@ function beginPlayableTurn(state, map, events, runtime) {
       return
     }
 
+    // 手上有保释令就自动用掉：这局待在看守所永远没有好处，不必再问一次
+    if (
+      hasItem(player, JAIL_FREE_ITEM) &&
+      consumeItem(state, map, player.userId, JAIL_FREE_ITEM, events, {
+        reason: "jail",
+      })
+    ) {
+      player.jailTurns = 0
+      addTurnStartedEvent(state, map, events)
+      return
+    }
+
     player.jailTurns -= 1
     events.push({
       type: "jail_turn_skipped",
@@ -221,6 +250,7 @@ function finishPlayerTurn(state, map, events, runtime) {
   if (endingPlayer) endingPlayer.consecutiveDoubles = 0
   state.pendingDecision = null
   state.pendingDebt = null
+  state.pendingAction = null
   state.deadlineAt = 0
   state.phase = PHASES.RESOLVING
 
@@ -257,6 +287,7 @@ function finishResolvedRoll(state, map, events, runtime) {
   state.phase = PHASES.AWAITING_ROLL
   state.pendingDecision = null
   state.pendingDebt = null
+  state.pendingAction = null
   state.deadlineAt =
     state.updatedAt + map.gameDefaults.rollTimeoutSeconds * 1000
   events.push({
@@ -285,9 +316,10 @@ function validateStartRandomness(state, map, runtime) {
   ) {
     ruleError("INVALID_RANDOM_INPUT", "玩家棋子颜色无效。")
   }
-  const deck = map.chanceDecks[0]
-  if (!validateDeckOrder(deck, runtime.chanceOrder)) {
-    ruleError("INVALID_RANDOM_INPUT", "开局机会牌顺序无效。")
+  for (const deck of map.chanceDecks) {
+    if (!validateDeckOrder(deck, runtime.chanceOrder?.[deck.id])) {
+      ruleError("INVALID_RANDOM_INPUT", `开局牌堆 ${deck.id} 的顺序无效。`)
+    }
   }
 }
 
@@ -317,17 +349,20 @@ function startGame(state, map, action, runtime, events) {
     player.consecutiveRollTimeouts = 0
     player.consecutiveDoubles = 0
     player.status = PLAYER_STATUS.ACTIVE
+    player.items = []
     return player
   })
   state.propertyStates = createPropertyStates(map)
   state.buildingSupply = createBuildingSupply(map)
-  state.chance = {
-    deckId: map.chanceDecks[0].id,
-    order: [...runtime.chanceOrder],
-    cursor: 0,
-  }
+  state.decks = Object.fromEntries(
+    map.chanceDecks.map((deck) => [
+      deck.id,
+      { order: [...runtime.chanceOrder[deck.id]], cursor: 0 },
+    ])
+  )
   state.pendingDecision = null
   state.pendingDebt = null
+  state.pendingAction = null
   state.turnIndex = 0
   state.turnSeq = 1
   state.startedAt = asNow(runtime)
@@ -455,6 +490,163 @@ function performRoll(
     state.pendingDecision = null
   }
   finishResolvedRoll(state, map, events, runtime)
+}
+
+// —— 道具与否决链 ——
+
+// 链上每多一张否决令就翻转一次结果：偶数层生效，奇数层作废
+function counterRespondentId(pending) {
+  return pending.chain.length % 2 === 0 ? pending.victimId : pending.actorId
+}
+
+function resolvePendingItem(state, map, runtime, events) {
+  const pending = state.pendingAction
+  if (!pending) return
+  state.pendingAction = null
+
+  const actor = playerById(state, pending.actorId)
+  const negated = pending.chain.length % 2 === 1
+  if (negated) {
+    const last = pending.chain[pending.chain.length - 1]
+    events.push({
+      type: "item_negated",
+      playerId: last.userId,
+      actorId: pending.actorId,
+      itemId: pending.itemId,
+      depth: pending.chain.length,
+    })
+  } else if (actor?.status === PLAYER_STATUS.ACTIVE) {
+    itemAction(pending.itemId).apply(
+      state,
+      map,
+      actor,
+      { ...pending.args, victimId: pending.victimId },
+      runtime,
+      events
+    )
+    if (pending.chain.length > 0) {
+      events.push({
+        type: "counter_chain_resolved",
+        playerId: pending.actorId,
+        itemId: pending.itemId,
+        depth: pending.chain.length,
+        applied: true,
+      })
+    }
+  }
+
+  // 道具是在自己掷骰前用的，结算完把回合还回去，不换人
+  state.phase = PHASES.AWAITING_ROLL
+  state.deadlineAt =
+    state.updatedAt + map.gameDefaults.rollTimeoutSeconds * 1000
+}
+
+// 只有手上真有否决令的人才值得开窗口，否则直接结算，别让全场干等
+function advanceCounter(state, map, runtime, events) {
+  const pending = state.pendingAction
+  const respondent = playerById(state, counterRespondentId(pending))
+  if (
+    !respondent ||
+    respondent.status !== PLAYER_STATUS.ACTIVE ||
+    !hasItem(respondent, NEGATE_ITEM)
+  ) {
+    resolvePendingItem(state, map, runtime, events)
+    return
+  }
+  pending.respondentId = respondent.userId
+  state.phase = PHASES.AWAITING_COUNTER
+  state.deadlineAt =
+    state.updatedAt + map.gameDefaults.counterTimeoutSeconds * 1000
+  events.push({
+    type: "counter_window_opened",
+    playerId: respondent.userId,
+    actorId: pending.actorId,
+    victimId: pending.victimId,
+    itemId: pending.itemId,
+    depth: pending.chain.length,
+    deadlineAt: state.deadlineAt,
+  })
+}
+
+function useItem(state, map, action, runtime, events) {
+  requirePhase(state, PHASES.AWAITING_ROLL, "只能在自己掷骰前使用道具。")
+  const actor = requireCurrentPlayer(state, action.userId)
+  const definition = itemById(map, action.itemId)
+  const handler = itemAction(action.itemId)
+  if (!definition || !handler) {
+    ruleError("UNKNOWN_ITEM", "这张道具卡不能主动使用。")
+  }
+  if (!hasItem(actor, definition.id)) {
+    ruleError("ITEM_NOT_HELD", `你手上没有${definition.name}。`)
+  }
+
+  const prepared = handler.prepare(
+    state,
+    map,
+    actor,
+    action.args || [],
+    runtime
+  )
+  consumeItem(state, map, actor.userId, definition.id, events, {
+    reason: "use",
+  })
+  events.push({
+    type: "item_targeted",
+    playerId: actor.userId,
+    victimId: prepared.victimId,
+    itemId: definition.id,
+    detail: handler.describe(map, prepared.args),
+  })
+
+  state.pendingAction = {
+    itemId: definition.id,
+    actorId: actor.userId,
+    victimId: prepared.victimId,
+    args: prepared.args,
+    chain: [],
+    respondentId: null,
+    createdAt: asNow(runtime),
+  }
+  if (handler.counterable) {
+    advanceCounter(state, map, runtime, events)
+    return
+  }
+  resolvePendingItem(state, map, runtime, events)
+}
+
+function counterAction(state, map, action, runtime, events, automatic) {
+  requirePhase(state, PHASES.AWAITING_COUNTER, "当前没有等待否决的道具。")
+  const pending = state.pendingAction
+  if (automatic || action.pass) {
+    if (!automatic) {
+      const player = requirePlayer(state, action.userId)
+      if (player.userId !== pending.respondentId) {
+        ruleError("NOT_RESPONDENT", "现在不该你决定是否否决。")
+      }
+    }
+    events.push({
+      type: "counter_declined",
+      playerId: pending.respondentId,
+      itemId: pending.itemId,
+      automatic,
+      depth: pending.chain.length,
+    })
+    resolvePendingItem(state, map, runtime, events)
+    return
+  }
+
+  const player = requirePlayer(state, action.userId)
+  if (player.userId !== pending.respondentId) {
+    ruleError("NOT_RESPONDENT", "现在不该你决定是否否决。")
+  }
+  if (!hasItem(player, NEGATE_ITEM)) {
+    ruleError("ITEM_NOT_HELD", "你手上没有否决令。")
+  }
+  consumeItem(state, map, player.userId, NEGATE_ITEM, events, {
+    reason: "counter",
+  })
+  pending.chain.push({ userId: player.userId, itemId: NEGATE_ITEM })
+  advanceCounter(state, map, runtime, events)
 }
 
 function joinLobby(state, map, action, events) {
@@ -590,7 +782,7 @@ function resolveDebtAction(state, map, action, runtime, events, automatic) {
   if (!automatic) {
     const player = requirePlayer(state, action.userId)
     if (state.pendingDebt?.payerId !== player.userId) {
-      ruleError("NOT_DEBTOR", "只有当前欠款玩家可以继续结算。")
+      ruleError("NOT_DEBTOR", "只有当前欠款玩家可以强制结算。")
     }
   }
   finishDebtResolution(state, map, runtime, events, automatic)
@@ -703,6 +895,25 @@ export function transition(inputState, action, map, runtime = {}) {
     case ACTIONS.MORTGAGE:
     case ACTIONS.REDEEM:
       performAssetAction(state, map, action, runtime, events)
+      break
+    case ACTIONS.USE_ITEM:
+      useItem(state, map, action, runtime, events)
+      break
+    case ACTIONS.COUNTER:
+      counterAction(state, map, action, runtime, events, false)
+      break
+    case ACTIONS.COUNTER_PASS:
+      counterAction(
+        state,
+        map,
+        { ...action, pass: true },
+        runtime,
+        events,
+        false
+      )
+      break
+    case ACTIONS.COUNTER_TIMEOUT:
+      counterAction(state, map, action, runtime, events, true)
       break
     case ACTIONS.RESOLVE_DEBT:
       resolveDebtAction(state, map, action, runtime, events, false)

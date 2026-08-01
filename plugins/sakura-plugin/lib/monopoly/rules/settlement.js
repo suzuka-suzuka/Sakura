@@ -4,6 +4,8 @@ import {
   ruleError,
 } from "../constants.js"
 import { returnBuildingsToBank } from "./buildings.js"
+import { dropAllItems } from "./items.js"
+import { autoLiquidate } from "./liquidation.js"
 import {
   ownedPropertyEntries,
   playerById,
@@ -14,13 +16,25 @@ export function liquidationValue(map, tile, propertyState) {
   return tile.price + (tile.upgradeCost || 0) * propertyState.level
 }
 
-export function returnAllPropertiesToBank(
+// 破产清算：欠玩家的把地连同抵押状态转给债主，欠银行的照旧退回银行。
+// 建筑一律先折回银行库存，转手的永远是空地——和原版「先卖光房子再交地契」一致。
+export function handOverEstate(
   state,
   map,
   playerId,
+  creditorId,
   events,
   reason
 ) {
+  const creditor = creditorId == null ? null : playerById(state, creditorId)
+  const toCreditor =
+    creditor != null &&
+    creditor.status === PLAYER_STATUS.ACTIVE &&
+    creditor.userId !== String(playerId)
+  let transferred = 0
+  let mortgagedCount = 0
+  let interestDue = 0
+
   for (const { tile, propertyState } of ownedPropertyEntries(
     state,
     map,
@@ -32,8 +46,32 @@ export function returnAllPropertiesToBank(
       map,
       previousLevel
     )
-    propertyState.ownerId = null
     propertyState.level = 0
+
+    if (toCreditor) {
+      propertyState.ownerId = creditor.userId
+      transferred += 1
+      if (propertyState.mortgaged) {
+        mortgagedCount += 1
+        // 接手抵押地要立刻向银行付一次利息，地契仍然是抵押状态
+        interestDue += Math.ceil(
+          tile.mortgageValue * map.gameDefaults.mortgageInterestRate
+        )
+      }
+      events.push({
+        type: "property_transferred",
+        playerId: String(playerId),
+        recipientId: creditor.userId,
+        tileId: tile.id,
+        previousLevel,
+        returnedBuildings,
+        mortgaged: propertyState.mortgaged,
+        reason,
+      })
+      continue
+    }
+
+    propertyState.ownerId = null
     propertyState.mortgaged = false
     events.push({
       type: "property_returned",
@@ -44,6 +82,32 @@ export function returnAllPropertiesToBank(
       reason,
     })
   }
+
+  if (transferred > 0) {
+    // 债主掏不出全额利息时只扣到见底，不再把债主也拖进欠款流程
+    const interest = Math.min(creditor.cash, interestDue)
+    creditor.cash -= interest
+    events.push({
+      type: "properties_transferred",
+      playerId: String(playerId),
+      recipientId: creditor.userId,
+      count: transferred,
+      mortgagedCount,
+      interest,
+      interestDue,
+      reason,
+    })
+  }
+}
+
+export function returnAllPropertiesToBank(
+  state,
+  map,
+  playerId,
+  events,
+  reason
+) {
+  handOverEstate(state, map, playerId, null, events, reason)
 }
 
 export function surrenderPlayer(
@@ -59,6 +123,7 @@ export function surrenderPlayer(
 
   player.cash = 0
   player.status = PLAYER_STATUS.SURRENDERED
+  dropAllItems(state, player.userId, events, reason)
   returnAllPropertiesToBank(state, map, player.userId, events, reason)
   events.push({
     type: "player_surrendered",
@@ -68,13 +133,16 @@ export function surrenderPlayer(
   return true
 }
 
-function markBankrupt(state, map, player, events, reason) {
+function markBankrupt(state, map, player, events, reason, creditorId = null) {
   player.cash = 0
   player.status = PLAYER_STATUS.BANKRUPT
-  returnAllPropertiesToBank(
+  // 道具不随地产转给债主，一律作废
+  dropAllItems(state, player.userId, events, "bankruptcy")
+  handOverEstate(
     state,
     map,
     player.userId,
+    creditorId,
     events,
     "bankruptcy"
   )
@@ -139,7 +207,9 @@ export function settlePayment(
   })
 
   const bankrupt = paid < amount
-  if (bankrupt) markBankrupt(state, map, payer, events, reason)
+  if (bankrupt) {
+    markBankrupt(state, map, payer, events, reason, recipient?.userId ?? null)
+  }
   return { due: amount, paid, bankrupt }
 }
 
@@ -213,6 +283,18 @@ export function resolvePendingDebt(
   state.pendingDebt = null
   state.phase = PHASES.RESOLVING
   state.deadlineAt = 0
+
+  // 掏光现金之前先自动变现，卖到还不起为止才算真破产
+  const payer = playerById(state, currentPayment.payerId)
+  if (payer?.status === PLAYER_STATUS.ACTIVE && payer.cash < currentPayment.amount) {
+    autoLiquidate(
+      state,
+      map,
+      payer.userId,
+      currentPayment.amount,
+      events
+    )
+  }
 
   const result = settlePayment(state, map, {
     ...currentPayment,

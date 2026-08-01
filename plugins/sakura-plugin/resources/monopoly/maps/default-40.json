@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "sakura-city-40",
-  "version": 4,
+  "version": 6,
   "name": "樱都经典环线",
   "description": "参考经典大富翁结构设计的40格默认地图。",
   "ruleset": "qq-monopoly-turn-v4",
@@ -26,7 +26,8 @@
     "maxTileResolutionDepth": 4,
     "debtTimeoutSeconds": 60,
     "buildingSaleRate": 0.5,
-    "mortgageInterestRate": 0.1
+    "mortgageInterestRate": 0.1,
+    "counterTimeoutSeconds": 15
   },
   "board": {
     "size": 40,
@@ -218,13 +219,13 @@
     {
       "id": 2,
       "type": "chance",
-      "name": "机会",
-      "description": "抽取一张城市事件牌。",
+      "name": "命运",
+      "description": "抽取一张命运牌。",
       "position": {
         "x": 8,
         "y": 10
       },
-      "deckId": "city_chance"
+      "deckId": "city_fate"
     },
     {
       "id": 3,
@@ -307,7 +308,7 @@
       "id": 7,
       "type": "chance",
       "name": "机会",
-      "description": "抽取一张城市事件牌。",
+      "description": "抽取一张机会牌。",
       "position": {
         "x": 3,
         "y": 10
@@ -503,13 +504,13 @@
     {
       "id": 17,
       "type": "chance",
-      "name": "机会",
-      "description": "抽取一张城市事件牌。",
+      "name": "命运",
+      "description": "抽取一张命运牌。",
       "position": {
         "x": 0,
         "y": 3
       },
-      "deckId": "city_chance"
+      "deckId": "city_fate"
     },
     {
       "id": 18,
@@ -594,7 +595,7 @@
       "id": 22,
       "type": "chance",
       "name": "机会",
-      "description": "抽取一张城市事件牌。",
+      "description": "抽取一张机会牌。",
       "position": {
         "x": 2,
         "y": 0
@@ -814,13 +815,13 @@
     {
       "id": 33,
       "type": "chance",
-      "name": "机会",
-      "description": "抽取一张城市事件牌。",
+      "name": "命运",
+      "description": "抽取一张命运牌。",
       "position": {
         "x": 10,
         "y": 3
       },
-      "deckId": "city_chance"
+      "deckId": "city_fate"
     },
     {
       "id": 34,
@@ -869,7 +870,7 @@
       "id": 36,
       "type": "chance",
       "name": "机会",
-      "description": "抽取一张城市事件牌。",
+      "description": "抽取一张机会牌。",
       "position": {
         "x": 10,
         "y": 6
@@ -937,8 +938,186 @@
   "chanceDecks": [
     {
       "id": "city_chance",
-      "name": "城市事件",
+      "name": "机会",
       "cards": [
+        {
+          "id": "express_line",
+          "name": "搭乘快线",
+          "description": "赶上城际快线，前进 3 格。",
+          "effect": {
+            "type": "move_by",
+            "steps": 3,
+            "collectStartReward": true,
+            "resolveDestination": true
+          }
+        },
+        {
+          "id": "wrong_turn",
+          "name": "走错路口",
+          "description": "导航失灵，后退 2 格。",
+          "effect": {
+            "type": "move_by",
+            "steps": -2,
+            "collectStartReward": false,
+            "resolveDestination": true
+          }
+        },
+        {
+          "id": "chance_return_to_start",
+          "name": "返回起点",
+          "description": "直接回到樱都起点，领取 200。",
+          "effect": {
+            "type": "move_to",
+            "targetTileId": 0,
+            "collectStartReward": true,
+            "resolveDestination": false
+          }
+        },
+        {
+          "id": "castle_tour",
+          "name": "直达城堡",
+          "description": "受邀前往樱都城堡，立刻移动过去。",
+          "effect": {
+            "type": "move_to",
+            "targetTileId": 39,
+            "collectStartReward": true,
+            "resolveDestination": true
+          }
+        },
+        {
+          "id": "hanami_parade",
+          "name": "花见巡游",
+          "description": "巡游队伍出发，前往花见广场。",
+          "effect": {
+            "type": "move_to",
+            "targetTileId": 11,
+            "collectStartReward": true,
+            "resolveDestination": true
+          }
+        },
+        {
+          "id": "last_train",
+          "name": "末班列车",
+          "description": "赶往最近的车站，若已有主人则支付双倍租金。",
+          "effect": {
+            "type": "move_to_nearest",
+            "propertyKind": "station",
+            "rentMultiplier": 2,
+            "collectStartReward": true,
+            "resolveDestination": true
+          },
+          "count": 2
+        },
+        {
+          "id": "power_repair",
+          "name": "抢修电路",
+          "description": "前往最近的公共设施，按双倍水电费结算。",
+          "effect": {
+            "type": "move_to_nearest",
+            "propertyKind": "utility",
+            "rentMultiplier": 2,
+            "collectStartReward": true,
+            "resolveDestination": true
+          }
+        },
+        {
+          "id": "security_check",
+          "name": "临时检查",
+          "description": "被临时检查扣下，前往看守所。",
+          "effect": {
+            "type": "send_to_jail",
+            "targetTileId": 10
+          }
+        },
+        {
+          "id": "traffic_ticket",
+          "name": "交通罚单",
+          "description": "违章停车，罚款 60。",
+          "effect": {
+            "type": "cash",
+            "amount": -60
+          }
+        },
+        {
+          "id": "group_treat",
+          "name": "请客聚餐",
+          "description": "临时起意请客，给每位玩家 20。",
+          "effect": {
+            "type": "transfer_each",
+            "direction": "to_others",
+            "amount": 20
+          }
+        },
+        {
+          "id": "city_repairs",
+          "name": "市政维修",
+          "description": "名下每栋房屋 25、每座旅馆 100。",
+          "effect": {
+            "type": "repairs",
+            "perHouse": 25,
+            "perHotel": 100
+          }
+        },
+        {
+          "id": "chance_bail_order",
+          "name": "保释令",
+          "description": "获得一张保释令，进看守所时自动使用。",
+          "effect": {
+            "type": "grant_item",
+            "itemId": "jail_free"
+          }
+        },
+        {
+          "id": "swap_deed",
+          "name": "地契置换",
+          "description": "拿到一份置换协议，可与更富有的玩家换一块地。",
+          "effect": {
+            "type": "grant_item",
+            "itemId": "swap_property"
+          }
+        },
+        {
+          "id": "compulsory_purchase",
+          "name": "强制征收",
+          "description": "拿到一份征收令，可按全额售价强买一块地。",
+          "effect": {
+            "type": "grant_item",
+            "itemId": "seize_property"
+          }
+        },
+        {
+          "id": "demolition_order",
+          "name": "拆迁令",
+          "description": "拿到一份拆迁令，可拆掉对方一栋建筑。",
+          "effect": {
+            "type": "grant_item",
+            "itemId": "demolish"
+          }
+        }
+      ]
+    },
+    {
+      "id": "city_fate",
+      "name": "命运",
+      "cards": [
+        {
+          "id": "bank_error",
+          "name": "银行结算错误",
+          "description": "银行结算出错，多进账 200。",
+          "effect": {
+            "type": "cash",
+            "amount": 200
+          }
+        },
+        {
+          "id": "insurance_matured",
+          "name": "保险金到期",
+          "description": "保险金到期，领取 100。",
+          "effect": {
+            "type": "cash",
+            "amount": 100
+          }
+        },
         {
           "id": "project_bonus",
           "name": "项目奖金",
@@ -951,45 +1130,81 @@
         {
           "id": "shopping_rebate",
           "name": "消费返利",
-          "description": "收到城市消费返利，获得 50。",
+          "description": "商圈消费返利 50。",
           "effect": {
             "type": "cash",
             "amount": 50
           }
         },
         {
-          "id": "equipment_repair",
-          "name": "设备维修",
-          "description": "临时维修设备，支付 50。",
+          "id": "startup_subsidy",
+          "name": "创业补贴",
+          "description": "创业补贴到账 30。",
+          "effect": {
+            "type": "cash",
+            "amount": 30
+          }
+        },
+        {
+          "id": "hospital_fee",
+          "name": "医药费",
+          "description": "住院一周，支付 100。",
+          "effect": {
+            "type": "cash",
+            "amount": -100
+          }
+        },
+        {
+          "id": "school_fee",
+          "name": "学费",
+          "description": "缴纳进修学费 50。",
           "effect": {
             "type": "cash",
             "amount": -50
           }
         },
         {
-          "id": "traffic_ticket",
-          "name": "交通罚单",
-          "description": "收到交通罚单，支付 60。",
+          "id": "equipment_repair",
+          "name": "设备维修",
+          "description": "设备突发故障，支出 50。",
           "effect": {
             "type": "cash",
-            "amount": -60
+            "amount": -50
           }
         },
         {
-          "id": "express_line",
-          "name": "搭乘快线",
-          "description": "向前移动 3 格，并处理到达格。",
+          "id": "charity_drive",
+          "name": "公益募捐",
+          "description": "参与公益募捐，支出 30。",
           "effect": {
-            "type": "move_by",
-            "steps": 3,
-            "collectStartReward": true,
-            "resolveDestination": true
+            "type": "cash",
+            "amount": -30
           }
         },
         {
-          "id": "return_to_station",
-          "name": "返回起点",
-          "description": "移动到樱都起点并领取起点奖励。",
+          "id": "birthday_gift",
+          "name": "生日礼物",
+          "description": "今天生日，每位玩家送你 20。",
+          "effect": {
+            "type": "transfer_each",
+            "direction": "from_others",
+            "amount": 20
+          }
+        },
+        {
+          "id": "street_repairs",
+          "name": "街道整修",
+          "description": "名下每栋房屋 40、每座旅馆 115。",
+          "effect": {
+            "type": "repairs",
+            "perHouse": 40,
+            "perHotel": 115
+          }
+        },
+        {
+          "id": "fate_return_to_start",
+          "name": "回城手续",
+          "description": "办完手续回到樱都起点，领取 200。",
           "effect": {
             "type": "move_to",
             "targetTileId": 0,
@@ -998,64 +1213,66 @@
           }
         },
         {
-          "id": "security_check",
-          "name": "临时检查",
-          "description": "立即前往看守所，并跳过下一个自己的玩家回合。",
+          "id": "detention",
+          "name": "临时拘留",
+          "description": "配合调查，前往看守所。",
           "effect": {
             "type": "send_to_jail",
             "targetTileId": 10
           }
         },
         {
-          "id": "birthday_gift",
-          "name": "生日礼物",
-          "description": "每名其他在场玩家向你支付 20。",
+          "id": "fate_bail_order",
+          "name": "保释令",
+          "description": "获得一张保释令，进看守所时自动使用。",
           "effect": {
-            "type": "transfer_each",
-            "direction": "from_others",
-            "amount": 20
+            "type": "grant_item",
+            "itemId": "jail_free"
           }
         },
         {
-          "id": "group_treat",
-          "name": "请客聚餐",
-          "description": "向每名其他在场玩家支付 20。",
+          "id": "veto_writ",
+          "name": "否决令",
+          "description": "拿到一份否决令，可让针对你的道具作废。",
           "effect": {
-            "type": "transfer_each",
-            "direction": "to_others",
-            "amount": 20
-          }
-        },
-        {
-          "id": "startup_subsidy",
-          "name": "创业补贴",
-          "description": "领取创业补贴 30。",
-          "effect": {
-            "type": "cash",
-            "amount": 30
-          }
-        },
-        {
-          "id": "charity_drive",
-          "name": "公益募捐",
-          "description": "参加公益募捐，支付 30。",
-          "effect": {
-            "type": "cash",
-            "amount": -30
-          }
-        },
-        {
-          "id": "wrong_turn",
-          "name": "走错路口",
-          "description": "向后移动 2 格，并处理到达格。",
-          "effect": {
-            "type": "move_by",
-            "steps": -2,
-            "collectStartReward": false,
-            "resolveDestination": true
-          }
+            "type": "grant_item",
+            "itemId": "negate"
+          },
+          "count": 2
         }
       ]
+    }
+  ],
+  "items": [
+    {
+      "id": "jail_free",
+      "name": "保释令",
+      "description": "进入看守所时自动使用，免去停留一回合。",
+      "maxHeld": 2
+    },
+    {
+      "id": "negate",
+      "name": "否决令",
+      "description": "让一次针对你的道具作废，也能否决别人的否决。",
+      "maxHeld": 2
+    },
+    {
+      "id": "swap_property",
+      "name": "地契置换",
+      "description": "掷骰前与净资产更高的玩家交换一块没有建筑的地。",
+      "maxHeld": 1
+    },
+    {
+      "id": "seize_property",
+      "name": "强制征收",
+      "description": "掷骰前按全额售价强制买下对方一块没有建筑的地。",
+      "maxHeld": 1
+    },
+    {
+      "id": "demolish",
+      "name": "拆迁令",
+      "description": "掷骰前拆掉对方等级最高的一栋建筑，对方获得半价补偿。",
+      "maxHeld": 1
     }
   ]
 }

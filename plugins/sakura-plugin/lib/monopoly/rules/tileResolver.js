@@ -21,7 +21,8 @@ export function resolveCurrentTile(
   playerId,
   runtime,
   events,
-  depth = 0
+  depth = 0,
+  { rentMultiplier = 1 } = {}
 ) {
   const player = playerById(state, playerId)
   if (!player || player.status !== PLAYER_STATUS.ACTIVE) return
@@ -99,7 +100,8 @@ export function resolveCurrentTile(
         {
           payerId: player.userId,
           recipientId: owner.userId,
-          amount: rentFor(state, map, tile),
+          // 机会牌指定前往时会带倍率（例如末班列车付双倍）
+          amount: rentFor(state, map, tile) * rentMultiplier,
           reason: "rent",
           tileId: tile.id,
         },
@@ -114,14 +116,15 @@ export function resolveCurrentTile(
     const card = drawChanceCard(state, map, tile.deckId, runtime, events)
     applyChanceCard(state, map, player.userId, card, runtime, events, {
       depth,
-      resolveDestination: (nextDepth) =>
+      resolveDestination: (nextDepth, options) =>
         resolveCurrentTile(
           state,
           map,
           player.userId,
           runtime,
           events,
-          nextDepth
+          nextDepth,
+          options
         ),
     })
     return

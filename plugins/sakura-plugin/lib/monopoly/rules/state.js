@@ -131,6 +131,48 @@ export function assertStateInvariants(state, map) {
         `玩家 ${player.userId} 的连续对子计数无效。`
       )
     }
+    if (!Array.isArray(player.items)) {
+      throw new GameRuleError(
+        "INVALID_STATE",
+        `玩家 ${player.userId} 的道具背包不是数组。`
+      )
+    }
+    const heldCounts = new Map()
+    for (const entry of player.items) {
+      const definition = map.items?.find(
+        (item) => item.id === entry?.itemId
+      )
+      if (!definition) {
+        throw new GameRuleError(
+          "INVALID_STATE",
+          `玩家 ${player.userId} 持有不存在的道具 ${entry?.itemId}。`
+        )
+      }
+      const count = (heldCounts.get(definition.id) || 0) + 1
+      heldCounts.set(definition.id, count)
+      if (count > definition.maxHeld) {
+        throw new GameRuleError(
+          "INVALID_STATE",
+          `玩家 ${player.userId} 的 ${definition.name} 超过持有上限。`
+        )
+      }
+    }
+  }
+
+  for (const deck of map.chanceDecks) {
+    const deckState = state.decks?.[deck.id]
+    if (
+      !deckState ||
+      !Array.isArray(deckState.order) ||
+      !Number.isSafeInteger(deckState.cursor) ||
+      deckState.cursor < 0 ||
+      deckState.cursor > deckState.order.length
+    ) {
+      throw new GameRuleError(
+        "INVALID_STATE",
+        `牌堆 ${deck.id} 的状态无效。`
+      )
+    }
   }
 
   if (state.lastDice != null) {
@@ -258,20 +300,29 @@ export function assertStateInvariants(state, map) {
     const states = group.tileIds.map(
       (tileId) => state.propertyStates[String(tileId)]
     )
-    if (!states.some((entry) => entry.level > 0)) continue
-    const ownerId = states[0].ownerId
+    const built = states.filter((entry) => entry.level > 0)
+    if (built.length === 0) continue
+
+    const builderId = built[0].ownerId
     if (
-      ownerId === null ||
-      states.some(
-        (entry) => entry.ownerId !== ownerId || entry.mortgaged
-      ) ||
-      Math.max(...states.map((entry) => entry.level)) -
-        Math.min(...states.map((entry) => entry.level)) >
-        1
+      builderId === null ||
+      built.some((entry) => entry.ownerId !== builderId)
     ) {
       throw new GameRuleError(
         "INVALID_STATE",
-        `色组 ${group.id} 的建筑、归属或抵押状态不合法。`
+        `色组 ${group.id} 的建筑归属不合法。`
+      )
+    }
+
+    // 色组被道具打散后只按有建筑的地块比等级；
+    // 一旦整组重新回到同一个主人手里，立刻恢复整组的均衡校验
+    const owners = new Set(states.map((entry) => entry.ownerId))
+    const scope = owners.size === 1 ? states : built
+    const levels = scope.map((entry) => entry.level)
+    if (Math.max(...levels) - Math.min(...levels) > 1) {
+      throw new GameRuleError(
+        "INVALID_STATE",
+        `色组 ${group.id} 的建筑等级不均衡。`
       )
     }
   }
@@ -316,6 +367,26 @@ export function assertStateInvariants(state, map) {
   const debtPhase = state.phase === PHASES.AWAITING_DEBT
   if (debtPhase !== Boolean(state.pendingDebt)) {
     throw new GameRuleError("INVALID_STATE", "欠款状态与待处理欠款不一致。")
+  }
+  const counterPhase = state.phase === PHASES.AWAITING_COUNTER
+  if (counterPhase !== Boolean(state.pendingAction)) {
+    throw new GameRuleError("INVALID_STATE", "否决状态与待处理道具不一致。")
+  }
+  if (state.pendingAction) {
+    const pending = state.pendingAction
+    const known = new Set(userIds)
+    if (
+      !map.items?.some((item) => item.id === pending.itemId) ||
+      !known.has(String(pending.actorId)) ||
+      !known.has(String(pending.victimId)) ||
+      !known.has(String(pending.respondentId)) ||
+      !Array.isArray(pending.chain) ||
+      pending.chain.some((entry) => !known.has(String(entry?.userId))) ||
+      !Number.isSafeInteger(pending.createdAt) ||
+      pending.createdAt < 0
+    ) {
+      throw new GameRuleError("INVALID_STATE", "待处理道具内容无效。")
+    }
   }
   if (state.pendingDebt) {
     const debt = state.pendingDebt

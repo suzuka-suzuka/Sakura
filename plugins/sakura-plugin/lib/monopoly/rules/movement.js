@@ -64,6 +64,22 @@ export function moveBy(
   return tileById(map, to)
 }
 
+// 找到从当前位置往前数最近的某类地产（车站 / 公共设施）
+export function nearestTileOfKind(map, fromTileId, propertyKind) {
+  const path = map.board.path
+  const fromIndex = pathIndex(map, fromTileId)
+  for (let offset = 1; offset <= path.length; offset++) {
+    const tile = tileById(map, path[(fromIndex + offset) % path.length])
+    if (
+      tile?.type === "property" &&
+      (tile.propertyKind || "street") === propertyKind
+    ) {
+      return tile
+    }
+  }
+  return null
+}
+
 export function moveTo(
   state,
   map,
@@ -81,7 +97,10 @@ export function moveTo(
   if (!target) ruleError("INVALID_MOVE", `目标格 ${targetTileId} 不存在。`)
 
   const from = player.position
-  if (collectStartReward) {
+  // 只有真的绕过起点才发过路费：目标下标不在当前之后，就说明这一步跨过了起点
+  const passedStart =
+    pathIndex(map, target.id) <= pathIndex(map, from)
+  if (collectStartReward && passedStart) {
     grantStartReward(state, map, player, 1, events, reason)
   }
   player.position = target.id
@@ -91,7 +110,7 @@ export function moveTo(
     fromTileId: from,
     toTileId: target.id,
     steps: null,
-    startCrossings: collectStartReward ? 1 : 0,
+    startCrossings: collectStartReward && passedStart ? 1 : 0,
     reason,
   })
   return target

@@ -8,7 +8,9 @@ import {
   PLAYER_COLORS,
   PLAYER_STATUS,
   SESSION_VERSION,
+  playerPublicLabel,
 } from "./constants.js"
+import { itemAction } from "./rules/itemActions.js"
 import {
   createLobbyState,
   transition,
@@ -121,10 +123,33 @@ export class GameService {
     return Boolean(session && session.phase !== PHASES.ENDED)
   }
 
+  // 供指令层做静默门禁用：只认还在场的玩家，破产和认输的人一律当路人
+  async isActivePlayer(rawContext) {
+    const context = normalizeContext(rawContext)
+    const session = await this.store.loadSession(
+      context.selfId,
+      context.groupId
+    )
+    if (!session || session.phase === PHASES.ENDED) return false
+    return session.players.some(
+      (player) =>
+        player.userId === context.userId &&
+        player.status === PLAYER_STATUS.ACTIVE
+    )
+  }
+
+  // 每个牌堆各洗一副；同一张牌放几份就展开几份
   chanceOrder() {
-    return shuffle(
-      this.map.chanceDecks[0].cards.map((card) => card.id),
-      this.randomInt
+    return Object.fromEntries(
+      this.map.chanceDecks.map((deck) => [
+        deck.id,
+        shuffle(
+          deck.cards.flatMap((card) =>
+            Array.from({ length: card.count ?? 1 }, () => card.id)
+          ),
+          this.randomInt
+        ),
+      ])
     )
   }
 
@@ -154,6 +179,8 @@ export class GameService {
       now: this.now(),
       chanceOrder: this.chanceOrder(),
       tieBreakRolls: this.tieBreakRolls(session.players),
+      // 拆迁令在多块并列最高时靠它随机选一块
+      itemPick: this.randomInt(0, 1_000_000),
       ...overrides,
     }
   }
@@ -421,9 +448,10 @@ export class GameService {
         previous,
         transitionResult
       )
+      // 放弃不移动、不改归属、也不改钱，盘面和刚掷完那张一模一样，只回文字
       return this.result({
         ...transitionResult,
-        renderBoard: true,
+        renderBoard: decision === DECISIONS.PURCHASE,
         deleted,
       })
     })
@@ -436,6 +464,113 @@ export class GameService {
     )
     if (!tile) gameError("PROPERTY_NOT_FOUND", `找不到地产【${wanted}】。`)
     return tile.id
+  }
+
+  resolveItemId(name) {
+    const wanted = String(name || "").trim()
+    const item = this.map.items?.find(
+      (entry) => entry.id === wanted || entry.name === wanted
+    )
+    if (!item) gameError("UNKNOWN_ITEM", `找不到道具【${wanted}】。`)
+    return item.id
+  }
+
+  // 目标玩家可以写 QQ 号，也可以写盘面上的颜色名（红色 / 蓝色…）
+  resolvePlayerRef(session, ref) {
+    const wanted = String(ref || "").trim()
+    if (!wanted) gameError("INVALID_TARGET", "需要指定目标玩家。")
+    const byId = session.players.find((player) => player.userId === wanted)
+    if (byId) return byId.userId
+    const byLabel = session.players.find(
+      (player, index) => playerPublicLabel(player, index) === wanted
+    )
+    if (byLabel) return byLabel.userId
+    gameError("INVALID_TARGET", `找不到玩家【${wanted}】。`)
+  }
+
+  // 只有真正改变了盘面才值得再发一张图：开窗和被否决都只回文字
+  itemFrameRendersBoard(transitionResult) {
+    if (transitionResult.state.phase === PHASES.AWAITING_COUNTER) return false
+    return !transitionResult.events.some(
+      (event) => event.type === "item_negated"
+    )
+  }
+
+  async useItem(rawContext, itemRef, rawArgs = [], atUserId = null) {
+    const context = normalizeContext(rawContext)
+    return this.withLock(context, async () => {
+      const previous = await this.requireSession(
+        context.selfId,
+        context.groupId
+      )
+      const itemId = this.resolveItemId(itemRef)
+      const handler = itemAction(itemId)
+      if (!handler) {
+        gameError("UNKNOWN_ITEM", "这张道具卡不能主动使用。")
+      }
+      const args = handler.argSpec.map((kind, index) => {
+        const value =
+          kind === "player" && atUserId ? atUserId : rawArgs[index]
+        if (value == null || String(value).trim() === "") {
+          gameError(
+            "MISSING_ARG",
+            kind === "player" ? "需要指定目标玩家。" : "需要指定地产名称。"
+          )
+        }
+        return kind === "player"
+          ? this.resolvePlayerRef(previous, value)
+          : this.propertyTileId(value)
+      })
+
+      const transitionResult = transition(
+        previous,
+        {
+          type: ACTIONS.USE_ITEM,
+          userId: context.userId,
+          itemId,
+          args,
+        },
+        this.map,
+        this.runtime(previous)
+      )
+      const { deleted } = await this.commitTransition(
+        previous,
+        transitionResult
+      )
+      return this.result({
+        ...transitionResult,
+        renderBoard: this.itemFrameRendersBoard(transitionResult),
+        deleted,
+      })
+    })
+  }
+
+  async respondToCounter(rawContext, pass) {
+    const context = normalizeContext(rawContext)
+    return this.withLock(context, async () => {
+      const previous = await this.requireSession(
+        context.selfId,
+        context.groupId
+      )
+      const transitionResult = transition(
+        previous,
+        {
+          type: pass ? ACTIONS.COUNTER_PASS : ACTIONS.COUNTER,
+          userId: context.userId,
+        },
+        this.map,
+        this.runtime(previous)
+      )
+      const { deleted } = await this.commitTransition(
+        previous,
+        transitionResult
+      )
+      return this.result({
+        ...transitionResult,
+        renderBoard: this.itemFrameRendersBoard(transitionResult),
+        deleted,
+      })
+    })
   }
 
   async assetAction(rawContext, type, propertyName) {
@@ -692,6 +827,8 @@ export class GameService {
         action = { type: ACTIONS.DECISION_TIMEOUT }
       } else if (previous.phase === PHASES.AWAITING_DEBT) {
         action = { type: ACTIONS.DEBT_TIMEOUT }
+      } else if (previous.phase === PHASES.AWAITING_COUNTER) {
+        action = { type: ACTIONS.COUNTER_TIMEOUT }
       } else {
         return null
       }
@@ -708,7 +845,13 @@ export class GameService {
       )
       return this.result({
         ...transitionResult,
-        renderBoard: true,
+        // 超时自动放弃、以及没人否决直接结算，都不必重复出图
+        renderBoard:
+          previous.phase === PHASES.AWAITING_PURCHASE
+            ? false
+            : previous.phase === PHASES.AWAITING_COUNTER
+              ? this.itemFrameRendersBoard(transitionResult)
+              : true,
         scheduled: true,
         deleted,
       })

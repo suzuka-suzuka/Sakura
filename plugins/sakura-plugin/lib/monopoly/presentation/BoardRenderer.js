@@ -552,15 +552,83 @@ function drawTokens(ctx, map, view) {
   }
 }
 
-function focusPlayer(view) {
-  const playerId =
-    view.pendingDecision?.playerId ||
-    view.lastMove?.playerId ||
-    view.lastDice?.playerId ||
-    view.currentPlayerId
+// 这些事件只是回合流转或查询回执，不代表某个玩家刚刚行动过
+const NON_ACTION_EVENTS = new Set([
+  "turn_started",
+  "jail_turn_skipped",
+  // 开窗和弃权说的是「谁该接话」，不是「谁刚行动过」
+  "counter_window_opened",
+  "counter_declined",
+  "status_requested",
+  "rules_requested",
+  "rule_error",
+  "game_created",
+  "player_joined",
+  "player_left",
+  "host_changed",
+  "game_started",
+  "game_ended",
+  "lobby_expired",
+  "ranking_tie_break",
+  "resolution_limit_reached",
+])
+
+// 本帧在汇报谁的行动：购买回执仍属于刚买地的人，而不是已经接棒的下一位
+function frameSubjectId(view, events) {
+  const acted = [...(events || [])]
+    .reverse()
+    .find(
+      (event) =>
+        event?.playerId != null && !NON_ACTION_EVENTS.has(event.type)
+    )
   return (
-    view.players.find((player) => player.userId === playerId) ||
+    acted?.playerId ??
+    view.pendingDecision?.playerId ??
+    view.pendingDebt?.payerId ??
     null
+  )
+}
+
+// 骰子与足迹只在属于本帧主语时展示，掷骰前不留上一手的残影
+function rollBelongsToFrame(view, subjectId) {
+  const dice = view.lastDice
+  if (!dice) return false
+  if (subjectId != null) return String(dice.playerId) === String(subjectId)
+  return (
+    view.currentPlayerId != null &&
+    String(dice.playerId) === String(view.currentPlayerId) &&
+    dice.turnSeq === view.turnSeq
+  )
+}
+
+function buildFrame(view, events) {
+  const subjectId = frameSubjectId(view, events)
+  return {
+    subjectId,
+    rollVisible: rollBelongsToFrame(view, subjectId),
+  }
+}
+
+function playerOf(view, playerId) {
+  if (playerId == null) return null
+  return (
+    view.players.find((player) => player.userId === String(playerId)) ||
+    null
+  )
+}
+
+function focusPlayer(view, frame) {
+  if (!frame.rollVisible) {
+    return (
+      playerOf(view, view.currentPlayerId) ||
+      playerOf(view, frame.subjectId)
+    )
+  }
+  return (
+    playerOf(view, view.lastMove?.playerId) ||
+    playerOf(view, view.lastDice?.playerId) ||
+    playerOf(view, frame.subjectId) ||
+    playerOf(view, view.currentPlayerId)
   )
 }
 
@@ -569,6 +637,10 @@ function viewPlayerLabel(view, playerId) {
     view.players.find((player) => player.userId === String(playerId))
       ?.label || "未知玩家"
   )
+}
+
+function itemLabel(map, itemId) {
+  return map.items?.find((item) => item.id === itemId)?.name || itemId
 }
 
 function eventNoticeLines(events, view, map) {
@@ -611,7 +683,21 @@ function eventNoticeLines(events, view, map) {
         ? viewPlayerLabel(view, event.recipientId)
         : "银行"
       const reason = event.reason === "rent" ? "租金" : "费用"
-      lines.push(`${player}向${recipient}支付${reason} ${amount(event.paid)}`)
+      lines.push(
+        `${viewPlayerLabel(view, event.payerId)}向${recipient}支付${reason} ${amount(event.paid)}`
+      )
+    } else if (event.type === "auto_liquidated") {
+      const parts = []
+      if (event.sold > 0) parts.push(`拆房 ${event.sold}`)
+      if (event.mortgaged > 0) parts.push(`抵押 ${event.mortgaged}`)
+      lines.push(
+        `${player}自动变现 · ${parts.join(" · ")} · 共 ${amount(event.amount)}`
+      )
+    } else if (event.type === "properties_transferred") {
+      const interest = event.interest > 0 ? ` · 利息 ${amount(event.interest)}` : ""
+      lines.push(
+        `${player}的 ${event.count} 处地产转给${viewPlayerLabel(view, event.recipientId)}${interest}`
+      )
     } else if (event.type === "debt_required") {
       lines.push(
         `${viewPlayerLabel(view, event.payerId)}尚缺 ${amount(event.shortfall)}，等待筹款`
@@ -627,6 +713,44 @@ function eventNoticeLines(events, view, map) {
         .flatMap((deck) => deck.cards)
         .find((item) => item.id === event.cardId)
       lines.push(`机会 · ${card?.name || event.cardId}`)
+    } else if (event.type === "item_granted") {
+      lines.push(`${player}获得道具 · ${itemLabel(map, event.itemId)}`)
+    } else if (event.type === "item_capped") {
+      lines.push(`${player}的${itemLabel(map, event.itemId)}已达上限 · 本次作废`)
+    } else if (event.type === "item_used" && event.reason === "jail") {
+      // 主动使用和打否决另有专门的行，这里只播报自动消耗的保释令
+      lines.push(`${player}使用${itemLabel(map, event.itemId)} · 免去看守所`)
+    } else if (event.type === "item_targeted") {
+      const detail = event.detail ? ` · ${event.detail}` : ""
+      lines.push(
+        `${player}对${viewPlayerLabel(view, event.victimId)}使用${itemLabel(map, event.itemId)}${detail}`
+      )
+    } else if (event.type === "item_negated") {
+      lines.push(
+        `${player}打出否决令 · ${itemLabel(map, event.itemId)}失效`
+      )
+    } else if (event.type === "counter_chain_resolved") {
+      lines.push(
+        `否决链 ${event.depth} 层 · ${itemLabel(map, event.itemId)}最终生效`
+      )
+    } else if (event.type === "property_seized") {
+      lines.push(
+        `${player}征收${viewPlayerLabel(view, event.recipientId)}的${tileName(event.tileId)} · 支付 ${amount(event.amount)}`
+      )
+    } else if (event.type === "property_swapped") {
+      lines.push(
+        `${player}用${tileName(event.givenTileId)}换走${viewPlayerLabel(view, event.recipientId)}的${tileName(event.takenTileId)}`
+      )
+    } else if (event.type === "building_demolished") {
+      lines.push(
+        `${viewPlayerLabel(view, event.recipientId)}的${tileName(event.tileId)}被拆 · 补偿 ${amount(event.amount)}`
+      )
+    } else if (event.type === "item_fizzled") {
+      lines.push(`${itemLabel(map, event.itemId)}目标已失效 · 本次落空`)
+    } else if (event.type === "repairs_assessed" && event.amount > 0) {
+      lines.push(
+        `${player}维修 ${event.houses} 房 ${event.hotels} 旅馆 · 共 ${amount(event.amount)}`
+      )
     } else if (event.type === "cash_granted") {
       lines.push(`${player}获得 ${amount(event.amount)}`)
     } else if (
@@ -654,8 +778,6 @@ function eventNoticeLines(events, view, map) {
       lines.push("事件连锁已到安全上限，本次停止")
     } else if (event.type === "ranking_tie_break") {
       lines.push("净资产相同 · 已自动掷骰决定名次")
-    } else if (event.type === "player_bankrupt") {
-      lines.push(`${player}已破产`)
     } else if (event.type === "player_surrendered") {
       lines.push(`${player}已认输`)
     } else if (event.type === "game_ended") {
@@ -748,10 +870,10 @@ function drawDashedArrow(ctx, start, control1, control2, end) {
   ctx.restore()
 }
 
-function drawTurnFocus(ctx, map, view) {
-  const player = focusPlayer(view)
+function drawTurnFocus(ctx, map, view, frame) {
+  const player = focusPlayer(view, frame)
   if (!player) return
-  const move = view.lastMove
+  const move = frame.rollVisible ? view.lastMove : null
   const fromTile = move
     ? map.tiles.find((item) => item.id === move.fromTileId)
     : null
@@ -833,22 +955,28 @@ function drawDiceFace(ctx, image, value, x, y, size) {
   }
   ctx.textAlign = "center"
   ctx.textBaseline = "middle"
-  ctx.fillStyle = "#455A64"
-  ctx.font = font(34, "bold")
+  ctx.fillStyle = value ? "#455A64" : "#B0BEC5"
+  ctx.font = font(value ? 34 : 44, "bold")
   ctx.fillText(value || "?", x + size / 2, y + size / 2)
 }
 
 function centerButtons(view) {
   if (view.phase === PHASES.AWAITING_PURCHASE) {
     return [
-      { label: "购买", fill: "#E8F5E9", color: "#18794E" },
-      { label: "放弃", fill: "#F5F5F5", color: "#546E7A" },
+      { label: "购买 · y", fill: "#E8F5E9", color: "#18794E" },
+      { label: "放弃 · n", fill: "#F5F5F5", color: "#546E7A" },
     ]
   }
   if (view.phase === PHASES.AWAITING_DEBT) {
     return [
       { label: "卖房 / 抵押", fill: "#FFF3E0", color: "#D05A00" },
-      { label: "继续结算", fill: "#FFEBEE", color: "#C62828" },
+      { label: "强制结算", fill: "#FFEBEE", color: "#C62828" },
+    ]
+  }
+  if (view.phase === PHASES.AWAITING_COUNTER) {
+    return [
+      { label: "否决", fill: "#EDE7F6", color: "#5E35B1" },
+      { label: "不管", fill: "#F5F5F5", color: "#546E7A" },
     ]
   }
   if (view.phase === PHASES.LOBBY) {
@@ -859,7 +987,7 @@ function centerButtons(view) {
   }
   if (view.phase === PHASES.AWAITING_ROLL) {
     return [
-      { label: "掷骰", fill: "#E3F2FD", color: "#1565C0" },
+      { label: "掷骰 · r", fill: "#E3F2FD", color: "#1565C0" },
     ]
   }
   return []
@@ -893,12 +1021,14 @@ function drawCenterButtons(ctx, buttons, x, y, width, height) {
   })
 }
 
-function centerAssetPlayer(view) {
+function centerAssetPlayer(view, frame) {
   if (view.pendingDebt) {
     return view.players.find(
       (player) => player.userId === view.pendingDebt.payerId
     )
   }
+  const subject = playerOf(view, frame.subjectId)
+  if (subject) return subject
   const current = view.players.find(
     (player) => player.userId === view.currentPlayerId
   )
@@ -915,7 +1045,7 @@ function centerAssetPlayer(view) {
   ) || view.players[0]
 }
 
-function drawCenter(ctx, map, view, events = [], diceImages = {}) {
+function drawCenter(ctx, map, view, events = [], diceImages = {}, frame) {
   const { columns, rows } = map.board.layout
   const x = BOARD_X + CELL + CENTER_GUTTER
   const y = BOARD_Y + CELL + CENTER_GUTTER
@@ -927,7 +1057,7 @@ function drawCenter(ctx, map, view, events = [], diceImages = {}) {
   const contentX = x + 32
   const contentWidth = width - 64
   const gap = 14
-  const assetPlayer = centerAssetPlayer(view)
+  const assetPlayer = centerAssetPlayer(view, frame)
   const role = view.pendingDebt
     ? "欠款玩家"
     : view.phase === PHASES.LOBBY
@@ -936,7 +1066,9 @@ function drawCenter(ctx, map, view, events = [], diceImages = {}) {
         : "已加入玩家"
       : view.phase === PHASES.ENDED
         ? "第一名"
-        : "当前玩家"
+        : assetPlayer?.userId === view.currentPlayerId
+          ? "当前玩家"
+          : "本次行动"
   const headerY = y + 24
   const headerHeight = 64
   drawCenterCard(ctx, contentX, headerY, contentWidth, headerHeight, "#F1F6F8")
@@ -980,7 +1112,7 @@ function drawCenter(ctx, map, view, events = [], diceImages = {}) {
   drawCenterCard(ctx, contentX, topY, diceWidth, topHeight, "#F4F7F8")
   drawCenterCard(ctx, totalX, topY, totalWidth, topHeight, "#EEF4F7")
 
-  const diceValues = view.lastDice?.values || []
+  const diceValues = frame.rollVisible ? view.lastDice.values : []
   const diceSize = 84
   const diceGap = 24
   const diceStartX =
@@ -1007,14 +1139,14 @@ function drawCenter(ctx, map, view, events = [], diceImages = {}) {
   ctx.fillStyle = "#607D8B"
   ctx.font = font(15, "bold")
   ctx.fillText("总点数", totalX + totalWidth / 2, topY + 15)
-  ctx.fillStyle = "#263238"
+  ctx.fillStyle = frame.rollVisible ? "#263238" : "#B0BEC5"
   ctx.font = font(48, "bold")
   ctx.fillText(
-    view.lastDice ? String(view.lastDice.total) : "—",
+    frame.rollVisible ? String(view.lastDice.total) : "?",
     totalX + totalWidth / 2,
     topY + 39
   )
-  if (view.lastDice?.isDouble) {
+  if (frame.rollVisible && view.lastDice.isDouble) {
     ctx.fillStyle = "#D84315"
     ctx.font = font(14, "bold")
     ctx.fillText("对子", totalX + totalWidth / 2, topY + 96)
@@ -1022,11 +1154,12 @@ function drawCenter(ctx, map, view, events = [], diceImages = {}) {
 
   const moveY = y + 236
   drawCenterCard(ctx, contentX, moveY, contentWidth, 56, "#F7F4EF")
-  const fromName = view.lastMove
-    ? map.tiles.find((tile) => tile.id === view.lastMove.fromTileId)?.name
+  const shownMove = frame.rollVisible ? view.lastMove : null
+  const fromName = shownMove
+    ? map.tiles.find((tile) => tile.id === shownMove.fromTileId)?.name
     : null
-  const toName = view.lastMove
-    ? map.tiles.find((tile) => tile.id === view.lastMove.toTileId)?.name
+  const toName = shownMove
+    ? map.tiles.find((tile) => tile.id === shownMove.toTileId)?.name
     : null
   const moveText =
     fromName && toName ? `${fromName}  →  ${toName}` : "等待掷骰"
@@ -1058,7 +1191,7 @@ function drawCenter(ctx, map, view, events = [], diceImages = {}) {
       detailY + 40
     )
   } else if (view.pendingDebt) {
-    const debtor = centerAssetPlayer(view)
+    const debtor = centerAssetPlayer(view, frame)
     const shortfall = Math.max(
       0,
       view.pendingDebt.amount - (debtor?.cash || 0)
@@ -1083,7 +1216,7 @@ function drawCenter(ctx, map, view, events = [], diceImages = {}) {
         ? `等待加入 · ${view.players.length}/${map.gameDefaults.maxPlayers} 人`
         : view.phase === PHASES.ENDED
           ? "本局游戏结束"
-          : `等待${centerAssetPlayer(view)?.label || "当前玩家"}操作`
+          : `等待${playerOf(view, view.currentPlayerId)?.label || "当前玩家"}操作`
     const lines = notices.length ? notices : [fallback]
     const lineGap = lines.length >= 4 ? 17 : lines.length === 3 ? 21 : 26
     const startY =
@@ -1144,12 +1277,13 @@ function drawCenter(ctx, map, view, events = [], diceImages = {}) {
 
   const countsY = y + 542
   const countGap = 10
-  const countWidth = (contentWidth - countGap * 3) / 4
+  const countWidth = (contentWidth - countGap * 4) / 5
   const countCards = [
     { label: "地产", value: assetPlayer?.propertyCount, color: "#546E7A" },
     { label: "抵押", value: assetPlayer?.mortgagedCount, color: "#8D6E63" },
     { label: "房屋", value: assetPlayer?.houseCount, color: "#18875B" },
     { label: "旅馆", value: assetPlayer?.hotelCount, color: "#D04444" },
+    { label: "道具", value: assetPlayer?.itemCount, color: "#6A4FB6" },
   ]
   countCards.forEach((item, index) => {
     const cardX = contentX + index * (countWidth + countGap)
@@ -1201,11 +1335,21 @@ function drawCenter(ctx, map, view, events = [], diceImages = {}) {
   }
 }
 
+const PANEL_ROW_HEIGHT = 46
+const PANEL_ROW_GAP = 8
+const PANEL_HEAD = 74
+
 function panelMetrics(map, playerCount) {
   const boardWidth = map.board.layout.columns * CELL
   const boardHeight = map.board.layout.rows * CELL
   const rows = Math.max(0, Number(playerCount) || 0)
-  const panelHeight = rows === 0 ? 96 : 84 + rows * 58 + (rows - 1) * 8
+  const panelHeight =
+    rows === 0
+      ? 96
+      : PANEL_HEAD +
+        rows * PANEL_ROW_HEIGHT +
+        (rows - 1) * PANEL_ROW_GAP +
+        16
   return {
     boardWidth,
     boardHeight,
@@ -1242,7 +1386,16 @@ function rankedPlayers(view) {
     }))
 }
 
-function drawPlayersPanel(ctx, view, metrics) {
+// 背包按地图里的道具顺序列出来，形如「地契置换×1  否决令×2」
+function itemsText(map, player) {
+  const summary = player.items || {}
+  const parts = (map.items || [])
+    .filter((item) => summary[item.id] > 0)
+    .map((item) => `${item.name}×${summary[item.id]}`)
+  return parts.length > 0 ? parts.join("  ") : "—"
+}
+
+function drawPlayersPanel(ctx, view, metrics, map) {
   const {
     panelX,
     panelY,
@@ -1263,17 +1416,33 @@ function drawPlayersPanel(ctx, view, metrics) {
   ctx.textBaseline = "top"
   ctx.fillStyle = "#FFFFFF"
   ctx.font = font(23, "bold")
-  ctx.fillText("净资产排名", panelX + 20, panelY + 16)
+  ctx.fillText("玩家一览", panelX + 20, panelY + 16)
 
   const players = rankedPlayers(view)
   if (players.length === 0) return
-  const gap = 8
+  const gap = PANEL_ROW_GAP
   const padding = 16
   const cardWidth = panelWidth - padding * 2
-  const cardHeight = 58
+  const cardHeight = PANEL_ROW_HEIGHT
+  const columns = {
+    netWorth: cardWidth * 0.36,
+    cash: cardWidth * 0.52,
+    items: cardWidth * 0.63,
+  }
+
+  // 表头
+  ctx.textBaseline = "top"
+  ctx.fillStyle = "#78909C"
+  ctx.font = font(12, "bold")
+  ctx.textAlign = "center"
+  ctx.fillText("净资产", panelX + padding + columns.netWorth, panelY + 52)
+  ctx.fillText("现金", panelX + padding + columns.cash, panelY + 52)
+  ctx.textAlign = "left"
+  ctx.fillText("道具", panelX + padding + columns.items, panelY + 52)
+
   players.forEach((player, index) => {
     const x = panelX + padding
-    const y = panelY + 54 + index * (cardHeight + gap)
+    const y = panelY + PANEL_HEAD + index * (cardHeight + gap)
     const current = player.userId === view.currentPlayerId
 
     fillRounded(
@@ -1305,40 +1474,48 @@ function drawPlayersPanel(ctx, view, metrics) {
     }
 
     const title = `${player.displayRank}. ${player.label}`
-    const titleSize = fitText(ctx, title, cardWidth * 0.3, 18, 11)
+    const titleSize = fitText(ctx, title, cardWidth * 0.28, 18, 11)
     ctx.font = font(titleSize, "bold")
     ctx.fillStyle = "#FFFFFF"
     ctx.textAlign = "left"
     ctx.textBaseline = "middle"
     ctx.fillText(title, x + 20, y + cardHeight / 2)
 
+    ctx.textAlign = "center"
     for (const item of [
       {
-        label: "净资产",
         value: player.netWorth,
-        centerX: x + cardWidth * 0.57,
+        centerX: x + columns.netWorth,
         color: "#FFFFFF",
       },
       {
-        label: "现金",
         value: player.cash,
-        centerX: x + cardWidth * 0.83,
+        centerX: x + columns.cash,
         color: "#CFD8DC",
       },
     ]) {
-      ctx.textAlign = "center"
-      ctx.textBaseline = "top"
-      ctx.fillStyle = "#90A4AE"
-      ctx.font = font(11, "bold")
-      ctx.fillText(item.label, item.centerX, y + 8)
       ctx.fillStyle = item.color
       ctx.font = font(18, "bold")
       ctx.fillText(
         item.value.toLocaleString("zh-CN"),
         item.centerX,
-        y + 27
+        y + cardHeight / 2
       )
     }
+
+    const text = itemsText(map, player)
+    const itemsX = x + columns.items
+    const size = fitText(
+      ctx,
+      text,
+      cardWidth - columns.items - 20,
+      15,
+      10
+    )
+    ctx.textAlign = "left"
+    ctx.fillStyle = text === "—" ? "#546E7A" : "#C9B6F5"
+    ctx.font = font(size, "bold")
+    ctx.fillText(text, itemsX, y + cardHeight / 2)
   })
 }
 
@@ -1346,6 +1523,7 @@ export async function renderBoard(state, map, { events = [] } = {}) {
   ensureFont()
   const diceImages = await loadDiceAssets()
   const view = buildPublicView(state, map)
+  const frame = buildFrame(view, events)
   const metrics = panelMetrics(map, view.players.length)
   const canvas = createCanvas(metrics.canvasWidth, metrics.canvasHeight)
   const ctx = canvas.getContext("2d")
@@ -1362,10 +1540,10 @@ export async function renderBoard(state, map, { events = [] } = {}) {
   ctx.fillRect(0, 0, metrics.canvasWidth, metrics.canvasHeight)
 
   for (const tile of map.tiles) drawTile(ctx, map, view, tile)
-  drawCenter(ctx, map, view, events, diceImages)
-  drawTurnFocus(ctx, map, view)
+  drawCenter(ctx, map, view, events, diceImages, frame)
+  drawTurnFocus(ctx, map, view, frame)
   drawTokens(ctx, map, view)
-  drawPlayersPanel(ctx, view, metrics)
+  drawPlayersPanel(ctx, view, metrics, map)
 
   return canvas.toBuffer("image/png")
 }

@@ -11,6 +11,10 @@ import {
   buildingCountsForLevel,
   buildingLabel,
 } from "../rules/buildings.js"
+import {
+  heldItems,
+  itemSummary,
+} from "../rules/items.js"
 import { rentFor } from "../rules/property.js"
 import {
   currentPlayer,
@@ -60,6 +64,8 @@ export function buildPublicView(state, map) {
       ).length,
       houseCount: buildings.houses,
       hotelCount: buildings.hotels,
+      items: itemSummary(player),
+      itemCount: heldItems(player).length,
       propertyValue,
       netWorth: player.cash + propertyValue,
     }
@@ -110,6 +116,9 @@ export function buildPublicView(state, map) {
       : null,
     pendingDebt: state.pendingDebt
       ? structuredClone(state.pendingDebt)
+      : null,
+    pendingAction: state.pendingAction
+      ? structuredClone(state.pendingAction)
       : null,
     players,
     propertyStates,

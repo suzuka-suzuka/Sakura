@@ -10,6 +10,7 @@ const ROOT_FIELDS = new Set([
   "propertyGroups",
   "tiles",
   "chanceDecks",
+  "items",
 ])
 
 const GAME_DEFAULT_FIELDS = new Set([
@@ -22,6 +23,7 @@ const GAME_DEFAULT_FIELDS = new Set([
   "rollTimeoutSeconds",
   "decisionTimeoutSeconds",
   "debtTimeoutSeconds",
+  "counterTimeoutSeconds",
   "maxConsecutiveRollTimeouts",
   "lobbyTimeoutSeconds",
   "passStartReward",
@@ -52,8 +54,10 @@ const LAYOUT_FIELDS = new Set([
 ])
 
 const GROUP_FIELDS = new Set(["id", "name", "color", "tileIds"])
-const CARD_FIELDS = new Set(["id", "name", "description", "effect"])
+const CARD_FIELDS = new Set(["id", "name", "description", "effect", "count"])
 const DECK_FIELDS = new Set(["id", "name", "cards"])
+const ITEM_FIELDS = new Set(["id", "name", "description", "maxHeld"])
+const MAX_DECKS = 4
 const BASE_TILE_FIELDS = [
   "id",
   "type",
@@ -100,8 +104,17 @@ const EFFECT_FIELDS = Object.freeze({
     "collectStartReward",
     "resolveDestination",
   ]),
+  move_to_nearest: new Set([
+    "type",
+    "propertyKind",
+    "rentMultiplier",
+    "collectStartReward",
+    "resolveDestination",
+  ]),
   send_to_jail: new Set(["type", "targetTileId"]),
   transfer_each: new Set(["type", "direction", "amount"]),
+  repairs: new Set(["type", "perHouse", "perHotel"]),
+  grant_item: new Set(["type", "itemId"]),
 })
 
 export class MapValidationError extends Error {
@@ -249,6 +262,12 @@ function validateDefaults(defaults, errors) {
     "debtTimeoutSeconds",
     errors,
     { min: 10, max: 600 }
+  )
+  requireInteger(
+    defaults.counterTimeoutSeconds,
+    "counterTimeoutSeconds",
+    errors,
+    { min: 5, max: 120 }
   )
   requireInteger(
     defaults.maxConsecutiveRollTimeouts,
@@ -515,7 +534,7 @@ function validateTileShape(tile, index, defaults, errors) {
   }
 }
 
-function validateEffect(effect, label, tileIds, errors) {
+function validateEffect(effect, label, tileIds, errors, itemIds = new Set()) {
   if (!requireObject(effect, label, errors)) return
   const allowed = EFFECT_FIELDS[effect.type]
   if (!allowed) {
@@ -574,7 +593,79 @@ function validateEffect(effect, label, tileIds, errors) {
       min: 1,
       max: 1_000_000,
     })
+  } else if (effect.type === "move_to_nearest") {
+    if (!["station", "utility"].includes(effect.propertyKind)) {
+      errors.push(`${label}.propertyKind 只能是 station 或 utility`)
+    }
+    requireInteger(effect.rentMultiplier, `${label}.rentMultiplier`, errors, {
+      min: 1,
+      max: 10,
+    })
+    requireBoolean(
+      effect.collectStartReward,
+      `${label}.collectStartReward`,
+      errors
+    )
+    requireBoolean(
+      effect.resolveDestination,
+      `${label}.resolveDestination`,
+      errors
+    )
+  } else if (effect.type === "repairs") {
+    requireInteger(effect.perHouse, `${label}.perHouse`, errors, {
+      min: 0,
+      max: 100_000,
+    })
+    requireInteger(effect.perHotel, `${label}.perHotel`, errors, {
+      min: 0,
+      max: 100_000,
+    })
+    if (effect.perHouse === 0 && effect.perHotel === 0) {
+      errors.push(`${label} 的房屋与旅馆费用不能同时为 0`)
+    }
+  } else if (effect.type === "grant_item") {
+    if (
+      requireString(effect.itemId, `${label}.itemId`, errors, {
+        pattern: /^[a-z][a-z0-9_]*$/,
+      }) &&
+      !itemIds.has(effect.itemId)
+    ) {
+      errors.push(`${label}.itemId 指向不存在的道具 ${effect.itemId}`)
+    }
   }
+}
+
+function validateItems(map, errors) {
+  const itemIds = new Set()
+  if (map.items === undefined) return itemIds
+  if (!requireArray(map.items, "items", errors)) return itemIds
+
+  const seen = []
+  for (const [index, item] of map.items.entries()) {
+    const label = `items[${index}]`
+    if (!requireObject(item, label, errors)) continue
+    collectUnknownFields(item, ITEM_FIELDS, label, errors)
+    if (
+      requireString(item.id, `${label}.id`, errors, {
+        pattern: /^[a-z][a-z0-9_]*$/,
+      })
+    ) {
+      seen.push(item.id)
+      itemIds.add(item.id)
+    }
+    requireString(item.name, `${label}.name`, errors, { maxLength: 20 })
+    requireString(item.description, `${label}.description`, errors, {
+      maxLength: 120,
+    })
+    requireInteger(item.maxHeld, `${label}.maxHeld`, errors, {
+      min: 1,
+      max: 9,
+    })
+  }
+  for (const duplicate of duplicates(seen)) {
+    errors.push(`道具 ID 重复：${duplicate}`)
+  }
+  return itemIds
 }
 
 function validateGroups(map, tileById, errors) {
@@ -661,10 +752,10 @@ function validateGroups(map, tileById, errors) {
   }
 }
 
-function validateDecks(map, tileById, errors) {
+function validateDecks(map, tileById, itemIds, errors) {
   if (!requireArray(map.chanceDecks, "chanceDecks", errors)) return
-  if (map.chanceDecks.length !== 1) {
-    errors.push("MVP 地图必须恰好包含 1 个机会牌堆")
+  if (map.chanceDecks.length < 1 || map.chanceDecks.length > MAX_DECKS) {
+    errors.push(`地图需要 1～${MAX_DECKS} 个牌堆`)
   }
   const deckIds = []
 
@@ -699,11 +790,19 @@ function validateDecks(map, tileById, errors) {
       requireString(card.description, `${cardLabel}.description`, errors, {
         maxLength: 120,
       })
+      // 同一张牌可以在牌堆里放多份，缺省 1 份
+      if (card.count !== undefined) {
+        requireInteger(card.count, `${cardLabel}.count`, errors, {
+          min: 1,
+          max: 8,
+        })
+      }
       validateEffect(
         card.effect,
         `${cardLabel}.effect`,
         new Set(tileById.keys()),
-        errors
+        errors,
+        itemIds
       )
     }
     for (const duplicate of duplicates(cardIds)) {
@@ -838,7 +937,7 @@ export function validateMap(map) {
 
   validateTopology(map, tileById, errors)
   validateGroups(map, tileById, errors)
-  validateDecks(map, tileById, errors)
+  validateDecks(map, tileById, validateItems(map, errors), errors)
 
   if (errors.length > 0) throw new MapValidationError(errors)
   return map

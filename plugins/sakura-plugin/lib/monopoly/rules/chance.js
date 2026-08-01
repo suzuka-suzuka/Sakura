@@ -1,5 +1,12 @@
 import { PLAYER_STATUS, ruleError } from "../constants.js"
-import { moveBy, moveTo, sendToJail } from "./movement.js"
+import { buildingCountsForLevel } from "./buildings.js"
+import { grantItem } from "./items.js"
+import {
+  moveBy,
+  moveTo,
+  nearestTileOfKind,
+  sendToJail,
+} from "./movement.js"
 import {
   grantCash,
   processPaymentQueue,
@@ -7,13 +14,50 @@ import {
 import {
   activePlayers,
   deckById,
+  ownedPropertyEntries,
   playerById,
 } from "./state.js"
 
+function buildingCountsFor(state, map, playerId) {
+  return ownedPropertyEntries(state, map, playerId).reduce(
+    (total, { propertyState }) => {
+      const counts = buildingCountsForLevel(map, propertyState.level)
+      total.houses += counts.houses
+      total.hotels += counts.hotels
+      return total
+    },
+    { houses: 0, hotels: 0 }
+  )
+}
+
+// 一张牌可以放多份，所以牌序按「多重集」比对，而不是去重后比对
+export function deckCardCounts(deck) {
+  const counts = new Map()
+  for (const card of deck.cards) {
+    counts.set(card.id, (counts.get(card.id) || 0) + (card.count ?? 1))
+  }
+  return counts
+}
+
+export function deckSize(deck) {
+  let total = 0
+  for (const count of deckCardCounts(deck).values()) total += count
+  return total
+}
+
 export function validateDeckOrder(deck, order) {
-  if (!Array.isArray(order) || order.length !== deck.cards.length) return false
-  const expected = new Set(deck.cards.map((card) => card.id))
-  return new Set(order).size === order.length && order.every((id) => expected.has(id))
+  if (!Array.isArray(order)) return false
+  const expected = deckCardCounts(deck)
+  if (order.length !== deckSize(deck)) return false
+  const seen = new Map()
+  for (const cardId of order) {
+    if (!expected.has(cardId)) return false
+    seen.set(cardId, (seen.get(cardId) || 0) + 1)
+  }
+  for (const [cardId, count] of expected) {
+    if (seen.get(cardId) !== count) return false
+  }
+  return true
 }
 
 function cardById(deck, cardId) {
@@ -22,19 +66,20 @@ function cardById(deck, cardId) {
 
 function prepareDeck(state, map, deckId, runtime, events) {
   const deck = deckById(map, deckId)
-  if (!deck) ruleError("INVALID_DECK", `机会牌堆 ${deckId} 不存在。`)
+  if (!deck) ruleError("INVALID_DECK", `牌堆 ${deckId} 不存在。`)
 
-  if (!state.chance || state.chance.deckId !== deckId) {
-    ruleError("INVALID_DECK_STATE", "当前机会牌堆状态与地图不一致。")
+  const deckState = state.decks?.[deckId]
+  if (!deckState) {
+    ruleError("INVALID_DECK_STATE", "当前牌堆状态与地图不一致。")
   }
 
-  if (state.chance.cursor >= state.chance.order.length) {
-    const nextOrder = runtime.chanceOrder
+  if (deckState.cursor >= deckState.order.length) {
+    const nextOrder = runtime.chanceOrder?.[deckId]
     if (!validateDeckOrder(deck, nextOrder)) {
-      ruleError("INVALID_RANDOM_INPUT", "机会牌重新洗牌结果无效。")
+      ruleError("INVALID_RANDOM_INPUT", "牌堆重新洗牌结果无效。")
     }
-    state.chance.order = [...nextOrder]
-    state.chance.cursor = 0
+    deckState.order = [...nextOrder]
+    deckState.cursor = 0
     events.push({ type: "chance_reshuffled", deckId })
   }
   return deck
@@ -42,10 +87,11 @@ function prepareDeck(state, map, deckId, runtime, events) {
 
 export function drawChanceCard(state, map, deckId, runtime, events) {
   const deck = prepareDeck(state, map, deckId, runtime, events)
-  const cardId = state.chance.order[state.chance.cursor]
+  const deckState = state.decks[deckId]
+  const cardId = deckState.order[deckState.cursor]
   const card = cardById(deck, cardId)
-  if (!card) ruleError("INVALID_DECK_STATE", `机会牌 ${cardId} 不存在。`)
-  state.chance.cursor += 1
+  if (!card) ruleError("INVALID_DECK_STATE", `卡牌 ${cardId} 不存在。`)
+  deckState.cursor += 1
   events.push({
     type: "chance_drawn",
     deckId,
@@ -112,6 +158,65 @@ export function applyChanceCard(
     if (effect.resolveDestination && player.status === PLAYER_STATUS.ACTIVE) {
       resolveDestination(depth + 1)
     }
+    return
+  }
+
+  if (effect.type === "move_to_nearest") {
+    const target = nearestTileOfKind(
+      map,
+      player.position,
+      effect.propertyKind
+    )
+    if (!target) {
+      ruleError("INVALID_CHANCE_TARGET", "地图上找不到对应的目标地产。")
+    }
+    moveTo(state, map, player.userId, target.id, {
+      collectStartReward: effect.collectStartReward,
+      events,
+      reason: "chance",
+    })
+    if (effect.resolveDestination && player.status === PLAYER_STATUS.ACTIVE) {
+      resolveDestination(depth + 1, {
+        rentMultiplier: effect.rentMultiplier,
+      })
+    }
+    return
+  }
+
+  if (effect.type === "repairs") {
+    const counts = buildingCountsFor(state, map, player.userId)
+    const amount =
+      counts.houses * effect.perHouse + counts.hotels * effect.perHotel
+    events.push({
+      type: "repairs_assessed",
+      playerId: player.userId,
+      cardId: card.id,
+      houses: counts.houses,
+      hotels: counts.hotels,
+      amount,
+    })
+    if (amount <= 0) return
+    processPaymentQueue(
+      state,
+      map,
+      [
+        {
+          payerId: player.userId,
+          amount,
+          reason: "repairs",
+          cardId: card.id,
+        },
+      ],
+      events,
+      { now: runtime.now }
+    )
+    return
+  }
+
+  if (effect.type === "grant_item") {
+    grantItem(state, map, player.userId, effect.itemId, events, {
+      cardId: card.id,
+    })
     return
   }
 
