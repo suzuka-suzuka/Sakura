@@ -1,4 +1,8 @@
-import { PLAYER_STATUS, ruleError } from "../constants.js"
+import {
+  PLAYER_STATUS,
+  insufficientCash,
+  ruleError,
+} from "../constants.js"
 import {
   buyOutProperty,
   demolishBuilding,
@@ -146,10 +150,7 @@ export const ITEM_ACTIONS = Object.freeze({
 
       const interest = transferInterest(map, targetTile, targetState)
       if (actor.cash < interest) {
-        ruleError(
-          "INSUFFICIENT_CASH",
-          `接手抵押地需要先付 ${interest} 过户利息。`
-        )
+        insufficientCash("接手抵押地的过户利息", interest, actor.cash)
       }
       return {
         victimId: victim.userId,
@@ -189,7 +190,7 @@ export const ITEM_ACTIONS = Object.freeze({
         targetTileId
       )
       if (actor.cash < tile.price) {
-        ruleError("INSUFFICIENT_CASH", `征收${tile.name}需要 ${tile.price}。`)
+        insufficientCash(`征收${tile.name}`, tile.price, actor.cash)
       }
       return {
         victimId: victim.userId,
@@ -231,7 +232,7 @@ export const ITEM_ACTIONS = Object.freeze({
       }
       const price = tile.price * map.gameDefaults.forceBuyPriceRate
       if (actor.cash < price) {
-        ruleError("INSUFFICIENT_CASH", `收购${tile.name}需要 ${price}。`)
+        insufficientCash(`收购${tile.name}`, price, actor.cash)
       }
       return {
         victimId: victim.userId,

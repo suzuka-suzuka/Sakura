@@ -105,3 +105,12 @@ export class GameRuleError extends Error {
 export function ruleError(code, message) {
   throw new GameRuleError(code, message)
 }
+
+// 钱不够是最常撞的一种拒绝，光说「现金不足」等于让玩家自己去翻棋盘算账，
+// 所以要多少、有多少、还差多少三个数一次报全
+export function insufficientCash(what, need, cash) {
+  ruleError(
+    "INSUFFICIENT_CASH",
+    `${what}需要 ${need}，你只有 ${cash}，还差 ${need - cash}。`
+  )
+}

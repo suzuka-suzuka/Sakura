@@ -25,22 +25,6 @@ import {
   buildTurnMessages,
 } from "../lib/monopoly/presentation/MessageFormatter.js"
 
-// 这些错误只是「现在不该你发这条指令」，回一句话就够，不必再刷一张棋盘
-const QUIET_RULE_ERRORS = new Set([
-  "NOT_PLAYER",
-  "NOT_CURRENT_PLAYER",
-  "NOT_DEBTOR",
-  "NOT_RESPONDENT",
-  "PLAYER_INACTIVE",
-  "WRONG_PHASE",
-  // 名字打错、参数漏了这类输入问题，回一句话就行，不必刷一张棋盘
-  "UNKNOWN_ITEM",
-  "NOT_IN_JAIL",
-  "MISSING_ARG",
-  "INVALID_TARGET",
-  "PROPERTY_NOT_FOUND",
-])
-
 export class Monopoly extends plugin {
   constructor() {
     super({
@@ -192,20 +176,10 @@ export class Monopoly extends plugin {
       if (result) await this.sendResult(e, result)
       return true
     } catch (error) {
+      // 规则错误说明这条指令一点状态都没改动（买不起、建不了、还没轮到你……），
+      // 艾特一句原因就够，重画一张和上一帧完全相同的棋盘只是刷屏
       if (error instanceof GameRuleError) {
-        if (QUIET_RULE_ERRORS.has(error.code)) {
-          await e.reply(error.message, false, true)
-          return true
-        }
-        try {
-          const result = await this.service.status(this.contextFromEvent(e))
-          result.events = [
-            { type: "rule_error", message: error.message },
-          ]
-          await this.sendResult(e, result)
-        } catch {
-          await e.reply(error.message)
-        }
+        await e.reply(error.message, false, true)
         return true
       }
       logger.error(`[大富翁] 指令执行失败：${error.stack || error}`)

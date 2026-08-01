@@ -1,4 +1,8 @@
-import { PLAYER_STATUS, ruleError } from "../constants.js"
+import {
+  PLAYER_STATUS,
+  insufficientCash,
+  ruleError,
+} from "../constants.js"
 import {
   buildingLabel,
   hotelLevel,
@@ -70,7 +74,12 @@ export function buildOnProperty(state, map, playerId, tileId, events) {
     ruleError("BUILDING_SUPPLY_EXHAUSTED", `银行已经没有可用${name}。`)
   }
   if (player.cash < tile.upgradeCost) {
-    ruleError("INSUFFICIENT_CASH", "你的现金不足以建造。")
+    const name = plan.buildingType === "hotel" ? "旅馆" : "房子"
+    insufficientCash(
+      `在${tile.name}建${name}`,
+      tile.upgradeCost,
+      player.cash
+    )
   }
 
   player.cash -= tile.upgradeCost
@@ -208,7 +217,7 @@ export function buyOutProperty(
     ruleError("INVALID_PAYMENT", "买断金额必须是非负整数。")
   }
   if (buyer.cash < amount) {
-    ruleError("INSUFFICIENT_CASH", `买下${tile.name}需要 ${amount}。`)
+    insufficientCash(`买下${tile.name}`, amount, buyer.cash)
   }
 
   const seller = playerById(state, propertyState.ownerId)
@@ -247,7 +256,7 @@ export function redeemProperty(state, map, playerId, tileId, events) {
   }
   const amount = redemptionCost(map, tile)
   if (player.cash < amount) {
-    ruleError("INSUFFICIENT_CASH", `赎回这块地产需要 ${amount}。`)
+    insufficientCash(`赎回${tile.name}`, amount, player.cash)
   }
   player.cash -= amount
   propertyState.mortgaged = false

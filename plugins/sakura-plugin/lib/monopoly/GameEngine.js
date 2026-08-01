@@ -5,6 +5,7 @@ import {
   PHASES,
   PLAYER_STATUS,
   SESSION_VERSION,
+  insufficientCash,
   ruleError,
 } from "./constants.js"
 import {
@@ -962,7 +963,7 @@ function payBail(state, map, action, events) {
 
   const amount = map.gameDefaults.jailBailAmount
   if (player.cash < amount) {
-    ruleError("INSUFFICIENT_CASH", `保释需要 ${amount}，你的现金不够。`)
+    insufficientCash("保释", amount, player.cash)
   }
   player.jailTurns = 0
   settlePayment(state, map, {

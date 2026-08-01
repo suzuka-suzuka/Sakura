@@ -1,6 +1,7 @@
 import {
   DECISIONS,
   PHASES,
+  insufficientCash,
   ruleError,
 } from "../constants.js"
 import {
@@ -189,7 +190,7 @@ export function resolvePropertyDecision(
       ruleError("PROPERTY_OWNED", "这块地产已经有主人了。")
     }
     if (player.cash < tile.price) {
-      ruleError("INSUFFICIENT_CASH", "你的现金已经不足以购买这块地产。")
+      insufficientCash(`买下${tile.name}`, tile.price, player.cash)
     }
     player.cash -= tile.price
     propertyState.ownerId = player.userId
