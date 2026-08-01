@@ -286,6 +286,10 @@ function finishResolvedRoll(state, map, events, runtime) {
   state.pendingAction = null
   state.deadlineAt =
     state.updatedAt + map.gameDefaults.rollTimeoutSeconds * 1000
+  // 额外掷骰前打出的道具（暗拍开标、稽查引发的欠款）结算完也会回到这里，
+  // 但这次对子早就播报过了，只续时限不重复刷「掷出对子」
+  if (state.lastDice.extraRollAwarded) return
+  state.lastDice.extraRollAwarded = true
   events.push({
     type: "extra_roll_awarded",
     playerId: player.userId,
@@ -482,6 +486,8 @@ function performRoll(
     total,
     isDouble,
     turnSeq: state.turnSeq,
+    // 这次对子的额外掷骰有没有播报过，见 finishResolvedRoll
+    extraRollAwarded: false,
   }
   events.push({
     type: "dice_rolled",

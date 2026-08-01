@@ -20,6 +20,8 @@ export const COMMAND_PATTERNS = Object.freeze({
   resolveDebt: /^#?强制结算$/,
   decline: /^#?(?:放弃|n)$/i,
   surrender: /^#?认输$/,
-  help: /^#?大富翁规则$/,
+  // 规则图不依赖对局，没开局和私聊都能查，所以放在会话检查之外
+  help: /^#?大富翁(?:规则|帮助)$/,
+  board: /^#?(?:大富翁棋盘|查看棋盘|刷新棋盘)$/,
   forceEnd: /^#?结束大富翁$/,
 })

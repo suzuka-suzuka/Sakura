@@ -20,6 +20,7 @@ import { MapLoader } from "../lib/monopoly/map/MapLoader.js"
 import { MonopolySessionStore } from "../lib/monopoly/SessionStore.js"
 import { TimeoutScheduler } from "../lib/monopoly/TimeoutScheduler.js"
 import { renderBoard } from "../lib/monopoly/presentation/BoardRenderer.js"
+import { renderRules } from "../lib/monopoly/presentation/RulesRenderer.js"
 import {
   buildTurnMessages,
 } from "../lib/monopoly/presentation/MessageFormatter.js"
@@ -53,6 +54,8 @@ export class Monopoly extends plugin {
     this.store = null
     this.scheduler = null
     this.service = null
+    // 规则图只跟地图有关，画一次缓存到重载为止
+    this.rulesImage = null
   }
 
   async init() {
@@ -426,13 +429,25 @@ export class Monopoly extends plugin {
     )
   )
 
-  help = Command(COMMAND_PATTERNS.help, async (e) => {
-    return this.executeInGame(e, async () => {
-      const result = await this.service.status(this.contextFromEvent(e))
-      result.events = [{ type: "rules_requested" }]
-      return result
-    })
+  // 规则图不碰会话，群里没开局、甚至私聊都能查
+  help = Command(COMMAND_PATTERNS.help, "message", async (e) => {
+    if (!(await this.ensureReady(e))) return true
+    try {
+      this.rulesImage ||= await renderRules(this.map)
+      await e.reply(Segment.image(this.rulesImage))
+    } catch (error) {
+      logger.error(`[大富翁] 规则图渲染失败：${error.stack || error}`)
+      await e.reply("规则图渲染失败了，请稍后再试。")
+    }
+    return true
   })
+
+  // 规则搬去独立长图后，刷新棋盘单独留一条命令
+  board = Command(COMMAND_PATTERNS.board, async (e) =>
+    this.executeInGame(e, () =>
+      this.service.status(this.contextFromEvent(e))
+    )
+  )
 
   forceEnd = Command(COMMAND_PATTERNS.forceEnd, async (e) =>
     this.executeInGame(e, () =>

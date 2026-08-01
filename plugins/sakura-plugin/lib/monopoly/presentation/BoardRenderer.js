@@ -559,7 +559,6 @@ const NON_ACTION_EVENTS = new Set([
   "counter_window_opened",
   "counter_declined",
   "status_requested",
-  "rules_requested",
   "rule_error",
   "game_created",
   "player_joined",
@@ -856,13 +855,6 @@ function eventNoticeLines(events, view, map) {
       }
     } else if (event.type === "lobby_expired") {
       lines.push("等待超时 · 房间已自动解散")
-    } else if (event.type === "rules_requested") {
-      lines.push("双骰相加 · 对子再掷 · 连续三次对子入狱")
-      lines.push(
-        `看守所掷对子出狱 · 三次不中强制付 ${amount(map.gameDefaults.jailBailAmount)} · 也可提前【保释】`
-      )
-      lines.push("同色组均衡建造 · 4 房升旅馆 · 卖房半价")
-      lines.push("抵押不收租 · 赎回为抵押本金加一成")
     } else if (event.type === "rule_error") {
       lines.push(`操作未生效 · ${event.message}`)
     }
