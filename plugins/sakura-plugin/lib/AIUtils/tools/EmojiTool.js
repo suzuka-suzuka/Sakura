@@ -51,7 +51,6 @@ export class EmojiTool extends AbstractTool {
         similarity: (result.similarity * 100).toFixed(1) + "%",
       };
     } catch (error) {
-      logger.error(`[EmojiTool] 发送表情失败: ${error.message}`);
       return `发送表情失败: ${error.message}`;
     }
   };

@@ -64,6 +64,7 @@ class MemoryVectorStore {
         vector: await generateTextEmbedding(memory.content, {
           selfId,
           taskType: "RETRIEVAL_DOCUMENT",
+          purpose: "记忆入库",
         }),
       }))
     );
@@ -123,6 +124,7 @@ class MemoryVectorStore {
       generateTextEmbedding(normalizedQuery, {
         selfId,
         taskType: "RETRIEVAL_QUERY",
+        purpose: "记忆检索",
       }),
       Promise.all(
         nonEmptyTargets.map((target) =>

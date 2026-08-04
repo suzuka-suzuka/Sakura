@@ -4,24 +4,29 @@ import { createGeminiClient } from "./vertexAuth.js";
 
 export const DEFAULT_EMBEDDING_MODEL = "gemini-embedding-2";
 export const DEFAULT_EMBEDDING_DIMENSIONS = 768;
+const EMBEDDING_PROTOCOL = "gemini";
 
-export function resolveEmbeddingConfig(selfId = null) {
+export function resolveEmbeddingConfig(selfId = null, purpose = "向量检索") {
   const scope = selfId == null ? {} : { selfId };
   const toolsRoute = Setting.getConfig("AI", scope)?.toolsRoute;
-  if (!toolsRoute) throw new Error("未配置 toolsRoute，无法生成记忆向量");
+  if (!toolsRoute) {
+    throw new Error(`${purpose}需要嵌入模型，但 AI 设定里没有配置工具路由`);
+  }
 
   const resolved = resolveRouteTarget(toolsRoute, {
     ...scope,
-    protocol: "gemini",
+    protocol: EMBEDDING_PROTOCOL,
   });
-  if (!resolved || resolved.provider.protocol !== "gemini") {
-    throw new Error(`工具路由 ${toolsRoute} 必须包含可用的 Gemini 目标才能生成记忆向量`);
+  if (!resolved || resolved.provider.protocol !== EMBEDDING_PROTOCOL) {
+    throw new Error(
+      `${purpose}需要嵌入模型，目前只支持 Gemini 协议，而工具路由「${toolsRoute}」里没有可用的 Gemini 目标，请在该路由下加一个 Gemini 供应商的目标`
+    );
   }
   return resolved.requestConfig;
 }
 
-export function createEmbeddingClient(selfId = null) {
-  return createGeminiClient(resolveEmbeddingConfig(selfId));
+export function createEmbeddingClient(selfId = null, purpose) {
+  return createGeminiClient(resolveEmbeddingConfig(selfId, purpose));
 }
 
 export async function generateTextEmbedding(text, options = {}) {
@@ -31,10 +36,11 @@ export async function generateTextEmbedding(text, options = {}) {
   const {
     selfId = null,
     taskType = "",
+    purpose,
     model = DEFAULT_EMBEDDING_MODEL,
     outputDimensionality = DEFAULT_EMBEDDING_DIMENSIONS,
   } = options;
-  const client = createEmbeddingClient(selfId);
+  const client = createEmbeddingClient(selfId, purpose);
   const config = { outputDimensionality };
   if (taskType) config.taskType = taskType;
 

@@ -60,8 +60,8 @@ class ImageEmbeddingManager {
     }
   }
 
-  createClient() {
-    return createEmbeddingClient();
+  createClient(purpose) {
+    return createEmbeddingClient(null, purpose);
   }
 
   getMimeTypeFromFormat(format, fallback = "image/png") {
@@ -197,35 +197,30 @@ class ImageEmbeddingManager {
    * @param {number} maxSize - 最大文件大小（字节），默认2MB
    */
   async downloadImage(imageUrl, saveToLocal = true, maxSize = 2 * 1024 * 1024) {
-    try {
-      const response = await fetch(imageUrl);
-      if (!response.ok) throw new Error(`下载失败: ${response.status}`);
+    const response = await fetch(imageUrl);
+    if (!response.ok) throw new Error(`下载表情图片失败: HTTP ${response.status}`);
 
-      const buffer = Buffer.from(await response.arrayBuffer());
+    const buffer = Buffer.from(await response.arrayBuffer());
 
-      if (buffer.length > maxSize) {
-        const sizeMB = (buffer.length / 1024 / 1024).toFixed(2);
-        throw new Error(`图片太大了(${sizeMB}MB)，表情包最大支持2MB`);
-      }
-
-      const responseMimeType = response.headers.get("content-type") || "image/png";
-      const mimeType = await this.detectImageMimeType(buffer, responseMimeType);
-
-      const hash = crypto.createHash("md5").update(buffer).digest("hex");
-
-      const ext = this.getExtensionFromMimeType(mimeType);
-      const filename = `${hash}.${ext}`;
-      const filepath = path.join(EMOJI_IMAGES_DIR, filename);
-
-      if (saveToLocal) {
-        fs.writeFileSync(filepath, buffer);
-      }
-
-      return { filepath, filename, hash };
-    } catch (error) {
-      logger.error(`[表情向量] 下载图片失败: ${error.message}`);
-      throw error;
+    if (buffer.length > maxSize) {
+      const sizeMB = (buffer.length / 1024 / 1024).toFixed(2);
+      throw new Error(`图片太大了(${sizeMB}MB)，表情包最大支持2MB`);
     }
+
+    const responseMimeType = response.headers.get("content-type") || "image/png";
+    const mimeType = await this.detectImageMimeType(buffer, responseMimeType);
+
+    const hash = crypto.createHash("md5").update(buffer).digest("hex");
+
+    const ext = this.getExtensionFromMimeType(mimeType);
+    const filename = `${hash}.${ext}`;
+    const filepath = path.join(EMOJI_IMAGES_DIR, filename);
+
+    if (saveToLocal) {
+      fs.writeFileSync(filepath, buffer);
+    }
+
+    return { filepath, filename, hash };
   }
 
   /**
@@ -236,54 +231,49 @@ class ImageEmbeddingManager {
    * @returns {Promise<number[]>} 嵌入向量
    */
   async generateImageEmbedding(imageBuffer, mimeType = "image/png", description = "") {
-    try {
-      const client = this.createClient();
+    const client = this.createClient("表情入库");
 
-      // Convert GIF to PNG before sending it to the embedding model.
-      let processedBuffer = imageBuffer;
-      let processedMimeType = await this.detectImageMimeType(imageBuffer, mimeType);
-      if (processedMimeType.includes("gif")) {
-        try {
-          processedBuffer = await sharp(imageBuffer, { animated: false })
-            .png()
-            .toBuffer();
-          processedMimeType = "image/png";
-        } catch (err) {
-          logger.warn(`[表情向量] GIF转PNG失败，尝试原格式: ${err.message}`);
-        }
+    // Convert GIF to PNG before sending it to the embedding model.
+    let processedBuffer = imageBuffer;
+    let processedMimeType = await this.detectImageMimeType(imageBuffer, mimeType);
+    if (processedMimeType.includes("gif")) {
+      try {
+        processedBuffer = await sharp(imageBuffer, { animated: false })
+          .png()
+          .toBuffer();
+        processedMimeType = "image/png";
+      } catch (err) {
+        logger.warn(`[表情向量] GIF转PNG失败，尝试原格式: ${err.message}`);
       }
-
-      const base64 = processedBuffer.toString("base64");
-
-      // 构建 parts：图片 + 可选描述文本（混合嵌入）
-      const parts = [
-        {
-          inlineData: {
-            mimeType: processedMimeType,
-            data: base64,
-          },
-        },
-      ];
-
-      if (description) {
-        parts.push({ text: description });
-      }
-
-      const result = await client.models.embedContent({
-        model: this.embeddingModel,
-        contents: {
-          parts: parts,
-        },
-        config: {
-          outputDimensionality: 768,
-        },
-      });
-
-      return result.embeddings[0].values;
-    } catch (error) {
-      logger.error(`[表情向量] 生成图片向量失败: ${error.message}`);
-      throw error;
     }
+
+    const base64 = processedBuffer.toString("base64");
+
+    // 构建 parts：图片 + 可选描述文本（混合嵌入）
+    const parts = [
+      {
+        inlineData: {
+          mimeType: processedMimeType,
+          data: base64,
+        },
+      },
+    ];
+
+    if (description) {
+      parts.push({ text: description });
+    }
+
+    const result = await client.models.embedContent({
+      model: this.embeddingModel,
+      contents: {
+        parts: parts,
+      },
+      config: {
+        outputDimensionality: 768,
+      },
+    });
+
+    return result.embeddings[0].values;
   }
 
   /**
@@ -338,15 +328,11 @@ class ImageEmbeddingManager {
    * @returns {Promise<number[]>} 嵌入向量
    */
   async generateTextEmbedding(text, taskPrefix = "") {
-    try {
-      const content = taskPrefix ? `${taskPrefix}${text}` : text;
-      return await embedText(content, {
-        model: this.embeddingModel,
-      });
-    } catch (error) {
-      logger.error(`[表情向量] 生成文本向量失败: ${error.message}`);
-      throw error;
-    }
+    const content = taskPrefix ? `${taskPrefix}${text}` : text;
+    return embedText(content, {
+      model: this.embeddingModel,
+      purpose: "表情检索",
+    });
   }
 
   async checkImage(imageUrl) {
