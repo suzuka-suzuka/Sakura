@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { readAuthToken } from '../utils/authStorage';
+import { useDynamicOptions } from '../hooks/useDynamicOptions';
 
 function normalizeScopeSelfId(scopeSelfId) {
     if (scopeSelfId == null) return null;
@@ -1426,33 +1427,7 @@ function ProviderCredentialsField({
 }
 
 function DynamicSelectField({ name, displayName, help, value, onChange, uiType, scopeSelfId = null }) {
-    const [options, setOptions] = useState([]);
-    const [configLabel, setConfigLabel] = useState('');
-    const [loading, setLoading] = useState(true);
-    const [isDynamic, setIsDynamic] = useState(true);
-
-    useEffect(() => {
-        const token = getAuthToken();
-        fetch(buildScopedUrl('/api/dynamic-options', scopeSelfId), {
-            headers: { Authorization: `Bearer ${token}` },
-        })
-            .then(r => r.json())
-            .then(d => {
-                if (d.success && d.data) {
-                    const config = d.data.config?.[uiType];
-                    if (config) {
-                        setOptions(d.data.options?.[uiType] || []);
-                        setConfigLabel(config.label || '');
-                        setIsDynamic(true);
-                    } else {
-                        // 不是动态类型，标记为非动态
-                        setIsDynamic(false);
-                    }
-                }
-            })
-            .catch(() => { setIsDynamic(false); })
-            .finally(() => setLoading(false));
-    }, [scopeSelfId, uiType]);
+    const { options, label: configLabel, loading, isDynamic } = useDynamicOptions(scopeSelfId, uiType);
 
     // 如果不是动态类型，回退到普通文本输入
     if (!loading && !isDynamic) {
@@ -1507,27 +1482,8 @@ function DynamicSelectField({ name, displayName, help, value, onChange, uiType, 
  */
 function DynamicSelectArrayField({ name, displayName, help, value, onChange, uiType, scopeSelfId = null }) {
     const [showModal, setShowModal] = useState(false);
-    const [options, setOptions] = useState([]);
-    const [configLabel, setConfigLabel] = useState('');
+    const { options, label: configLabel } = useDynamicOptions(scopeSelfId, uiType);
     const items = Array.isArray(value) ? value : [];
-
-    useEffect(() => {
-        const token = getAuthToken();
-        fetch(buildScopedUrl('/api/dynamic-options', scopeSelfId), {
-            headers: { Authorization: `Bearer ${token}` },
-        })
-            .then(r => r.json())
-            .then(d => {
-                if (d.success && d.data) {
-                    const config = d.data.config?.[uiType];
-                    if (config) {
-                        setOptions(d.data.options?.[uiType] || []);
-                        setConfigLabel(config.label || '');
-                    }
-                }
-            })
-            .catch(() => { });
-    }, [scopeSelfId, uiType]);
 
     const removeItem = (index) => {
         onChange(items.filter((_, i) => i !== index));

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { clearAuthState, readAuthToken, storeAuthState, touchAuthToken } from '../utils/authStorage';
 import { normalizeAccountSelfId, resolvePluginScopeSelfId } from '../utils/accountScope';
+import { invalidateDynamicOptions } from './useDynamicOptions';
 
 const API_BASE = '';
 const PLUGIN_SELF_ID_STORAGE_KEY = 'sakura_plugin_self_id';
@@ -387,6 +388,8 @@ export function useConfig() {
                         },
                     },
                 }));
+                // 保存的模块可能是别的字段的动态选项来源，让下拉选项重新拉取
+                invalidateDynamicOptions();
                 return { success: true };
             }
             return { success: false, errors: data.errors };
@@ -452,6 +455,8 @@ export function useConfig() {
 
     const updatePluginFromWs = useCallback((pluginName, moduleName, data, selfId = null) => {
         const scopeKey = scopeKeyOf(normalizeSelfId(selfId));
+        // 配置在后端被改动（面板外保存 / YAML 文件热重载），动态选项一并失效
+        invalidateDynamicOptions();
         setPluginConfigs((prev) => ({
             ...prev,
             [pluginName]: {
