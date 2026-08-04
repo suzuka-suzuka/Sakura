@@ -438,16 +438,20 @@ function translateEvent(milkyEvent, selfId) {
         user_id:     data.user_id,
         operator_id: data.operator_id || data.invitor_id || 0,
       };
-    case "group_member_decrease":
+    case "group_member_decrease": {
+      // operator_id 与 user_id 相同的是主动退群，不是被踢
+      const opId = Number(data.operator_id) || 0;
+      const isKick = opId !== 0 && opId !== Number(data.user_id);
       return {
         ...base,
         post_type:   "notice",
         notice_type: "group_decrease",
-        sub_type:    data.operator_id ? "kick" : "leave",
+        sub_type:    isKick ? "kick" : "leave",
         group_id:    data.group_id,
         user_id:     data.user_id,
         operator_id: data.operator_id || 0,
       };
+    }
 
     // ---- 群管理员变动 ----
     case "group_admin_change":

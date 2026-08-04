@@ -69,7 +69,11 @@ export class GroupNotice extends plugin {
 
   handleDecrease = OnEvent("notice.group_decrease", async (e) => {
     if (e.user_id === e.self_id) return;
-    if (e.operator_id !== 0) return;
+    // 主动退群：NapCat 给 operator_id=0，SnowLuma 按 OneBot 标准给 operator_id=user_id
+    const isSelfLeave = e.sub_type
+      ? e.sub_type === "leave"
+      : !e.operator_id || Number(e.operator_id) === Number(e.user_id);
+    if (!isSelfLeave) return;
 
     const config = Setting.getConfig("groupnotice");
     if (!config.leaveEnable) return;
