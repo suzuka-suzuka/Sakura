@@ -261,6 +261,13 @@ export class AIChat extends plugin {
         return true;
       }
 
+      if (agentResult.status === "stopped") {
+        if (history) {
+          await saveConversationHistory(e, currentFullHistory, prefix);
+        }
+        return true;
+      }
+
       if (agentResult.status === "tool_limit") {
         await e.reply("⚠️ 工具调用次数过多，为防止死循环已强制中断对话。", 10, true);
         if (history) {

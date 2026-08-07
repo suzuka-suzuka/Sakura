@@ -130,6 +130,47 @@ function sameJson(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+export const STOPPED_CONVERSATION_TEXT = "本轮回答已被停止，未继续生成。";
+
+export function finalizeStoppedConversationTurn(
+  history = [],
+  turnStartIndex = history.length,
+  shouldKeepPart = (part) => !part?.inlineData
+) {
+  if (!Array.isArray(history)) return history;
+
+  const normalizedStart = Number.isInteger(turnStartIndex)
+    ? Math.max(0, Math.min(turnStartIndex, history.length))
+    : history.length;
+  const currentTurn = history.slice(normalizedStart);
+  const hasPersistentUserMessage = currentTurn.some(
+    (item) =>
+      item?.role === "user" &&
+      Array.isArray(item.parts) &&
+      item.parts.some((part) => part && shouldKeepPart(part))
+  );
+
+  if (!hasPersistentUserMessage) {
+    history.splice(normalizedStart);
+    return history;
+  }
+
+  const alreadyFinalized = currentTurn.some(
+    (item) => item?.role === "model" && item.interrupted === true
+  );
+  if (alreadyFinalized) {
+    return history;
+  }
+
+  history.push({
+    role: "model",
+    parts: [{ text: STOPPED_CONVERSATION_TEXT }],
+    interrupted: true,
+  });
+
+  return history;
+}
+
 function removeTrailingToolExchange(history) {
   while (history.length > 0) {
     const last = history[history.length - 1];

@@ -4,6 +4,7 @@ import { modelSupportsDirectImageInput } from "./providerRouter.js";
 import { ensureToolCallIds } from "./toolCallProtocol.js";
 import { executeToolCalls, toolGroupHasTool } from "./tools/tools.js";
 import { buildMemoryContext } from "./memoryContext.js";
+import { finalizeStoppedConversationTurn } from "./ConversationHistory.js";
 import {
   collectUniqueInlineDataParts,
   filterNewInlineDataParts,
@@ -81,6 +82,7 @@ export async function runAgentLoop({
   includeUserHistoryPart = (part) => !part.inlineData,
 }) {
   const currentFullHistory = history;
+  const turnStartIndex = currentFullHistory.length;
   const taskId = startAiTask(e);
   const preparedImageQueries = new WeakMap();
   const routingContext = {
@@ -191,6 +193,11 @@ export async function runAgentLoop({
     while (true) {
       if (checkAndClearStopFlag(taskId)) {
         logger.info(`[${label}] User ${e.user_id} requested stop`);
+        finalizeStoppedConversationTurn(
+          currentFullHistory,
+          turnStartIndex,
+          includeUserHistoryPart
+        );
         return {
           status: "stopped",
           history: currentFullHistory,

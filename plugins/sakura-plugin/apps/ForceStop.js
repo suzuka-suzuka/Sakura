@@ -1,4 +1,7 @@
-import { requestStopCurrentTasks } from "../lib/AIUtils/stopFlag.js";
+import {
+    requestStopAllGroupTasks,
+    requestStopCurrentTasks,
+} from "../lib/AIUtils/stopFlag.js";
 
 export class ForceStop extends plugin {
     constructor() {
@@ -20,5 +23,22 @@ export class ForceStop extends plugin {
 
         await e.reply("已接收强制停止指令，正在结束当前执行逻辑...", 10);
         return false;
+    });
+
+    forceStopAll = Command(/^#?停止全部对话$/i, "white", async (e) => {
+        if (!e.group_id) {
+            await e.reply("停止全部对话指令仅可在群聊中使用。", 10);
+            return true;
+        }
+
+        const hasRunningTask = requestStopAllGroupTasks(e);
+
+        if (!hasRunningTask) {
+            await e.reply("本群当前没有正在运行的 AI 对话。", 10);
+            return true;
+        }
+
+        await e.reply("已接收停止全部对话指令，正在结束本群所有 AI 对话...", 10);
+        return true;
     });
 }

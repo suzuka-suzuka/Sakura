@@ -63,6 +63,29 @@ export function requestStopCurrentTasks(e) {
     return true;
 }
 
+export function requestStopAllGroupTasks(e) {
+    if (!e?.group_id) {
+        return false;
+    }
+
+    const selfId = e.self_id || "default";
+    const groupKeyPrefix = `bot:${selfId}:group:${e.group_id}:user:`;
+    let hasRunningTask = false;
+
+    for (const [key, tasks] of activeAiTasks) {
+        if (!key.startsWith(groupKeyPrefix)) {
+            continue;
+        }
+
+        for (const taskId of tasks) {
+            aiStopRequests.add(taskId);
+            hasRunningTask = true;
+        }
+    }
+
+    return hasRunningTask;
+}
+
 export function checkAndClearStopFlag(taskId) {
     if (taskId && aiStopRequests.has(taskId)) {
         aiStopRequests.delete(taskId);

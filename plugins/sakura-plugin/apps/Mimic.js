@@ -330,6 +330,10 @@ export class Mimic extends plugin {
         );
       }
 
+      if (agentResult.status === "stopped") {
+        return true;
+      }
+
       if (agentResult.status === "tool_limit") {
         await e.reply("⚠️ 工具调用次数过多，为防止死循环已强制中断对话。", 10, true);
         return true;
