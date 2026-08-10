@@ -18,7 +18,7 @@ categories:
         icon: 🔧
         type: consumable
         instant_effect: repair_rod
-        description: 完全修复鱼竿耐久与骸骨鲨暗伤，并解除深压回响的控制力减益。
+        description: 完全修复当前鱼竿的耐久与暗伤，并解除深压回响造成的控制力减益。
 
       - id: item_holy_water
         name: 净化圣水

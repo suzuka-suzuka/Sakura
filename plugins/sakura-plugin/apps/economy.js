@@ -1119,7 +1119,7 @@ export default class Economy extends plugin {
             ? `耐久损耗 -${repaired.durabilityRepaired}`
             : "",
           repaired.controlRestored > 0
-            ? "骸骨鲨留下的暗伤已修复"
+            ? "竿身暗伤已修复"
             : "",
           deepPressureCleared.cleared
             ? `深压回响 ${deepPressureCleared.before} 层已解除（控制力 ×${Number(deepPressureCleared.beforeMultiplier.toFixed(3))} → ×1）`

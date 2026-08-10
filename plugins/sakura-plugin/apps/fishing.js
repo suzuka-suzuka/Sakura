@@ -217,7 +217,7 @@ function computeRiverBlessRefundValue(state, fishingManager) {
 }
 
 function getEffectiveRodControl(fishingManager, userId, state, rodMastery = 0) {
-  // 深压回响是持久连乘减益，作用于「基础控制力（已减骨鱼暗伤）+ 熟练度」之后的实际控制力。
+  // 深压回响是持久连乘减益，作用于「基础控制力（已减竿身暗伤）+ 熟练度」之后的实际控制力。
   const deepPressureMultiplier = Number(state.deepPressureMultiplier) || 1;
   const baseControl = fishingManager.getRodControl(userId, state.rodConfig.id) + rodMastery;
   return baseControl * deepPressureMultiplier;

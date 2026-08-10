@@ -1263,7 +1263,7 @@ async function generateNightmareGuide() {
     ["2 · 深渊猎手", "充能触发时，噩梦伤害、偷取、状态与断线全部免疫；1级最多1次/24小时，2级最多2次/12小时恢复1次。"],
     ["3 · 河神垂青", "只保住鱼线并给予折现奖励，噩梦本体效果照常生效。"],
     ["4 · 净化圣水", "清诅咒、花嫁印记、亡者债务/抽成印记与深压；不修鱼竿暗伤。"],
-    ["5 · 修理工具箱", "修满耐久、修复骸骨鲨暗伤，并清除全部深压；不清花嫁、诅咒或债务。"],
+    ["5 · 修理工具箱", "修满耐久、修复鱼竿暗伤，并清除全部深压；不清花嫁、诅咒或债务。"],
   ];
   for (const [index, [label, text]] of counters.entries()) {
     const column = index % 2;
@@ -1289,7 +1289,7 @@ async function generateNightmareGuide() {
 
 const ITEM_GUIDE_TEXT = Object.freeze({
   item_charm_lucky: "35分钟内必定上钩，可跳过普通渔获的重量与难度判定；仍需5秒内操作才算完美收竿。",
-  item_toolkit_repair: "立即修满当前鱼竿耐久、修复骸骨鲨暗伤，并清除全部深压回响。",
+  item_toolkit_repair: "立即修满当前鱼竿耐久、修复鱼竿暗伤，并清除全部深压回响。",
   item_holy_water: "立即清除骷髅诅咒、花嫁印记、亡者债务/抽成印记与深压回响。",
   item_sand_time: "35分钟内把每竿钓鱼冷却从5分钟缩短到2分30秒。",
   bait_boss: "宝箱非卖品。装备后下一竿必定呼出当前钓点首领；每次消耗1个。",

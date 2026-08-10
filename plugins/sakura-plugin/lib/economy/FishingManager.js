@@ -692,7 +692,7 @@ export default class FishingManager {
     };
   }
 
-  // 修理工具箱可单独解除深压回响（与骨鱼暗伤一样属于「鱼竿控制」范畴的修复）。
+  // 修理工具箱可单独解除深压回响（与竿身暗伤一样属于「鱼竿控制」范畴的修复）。
   clearDeepPressure(userId) {
     userId = String(userId);
     this._ensureUser(userId);
@@ -988,7 +988,7 @@ export default class FishingManager {
     return transaction.immediate();
   }
 
-  // 骸骨鲨只施加暗伤；本次暗伤耗尽剩余控制力时直接断竿。
+  // 施加竿身暗伤；本次暗伤耗尽剩余控制力时直接断竿。
   applyRodControlLoss(userId, rodId, controlLoss) {
     const safeControlLoss = Math.max(0, Math.floor(Number(controlLoss) || 0));
     const controlResult = this.reduceRodControl(userId, rodId, safeControlLoss);
