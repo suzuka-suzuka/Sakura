@@ -351,7 +351,12 @@ export class Event {
       return this.bot.setFriendAddRequest({ flag: targetFlag, approve: true, remark });
     }
     if (this.request_type === "group") {
-      return this.bot.setGroupAddRequest({ flag: targetFlag, approve: true });
+      // sub_type 必带：add（申请入群）和 invite（邀请入群）是两条不同的审批队列
+      return this.bot.setGroupAddRequest({
+        flag: targetFlag,
+        sub_type: this.sub_type || "add",
+        approve: true,
+      });
     }
   }
 
@@ -366,7 +371,12 @@ export class Event {
       return this.bot.setFriendAddRequest({ flag: targetFlag, approve: false });
     }
     if (this.request_type === "group") {
-      return this.bot.setGroupAddRequest({ flag: targetFlag, approve: false, reason });
+      return this.bot.setGroupAddRequest({
+        flag: targetFlag,
+        sub_type: this.sub_type || "add",
+        approve: false,
+        reason,
+      });
     }
   }
 
