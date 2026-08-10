@@ -37,14 +37,13 @@ categories:
 
       # 首领鱼饵沿用 shop.yaml 中的 bait_boss，由所有钓点宝箱共同掉落。
 
-      # ===== 钓点专属道具（均持续35分钟） =====
+      # ===== 钓点专属道具（限时Buff均持续35分钟，两种许愿保留到下一次咬钩） =====
       - id: item_sign_koi
         name: 锦鲤许愿签
         icon: 🎏
         type: consumable
-        duration: 2100
         instant_effect: koi_wish
-        description: 樱花池塘专属道具。使用后35分钟内，下一次咬钩必定异色。
+        description: 樱花池塘专属道具。使用后一直保留，下一次咬钩必定异色。
 
       - id: item_charm_river
         name: 河神垂青
@@ -85,9 +84,8 @@ categories:
         name: 星愿瓶
         icon: 🌠
         type: consumable
-        duration: 2100
         instant_effect: star_wish
-        description: 星辉秘境专属道具。使用时指定品质，35分钟内下一次咬钩必定为该品质。
+        description: 星辉秘境专属道具。使用时指定品质，许愿一直保留，下一次咬钩必定为该品质。
 
   treasures:
     name: "💎 钓点藏品"

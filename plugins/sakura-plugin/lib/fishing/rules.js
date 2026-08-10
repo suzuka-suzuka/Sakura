@@ -54,7 +54,7 @@ export const BOSS_ATTACK_INTERVAL_MS = 5000;
 export const BOSS_PLAYER_ATTACK_COOLDOWN_MS = 5000;
 export const BOSS_FIGHT_TIMEOUT_MS = 60 * 1000;
 // 首领困难度按「顶级鱼竿 + 熟练度 10 → 溜鱼通过率 100%」反推：190 + 10 + 25。
-// 熟练度每 +5 抬 20 个百分点，裸竿 60%、熟练度 5 落在原本的 80% 校准带。
+// 控制力每 +5 抬 20 个百分点；熟练度换算见 getMasteryControlBonus，熟练度 10 仍折算 +10。
 export const BOSS_MIN_DIFFICULTY = 225;
 export const BOSS_MASTERY_FOR_FULL_CONTROL = 10;
 export const BOSS_MIN_HP = 150;
@@ -755,6 +755,28 @@ export function applyFishFightStateModifiers({
     };
   }
   throw new TypeError(`未知的溜鱼操作：${action}`);
+}
+
+// 熟练度折算控制力走对数：控制力是 1:1 抵扣困难度的硬通货，而困难度上限只有 225，
+// 线性 +1/竿 意味着几十竿之后控制力就盖过全图，所有渔获直接跳过判定自动上岸。
+// 对数曲线让前十竿几乎照旧（熟练度 10 仍是 +10，接住首领 225 = 190 + 10 + 25 的校准），
+// 之后每翻一倍熟练度才多几点，MAX 再兜一道底：顶级鱼竿最多 190 + 50 = 240，
+// 永远追不上异色传说/异色首领的 281，最强的猎物不会退化成必得。
+export const MASTERY_CONTROL_ANCHOR = 10;
+export const MASTERY_CONTROL_SCALE = 8;
+export const MASTERY_CONTROL_BONUS_MAX = 50;
+const MASTERY_CONTROL_COEFFICIENT = MASTERY_CONTROL_ANCHOR /
+  Math.log(1 + MASTERY_CONTROL_ANCHOR / MASTERY_CONTROL_SCALE);
+
+export function getMasteryControlBonus(mastery) {
+  const safeMastery = Math.max(0, Math.floor(Number(mastery) || 0));
+  if (safeMastery <= 0) return 0;
+  return Math.min(
+    MASTERY_CONTROL_BONUS_MAX,
+    Math.round(
+      MASTERY_CONTROL_COEFFICIENT * Math.log(1 + safeMastery / MASTERY_CONTROL_SCALE),
+    ),
+  );
 }
 
 export function calculateForcePullSuccessRate(fishDifficulty, effectiveControl) {

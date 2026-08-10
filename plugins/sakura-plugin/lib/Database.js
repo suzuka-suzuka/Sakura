@@ -153,6 +153,8 @@ class DB {
         deep_pressure_layers INTEGER DEFAULT 0,
         nightmare_immunity_charges INTEGER DEFAULT 0,
         nightmare_immunity_updated_at INTEGER DEFAULT 0,
+        koi_wish INTEGER DEFAULT 0,
+        star_wish TEXT,
         location TEXT,
         PRIMARY KEY (group_id, user_id)
       );
@@ -310,6 +312,13 @@ class DB {
     }
     if (!fishingStatsColumns.some((column) => column.name === 'nightmare_immunity_updated_at')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN nightmare_immunity_updated_at INTEGER DEFAULT 0');
+    }
+    // 两种许愿不设时限，一直挂到下一次咬钩，所以只能落库；放在 Redis 里会留下永不过期的键。
+    if (!fishingStatsColumns.some((column) => column.name === 'koi_wish')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN koi_wish INTEGER DEFAULT 0');
+    }
+    if (!fishingStatsColumns.some((column) => column.name === 'star_wish')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN star_wish TEXT');
     }
 
     // 主人红包是凭空发放的，过期不退款，需要单独标记。

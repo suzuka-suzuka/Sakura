@@ -818,6 +818,136 @@ export default class FishingManager {
     return transaction.immediate();
   }
 
+  // 锦鲤许愿签与星愿瓶不设时限：许下之后一直挂着，直到下一次咬钩才兑现并消耗。
+  // 正因为不会过期，它们只能落在 fishing_stats 里——写进 Redis 就是一批永不回收的键。
+  getPendingWishes(userId) {
+    const userData = this.getUserData(userId);
+    return {
+      koiWish: Boolean(userData.koi_wish),
+      starWish: userData.star_wish || null,
+    };
+  }
+
+  // 已经挂着一枚时返回 false，调用方据此退还道具。
+  setKoiWish(userId) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    const result = db.prepare(`
+        UPDATE fishing_stats
+        SET koi_wish = 1
+        WHERE group_id = ? AND user_id = ? AND COALESCE(koi_wish, 0) = 0
+    `).run(this.groupId, userId);
+    return result.changes > 0;
+  }
+
+  // 抛竿时无条件消耗，返回本竿是否真的带着许愿。
+  consumeKoiWish(userId) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    const result = db.prepare(`
+        UPDATE fishing_stats
+        SET koi_wish = 0
+        WHERE group_id = ? AND user_id = ? AND COALESCE(koi_wish, 0) <> 0
+    `).run(this.groupId, userId);
+    return result.changes > 0;
+  }
+
+  // 抛竿启动失败时原样退还，不判断当前状态。
+  restoreKoiWish(userId) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    db.prepare(`
+        UPDATE fishing_stats
+        SET koi_wish = 1
+        WHERE group_id = ? AND user_id = ?
+    `).run(this.groupId, userId);
+  }
+
+  setStarWish(userId, rarity) {
+    userId = String(userId);
+    const safeRarity = String(rarity || "").trim();
+    if (!safeRarity) return false;
+    this._ensureUser(userId);
+    const result = db.prepare(`
+        UPDATE fishing_stats
+        SET star_wish = ?
+        WHERE group_id = ? AND user_id = ? AND star_wish IS NULL
+    `).run(safeRarity, this.groupId, userId);
+    return result.changes > 0;
+  }
+
+  // 取出并清空所许品质；没有星愿时返回 null。
+  consumeStarWish(userId) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    const transaction = db.transaction(() => {
+      const row = db.prepare(`
+          SELECT star_wish FROM fishing_stats WHERE group_id = ? AND user_id = ?
+      `).get(this.groupId, userId);
+      const rarity = row?.star_wish || null;
+      if (!rarity) return null;
+      db.prepare(`
+          UPDATE fishing_stats
+          SET star_wish = NULL
+          WHERE group_id = ? AND user_id = ?
+      `).run(this.groupId, userId);
+      return rarity;
+    });
+    return transaction.immediate();
+  }
+
+  // 一次性迁移：旧版把两种许愿写在 Redis 里，改为落库后这些键不会再被读到，
+  // 逐个搬进 fishing_stats 再删除，键清空之后这段扫描就只是空转。
+  static async migrateLegacyWishKeys() {
+    if (!global.redis) return { koiWish: 0, starWish: 0 };
+    const legacyPatterns = [
+      { pattern: "sakura:fishing:koi-wish:*", type: "koiWish" },
+      { pattern: "sakura:fishing:wish:*", type: "starWish" },
+    ];
+    const migrated = { koiWish: 0, starWish: 0 };
+    for (const { pattern, type } of legacyPatterns) {
+      let cursor = "0";
+      do {
+        const [nextCursor, keys] = await redis.scan(
+          cursor,
+          "MATCH",
+          pattern,
+          "COUNT",
+          200,
+        );
+        cursor = String(nextCursor);
+        for (const key of keys) {
+          const segments = String(key).split(":");
+          const userId = segments.pop();
+          const groupId = segments.pop();
+          const value = await redis.get(key);
+          // 先落库再删键：中途挂掉最多重来一次，不会把玩家的许愿弄丢。
+          if (groupId && userId && value) {
+            const manager = new FishingManager(groupId);
+            const applied = type === "koiWish"
+              ? manager.setKoiWish(userId)
+              : manager.setStarWish(userId, value);
+            if (applied) migrated[type] += 1;
+          }
+          await redis.del(key);
+        }
+      } while (cursor !== "0");
+    }
+    return migrated;
+  }
+
+  restoreStarWish(userId, rarity) {
+    userId = String(userId);
+    const safeRarity = String(rarity || "").trim();
+    if (!safeRarity) return;
+    this._ensureUser(userId);
+    db.prepare(`
+        UPDATE fishing_stats
+        SET star_wish = ?
+        WHERE group_id = ? AND user_id = ?
+    `).run(safeRarity, this.groupId, userId);
+  }
+
   getRodControl(userId, rodId) {
     const rodConfig = this.getRodConfig(rodId);
     if (!rodConfig) return 0;

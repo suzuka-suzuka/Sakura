@@ -62,6 +62,7 @@ import {
   getFishingLocationConfig,
   getFishingEnvironmentModifiers,
   getFishingLevelExp,
+  getMasteryControlBonus,
   getNextWeatherByTime,
   getWeatherByTime,
   isBossFish,
@@ -92,6 +93,19 @@ import {
 import { getShanghaiHour, secondsUntilNextShanghaiDay } from "../lib/economy/time.js";
 
 const fishingSessions = new FishingSessionStore();
+
+// 锦鲤许愿与星愿改存 SQLite（不过期的键堆在 Redis 里只会越积越多），
+// 启动时把旧版残留的键搬进数据库并清掉。
+FishingManager.migrateLegacyWishKeys()
+  .then((migrated) => {
+    const total = migrated.koiWish + migrated.starWish;
+    if (total > 0) {
+      logger.info(
+        `[钓鱼] 已迁移旧版许愿数据：锦鲤 ${migrated.koiWish} 份、星愿 ${migrated.starWish} 份`,
+      );
+    }
+  })
+  .catch((err) => logger.warn(`[钓鱼] 迁移旧版许愿数据失败: ${err.message}`));
 
 const fishData = getFishData();
 
@@ -217,9 +231,11 @@ function computeRiverBlessRefundValue(state, fishingManager) {
 }
 
 function getEffectiveRodControl(fishingManager, userId, state, rodMastery = 0) {
-  // 深压回响是持久连乘减益，作用于「基础控制力（已减竿身暗伤）+ 熟练度」之后的实际控制力。
+  // 深压回响是持久连乘减益，作用于「基础控制力（已减竿身暗伤）+ 熟练度加成」之后的实际控制力。
+  // 熟练度走对数折算，练得越久收益越薄，不会堆到全图自动上岸。
   const deepPressureMultiplier = Number(state.deepPressureMultiplier) || 1;
-  const baseControl = fishingManager.getRodControl(userId, state.rodConfig.id) + rodMastery;
+  const baseControl = fishingManager.getRodControl(userId, state.rodConfig.id) +
+    getMasteryControlBonus(rodMastery);
   return baseControl * deepPressureMultiplier;
 }
 
@@ -938,15 +954,11 @@ export default class Fishing extends plugin {
       state.curseAccrued = curseActive;
 
       // 星愿一次性生效：抛竿即消耗所选品质；启动失败会在 catch 中原样退还。
+      // 首领鱼饵不吃星愿，这一竿不去动它，留给下一次普通咬钩。
       let wishRarity = null;
-      try {
-        const wishKey = `sakura:fishing:wish:${groupId}:${userId}`;
-        const storedWish = await redis.get(wishKey);
-        wishRarity = !isBossBait && RARITY_CONFIG[storedWish] ? storedWish : null;
-        if (wishRarity) await redis.del(wishKey);
-      } catch (err) {
-        wishRarity = null;
-        logger.warn(`[钓鱼] 读取星愿状态失败: ${err.message}`);
+      if (!isBossBait) {
+        const storedWish = fishingManager.consumeStarWish(userId);
+        wishRarity = RARITY_CONFIG[storedWish] ? storedWish : null;
       }
       state.wishConsumed = Boolean(wishRarity);
       state.wishRarity = wishRarity;
@@ -989,14 +1001,7 @@ export default class Fishing extends plugin {
       }
       // 许愿签由本次咬钩无条件消耗；只有垃圾至传说的非首领鱼会被强制为异色。
       // 抛竿阶段先原子占用许愿，使其与其他Buff一起进入本次会话快照。
-      let koiWishConsumed = false;
-      try {
-        koiWishConsumed = (
-          await redis.del(`sakura:fishing:koi-wish:${groupId}:${userId}`)
-        ) > 0;
-      } catch (err) {
-        logger.warn(`[钓鱼] 消耗锦鲤许愿失败，本次按未许愿处理: ${err.message}`);
-      }
+      const koiWishConsumed = fishingManager.consumeKoiWish(userId);
       state.koiWishConsumed = koiWishConsumed;
       const shinyResult = resolveKoiWishShiny(selectedFish, koiWishConsumed);
       selectedFish.isShiny = shinyResult.isShiny;
@@ -1170,12 +1175,7 @@ export default class Fishing extends plugin {
       }
       if (state.wishConsumed) {
         try {
-          await redis.set(
-            `sakura:fishing:wish:${groupId}:${userId}`,
-            state.wishRarity,
-            "EX",
-            FISHING_BENEFIT_DURATION_SECONDS,
-          );
+          fishingManager.restoreStarWish(userId, state.wishRarity);
           state.wishConsumed = false;
         } catch (refundErr) {
           logger.error(`[钓鱼] 启动失败后退还星愿异常: ${refundErr.stack || refundErr}`);
@@ -1183,12 +1183,7 @@ export default class Fishing extends plugin {
       }
       if (state.koiWishConsumed) {
         try {
-          await redis.set(
-            `sakura:fishing:koi-wish:${groupId}:${userId}`,
-            String(Date.now()),
-            "EX",
-            FISHING_BENEFIT_DURATION_SECONDS,
-          );
+          fishingManager.restoreKoiWish(userId);
           state.koiWishConsumed = false;
         } catch (refundErr) {
           logger.error(`[钓鱼] 启动失败后退还锦鲤许愿异常: ${refundErr.stack || refundErr}`);
@@ -2477,7 +2472,7 @@ export default class Fishing extends plugin {
         name: rodConfig.name,
         handler: "fishing_rod",
         details: [
-          `熟练度 ${mastery}`,
+          `熟练度 ${mastery}（控制力 +${getMasteryControlBonus(mastery)}）`,
           `耐久 ${durability.currentDurability}/${durability.maxDurability}`,
         ],
       });
@@ -2548,26 +2543,21 @@ export default class Fishing extends plugin {
       ? { name: "雾（雾灯）", emoji: WEATHER_CONFIG["雾"].emoji }
       : weather;
 
-    const koiWishKey = `sakura:fishing:koi-wish:${groupId}:${userId}`;
-    const wishKey = `sakura:fishing:wish:${groupId}:${userId}`;
-    const [koiWishTtl, wishTtl, wishRarity] = await Promise.all([
-      redis.ttl(koiWishKey).catch(() => 0),
-      redis.ttl(wishKey).catch(() => 0),
-      redis.get(wishKey).catch(() => null),
-    ]);
-    if (koiWishTtl > 0) {
+    // 两种许愿都没有时限，挂着就一直等下一次咬钩，只需判断是否存在。
+    const { koiWish, starWish: wishRarity } = fishingManager.getPendingWishes(userId);
+    if (koiWish) {
       effects.push({
         icon: "🎏",
         name: "锦鲤许愿",
-        detail: `下一次咬钩消耗，非宝藏/噩梦/鱼雷/首领必定异色 · 剩余 ${formatEffectTime(koiWishTtl)}`,
+        detail: "下一次咬钩消耗，非宝藏/噩梦/鱼雷/首领必定异色",
         tone: "positive",
       });
     }
-    if (wishTtl > 0 && RARITY_CONFIG[wishRarity]) {
+    if (RARITY_CONFIG[wishRarity]) {
       effects.push({
         icon: "🌠",
         name: "星愿",
-        detail: `下一次咬钩指定为${wishRarity} · 剩余 ${formatEffectTime(wishTtl)}`,
+        detail: `下一次咬钩指定为${wishRarity}`,
         tone: "positive",
       });
     }

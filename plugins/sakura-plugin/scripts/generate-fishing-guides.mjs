@@ -1294,12 +1294,12 @@ const ITEM_GUIDE_TEXT = Object.freeze({
   item_sand_time: "35分钟内把每竿钓鱼冷却从5分钟缩短到2分30秒。",
   bait_boss: "宝箱非卖品。装备后下一竿必定呼出当前钓点首领；每次消耗1个。",
   torpedo: `每个钓点各限埋1枚。被别人钓中：鱼竿-${TORPEDO_ROD_DAMAGE}、断线，钓点鱼价35分钟×${TORPEDO_PRICE_BOOST_MULTIPLIER}；满${Math.round(TORPEDO_ARM_DURATION_MS / 3600000)}小时可自爆，获得当地随机${TORPEDO_BLAST_CATCH_COUNT}条鱼并使鱼价×${TORPEDO_DETONATE_PRICE_MULTIPLIER}。`,
-  item_sign_koi: "35分钟内下一次咬钩必定异色；宝藏、噩梦、鱼雷、首领不适用，但仍会消耗许愿签。",
+  item_sign_koi: "使用后一直保留，下一次咬钩必定异色；宝藏、噩梦、鱼雷、首领不适用，但仍会消耗许愿签。",
   item_charm_river: "35分钟内鱼线永不断裂；每次成功保线，会按本竿鱼饵市价获得等额樱花币。",
   item_lamp_fog: "35分钟内个人天气固定为雾，享受雾倍率，宝藏权重×2、噩梦×0.5，且不会钓到垃圾。",
   item_card_double_coin: "35分钟内普通垂钓金币收益×2；首领奖励不吃该倍率。",
   item_bait_monster: "35分钟内噩梦权重+50，普通垂钓金币与经验×3；首领奖励不吃该倍率。",
-  item_bottle_wish: "使用时指定任意品质；35分钟内下一次普通咬钩必定为该品质。首领鱼饵不会消耗星愿。",
+  item_bottle_wish: "使用时指定任意品质；许愿一直保留，下一次普通咬钩必定为该品质。首领鱼饵不会消耗星愿。",
 });
 
 async function drawItemCard(ctx, item, x, y, width, height, meta) {
@@ -1397,7 +1397,7 @@ async function generateItemGuide() {
   const localSectionY = commonTop + 3 * (cardHeight + 18) + 36;
   drawSectionTitle(ctx, "钓点专属功能道具", 96, localSectionY, WIDTH - 192, {
     color: PALETTE.blue,
-    subtitle: "均来自对应钓点宝箱，效果持续35分钟或等待下一次咬钩",
+    subtitle: "均来自对应钓点宝箱，限时道具持续35分钟，两种许愿一直等到下一次咬钩",
   });
   const localTop = localSectionY + 80;
   for (const [index, item] of localItems.entries()) {

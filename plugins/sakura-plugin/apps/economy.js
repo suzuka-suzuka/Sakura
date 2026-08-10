@@ -1161,16 +1161,7 @@ export default class Economy extends plugin {
       }
 
       case "koi_wish": {
-        const koiWishKey = `sakura:fishing:koi-wish:${e.group_id}:${userId}`;
-        let existingWish;
-        try {
-          existingWish = await redis.get(koiWishKey);
-        } catch (err) {
-          logger.error(`[经济系统] 读取锦鲤许愿失败: ${err.stack || err}`);
-          await e.reply("暂时听不清锦鲤的回应，道具没有消耗，请稍后再试。", 10);
-          return true;
-        }
-        if (existingWish) {
+        if (fishingManager.getPendingWishes(userId).koiWish) {
           await e.reply("🎏 已有一枚锦鲤许愿签在等待下一次咬钩~", 10);
           return true;
         }
@@ -1178,18 +1169,15 @@ export default class Economy extends plugin {
           await e.reply(`你没有【${item.name}】，无法使用~`, 10);
           return true;
         }
-        const duration = item.duration || FISHING_BENEFIT_DURATION_SECONDS;
-        try {
-          await redis.set(koiWishKey, String(Date.now()), "EX", duration);
-        } catch (err) {
+        // 许愿不设时限，一直挂到下一次咬钩把它消耗掉，所以存库而不是 Redis。
+        if (!fishingManager.setKoiWish(userId)) {
           await inventoryManager.forceAddItem(item.id, 1);
-          logger.error(`[经济系统] 写入锦鲤许愿失败，已返还物品: ${err.stack || err}`);
-          await e.reply("许愿失败，物品已经返还，请稍后重试。", 10);
+          await e.reply("🎏 已有一枚锦鲤许愿签在等待下一次咬钩~", 10);
           return true;
         }
         await e.reply(
           `🎏 你将【${item.name}】系在了樱枝上……\n` +
-          `🌸 ${Math.round(duration / 60)}分钟内，下一次咬钩` +
+          `🌸 许愿会一直留到下一次咬钩，届时` +
           `只要不是宝藏、噩梦、鱼雷或首领，则必定为异色！`,
         );
         return true;
@@ -1206,8 +1194,7 @@ export default class Economy extends plugin {
           );
           return true;
         }
-        const wishKey = `sakura:fishing:wish:${e.group_id}:${userId}`;
-        const existingWish = await redis.get(wishKey);
+        const existingWish = fishingManager.getPendingWishes(userId).starWish;
         if (existingWish) {
           await e.reply(`⭐ 已有“${existingWish}”品质的星愿在等待下一次咬钩~`, 10);
           return true;
@@ -1216,22 +1203,15 @@ export default class Economy extends plugin {
           await e.reply(`你没有【${item.name}】，无法使用~`, 10);
           return true;
         }
-        try {
-          await redis.set(
-            wishKey,
-            rarity,
-            "EX",
-            item.duration || FISHING_BENEFIT_DURATION_SECONDS,
-          );
-        } catch (err) {
+        // 星愿同样不设时限，等到下一次普通咬钩才会兑现并消耗。
+        if (!fishingManager.setStarWish(userId, rarity)) {
           await inventoryManager.forceAddItem(item.id, 1);
-          logger.error(`[经济系统] 写入星愿失败，已返还物品: ${err.stack || err}`);
-          await e.reply("许愿失败，物品已经返还，请稍后重试。", 10);
+          await e.reply("⭐ 已有一枚星愿在等待下一次咬钩~", 10);
           return true;
         }
         await e.reply(
           `🌠 你对着瓶中的流星许下“${rarity}”心愿……\n` +
-          `⭐ ${Math.round((item.duration || FISHING_BENEFIT_DURATION_SECONDS) / 60)}分钟内，下一次普通咬钩必定为【${rarity}】品质！`,
+          `⭐ 星愿会一直留到下一次普通咬钩，届时必定为【${rarity}】品质！`,
         );
         return true;
       }
