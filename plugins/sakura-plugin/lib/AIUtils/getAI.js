@@ -245,7 +245,8 @@ async function _getOpenAIResponse(
   presetPrompt,
   enableGroupContext,
   enableTools,
-  historyContents = []
+  historyContents = [],
+  requestContext = {}
 ) {
   if (!isRequestConfigComplete(channel, "openai")) {
     const errorMessage = "无效或不完整的渠道配置";
@@ -393,8 +394,15 @@ async function _getOpenAIResponse(
     if (channel.nativeWebSearch === true) {
       allOpenAITools.push(buildOpenAICompatibleWebSearchTool(channel));
     }
-    if (enableTools) {
-      const { localTools: toolsSchema, allowedMcpServerIds } = await getToolsSchema(e, enableTools);
+    const additionalToolNames = Array.isArray(requestContext?.additionalToolNames)
+      ? requestContext.additionalToolNames
+      : [];
+    if (enableTools || additionalToolNames.length > 0) {
+      const { localTools: toolsSchema, allowedMcpServerIds } = await getToolsSchema(
+        e,
+        enableTools,
+        { additionalToolNames }
+      );
       if (toolsSchema && toolsSchema.length > 0) {
         const adjustedSchema = adjustSchemaCase(toolsSchema, false);
         allOpenAITools.push(...adjustedSchema.map((tool) => ({
@@ -567,7 +575,8 @@ async function _getGeminiResponse(
   presetPrompt,
   enableGroupContext,
   enableTools,
-  historyContents = []
+  historyContents = [],
+  requestContext = {}
 ) {
   if (!isRequestConfigComplete(channel, "gemini")) {
     const errorMessage = "无效或不完整的渠道配置。";
@@ -674,8 +683,15 @@ async function _getGeminiResponse(
 
     // 本地工具和 MCP 工具独立匹配，任一有结果就注入
     let allDeclarations = [];
-    if (enableTools) {
-      const { localTools: toolsSchema, allowedMcpServerIds } = await getToolsSchema(e, enableTools);
+    const additionalToolNames = Array.isArray(requestContext?.additionalToolNames)
+      ? requestContext.additionalToolNames
+      : [];
+    if (enableTools || additionalToolNames.length > 0) {
+      const { localTools: toolsSchema, allowedMcpServerIds } = await getToolsSchema(
+        e,
+        enableTools,
+        { additionalToolNames }
+      );
       if (toolsSchema && toolsSchema.length > 0) {
         const adjustedSchema = adjustSchemaCase(toolsSchema, true);
         allDeclarations.push(...adjustedSchema);
@@ -919,6 +935,10 @@ export async function getAI(
         typeof routingContext?.prepareQueryPartsForAttempt === "function"
           ? await routingContext.prepareQueryPartsForAttempt(queryParts, config)
           : queryParts;
+      const additionalToolNames =
+        typeof routingContext?.getAdditionalToolNamesForAttempt === "function"
+          ? await routingContext.getAdditionalToolNamesForAttempt(config)
+          : [];
       const args = [
         config,
         e,
@@ -927,6 +947,7 @@ export async function getAI(
         enableGroupContext,
         enableTools,
         historyContents,
+        { additionalToolNames },
       ];
       const result = config.channelType === "gemini"
         ? await _getGeminiResponse(...args)

@@ -3,10 +3,15 @@ import { getAI } from "./getAI.js";
 import { modelSupportsDirectImageInput } from "./providerRouter.js";
 import { ensureToolCallIds } from "./toolCallProtocol.js";
 import { executeToolCalls, toolGroupHasTool } from "./tools/tools.js";
+import {
+  hasMessageImageReference,
+  MESSAGE_IMAGE_ANALYZER_TOOL_NAME,
+  prepareImagePartsForModel,
+  shouldExposeMessageImageAnalyzer,
+} from "./messageImageToolRouting.js";
 import { buildMemoryContext } from "./memoryContext.js";
 import { finalizeStoppedConversationTurn } from "./ConversationHistory.js";
 import {
-  collectUniqueInlineDataParts,
   filterNewInlineDataParts,
   stripEphemeralUserParts,
 } from "./toolResultProtocol.js";
@@ -47,26 +52,6 @@ function buildModelResponseParts(response) {
   return parts;
 }
 
-function findLatestImageToolQuestion(history = []) {
-  for (let historyIndex = history.length - 1; historyIndex >= 0; historyIndex--) {
-    const parts = history[historyIndex]?.parts;
-    if (!Array.isArray(parts)) continue;
-
-    for (let partIndex = parts.length - 1; partIndex >= 0; partIndex--) {
-      const functionCall = parts[partIndex]?.functionCall;
-      if (
-        functionCall?.name === "messageContentAnalyzer" &&
-        functionCall.args?.type === "image" &&
-        typeof functionCall.args?.query === "string"
-      ) {
-        return functionCall.args.query.trim();
-      }
-    }
-  }
-
-  return "";
-}
-
 export async function runAgentLoop({
   label = "Agent",
   e,
@@ -84,51 +69,25 @@ export async function runAgentLoop({
   const currentFullHistory = history;
   const turnStartIndex = currentFullHistory.length;
   const taskId = startAiTask(e);
-  const preparedImageQueries = new WeakMap();
+  const hasCurrentImages = hasMessageImageReference(queryParts);
+  const hasMessageContentAnalyzer = toolGroupHasTool(
+    toolGroup,
+    "MessageContentAnalyzer"
+  );
   const routingContext = {
-    prepareQueryPartsForAttempt: async (parts, config) => {
-      if (
-        modelSupportsDirectImageInput(config?.model) ||
-        !Array.isArray(parts) ||
-        !parts.some((part) => part?.inlineData)
-      ) {
-        return parts;
-      }
-
-      if (preparedImageQueries.has(parts)) {
-        return preparedImageQueries.get(parts);
-      }
-
-      const preparation = (async () => {
-        const directText = parts
-          .filter((part) => typeof part?.text === "string")
-          .map((part) => part.text.trim())
-          .filter(Boolean)
-          .join("\n");
-        const toolQuestion = directText || findLatestImageToolQuestion(currentFullHistory);
-        const historicalParts = currentFullHistory.flatMap((item) =>
-          Array.isArray(item?.parts) ? item.parts : []
-        );
-        const imageParts = collectUniqueInlineDataParts(historicalParts, parts);
-        const analysisResult = await analyzeImagesWithToolRoute([
-          ...(toolQuestion ? [{ text: toolQuestion }] : []),
-          ...imageParts,
-        ]);
-        const analysisText = typeof analysisResult === "object"
-          ? analysisResult?.text || JSON.stringify(analysisResult)
-          : String(analysisResult || "");
-
-        return [{
-          text: [
-            toolQuestion,
-            analysisText && `[工具识图结果]\n${analysisText}`,
-          ].filter(Boolean).join("\n\n"),
-        }];
-      })();
-
-      preparedImageQueries.set(parts, preparation);
-      return preparation;
-    },
+    prepareQueryPartsForAttempt: async (parts, config) =>
+      prepareImagePartsForModel(
+        parts,
+        modelSupportsDirectImageInput(config?.model)
+      ),
+    getAdditionalToolNamesForAttempt: (config) =>
+      shouldExposeMessageImageAnalyzer({
+        hasCurrentImages,
+        supportsImageInput: modelSupportsDirectImageInput(config?.model),
+        hasMessageContentAnalyzer,
+      })
+        ? [MESSAGE_IMAGE_ANALYZER_TOOL_NAME]
+        : [],
   };
   let toolCallCount = 0;
   let finalText = "";
@@ -250,6 +209,11 @@ export async function runAgentLoop({
           {
             supportsImageInput: currentResponse.supportsImageInput === true,
             analyzeImages: analyzeImagesWithToolRoute,
+            allowMessageImageAnalyzer: shouldExposeMessageImageAnalyzer({
+              hasCurrentImages,
+              supportsImageInput: currentResponse.supportsImageInput === true,
+              hasMessageContentAnalyzer,
+            }),
           }
         );
         currentFullHistory.push(...toolCallback.historyContents);

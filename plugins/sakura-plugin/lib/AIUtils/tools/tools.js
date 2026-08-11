@@ -5,6 +5,7 @@ import fs from "fs";
 import { watch } from "chokidar";
 import { GroupAdminTool } from "./GroupAdminTool.js";
 import { MessageContentAnalyzerTool } from "./MessageContentAnalyzerTool.js";
+import { MessageImageAnalyzerTool } from "./MessageImageAnalyzerTool.js";
 import { SearchMusicTool } from "./SearchMusicTool.js";
 import { ImageGeneratorTool } from "./ImageGeneratorTool.js";
 import { SendMusicTool } from "./SendMusicTool.js";
@@ -34,6 +35,8 @@ const __dirname = dirname(__filename);
 const availableTools = [
   new GroupAdminTool(),
   new MessageContentAnalyzerTool(),
+  // 内部兜底工具：不进入配置面板，只能通过 additionalToolNames 动态暴露。
+  new MessageImageAnalyzerTool(),
   new SearchMusicTool(),
   new ImageGeneratorTool(),
   new SendMusicTool(),
@@ -245,18 +248,30 @@ export function toolGroupHasTool(toolGroupName, toolKey) {
   return resolveToolGroup(toolGroupName).allowedTools.has(toolKey);
 }
 
-export async function getToolsSchema(e, toolGroupName) {
-  if (!toolGroupName) return { localTools: [], allowedMcpServerIds: [] };
-
-  const { allowedTools, allowedMcpServerIds } = resolveToolGroup(toolGroupName);
-  if (allowedTools.size === 0) return { localTools: [], allowedMcpServerIds: [] };
+export async function getToolsSchema(e, toolGroupName, options = {}) {
+  const additionalToolNames = new Set(
+    Array.isArray(options.additionalToolNames)
+      ? options.additionalToolNames.filter(
+        (name) => typeof name === "string" && name.trim()
+      )
+      : []
+  );
+  const { allowedTools, allowedMcpServerIds } = toolGroupName
+    ? resolveToolGroup(toolGroupName)
+    : { allowedTools: new Set(), allowedMcpServerIds: [] };
+  if (allowedTools.size === 0 && additionalToolNames.size === 0) {
+    return { localTools: [], allowedMcpServerIds: [] };
+  }
 
   const isMaster = Boolean(e?.isMaster);
   const localTools = availableTools
     .filter(tool => {
       if (OWNER_ONLY_TOOLS.has(tool.name) && !isMaster) return false;
       const configKey = TOOL_CONFIG_KEYS[tool.name];
-      return configKey && allowedTools.has(configKey);
+      return (
+        (configKey && allowedTools.has(configKey)) ||
+        additionalToolNames.has(tool.name)
+      );
     })
     .map(tool => tool.function());
 
