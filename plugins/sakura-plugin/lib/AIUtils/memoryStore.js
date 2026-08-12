@@ -235,6 +235,21 @@ function isNewerMemory(candidate, existing, indexById) {
   return indexById.get(candidate.id) > indexById.get(existing.id);
 }
 
+export function getLatestMemories(document, limit) {
+  const memories = document?.memories || [];
+  if (!Number.isInteger(limit) || limit <= 0) return [];
+  if (memories.length <= limit) return [...memories];
+
+  const indexById = new Map(memories.map((memory, index) => [memory.id, index]));
+  const latestIds = new Set(
+    [...memories]
+      .sort((a, b) => (isNewerMemory(a, b, indexById) ? -1 : 1))
+      .slice(0, limit)
+      .map((memory) => memory.id)
+  );
+  return memories.filter((memory) => latestIds.has(memory.id));
+}
+
 export function applyMemoryOrganization(document, organization) {
   validateMemoryDocument(document);
   if (!organization || typeof organization !== "object" || Array.isArray(organization)) {

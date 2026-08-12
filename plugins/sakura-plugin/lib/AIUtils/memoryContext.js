@@ -1,4 +1,5 @@
 import {
+  getLatestMemories,
   getMemoryLocations,
   readMemoryDocument,
 } from "./memoryStore.js";
@@ -31,6 +32,14 @@ export function getDirectMemoryMatches(targets = []) {
 export function getVectorMemoryTargets(targets = []) {
   return targets.filter(
     (target) => target.document?.memories?.length > DIRECT_MEMORY_INJECTION_LIMIT
+  );
+}
+
+// 向量召回不可用时的兜底：每个作用域直接取最新的若干条记忆
+export function getLatestMemoryMatches(targets = []) {
+  return targets.flatMap((target) =>
+    getLatestMemories(target.document, VECTOR_MEMORY_RESULTS_PER_SCOPE)
+      .map((memory) => toContextMemory(target, memory))
   );
 }
 
@@ -97,14 +106,22 @@ export async function buildMemoryContext(e, queryParts) {
   }
 
   const query = getRetrievalQuery(queryParts);
+  const vectorTargets = getVectorMemoryTargets(targets);
   let matches = getDirectMemoryMatches(targets);
-  if (query && getVectorMemoryTargets(targets).length > 0) {
-    try {
-      matches = await resolveAutomaticMemoryMatches(query, targets, {
-        selfId: e.self_id,
-      });
-    } catch (error) {
-      logger.warn(`[Memory] 自动向量召回失败，继续生成回复: ${error.message}`);
+  if (vectorTargets.length > 0) {
+    if (query) {
+      try {
+        matches = await resolveAutomaticMemoryMatches(query, targets, {
+          selfId: e.self_id,
+        });
+      } catch (error) {
+        logger.warn(
+          `[Memory] 自动向量召回失败，改用最新 ${VECTOR_MEMORY_RESULTS_PER_SCOPE} 条记忆: ${error.message}`
+        );
+        matches = [...matches, ...getLatestMemoryMatches(vectorTargets)];
+      }
+    } else {
+      matches = [...matches, ...getLatestMemoryMatches(vectorTargets)];
     }
   }
   return formatMemoryContext(targets, matches);
