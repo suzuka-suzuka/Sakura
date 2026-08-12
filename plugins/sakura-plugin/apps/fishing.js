@@ -22,6 +22,7 @@ import {
 } from "../lib/fishing/session.js";
 import {
   BOSS_ATTACK_INTERVAL_MS,
+  BOSS_PLAYER_ATTACK_COOLDOWN_MS,
   BOSS_BAIT_ID,
   FISH_FIGHT_STATE,
   FISHING_BENEFIT_DURATION_SECONDS,
@@ -716,7 +717,7 @@ export default class Fishing extends plugin {
         `👑 首领战开始！【${state.fish.name}】现身！\n`,
         `🌀 特殊机制【${state.fish.boss_mechanic.name}】：${state.fish.boss_mechanic.description}\n\n`,
         `${formatBossCombatStatus(state, fishingManager, e.user_id)}\n\n`,
-        `📝 指令：\n  「拉」拉近距离并增加张力\n  「溜」降低张力但会拉远距离\n  「攻」发起攻击（5秒冷却）\n`,
+        `📝 指令：\n  「拉」拉近距离并增加张力\n  「溜」降低张力但会拉远距离\n  「攻」发起攻击（${BOSS_PLAYER_ATTACK_COOLDOWN_MS / 1000}秒冷却）\n`,
         `🏆 必须同时把首领生命与距离降到 0；首领每5秒反击一次！\n`,
         `🧵 鱼线本场临时耐久按「承重余量」生成（承重越接近首领体重越薄），归零立即断线；战斗结束后不保留损伤！\n`,
         `⚠️ 限时 ${Math.floor(timeoutMs / 1000)} 秒，当前为单人挑战。`,
@@ -1508,7 +1509,7 @@ export default class Fishing extends plugin {
 
         const defeatHint = state.bossHp <= 0
           ? "\n💫 首领已经失去反抗能力！继续用「拉」把它拖到岸边。"
-          : "\n⏳ 「攻」进入5秒冷却，期间继续兼顾距离和张力。";
+          : `\n⏳ 「攻」进入${BOSS_PLAYER_ATTACK_COOLDOWN_MS / 1000}秒冷却，期间继续兼顾距离和张力。`;
         await e.reply(
           `⚔️ 你对【${fish.name}】造成 ${damage} 点伤害！\n` +
           formatBossCombatStatus(state, fishingManager, userId) +

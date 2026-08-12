@@ -51,10 +51,12 @@ export const FISHING_LOCATIONS = Object.freeze({
 export const DEFAULT_FISHING_LOCATION = "pond";
 export const BOSS_BAIT_ID = "bait_boss";
 export const BOSS_ATTACK_INTERVAL_MS = 5000;
-export const BOSS_PLAYER_ATTACK_COOLDOWN_MS = 5000;
+// 「攻」的冷却与首领反击（5 秒）错开：同周期会把最优解锁死成「反击一落地就攻」，
+// 行动预算刚好被冷却填满，攻/拉/溜之间没有取舍。4:5 不整除，攻击窗口相对反击持续漂移。
+export const BOSS_PLAYER_ATTACK_COOLDOWN_MS = 4000;
 export const BOSS_FIGHT_TIMEOUT_MS = 60 * 1000;
-// 首领困难度按「顶级鱼竿 + 熟练度 10 → 溜鱼通过率 100%」反推：190 + 10 + 25。
-// 控制力每 +5 抬 20 个百分点；熟练度换算见 getMasteryControlBonus，熟练度 10 仍折算 +10。
+// 首领困难度按「顶级鱼竿 + 熟练度加成 +10 → 溜鱼通过率 100%」反推：190 + 10 + 25。
+// 控制力每 +5 抬 20 个百分点；熟练度按 getMasteryControlBonus 折半，+10 对应熟练度 20。
 export const BOSS_MIN_DIFFICULTY = 225;
 export const BOSS_MASTERY_FOR_FULL_CONTROL = 10;
 export const BOSS_MIN_HP = 150;
@@ -757,26 +759,17 @@ export function applyFishFightStateModifiers({
   throw new TypeError(`未知的溜鱼操作：${action}`);
 }
 
-// 熟练度折算控制力走对数：控制力是 1:1 抵扣困难度的硬通货，而困难度上限只有 225，
-// 线性 +1/竿 意味着几十竿之后控制力就盖过全图，所有渔获直接跳过判定自动上岸。
-// 对数曲线让前十竿几乎照旧（熟练度 10 仍是 +10，接住首领 225 = 190 + 10 + 25 的校准），
-// 之后每翻一倍熟练度才多几点，MAX 再兜一道底：顶级鱼竿最多 190 + 50 = 240，
-// 永远追不上异色传说/异色首领的 281，最强的猎物不会退化成必得。
-export const MASTERY_CONTROL_ANCHOR = 10;
-export const MASTERY_CONTROL_SCALE = 8;
-export const MASTERY_CONTROL_BONUS_MAX = 50;
-const MASTERY_CONTROL_COEFFICIENT = MASTERY_CONTROL_ANCHOR /
-  Math.log(1 + MASTERY_CONTROL_ANCHOR / MASTERY_CONTROL_SCALE);
+// 熟练度折算控制力：每 2 竿 +1，保持线性、不设上限。
+// 控制力 1:1 抵扣困难度，所以熟练度迟早会盖过全图困难度——这是长期投入该给的回报，
+// 只是把斜率减半推远节奏：跳过全图判定从 35 竿变成 70 竿。
+// 不封顶还有一个实际理由：首领与异色的校准出自每秒精准操作的模拟，真人达不到那个
+// 操作密度，熟练度是他们补这段差距的唯一手段；一旦设上限，上限又落在机制阈值附近
+// （异色 281 的拉距归零线是控制力 231），就会凭空出现「打不了」的断层。
+export const MASTERY_CONTROL_DIVISOR = 2;
 
 export function getMasteryControlBonus(mastery) {
   const safeMastery = Math.max(0, Math.floor(Number(mastery) || 0));
-  if (safeMastery <= 0) return 0;
-  return Math.min(
-    MASTERY_CONTROL_BONUS_MAX,
-    Math.round(
-      MASTERY_CONTROL_COEFFICIENT * Math.log(1 + safeMastery / MASTERY_CONTROL_SCALE),
-    ),
-  );
+  return Math.floor(safeMastery / MASTERY_CONTROL_DIVISOR);
 }
 
 export function calculateForcePullSuccessRate(fishDifficulty, effectiveControl) {
