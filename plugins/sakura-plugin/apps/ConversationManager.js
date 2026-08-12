@@ -20,6 +20,23 @@ import {
   findProfileByPrefix,
   getPrimaryPrefix,
 } from "../lib/AIUtils/profileTriggers.js";
+
+// 拟态这类内置对话不在 AI 设定的 profiles 里，需要按别名单独映射到历史前缀
+const SPECIAL_HISTORY_TARGETS = [
+  { historyPrefix: "Mimic", name: "拟态", aliases: ["拟态", "mimic"] },
+];
+
+function findSpecialHistoryTarget(input) {
+  if (typeof input !== "string") return null;
+  const key = input.trim().toLowerCase();
+  if (!key) return null;
+  return (
+    SPECIAL_HISTORY_TARGETS.find((target) =>
+      target.aliases.some((alias) => alias.toLowerCase() === key)
+    ) || null
+  );
+}
+
 export class Conversationmanagement extends plugin {
   constructor() {
     super({
@@ -37,15 +54,26 @@ export class Conversationmanagement extends plugin {
     return Setting.getConfig("AI");
   }
 
-  getProfileName(prefix) {
-    const config = this.appconfig;
-    if (!config || !config.profiles) return prefix;
-    const profile = findProfileByPrefix(config.profiles, prefix);
-    return profile ? profile.name : prefix;
-  }
+  // 返回 { historyPrefix, name }，找不到则返回 null
+  resolveHistoryTarget(input) {
+    if (typeof input !== "string") return null;
+    const prefix = input.trim();
+    if (!prefix) return null;
 
-  getProfile(prefix) {
-    return findProfileByPrefix(this.appconfig?.profiles, prefix);
+    const profile = findProfileByPrefix(this.appconfig?.profiles, prefix);
+    if (profile) {
+      return {
+        historyPrefix: getPrimaryPrefix(profile),
+        name: profile.name || prefix,
+      };
+    }
+
+    const special = findSpecialHistoryTarget(prefix);
+    if (special) {
+      return { historyPrefix: special.historyPrefix, name: special.name };
+    }
+
+    return null;
   }
 
   ClearSingle = Command(/^#?清空对话\s*(.+)/, async (e) => {
@@ -55,17 +83,14 @@ export class Conversationmanagement extends plugin {
       return false;
     }
 
-    const config = this.appconfig;
-
-    const profile = findProfileByPrefix(config?.profiles, prefix);
-    if (!profile) {
+    const target = this.resolveHistoryTarget(prefix);
+    if (!target) {
       await e.reply(`未找到前缀为「${prefix}」的设定，请检查输入。`, 10);
       return true;
     }
 
-    const profileName = this.getProfileName(prefix);
-    await clearConversationHistory(e, getPrimaryPrefix(profile));
-    await e.reply(`您与「${profileName}」的对话历史已清空！喵~`, 10);
+    await clearConversationHistory(e, target.historyPrefix);
+    await e.reply(`您与「${target.name}」的对话历史已清空！喵~`, 10);
     return true;
   });
   RollbackSingle = Command(/^#?(?:撤销|回滚|撤回)对话\s*(.+)/, async (e) => {
@@ -82,12 +107,10 @@ export class Conversationmanagement extends plugin {
 
     if (!prefix) return false;
 
-    const config = this.appconfig;
-    let profile = findProfileByPrefix(config?.profiles, prefix);
-    if (!profile) {
-      profile = findProfileByPrefix(config?.profiles, input);
-      if (profile) {
-        prefix = input;
+    let target = this.resolveHistoryTarget(prefix);
+    if (!target) {
+      target = this.resolveHistoryTarget(input);
+      if (target) {
         rounds = 1;
       } else {
         await e.reply(`未找到前缀为「${prefix}」的设定，请检查输入。`, 10);
@@ -95,8 +118,8 @@ export class Conversationmanagement extends plugin {
       }
     }
 
-    const historyPrefix = getPrimaryPrefix(profile);
-    const profileName = this.getProfileName(prefix);
+    const historyPrefix = target.historyPrefix;
+    const profileName = target.name;
     const history = await loadConversationHistory(e, historyPrefix);
 
     if (history.length === 0) {
@@ -145,10 +168,7 @@ export class Conversationmanagement extends plugin {
   TamperSingle = Command(/^#?篡改对话\s*([\s\S]+)/, async (e) => {
     let input = e.match[1].trim();
 
-    const config = this.appconfig;
-    if (!config || !config.profiles) return false;
-
-    let prefix = null;
+    let target = null;
     let index = 1; // 默认：倒数第 1 条（最后一条）
     let newContent = null;
 
@@ -158,25 +178,23 @@ export class Conversationmanagement extends plugin {
     const match2 = input.match(/^(.+?)\s+([\s\S]+)$/);
 
     if (match3) {
-      const p = match3[1];
-      const profile = findProfileByPrefix(config.profiles, p);
-      if (profile) {
-        prefix = getPrimaryPrefix(profile);
+      const resolved = this.resolveHistoryTarget(match3[1]);
+      if (resolved) {
+        target = resolved;
         index = parseInt(match3[2], 10);
         newContent = match3[3];
       }
     }
 
-    if (!prefix && match2) {
-      const p = match2[1];
-      const profile = findProfileByPrefix(config.profiles, p);
-      if (profile) {
-        prefix = getPrimaryPrefix(profile);
+    if (!target && match2) {
+      const resolved = this.resolveHistoryTarget(match2[1]);
+      if (resolved) {
+        target = resolved;
         newContent = match2[2];
       }
     }
 
-    if (!prefix || !newContent) {
+    if (!target || !newContent) {
       return false;
     }
 
@@ -184,7 +202,8 @@ export class Conversationmanagement extends plugin {
       return false;
     }
 
-    const profileName = this.getProfileName(prefix);
+    const prefix = target.historyPrefix;
+    const profileName = target.name;
     const history = await loadConversationHistory(e, prefix);
 
     if (history.length === 0) {
@@ -245,16 +264,14 @@ export class Conversationmanagement extends plugin {
       return false;
     }
 
-    const config = this.appconfig;
-
-    const profile = findProfileByPrefix(config?.profiles, prefix);
-    if (!profile) {
+    const target = this.resolveHistoryTarget(prefix);
+    if (!target) {
       await e.reply(`未找到前缀为「${prefix}」的设定，请检查输入。`, 10);
       return true;
     }
 
-    const profileName = this.getProfileName(prefix);
-    const history = await loadConversationHistory(e, getPrimaryPrefix(profile));
+    const profileName = target.name;
+    const history = await loadConversationHistory(e, target.historyPrefix);
     if (history.length === 0) {
       await e.reply(`目前没有与「${profileName}」的对话历史记录。`, 10);
       return true;
