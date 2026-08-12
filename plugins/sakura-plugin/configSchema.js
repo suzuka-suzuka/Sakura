@@ -518,7 +518,7 @@ const ForwardRuleSchema = z.object({
     targetGroupIds: z.array(z.number()).default([]).describe('目标群号|#groupSelect|消息转发到的目标群号列表'),
     enableImage: z.boolean().default(true).describe('转发图片'),
     enableVideo: z.boolean().default(true).describe('转发视频'),
-    enableRecord: z.boolean().default(true).describe('转发语音'),
+    enableRecord: z.boolean().default(true).describe('转发聊天记录'),
 });
 
 export const ForwardMessageSchema = z.object({
