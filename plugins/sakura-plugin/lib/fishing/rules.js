@@ -605,10 +605,10 @@ export function calculateGhostDebtPayment(earnings, debt, {
   };
 }
 
-export function calculateCorpseFisherRodDamage(stamina, maximum = 20) {
-  const safeStamina = Math.max(0, Math.floor(Number(stamina) || 0));
-  const safeMaximum = Math.max(0, Math.floor(Number(maximum) || 0));
-  return Math.min(safeStamina, safeMaximum);
+// 捞尸人按当前体力等额反噬鱼竿，不封顶：体力上限随钓鱼等级增长，
+// 等级越高、越舍不得那身体力，这一钩就越疼。
+export function calculateCorpseFisherRodDamage(stamina) {
+  return Math.max(0, Math.floor(Number(stamina) || 0));
 }
 
 export const FISH_FIGHT_STATE = Object.freeze({

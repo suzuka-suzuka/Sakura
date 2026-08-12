@@ -2468,7 +2468,6 @@
     "difficulty": 70,
     "nightmare_effect": {
       "type": "stamina_crush",
-      "max_rod_damage": 20,
       "forced_stamina": 1
     },
     "weight": [

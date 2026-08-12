@@ -1128,7 +1128,7 @@ const NIGHTMARE_TEXT = Object.freeze({
     counter: "提前整理鱼饵只能降损；完整免疫可彻底挡下。",
   },
   stamina_crush: {
-    effect: "按当前体力反噬鱼竿（最多 20 点），并把钓鱼体力强制压到 1。",
+    effect: "按当前体力等额反噬鱼竿，不封顶；并把钓鱼体力强制压到 1。",
     counter: "低体力可降低竿损；工具箱负责修竿。",
   },
   ghost_debt: {

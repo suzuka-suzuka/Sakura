@@ -1867,10 +1867,7 @@ export default class Fishing extends plugin {
 
       case "stamina_crush": {
         const staminaStatus = fishingManager.getFishingStaminaStatus(e.user_id);
-        const baseDamage = calculateCorpseFisherRodDamage(
-          staminaStatus.current,
-          effect.max_rod_damage || 20,
-        );
+        const baseDamage = calculateCorpseFisherRodDamage(staminaStatus.current);
         const damage = baseDamage > 0 ? normalizePenalty(baseDamage) : 0;
         const damageResult = damage > 0
           ? applyRodDamage(fishingManager, e.user_id, rodConfig, damage)
