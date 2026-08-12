@@ -2473,7 +2473,7 @@ export default class Fishing extends plugin {
         name: rodConfig.name,
         handler: "fishing_rod",
         details: [
-          `熟练度 ${mastery}（控制力 +${getMasteryControlBonus(mastery)}）`,
+          `熟练度 ${mastery}`,
           `耐久 ${durability.currentDurability}/${durability.maxDurability}`,
         ],
       });
