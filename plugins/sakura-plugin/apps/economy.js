@@ -390,7 +390,7 @@ export default class Economy extends plugin {
   });
 
   reforgeItem = Command(
-    /^#?道具(?:重铸|转换)(?:\s+(\S+))?(?:\s+(\S+))?$/,
+    /^#?道具(?:重铸|转换)(?:\s*(\S+?)(?:(?:\s+(\S+))|(全部))?)?\s*$/,
     async (e) => {
       if (!this.checkWhitelist(e)) return false;
 
@@ -398,7 +398,7 @@ export default class Economy extends plugin {
       const inventoryManager = new InventoryManager(e);
       const convertibleItems = shopManager.getConvertibleItems();
       const sourceArg = String(e.match[1] || "").trim();
-      const amountArg = String(e.match[2] || "").trim();
+      const amountArg = String(e.match[2] || e.match[3] || "").trim();
 
       if (convertibleItems.length < 2) {
         logger.error("[道具重铸] 可重铸道具不足两种，请检查 special_items.yaml");
