@@ -331,6 +331,7 @@ export default class Economy extends plugin {
         handler,
         count,
         bossBait: Boolean(item?.boss_bait),
+        convertible: item?.convertible === true,
         equipped: itemId === equippedRodId || itemId === equippedLineId || itemId === equippedBaitId,
       };
 
@@ -387,6 +388,122 @@ export default class Economy extends plugin {
     }
     return true;
   });
+
+  reforgeItem = Command(
+    /^#?道具(?:重铸|转换)(?:\s+(\S+))?(?:\s+(\S+))?$/,
+    async (e) => {
+      if (!this.checkWhitelist(e)) return false;
+
+      const shopManager = new ShopManager();
+      const inventoryManager = new InventoryManager(e);
+      const convertibleItems = shopManager.getConvertibleItems();
+      const sourceArg = String(e.match[1] || "").trim();
+      const amountArg = String(e.match[2] || "").trim();
+
+      if (convertibleItems.length < 2) {
+        logger.error("[道具重铸] 可重铸道具不足两种，请检查 special_items.yaml");
+        await e.reply("道具重铸奖池配置异常，请联系管理员。", 10);
+        return true;
+      }
+
+      if (!sourceArg) {
+        const owned = convertibleItems
+          .map((item) => ({
+            item,
+            count: inventoryManager.getItemCount(item.id),
+          }))
+          .filter(({ count }) => count >= 2);
+        const ownedText = owned.length > 0
+          ? owned.map(({ item, count }) => `【${item.name}】×${count}`).join("、")
+          : "暂无数量达到2件的可重铸道具";
+        await e.reply(
+          `♻️ 两件同名特殊道具可随机重铸成一件异名特殊道具。\n` +
+          `当前可重铸：${ownedText}\n` +
+          `用法：#道具重铸 道具名 [次数|全部]`,
+          10,
+        );
+        return true;
+      }
+
+      const sourceItem = shopManager.findConvertibleItem(sourceArg);
+      if (!sourceItem) {
+        const names = convertibleItems.map((item) => item.name).join("、");
+        await e.reply(`【${sourceArg}】不在重铸池中。\n可重铸：${names}`, 10);
+        return true;
+      }
+
+      const ownedCount = inventoryManager.getItemCount(sourceItem.id);
+      const maxConversions = Math.floor(ownedCount / 2);
+      let conversionCount = 1;
+      if (amountArg === "全部") {
+        conversionCount = maxConversions;
+      } else if (amountArg) {
+        if (!/^[1-9]\d*$/.test(amountArg)) {
+          await e.reply("重铸次数必须是正整数或“全部”。", 10);
+          return true;
+        }
+        conversionCount = Number(amountArg);
+        if (!Number.isSafeInteger(conversionCount)) {
+          await e.reply("重铸次数过大，请重新输入。", 10);
+          return true;
+        }
+      }
+
+      if (maxConversions <= 0) {
+        await e.reply(
+          `你只有【${sourceItem.name}】×${ownedCount}，至少需要2件才能重铸。`,
+          10,
+        );
+        return true;
+      }
+      if (conversionCount > maxConversions) {
+        await e.reply(
+          `【${sourceItem.name}】只有${ownedCount}件，最多可重铸${maxConversions}次。`,
+          10,
+        );
+        return true;
+      }
+
+      const outputItems = convertibleItems.filter((item) => item.id !== sourceItem.id);
+      const economyManager = new EconomyManager(e);
+      const capacity = economyManager.getBagCapacity(e);
+      const beforeSize = inventoryManager.getCurrentSize();
+
+      let result;
+      try {
+        result = inventoryManager.convertItemRandomly(
+          sourceItem.id,
+          conversionCount,
+          outputItems.map((item) => item.id),
+        );
+      } catch (err) {
+        logger.error(`[道具重铸] 结算失败: ${err.stack || err}`);
+        await e.reply("道具重铸失败，原有道具没有变化，请稍后重试。", 10);
+        return true;
+      }
+      if (!result.success) {
+        await e.reply(result.msg || "道具重铸失败，请稍后重试。", 10);
+        return true;
+      }
+
+      const rewardText = outputItems
+        .filter((item) => Number(result.outputs[item.id]) > 0)
+        .map((item) => `${item.icon || "🎁"}【${item.name}】×${result.outputs[item.id]}`)
+        .join("、");
+      const afterSize = inventoryManager.getCurrentSize();
+      logger.info(
+        `[道具重铸] 群 ${e.group_id} 用户 ${e.user_id}: ` +
+        `${sourceItem.id} x${result.inputCount} -> ${JSON.stringify(result.outputs)}`,
+      );
+      await e.reply(
+        `♻️ 道具重铸完成\n` +
+        `消耗：【${sourceItem.name}】×${result.inputCount}\n` +
+        `获得：${rewardText}\n` +
+        `🎒 背包：${beforeSize}/${capacity} → ${afterSize}/${capacity}`,
+      );
+      return true;
+    },
+  );
 
   upgradeBag = Command(/^#?升级背包$/, async (e) => {
     if (!this.checkWhitelist(e)) return false;

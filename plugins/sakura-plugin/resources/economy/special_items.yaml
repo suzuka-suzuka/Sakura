@@ -5,10 +5,12 @@ categories:
     handler: fishing_special
     items:
       # ===== 通用道具 =====
+      # 标记为 convertible 的道具共同组成重铸池：两个同名道具随机换一个异名道具。
       - id: item_charm_lucky
         name: 好运护符
         icon: 🍀
         type: buff
+        convertible: true
         duration: 2100
         description: 使用后35分钟内，钓鱼必定上钩。
         activation_message: "🍀 好运护符已激活！\n🎣 接下来35分钟内，钓鱼必定上钩！"
@@ -17,6 +19,7 @@ categories:
         name: 修理工具箱
         icon: 🔧
         type: consumable
+        convertible: true
         instant_effect: repair_rod
         description: 完全修复当前鱼竿的耐久与暗伤，并解除深压回响造成的控制力减益。
 
@@ -24,6 +27,7 @@ categories:
         name: 净化圣水
         icon: 💧
         type: consumable
+        convertible: true
         instant_effect: clear_debuffs
         description: 清除骷髅诅咒、花嫁印记、亡者高利贷（含抽成印记）与深压诅咒等负面状态。
 
@@ -31,6 +35,7 @@ categories:
         name: 时之沙
         icon: ⏳
         type: buff
+        convertible: true
         duration: 2100
         description: 使用后35分钟内，钓鱼冷却减半。
         activation_message: "⏳ 时之沙开始流动！\n🎣 接下来35分钟内，钓鱼冷却减半！"
@@ -42,6 +47,7 @@ categories:
         name: 锦鲤许愿签
         icon: 🎏
         type: consumable
+        convertible: true
         instant_effect: koi_wish
         description: 樱花池塘专属道具。使用后一直保留，下一次咬钩必定异色。
 
@@ -49,6 +55,7 @@ categories:
         name: 河神垂青
         icon: 🌊
         type: buff
+        convertible: true
         duration: 2100
         description: 青柳河湾专属道具。使用后35分钟内鱼线永不断裂，成功抵挡获得额外奖励！
         activation_message: "🌊 河神垂青！\n🧵 接下来35分钟内鱼线永不断裂，成功抵挡获得额外奖励！"
@@ -57,6 +64,7 @@ categories:
         name: 雾灯
         icon: 🌫️
         type: buff
+        convertible: true
         duration: 2100
         description: 雾隐湖专属。35分钟内天气固定为雾，宝藏×2、噩梦×0.5、不出垃圾。
         activation_message: "🌫️ 雾灯亮起！\n🎣 接下来35分钟内个人天气固定为雾，宝藏翻倍、噩梦减半，不会钓到垃圾！"
@@ -65,6 +73,7 @@ categories:
         name: 双倍金币卡
         icon: 💰
         type: buff
+        convertible: true
         duration: 2100
         # 收益倍率互斥组：同组道具同一时间只能生效一个，避免倍率连乘。
         exclusive_group: coin_boost
@@ -75,6 +84,7 @@ categories:
         name: 怪物诱饵
         icon: 🩸
         type: buff
+        convertible: true
         duration: 2100
         exclusive_group: coin_boost
         description: 深渊海沟专属道具。35分钟内噩梦率提升，金币与经验×3，与双倍金币卡互斥。
@@ -84,6 +94,7 @@ categories:
         name: 星愿瓶
         icon: 🌠
         type: consumable
+        convertible: true
         instant_effect: star_wish
         description: 星辉秘境专属道具。使用时指定品质，许愿一直保留，下一次咬钩必定为该品质。
 

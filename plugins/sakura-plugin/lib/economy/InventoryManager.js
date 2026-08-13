@@ -249,4 +249,89 @@ export default class InventoryManager {
 
     return transaction.immediate();
   }
+
+  convertItemRandomly(inputItemId, conversionCount, outputItemIds, random = Math.random) {
+    const sourceItemId = String(inputItemId || "").trim();
+    const safeConversionCount = Number(conversionCount);
+    const requiredInputCount = safeConversionCount * 2;
+    if (
+      !sourceItemId ||
+      !Number.isSafeInteger(safeConversionCount) || safeConversionCount <= 0 ||
+      !Number.isSafeInteger(requiredInputCount)
+    ) {
+      return { success: false, msg: "重铸数量异常" };
+    }
+    if (isUniqueFishingEquipmentId(sourceItemId)) {
+      return { success: false, msg: "鱼竿和鱼线不能重铸" };
+    }
+
+    const candidates = [...new Set(
+      (Array.isArray(outputItemIds) ? outputItemIds : [])
+        .map((itemId) => String(itemId || "").trim())
+        .filter((itemId) => itemId && itemId !== sourceItemId),
+    )];
+    if (
+      candidates.length === 0 ||
+      candidates.some((itemId) => isUniqueFishingEquipmentId(itemId)) ||
+      typeof random !== "function"
+    ) {
+      return { success: false, msg: "重铸奖池配置异常" };
+    }
+
+    const transaction = db.transaction(() => {
+      if (this.getItemCount(sourceItemId) < requiredInputCount) {
+        return { success: false, msg: "用于重铸的道具不足" };
+      }
+
+      const removed = db.prepare(`
+          UPDATE inventory
+          SET count = count - ?
+          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count >= ?
+      `).run(
+        requiredInputCount,
+        this.groupId,
+        this.userId,
+        sourceItemId,
+        requiredInputCount,
+      );
+      if (removed.changes !== 1) {
+        return { success: false, msg: "用于重铸的道具不足" };
+      }
+      db.prepare(`
+          DELETE FROM inventory
+          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count <= 0
+      `).run(this.groupId, this.userId, sourceItemId);
+
+      const rewards = new Map();
+      for (let index = 0; index < safeConversionCount; index++) {
+        const rawRoll = Number(random());
+        const roll = Number.isFinite(rawRoll)
+          ? Math.max(0, Math.min(0.999999999999, rawRoll))
+          : 0;
+        const rewardItemId = candidates[Math.floor(roll * candidates.length)];
+        rewards.set(rewardItemId, (rewards.get(rewardItemId) || 0) + 1);
+      }
+
+      const insertReward = db.prepare(`
+          INSERT INTO inventory (group_id, user_id, item_id, count)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(group_id, user_id, item_id)
+          DO UPDATE SET count = count + ?
+      `);
+      for (const [rewardItemId, count] of rewards) {
+        insertReward.run(this.groupId, this.userId, rewardItemId, count, count);
+      }
+
+      // 固定为 2N -> N，总占用必定下降 N；即使重铸前已经超容也应允许自救。
+      return {
+        success: true,
+        msg: "重铸成功",
+        inputCount: requiredInputCount,
+        outputCount: safeConversionCount,
+        outputs: Object.fromEntries(rewards),
+      };
+    });
+
+    return transaction.immediate();
+  }
 }

@@ -380,6 +380,9 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
 
   getInventoryItemMeta(item) {
     const handlerMeta = HANDLER_META[item.handler] || HANDLER_META.fishing_special
+    const conversionHint = item.convertible && Number(item.count) >= 2
+      ? "发送 #道具重铸 2换1"
+      : ""
     if (item.durability) {
       const current = Math.max(0, Math.floor(toFiniteNumber(item.durability.current)))
       const max = Math.max(0, Math.floor(toFiniteNumber(item.durability.max)))
@@ -397,11 +400,14 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
       return [item.bossBait ? "首领挑战专用" : "钓鱼消耗品"]
     }
     if (item.handler === "fishing_chest") return ["发送 #开宝箱 开启"]
-    if (item.type === "buff") return ["发送 #使用 激活效果"]
+    if (item.type === "buff") return ["发送 #使用 激活效果", conversionHint].filter(Boolean)
+    if (item.handler === "fishing_special" && item.type === "consumable") {
+      return ["发送 #使用 消耗", conversionHint].filter(Boolean)
+    }
     if (item.type === "treasure") {
       return [`发送 #出售 变卖 · ${this.formatNumber(item.sellPrice)} 樱花币`]
     }
-    return [handlerMeta.label]
+    return [handlerMeta.label, conversionHint].filter(Boolean)
   }
 
   async generateInventoryPages({
@@ -526,7 +532,7 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
       ctx.fillStyle = COLORS.muted
       ctx.font = `16px ${this.fontFamily}`
       ctx.textAlign = "center"
-      ctx.fillText("可使用 #使用、#装备鱼竿、#装备鱼线、#装备鱼饵 管理物品", this.width / 2, height - 28)
+      ctx.fillText("可使用 #使用、#道具重铸、#装备鱼竿、#装备鱼线、#装备鱼饵 管理物品", this.width / 2, height - 28)
       ctx.textAlign = "left"
       pages.push({ buffer: canvas.toBuffer("image/png") })
     }

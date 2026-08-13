@@ -44,6 +44,18 @@ class ShopManager {
     return items;
   }
 
+  getConvertibleItems() {
+    return this.getAllItems().filter((item) => item.convertible === true);
+  }
+
+  findConvertibleItem(nameOrId) {
+    const query = String(nameOrId || "").trim();
+    if (!query) return null;
+    return this.getConvertibleItems().find(
+      (item) => item.id === query || item.name === query,
+    ) || null;
+  }
+
   getShopItems() {
     const categories = this.getAllCategories();
     const items = [];
