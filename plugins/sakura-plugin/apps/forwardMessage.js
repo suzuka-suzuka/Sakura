@@ -29,7 +29,10 @@ export class forwardMessage extends plugin {
         if (enableRecord) shouldForward = true;
       } else if (e.message.some(m => m.type === 'video')) {
         if (enableVideo) shouldForward = true;
-      } else if (e.message.some(m => m.type === 'image' && !(m.data.sub_type === 1))) {
+      } else if (
+        e.message.length > 0 &&
+        e.message.every(m => m.type === 'image' && !(m.data?.sub_type === 1))
+      ) {
         if (enableImage) shouldForward = true;
       }
     }
