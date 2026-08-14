@@ -445,6 +445,7 @@ function resolveTargets(state, u, eff, foes, allies, pick) {
 const nameOf = (u) => tmplOf(u).name
 
 function applyDamage(ctx, src, tgt, dmg, crit = false, aff = 1.0, eventMeta = {}) {
+  const totalDamage = dmg
   let absorbed = 0
   if (tgt.shield > 0) {
     absorbed = Math.min(tgt.shield, dmg)
@@ -464,6 +465,7 @@ function applyDamage(ctx, src, tgt, dmg, crit = false, aff = 1.0, eventMeta = {}
     target: unitRef(tgt),
     amount: Math.round(dmg),
     absorbed: Math.round(absorbed),
+    totalAmount: Math.round(totalDamage),
     crit,
     affinity: affinityMark(aff),
     attackType: eventMeta.attackType || (src ? tmplOf(src).atkType : "持续"),

@@ -55,6 +55,12 @@ export const ATTACK_VISUAL = Object.freeze({
   振动: { color: "#A969DA", soft: "#EDDEF8" },
 })
 
+export const SHIELD_VISUAL = Object.freeze({
+  color: "#2EC5CE",
+  dark: "#116572",
+  soft: "#D5F7F8",
+})
+
 const EFFECT_VISUAL = Object.freeze({
   爆发: { color: "#F05B5B", soft: "rgba(240,91,91,0.18)" },
   贯通: { color: "#F0C547", soft: "rgba(240,197,71,0.18)" },
@@ -354,7 +360,7 @@ function guidePageDefinitions() {
             { label: "命中", text: "同一角色的三类攻击共用面板命中；MISS 只取消伤害，附加的减益仍生效。" },
             { label: "Buff / Debuff", text: "施放瞬间生效；进攻 Buff 与即时属性 Debuff 把当前回合算作第 1 回合。" },
             { label: "刷新与层数", text: "同一施加者刷新；不同施加者同类效果分层乘算。角标只写层数，最后一回合图标变浅。" },
-            { label: "护盾", text: "白色假血条独立在真血上方，满盾时与真血等长；按敌方回合计时，重复施加以后一次为准。", color: "#F4F7FF" },
+            { label: "护盾", text: "浅青色假血条独立在真血上方，满盾时与真血等长；受击只显示本次总伤害，不拆分盾伤与掉血。", color: SHIELD_VISUAL.color },
             { label: "灼烧", text: "从施加者下个自身回合的行动时点开始跳伤；固定命中，施加者眩晕或阵亡也不延后。", color: "#E9854F" },
             { label: "眩晕", text: "吞掉目标下一次行动；若普通技能当时就绪，也视为已经释放并重新进入完整冷却。", color: "#F081A4" },
           ],
@@ -740,8 +746,9 @@ export class BaBattleImageGenerator {
       const shieldX = x + 14
       const shieldWidth = width - 28
       // 满容量时与真血条等长；受击后按剩余护盾 / 本次初始容量缩短。
-      fillRounded(ctx, shieldX, y + BATTLE_LAYOUT.shieldBarOffsetY, shieldWidth, 8, 4, "rgba(20,42,53,0.72)")
-      fillRounded(ctx, shieldX, y + BATTLE_LAYOUT.shieldBarOffsetY, Math.max(8, shieldWidth * shieldRatio), 8, 4, "#FFFFFF")
+      fillRounded(ctx, shieldX, y + BATTLE_LAYOUT.shieldBarOffsetY, shieldWidth, 8, 4, "rgba(17,69,79,0.46)")
+      fillRounded(ctx, shieldX, y + BATTLE_LAYOUT.shieldBarOffsetY, Math.max(8, shieldWidth * shieldRatio), 8, 4, SHIELD_VISUAL.color)
+      strokeRounded(ctx, shieldX, y + BATTLE_LAYOUT.shieldBarOffsetY, shieldWidth, 8, 4, SHIELD_VISUAL.dark, 1)
     }
     this.drawHealthBar(ctx, unit, tmpl, x + 14, y + BATTLE_LAYOUT.healthBarOffsetY, width - 28)
   }
@@ -823,7 +830,7 @@ export class BaBattleImageGenerator {
       good: ["#53C99A", "#DFFFF3"],
       bad: ["#E66E77", "#FFE2E3"],
       ready: ["#4EA9E8", "#E1F5FF"],
-      shield: ["#FFFFFF", "#FFFFFF"],
+      shield: [SHIELD_VISUAL.color, SHIELD_VISUAL.soft],
       neutral: ["#697984", "#E8EEF0"],
     }
     const [fill, textColor] = colors[status.tone] || colors.neutral
@@ -931,7 +938,16 @@ export class BaBattleImageGenerator {
   effectLabelLayout(ctx, event, anchor, index, total, shift = { x: 0, y: 0 }) {
     const isMiss = event.type === "miss"
     const isCost = event.type === "cost"
-    const amount = isMiss ? "MISS" : isCost ? `COST ${event.amount}` : String(event.amount)
+    const totalDamage = event.type === "damage"
+      ? Number.isFinite(Number(event.totalAmount))
+        ? Number(event.totalAmount)
+        : Number(event.amount || 0) + Number(event.absorbed || 0)
+      : null
+    const amount = isMiss
+      ? "MISS"
+      : isCost
+        ? `COST ${event.amount}`
+        : String(totalDamage ?? event.amount)
     const qualifier = event.affinity === "weak"
       ? "WEAK"
       : event.affinity === "resist"
@@ -1184,7 +1200,7 @@ export class BaBattleImageGenerator {
       ctx.fillText(type, cursor + 24, y + 14)
       cursor += 82
     }
-    fillRounded(ctx, cursor, y + 4, 19, 11, 5.5, "#FFFFFF")
+    fillRounded(ctx, cursor, y + 4, 19, 11, 5.5, SHIELD_VISUAL.color)
     ctx.fillStyle = "#C5D8E2"
     ctx.fillText("护盾", cursor + 24, y + 14)
   }
