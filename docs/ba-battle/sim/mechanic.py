@@ -1,13 +1,13 @@
-"""v4 机制表征 —— 先把机制测准，再照着它设计角色
+"""v5 机制表征 —— 先把机制测准，再照着它设计角色
 
 锁定的机制（engine.py CFG）：
     开局 Cost 0（双方对等，后手另给固定补偿）
-    回复 = 每存活角色 0.5  →  满编 4 人 2/回合，剩 2 人 1/回合
+    回复 = 每存活角色 0.5  →  满编每个己方回合 2，剩 2 人时 1
     上限 10，无「过 +1」（回复与玩家行为无关）
     暴击/闪避 真随机
+    4 张 EX 技能牌、2 张可见窗口；用一张补一张
 
-注意：本脚本跑在**旧角色表**上。长度、先后手、Cost 预算这类结构指标不敏感，
-可以当探针用；角色强度/极差这次一律不测，那要等角色重设计之后。
+本脚本使用当前角色表测结构指标；角色强度与极差由 `autotune.py` 单独复测。
 
 用法：python mechanic.py [budget|first|len|snow|var]
 """
@@ -34,7 +34,7 @@ def run_budget(n=1500):
             tot.append(t.total_regen); lost.append(t.regen_lost)
     tot.sort()
     print("\n== Cost 预算 ==")
-    print(f"  平均回合数        {statistics.mean(rounds):.2f}")
+    print(f"  平均轮数          {statistics.mean(rounds):.2f}")
     print(f"  每方全场总收入    平均 {statistics.mean(tot):.1f}   P10 {tot[len(tot)//10]}   P90 {tot[len(tot)*9//10]}")
     print(f"  撞上限浪费        平均 {statistics.mean(lost):.2f} 点/方  ← 接近 0 说明上限 10 基本不起作用")
 
@@ -74,64 +74,39 @@ def run_var():
     print(f"  期望槽 gauge  {tune.exp_variance('gauge'):.3f}")
 
 
-def run_scale(n=1200):
-    """拉长对局：扫描 HP_SCALE，看要多厚的血量才撑得起 10 费终极技
-    白热化起点与回合上限按同比例后移，否则它会把拉长的部分又压回去"""
-    print("\n== 拉长对局 ==（目标：能攒满 10 费还剩得下打完的回合）")
-    print(f"{'HP×':>5} {'白热化':>6} {'上限':>5} | {'平均回合':>8} {'P90':>5} "
-          f"{'每方总收入':>10} {'攒满10费需':>10} {'零封率':>7}")
-    old = {k: CFG[k] for k in ("HP_SCALE", "SD_START", "MAX_ROUND")}
-    try:
-        for s in (1.0, 1.4, 1.8, 2.2):
-            CFG["HP_SCALE"] = s
-            CFG["SD_START"] = round(7 * s)
-            CFG["MAX_ROUND"] = round(16 * s)
-            rounds, tot, surv = [], [], []
-            for b, r in _battles(n, 67):
-                rounds.append(b.round)
-                for t in b.teams: tot.append(t.total_regen)
-                if r in (0, 1): surv.append(len(b.teams[r].alive))
-            rounds.sort()
-            print(f"{s:>5} {CFG['SD_START']:>6} {CFG['MAX_ROUND']:>5} | "
-                  f"{statistics.mean(rounds):>8.2f} {rounds[len(rounds)*9//10]:>5} "
-                  f"{statistics.mean(tot):>10.1f} {'5 回合':>10} "
-                  f"{sum(1 for x in surv if x==4)/len(surv):>7.1%}")
-    finally:
-        CFG.update(old)
-
-
-LONG = dict(HP_SCALE=1.4, SD_START=10, MAX_ROUND=22)   # 拉长后的对局配置
+LONG = dict(SD_START=10, MAX_ROUND=22)   # 当前正式对局配置；生命值已直接烘焙进角色表
 
 
 class UltBattle(Battle):
-    """模拟「终极流」玩家：认准终极技，攒满之前一个 EX 都不放；载体阵亡后退回正常贪心。
-    贪心 AI 按性价比买，便宜 EX 会先吃光预算，10 费永远凑不齐——那不是人类的打法。"""
+    """模拟「终极流」玩家：终极牌进窗口后开始留费；此前用其他牌轮转牌组。"""
     ULT_ID = "YH"
 
     def plan_ex(self, side):
         if side == 0:
             u = next((x for x in self.teams[0].units
                       if x.t.id == self.ULT_ID and x.alive), None)
-            if u is not None:
-                if u.ex_cd > 0 or u.stun > 0: return []
+            team = self.teams[0]
+            team.normalize_ex_window()
+            if u is not None and u.idx in team.ex_hand:
+                if u.stun > 0: return []
                 return [u.idx] if self.teams[0].cost >= u.t.ex["cost"] else []
         return super().plan_ex(side)
 
 def run_ult(n=900):
-    """给 10 费终极技定价：攒满 5 回合放一发，倍率要多高才回本？
+    """给 10 费终极技定价：终极牌进窗口后攒满再放，倍率要多高才回本？
 
-    载体用炎火（爆发/轻装，原本 6 费 700% 单体处决）。
-    持有方按 hold=10 强制攒满再花，对手正常贪心。
+    载体用炎火（爆发/轻装）；当前 3 费技能作为常规基线，再覆盖成不同 10 费方案。
+    终极牌未出现时正常轮牌，出现后留费；对手正常贪心。
     胜率 50% = 攒它和不攒一样好；低于 50% = 这是个陷阱选项。
     """
     carrier = BY_ID["YH"]
     old_ex = carrier.ex
     old_cfg = {k: CFG[k] for k in LONG}
     CFG.update(LONG)
-    print("\n== 10 费终极技定价 ==（HP×1.4 / 12 回合 / 预算 22.5）")
+    print("\n== 10 费终极技定价 ==（正式生命值 / 2 槽技能牌窗口）")
     print(f"{'方案':<28} {'持有方胜率':>10}")
     trials = [
-        ("6费 700% 单体（原案·贪心）",  dict(old_ex),                                             False),
+        ("3费 350% 单体（当前·贪心）",  dict(old_ex),                                             False),
         ("10费 900% 单体",   dict(kind="damage", mult=9.0,  target="enemy_single", cost=10), True),
         ("10费 1400% 单体",  dict(kind="damage", mult=14.0, target="enemy_single", cost=10), True),
         ("10费 2000% 单体",  dict(kind="damage", mult=20.0, target="enemy_single", cost=10), True),
@@ -160,7 +135,6 @@ def run_ult(n=900):
 
 if __name__ == "__main__":
     w = sys.argv[1] if len(sys.argv) > 1 else "all"
-    if w in ("all", "scale"):  run_scale()
     if w in ("all", "ult"):    run_ult()
     if w in ("all", "budget"): run_budget()
     if w in ("all", "len"):    run_len()

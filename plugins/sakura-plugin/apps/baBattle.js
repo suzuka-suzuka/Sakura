@@ -1,7 +1,7 @@
 /**
  * 碧蓝档案 · 回合制群战
  *
- * 4v4 单排对线 / 暗配队 / 交替玩家回合 / Cost 驱动 EX。
+ * 4v4 单排对线 / 暗配队 / 交替回合 / Cost 驱动 EX。
  * 设计与数值验证见 docs/ba-battle/设计文档.md，战斗内核在 lib/ba/engine.js。
  *
  * 测试期约定：不做超时判负，一局靠 Redis TTL（3 小时）兜底；
@@ -14,26 +14,57 @@ import { getRedis } from "../../../src/utils/redis.js"
 import { logger } from "../../../src/utils/logger.js"
 
 import { ROSTER, CFG, BY_ID, findUnit } from "../lib/ba/roster.js"
-import { createBattle, playerTurn, validateAction, tmplOf, aliveOf } from "../lib/ba/engine.js"
+import { createBattle, playerTurn, validateAction, turnCostOf } from "../lib/ba/engine.js"
 import { BattleStore } from "../lib/ba/store.js"
 import { parseDraft, parseAction } from "../lib/ba/parse.js"
+import { baBattleImageGenerator } from "../lib/ba/BaBattleImageGenerator.js"
 import {
   renderReveal, renderTurn, renderResult, renderField,
-  renderRoster, renderOne, SIDE_NAME, SIDE_MARK,
+  renderRoster, renderOne, renderExWindow, SIDE_NAME, SIDE_MARK,
 } from "../lib/ba/format.js"
 
-/** 把纯文本数组包成合并转发节点。群聊和私聊都能用，不依赖 event 上下文。 */
-function toNodes(texts, botId, botName) {
-  return texts
-    .filter((t) => t != null && String(t).length)
-    .map((t) => ({
+/** 把文本、图片段或段数组包成合并转发节点。群聊和私聊都能用。 */
+function toNodes(items, botId, botName) {
+  return items
+    .filter((item) => item != null && (!Array.isArray(item) || item.length))
+    .map((item) => ({
       type: "node",
       data: {
         user_id: botId,
         nickname: botName || "档案对战",
-        content: [Segment.text(String(t))],
+        content: Array.isArray(item)
+          ? item
+          : item && typeof item === "object" && item.type
+            ? [item]
+            : [Segment.text(String(item))],
       },
     }))
+}
+
+function renderGuideFallback() {
+  return [
+    "【碧蓝档案 · 回合制群战】4v4 · v5",
+    "",
+    "一方完成一次行动叫 1 回合；先手、后手各完成 1 回合叫 1 轮。每个回合结算后自动发送战场图。",
+    "#档案对战 @某人　发起（不 @ 则公开邀战）",
+    "#应战　　　　　　接受",
+    "随后私聊 bot 发 4 个编号完成暗配队，例如：14 5 9 1",
+    "",
+    "出招：过 / ex 1 / ex 1>3 / ex 2>友3 / ex 1>3 4",
+    "普攻和普通技能锁定对位，EX 按技能规则指定目标。",
+    "动作优先级：EX → 普通技能 → 普攻；同一角色每回合只行动一次。",
+    "放过 EX 后，本回合不再触发小技能或普攻；已就绪的小技能保留到该角色下个回合。",
+    "",
+    `Cost：开局 ${CFG.COST_START}，每个己方回合回复 = 存活人数 × ${CFG.COST_REGEN_PER_UNIT}，上限 ${CFG.COST_MAX}；后手开局 +${CFG.SECOND_BONUS}。`,
+    "每队 4 张角色 EX 牌，同时只显示 2 张；只能使用窗口里的 EX，用后立即补牌。",
+    "阵亡角色的 EX 牌会自动移出牌组。",
+    "",
+    "命中失败只取消伤害，技能附加 Debuff 仍生效；灼烧伤害固定命中。",
+    "Buff / Debuff 从施放瞬间生效；同一施加者刷新，不同施加者同类效果分层乘算。",
+    "护盾是位于真血上方的独立白色假血条；重复施加以最后一次盾量和持续时间为准。",
+    "",
+    "#档案图鉴 [角色] / #档案攻略 / #认输 / #结束对战",
+  ].join("\n")
 }
 
 export class BaBattle extends plugin {
@@ -65,6 +96,43 @@ export class BaBattle extends plugin {
   async forwardToGroup(bot, groupId, texts, info = {}) {
     const nodes = toNodes(texts, bot.self_id, bot.nickname)
     return bot.sendForwardMsg({ messages: nodes, group_id: groupId, ...info })
+  }
+
+  async battleMapSegment(state, log = [], events = []) {
+    try {
+      return Segment.image(await baBattleImageGenerator.generateBattleMap(state, { log, events }))
+    } catch (error) {
+      logger.warn(`[档案对战] 战场图渲染失败，已回退文字战况：${error.message}`)
+      return null
+    }
+  }
+
+  async rosterCardSegments(templates = ROSTER) {
+    try {
+      // @napi-rs/canvas 并发绘制中文时偶发缺字；首次顺序生成，之后命中生成器缓存。
+      const buffers = templates === ROSTER
+        ? await baBattleImageGenerator.generateRosterCards()
+        : []
+      if (templates !== ROSTER) {
+        for (const tmpl of templates) {
+          buffers.push(await baBattleImageGenerator.generateCharacterCard(tmpl))
+        }
+      }
+      return buffers.map((buffer) => Segment.image(buffer))
+    } catch (error) {
+      logger.warn(`[档案对战] 角色卡渲染失败，已回退文字图鉴：${error.message}`)
+      return null
+    }
+  }
+
+  async guidePageSegments() {
+    try {
+      const pages = await baBattleImageGenerator.generateGuidePages()
+      return pages.map((buffer) => Segment.image(buffer))
+    } catch (error) {
+      logger.warn(`[档案对战] 攻略图渲染失败，已回退文字攻略：${error.message}`)
+      return null
+    }
   }
 
   // ---------------- 发起与应战 ----------------
@@ -129,7 +197,6 @@ export class BaBattle extends plugin {
 
     // 蓝方 = 发起方，红方 = 应战方
     const session = {
-      version: 1,
       scope,
       groupId: String(e.group_id),
       selfId: String(e.self_id),
@@ -149,7 +216,8 @@ export class BaBattle extends plugin {
       "配队是暗的，两边都提交后才揭晓。"
     )
 
-    const nodes = renderRoster()
+    const cards = await this.rosterCardSegments()
+    const nodes = cards || renderRoster()
     for (const p of session.players) {
       try {
         await e.bot.pickFriend(p.uid).sendForwardMsg(toNodes(nodes, e.bot.self_id, e.bot.nickname))
@@ -213,13 +281,16 @@ export class BaBattle extends plugin {
 
     const st = session.state
     const active = session.players[st.activeSide]
+    const map = await this.battleMapSegment(st)
     await this.forwardToGroup(
       e.bot,
       session.groupId,
       [
         renderReveal(st),
-        renderField(st),
+        map || renderField(st),
         `轮到 ${SIDE_MARK[st.activeSide]} ${active.name} 出招\n` +
+        `本回合可用 Cost ${turnCostOf(st.sides[st.activeSide])}\n` +
+        `${renderExWindow(st, st.activeSide)}\n` +
         "指令：「过」或「ex 1」「ex 1>3」「ex 1 4」",
       ],
       { source: "档案对战 · 开局", summary: `${session.players[0].name} vs ${session.players[1].name}` }
@@ -268,7 +339,7 @@ export class BaBattle extends plugin {
         if (fresh.state.activeSide !== st.activeSide) return null
 
         const side = fresh.state.activeSide
-        const { state: next, log, error, costBefore, gained, spent } = playerTurn(
+        const { state: next, log, events, error, costBefore, gained, skillGained, spent } = playerTurn(
           fresh.state,
           parsed.action
         )
@@ -277,7 +348,7 @@ export class BaBattle extends plugin {
         fresh.state = next
         if (next.phase === "done") fresh.phase = "done"
         await this.store.save(scope, fresh)
-        return { session: fresh, log, side, meta: { costBefore, gained, spent } }
+        return { session: fresh, log, events, side, meta: { costBefore, gained, skillGained, spent } }
       })
 
       if (!lock.locked) {
@@ -291,15 +362,17 @@ export class BaBattle extends plugin {
         return true
       }
 
-      await this.report(e, r.session, r.log, r.side, r.meta)
+      await this.report(e, r.session, r.log, r.events, r.side, r.meta)
       return true
     }
   )
 
   /** 发战报 */
-  async report(e, session, log, side, meta) {
+  async report(e, session, log, events, side, meta) {
     const st = session.state
-    const nodes = renderTurn(st, log, side, meta)
+    const map = await this.battleMapSegment(st, log, events)
+    const nodes = renderTurn(st, log, side, { ...meta, includeField: !map })
+    if (map) nodes.push(map)
 
     if (st.phase === "done") {
       nodes.push(renderResult(st))
@@ -314,34 +387,16 @@ export class BaBattle extends plugin {
     const next = session.players[st.activeSide]
     nodes.push(
       `轮到 ${SIDE_MARK[st.activeSide]} ${next.name} 出招\n` +
-      `Cost ${st.sides[st.activeSide].cost}（回合开始会先回复）`
+      `本回合可用 Cost ${turnCostOf(st.sides[st.activeSide])}\n` +
+      renderExWindow(st, st.activeSide)
     )
     await this.sendForward(e, nodes, {
-      source: `档案对战 · 第 ${st.round} 回合`,
+      source: `档案对战 · 第 ${meta?.round ?? st.round} 轮 · ${SIDE_NAME[side]}回合`,
       summary: `${SIDE_NAME[side]} ${session.players[side].name}`,
     })
   }
 
   // ---------------- 辅助指令 ----------------
-
-  status = Command(/^#战况$/, { event: "message.group" }, async function (e) {
-    const session = await this.store.load(this.scopeOf(e))
-    if (!session) {
-      await e.reply("本群当前没有对战")
-      return true
-    }
-    if (session.phase === "draft") {
-      const waiting = session.players.filter((p) => !p.picks).map((p) => p.name)
-      await e.reply(`配队阶段，等待：${waiting.join("、") || "无"}`)
-      return true
-    }
-    const st = session.state
-    await this.sendForward(e, [
-      renderField(st),
-      `轮到 ${SIDE_MARK[st.activeSide]} ${session.players[st.activeSide].name} 出招`,
-    ], { source: "档案对战 · 战况" })
-    return true
-  })
 
   surrender = Command(/^#(认输|投降)$/, { event: "message.group" }, async function (e) {
     const scope = this.scopeOf(e)
@@ -386,41 +441,24 @@ export class BaBattle extends plugin {
         await e.reply(`找不到角色「${key}」`)
         return true
       }
-      await e.reply(renderOne(t))
+      const cards = await this.rosterCardSegments([t])
+      await e.reply(cards?.[0] || renderOne(t))
       return true
     }
-    await this.sendForward(e, renderRoster(), {
+    const cards = await this.rosterCardSegments()
+    await this.sendForward(e, cards || renderRoster(), {
       source: "档案对战 · 角色图鉴",
-      summary: `${ROSTER.length} 名角色`,
+      summary: `${ROSTER.length} 张独立角色卡`,
     })
     return true
   })
 
-  help = Command(/^#档案对战帮助$/, async function (e) {
-    await e.reply(
-      [
-        "【碧蓝档案 · 回合制群战】4v4",
-        "",
-        "#档案对战 @某人　发起（不@则任意人可应战）",
-        "#应战　　　　　　接受",
-        "然后私聊 bot 发 4 个编号完成暗配队，例「14 5 9 1」",
-        "",
-        "配队顺序 = 1~4 号位，蓝1 对红1、蓝2 对红2……",
-        "普攻和普通技能被对位锁死，只有 EX 能自由选目标。",
-        "",
-        "出招指令（群内公开）：",
-        "  过　　　　本回合不放 EX",
-        "  ex 1　　　1 号位放 EX，目标走默认",
-        "  ex 1>3　　1 号位 EX 打敌方 3 号位",
-        "  ex 2>友3　目标是己方 3 号位（治疗/护盾）",
-        "  ex 1 4　　一次放多个",
-        "",
-        `Cost：开局 0，每回合回复 = 存活人数 × 0.5，上限 ${CFG.COST_MAX}`,
-        "人越少回得越慢，所以保人就是保资源。",
-        "",
-        "#战况 / #认输 / #结束对战 / #档案图鉴 [角色]",
-      ].join("\n")
-    )
+  help = Command(/^#档案(?:对战)?(?:帮助|攻略)$/, async function (e) {
+    const pages = await this.guidePageSegments()
+    await this.sendForward(e, pages || [renderGuideFallback()], {
+      source: "档案对战 · 攻略",
+      summary: pages ? `${pages.length} 页图片攻略` : "玩法攻略",
+    })
     return true
   })
 }

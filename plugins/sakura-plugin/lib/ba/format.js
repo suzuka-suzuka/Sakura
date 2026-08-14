@@ -1,12 +1,12 @@
 /**
  * 战报渲染 —— 把引擎吐出的日志行组装成合并转发的节点
  *
- * 用转发而不是图片：一个玩家回合 6~10 行、一局 22 个玩家回合就是 150~200 行，
+ * 用转发而不是图片：一个回合 6~10 行、一局约 24 个回合就是 150~200 行，
  * 直接刷群会炸；转发能把每回合折叠成一条，点开才看细节。
  */
 
-import { CFG, ROSTER, BY_INDEX } from "./roster.js"
-import { tmplOf, nameOf, atkOf, regenOf, aliveOf } from "./engine.js"
+import { CFG, ROSTER, BY_INDEX, combatRoleOf } from "./roster.js"
+import { tmplOf, nameOf, atkOf, regenOf, aliveOf, exHandOf } from "./engine.js"
 
 const SIDE_NAME = ["蓝方", "红方"]
 const SIDE_MARK = ["🔵", "🔴"]
@@ -26,26 +26,43 @@ function statusIcons(u) {
   if (u.stun > 0) s.push("💫晕")
   if (u.taunt > 0) s.push("🎯嘲讽")
   if (u.reflect > 0) s.push("⟲反伤")
-  if (u.dots.length) s.push("🔥灼烧")
-  const atkMod = u.buffs.reduce((x, b) => x + (b.stat === "atk" ? b.value : 0), 0)
-  const dfsMod = u.buffs.reduce((x, b) => x + (b.stat === "dfs" ? b.value : 0), 0)
-  const dmgUp = u.buffs.reduce((x, b) => x + (b.stat === "dmg_deal" ? b.value : 0), 0)
-  const dmgTake = u.buffs.reduce((x, b) => x + (b.stat === "dmg_take" ? b.value : 0), 0)
-  if (atkMod) s.push(`攻${atkMod > 0 ? "+" : ""}${Math.round(atkMod * 100)}%`)
-  if (dfsMod) s.push(`防${dfsMod > 0 ? "+" : ""}${Math.round(dfsMod * 100)}%`)
-  if (dmgUp) s.push(`增伤+${Math.round(dmgUp * 100)}%`)
-  if (dmgTake) s.push(`受伤${dmgTake > 0 ? "+" : ""}${Math.round(dmgTake * 100)}%`)
+  if (u.dots.length) {
+    const dotLayers = new Set(u.dots.map((dot) => dot.sourceKey))
+    s.push(`🔥灼烧${dotLayers.size > 1 ? dotLayers.size : ""}`)
+  }
+  const summary = (stat) => {
+    const bySource = new Map()
+    for (const status of u.buffs) {
+      if (status.stat !== stat) continue
+      bySource.set(`${status.effectKind}:${status.sourceKey}`, status)
+    }
+    const layers = [...bySource.values()]
+    const factor = layers.reduce((value, status) => value * (1 + status.value), 1)
+    return { value: factor - 1, layers: layers.length }
+  }
+  const atkMod = summary("atk")
+  const dfsMod = summary("dfs")
+  const dmgUp = summary("dmg_deal")
+  const dmgTake = summary("dmg_take")
+  const layerLabel = (label, data) => `${label}${data.layers > 1 ? data.layers : ""}`
+  if (atkMod.layers) s.push(`${layerLabel("攻", atkMod)}${atkMod.value > 0 ? "+" : ""}${Math.round(atkMod.value * 100)}%`)
+  if (dfsMod.layers) s.push(`${layerLabel("防", dfsMod)}${dfsMod.value > 0 ? "+" : ""}${Math.round(dfsMod.value * 100)}%`)
+  if (dmgUp.layers) s.push(`${layerLabel("增伤", dmgUp)}${dmgUp.value > 0 ? "+" : ""}${Math.round(dmgUp.value * 100)}%`)
+  if (dmgTake.layers) s.push(`${layerLabel("受伤", dmgTake)}${dmgTake.value > 0 ? "+" : ""}${Math.round(dmgTake.value * 100)}%`)
   return s.join(" ")
 }
 
 /** 单侧的四个格子 */
 function sideBlock(state, side) {
   const s = state.sides[side]
-  const lines = [`${SIDE_MARK[side]} ${SIDE_NAME[side]}　Cost ${s.cost}/${CFG.COST_MAX}　回复 +${regenOf(s)}`]
+  const lines = [
+    `${SIDE_MARK[side]} ${SIDE_NAME[side]}　Cost ${s.cost}/${CFG.COST_MAX}　回复 +${regenOf(s)}`,
+    `🎴 ${renderExWindow(state, side)}`,
+  ]
   for (const u of s.units) {
     const t = tmplOf(u)
     const cd = u.alive
-      ? `⚡${u.skillCd <= 0 ? "就绪" : u.skillCd}` + (u.exCd > 0 ? ` EX冷却${u.exCd}` : "")
+      ? `⚡${u.skillCd <= 0 ? "就绪" : u.skillCd}`
       : ""
     const st = statusIcons(u)
     lines.push(
@@ -57,6 +74,15 @@ function sideBlock(state, side) {
   return lines.join("\n")
 }
 
+/** 当前可释放的两张 EX 技能牌。 */
+export function renderExWindow(state, side) {
+  const cards = exHandOf(state, side).map((pos) => {
+    const u = state.sides[side].units[pos]
+    return `${pos + 1}.${tmplOf(u).name}(${tmplOf(u).ex.cost}费)`
+  })
+  return `EX窗口　${cards.join(" / ") || "无"}`
+}
+
 /** 战场态势：双方八格 */
 export function renderField(state) {
   return [
@@ -64,7 +90,7 @@ export function renderField(state) {
     "　",
     sideBlock(state, 1),
     "　",
-    `第 ${state.round} 回合` +
+    `第 ${state.round} 轮` +
       (state.round >= CFG.SD_START
         ? `　🔥白热化 x${state.round - CFG.SD_START + 1}（全场受伤 +${Math.round((state.round - CFG.SD_START + 1) * CFG.SD_DMG_STEP * 100)}%）`
         : ""),
@@ -91,29 +117,30 @@ export function renderReveal(state) {
 }
 
 /**
- * 一个玩家回合的战报节点数组。
+ * 一个回合的战报节点数组。
  * @param {object} state 打完之后的状态
  * @param {string[]} log 引擎日志
  * @param {number} side 行动方
- * @param {{costBefore:number, gained:number, spent:number}} meta 内核回报的 Cost 流水
+ * @param {{round?:number, costBefore:number, gained:number, skillGained?:number, spent:number, includeField?:boolean}} meta 内核回报的本回合轮数与 Cost 流水
  */
 export function renderTurn(state, log, side, meta = {}) {
   const nodes = []
   const s = state.sides[side]
-  const { costBefore = s.cost, gained = 0, spent = 0 } = meta
+  const { round = state.round, costBefore = s.cost, gained = 0, skillGained = 0, spent = 0, includeField = true } = meta
   // 把「回了多少、花了多少」摊开写，否则回 2 花 2 会显示成没变过
   const flow =
     `Cost ${costBefore}` +
     (gained ? ` +${gained}` : "") +
     (spent ? ` −${spent}` : "") +
+    (skillGained ? ` +${skillGained}（小技能）` : "") +
     ` = ${s.cost}`
   nodes.push(
-    `${SIDE_MARK[side]} 第 ${state.round} 回合 · ${SIDE_NAME[side]}（${s.name}）\n${flow}`
+    `${SIDE_MARK[side]} 第 ${round} 轮 · ${SIDE_NAME[side]}回合（${s.name}）\n${flow}`
   )
   // 引擎首行是「--- X方回合（Cost n）---」，渲染时已有更好的抬头，去掉
   const body = log.filter((l) => !l.startsWith("---")).join("\n")
   nodes.push(body || "（无事发生）")
-  nodes.push(renderField(state))
+  if (includeField) nodes.push(renderField(state))
   return nodes
 }
 
@@ -125,7 +152,7 @@ export function renderResult(state) {
   } else {
     const w = state.sides[state.winner]
     lines.push(`🏆 ${SIDE_MARK[state.winner]} ${SIDE_NAME[state.winner]}（${w.name}）胜利！`)
-    lines.push(`共 ${state.round} 回合，剩余 ${aliveOf(w).length} 人`)
+    lines.push(`共 ${state.round} 轮，剩余 ${aliveOf(w).length} 人`)
   }
   lines.push("")
   for (const side of [0, 1]) {
@@ -151,11 +178,12 @@ export function renderRoster() {
   let chunk = []
   for (const t of byCost) {
     chunk.push(
-      `${idxOf(t)}. ${t.name}　${t.atkType}/${t.defType}　${t.role}\n` +
-      `   生命${t.hp} 攻击${t.atk} 防御${t.dfs} 暴击${Math.round(t.crit * 100)}% 闪避${t.dodge}\n` +
+      `${idxOf(t)}. ${t.name}　${t.atkType}/${t.defType}\n` +
+      `   定位 ${combatRoleOf(t)}\n` +
+      `   生命${t.hp} 攻击${t.atk} 防御${t.dfs} 暴击${Math.round(t.crit * 100)}%\n` +
+      `   命中${t.acc} 闪避${t.dodge}\n` +
       `   [普技 CD${t.skill.cd}] ${describeEffect(t.skill)}\n` +
-      `   [EX ${t.ex.cost}费] ${describeEffect(t.ex)}` +
-      (t.passive ? `\n   ⚑ ${describePassive(t.passive)}` : "")
+      `   [EX ${t.ex.cost}费] ${describeEffect(t.ex)}`
     )
     if (chunk.length === 4) { nodes.push(chunk.join("\n\n")); chunk = [] }
   }
@@ -166,7 +194,13 @@ export function renderRoster() {
     "爆发 → 克轻装，被重装抵抗\n" +
     "贯通 → 克重装，被特殊抵抗\n" +
     "神秘 → 克特殊，被轻装抵抗\n" +
-    "振动 → 克弹力，被特殊抵抗"
+    "振动 → 克弹力，被特殊抵抗\n" +
+    "\n" +
+    `命中 vs 闪避\n` +
+    `被闪避率 =（目标闪避 − 我方命中）÷ ${CFG.DODGE_K}，上限 ${Math.round(CFG.DODGE_CAP * 100)}%\n` +
+    "即每 2 点差 1%，命中追平闪避就完全打不空。\n" +
+    "每名角色只有一个命中值，普攻、普通技能和 EX 全部共用。\n" +
+    "命中与攻击、攻防血量、闪避、技能 Cost/效果一起构成角色取舍，不按单项硬换算。"
   )
   return nodes
 }
@@ -192,7 +226,8 @@ export function describeEffect(e) {
     if (e.stun) s += "，眩晕 1 回合"
     if (e.execBonus) s += `，目标生命≤${Math.round(e.execBonus[0] * 100)}% 时 ×${e.execBonus[1]}`
     if (e.detonate) s += `，引爆灼烧追加 ${Math.round(e.detonate * 100)}%`
-    if (e.dot) s += `，灼烧 ${Math.round(e.dot.value * 100)}%攻 ×${e.dot.turns}回合`
+    if (e.dot) s += `，灼烧 ${Math.round(e.dot.value * 100)}%攻 ×后续${e.dot.turns}个自身回合（必中）`
+    if (e.costGain) s += `，回复 ${e.costGain} Cost（不依赖命中）`
     for (const d of e.debuffs || []) {
       s += `，${d.stat === "dfs" ? "防御" : "攻击"} ${d.value > 0 ? "+" : ""}${Math.round(d.value * 100)}%/${d.turns}回合`
     }
@@ -215,23 +250,17 @@ export function describeEffect(e) {
   return `${tg}：${p.join("、")}`
 }
 
-function describePassive(p) {
-  if (p.costRegen) return `本人算两个人（全队 Cost 每回合额外 +${p.costRegen}）`
-  if (p.revive) return `首次致命保留不死并回复 ${Math.round(p.revive * 100)}% 生命`
-  if (p.static?.crit_dmg) return `暴击伤害 +${Math.round(p.static.crit_dmg * 100)}%`
-  return ""
-}
-
 /** 单个角色详情，#档案图鉴 炎火 */
 export function renderOne(t) {
   const idx = ROSTER.indexOf(t) + 1
   return (
-    `${idx}. ${t.name}　${t.atkType}/${t.defType}　${t.role}\n` +
-    `生命 ${t.hp}（实战 ×${CFG.HP_SCALE} = ${Math.round(t.hp * CFG.HP_SCALE)}）\n` +
-    `攻击 ${t.atk}　防御 ${t.dfs}　暴击 ${Math.round(t.crit * 100)}%　闪避 ${t.dodge}\n\n` +
+    `${idx}. ${t.name}　${t.atkType}/${t.defType}\n` +
+    `定位 ${combatRoleOf(t)}\n` +
+    `生命 ${t.hp}\n` +
+    `攻击 ${t.atk}　防御 ${t.dfs}　暴击 ${Math.round(t.crit * 100)}%\n` +
+    `命中 ${t.acc}（所有攻击共用）　闪避 ${t.dodge}\n\n` +
     `[普通技能 CD${t.skill.cd}]\n${describeEffect(t.skill)}\n\n` +
-    `[EX ${t.ex.cost} 费]\n${describeEffect(t.ex)}` +
-    (t.passive ? `\n\n[被动]\n${describePassive(t.passive)}` : "")
+    `[EX ${t.ex.cost} 费]\n${describeEffect(t.ex)}`
   )
 }
 

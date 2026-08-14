@@ -68,9 +68,9 @@ def exp_power(n=6000):
             for t in tA: win[t.id]+=1
         elif r==1:
             for t in tB: win[t.id]+=1
-    rows=[(BY_ID[k].name,BY_ID[k].atk_type+"/"+BY_ID[k].def_type,BY_ID[k].role,
+    rows=[(BY_ID[k].name,BY_ID[k].atk_type+"/"+BY_ID[k].def_type,
            round(win[k]/app[k],3),app[k]) for k in app]
-    rows.sort(key=lambda r:-r[3]); return rows
+    rows.sort(key=lambda r:-r[2]); return rows
 
 def exp_variance(mode,pairs=120,reps=40):
     old=CFG["RNG_MODE"]; CFG["RNG_MODE"]=mode
@@ -109,4 +109,4 @@ if __name__=="__main__":
         for h in (5,6,7,8,10,12): print(f"   攒到 {h:>2} 再花     ", exp_hold(h,1200))
     if w in ("all","pow"):
         print("\n角色强度")
-        for r in exp_power(): print(f"  {r[0]:<4} {r[1]:<6} {r[2]:<9} {r[3]:.3f}")
+        for r in exp_power(): print(f"  {r[0]:<4} {r[1]:<6} {r[2]:.3f}")
