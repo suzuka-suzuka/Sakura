@@ -5,6 +5,7 @@ import path from "node:path"
 import { pluginresources } from "../path.js"
 import { CFG, ROSTER, combatRoleOf } from "./roster.js"
 import {
+  exDrawQueueOf,
   exHandOf,
   regenOf,
   tmplOf,
@@ -242,9 +243,9 @@ function guidePageDefinitions() {
           height: 390,
           items: [
             { label: "01  发起", text: "#档案对战 @某人；不 @ 时会成为公开邀战。" },
-            { label: "02  应战", text: "对手发送 #应战，双方随后进入私聊配队。" },
-            { label: "03  暗配队", text: "私聊 bot 发 4 个编号或角色名，例如 14 5 9 1；顺序就是 1~4 号位。" },
-            { label: "04  揭晓", text: `双方都提交后公开阵容并随机先手；后手开局补偿 ${CFG.SECOND_BONUS} Cost。` },
+            { label: "02  应战", text: "对手发送 #应战，完整角色图鉴随后在群里统一发送一次。" },
+            { label: "03  暗配队", text: "双方各自私聊 bot 发 4 个编号或角色名，例如 14 5 9 1；顺序就是 1~4 号位。" },
+            { label: "04  揭晓", text: `双方都提交后公开阵容并随机先手；行动图直接进入先手回合，满编显示先手可用 2、后手预计 ${CFG.COST_START + CFG.SECOND_BONUS + 2} Cost。` },
           ],
         },
         {
@@ -254,7 +255,7 @@ function guidePageDefinitions() {
           items: [
             { label: "回合", text: "一方从 Cost 回复到状态、冷却结算，完成一次行动，叫 1 回合。" },
             { label: "轮", text: "先手与后手各完成 1 回合，合起来才叫 1 轮。" },
-            { label: "结算图", text: "每个回合结算后自动发 1 张；一轮通常两张。箭头回放刚结束的行动。" },
+            { label: "结算图", text: "开局和每个回合结算后都只发 1 张图，不再附文字战报；箭头回放刚结束的行动。" },
           ],
         },
         {
@@ -286,7 +287,7 @@ function guidePageDefinitions() {
             { label: "ex 1", text: "窗口内 1 号位释放 EX，目标采用技能默认规则。" },
             { label: "ex 1>3", text: "1 号位释放 EX，并指定敌方 3 号位。" },
             { label: "ex 2>友3", text: "2 号位释放治疗或护盾 EX，指定己方 3 号位。" },
-            { label: "ex 1>3 4", text: "先让 1 号位打敌 3，再按补牌后的新窗口尝试 4 号位。" },
+            { label: "ex 1>3 4", text: "先让 1 号位打敌 3，再按图中公开补牌顺序释放 4 号位。" },
           ],
         },
         {
@@ -295,10 +296,10 @@ function guidePageDefinitions() {
           height: 380,
           labelWidth: 205,
           items: [
-            { label: "自动回复", text: `本回合先回复：存活人数 × ${CFG.COST_REGEN_PER_UNIT}；满编每回合 +2，上限 ${CFG.COST_MAX}。` },
-            { label: "开局补偿", text: `双方从 ${CFG.COST_START} 开始；后手只在开局额外获得 ${CFG.SECOND_BONUS} Cost。` },
+            { label: "自动回复", text: `行动图显示已计入本回合回复的可用值；每回合回复存活人数 × ${CFG.COST_REGEN_PER_UNIT}，满编 +2。` },
+            { label: "开局补偿", text: `底层起始值先手 ${CFG.COST_START}、后手 ${CFG.COST_START + CFG.SECOND_BONUS}；开局图已进入先手回合，显示 2 / ${CFG.COST_START + CFG.SECOND_BONUS + 2}。` },
             { label: "额外回费", text: "共鸣的小技能回复 3 Cost；即使伤害显示 MISS，回费仍然生效。" },
-            { label: "其他指令", text: "#档案图鉴 [角色]　#档案攻略　#认输　#结束对战" },
+            { label: "其他指令", text: "#档案图鉴 [角色]（群聊）　#档案攻略　#认输　#结束对战" },
           ],
         },
         {
@@ -306,10 +307,10 @@ function guidePageDefinitions() {
           accent: "#A978E6",
           height: 530,
           items: [
-            { label: "2 / 4", text: "每队 4 张角色 EX 牌，但同时只展示 2 张。" },
+            { label: "2 / 4", text: "每队 4 张角色 EX 牌；窗口展示 2 张，旁边公开剩余补牌顺序。" },
             { label: "只能选窗口", text: "角色在队伍里不等于随时能放；出招必须命中当前窗口。" },
-            { label: "用后补牌", text: "用掉一张后立即补一张；连续 EX 的后续指令按新窗口重新校验。" },
-            { label: "轮回", text: "满编时，同一角色最早要隔另外 2 次 EX 才会重新出现。" },
+            { label: "用后补牌", text: "用掉一张后立即补一张；照着补牌顺序可在一条指令中连续释放。" },
+            { label: "轮回", text: "满编时同一角色最早隔 2 次 EX 回来，但每个回合最多释放一次。" },
             { label: "减员", text: "阵亡角色的牌会从窗口、牌库与弃牌区移除，存活者轮牌随之加快。" },
           ],
         },
@@ -526,127 +527,15 @@ export class BaBattleImageGenerator {
   }
 
   drawMapBackground(ctx, state) {
-    const base = ctx.createLinearGradient(0, 0, 0, 1455)
-    base.addColorStop(0, "#BFE1EC")
-    base.addColorStop(0.18, "#E8E7D5")
-    base.addColorStop(0.55, "#D9DED7")
-    base.addColorStop(1, "#B8D0D3")
-    ctx.fillStyle = base
-    ctx.fillRect(0, 0, MAP_WIDTH, 1455)
+    // 战场只保留纯白底，让角色、血条和行动回放成为唯一视觉重点。
+    ctx.fillStyle = "#FFFFFF"
+    ctx.fillRect(0, 0, MAP_WIDTH, 1420)
 
-    // 学园街区俯视战场：画面主体保持明亮，只让 HUD 使用深色底。
-    ctx.fillStyle = "#E7E6DD"
-    ctx.fillRect(0, 154, 112, 1270)
-    ctx.fillRect(MAP_WIDTH - 112, 154, 112, 1270)
-    ctx.fillStyle = "#C5D2D1"
-    ctx.fillRect(112, 154, MAP_WIDTH - 224, 1270)
-
-    ctx.save()
-    ctx.globalAlpha = 0.45
-    ctx.strokeStyle = "#9DB3B4"
-    ctx.lineWidth = 2
-    for (let y = 190; y < 1415; y += 92) {
-      ctx.beginPath()
-      ctx.moveTo(112, y)
-      ctx.lineTo(MAP_WIDTH - 112, y)
-      ctx.stroke()
-    }
-    ctx.globalAlpha = 0.2
-    for (let x = 170; x < MAP_WIDTH - 110; x += 145) {
-      ctx.beginPath()
-      ctx.moveTo(x, 154)
-      ctx.lineTo(x, 1424)
-      ctx.stroke()
-    }
-    ctx.restore()
-
-    // 两侧绿化和路缘，让竖向对阵看起来是一个实际场景而非表格。
-    for (const sideX of [0, MAP_WIDTH - 102]) {
-      const grass = ctx.createLinearGradient(sideX, 0, sideX + 102, 0)
-      grass.addColorStop(sideX === 0 ? 0 : 1, "#79A99C")
-      grass.addColorStop(sideX === 0 ? 1 : 0, "#B6C9B4")
-      ctx.fillStyle = grass
-      ctx.fillRect(sideX, 190, 102, 1180)
-      ctx.fillStyle = "rgba(255,255,255,0.58)"
-      ctx.fillRect(sideX === 0 ? 94 : sideX, 190, 8, 1180)
-    }
-    for (const y of [285, 610, 950, 1265]) {
-      for (const x of [44, MAP_WIDTH - 44]) {
-        ctx.fillStyle = "rgba(41,77,75,0.22)"
-        ctx.beginPath()
-        ctx.ellipse(x + 4, y + 12, 38, 17, 0, 0, Math.PI * 2)
-        ctx.fill()
-        ctx.fillStyle = "#5E9A82"
-        ctx.beginPath()
-        ctx.arc(x, y, 30, 0, Math.PI * 2)
-        ctx.fill()
-        ctx.fillStyle = "#8FC2A2"
-        ctx.beginPath()
-        ctx.arc(x - 8, y - 8, 19, 0, Math.PI * 2)
-        ctx.fill()
-      }
-    }
-
-    const redZone = ctx.createRadialGradient(600, 335, 30, 600, 335, 500)
-    redZone.addColorStop(0, "rgba(239,102,112,0.18)")
-    redZone.addColorStop(1, "rgba(239,102,112,0)")
-    ctx.fillStyle = redZone
-    ctx.fillRect(100, 155, 1000, 710)
-    const blueZone = ctx.createRadialGradient(600, 1170, 30, 600, 1170, 520)
-    blueZone.addColorStop(0, "rgba(71,166,232,0.20)")
-    blueZone.addColorStop(1, "rgba(71,166,232,0)")
-    ctx.fillStyle = blueZone
-    ctx.fillRect(90, 770, 1020, 650)
-
-    // 中央交战线与少量掩体；它们只提供空间感，不抢角色信息。
-    ctx.save()
-    ctx.strokeStyle = "rgba(255,255,255,0.72)"
-    ctx.lineWidth = 4
-    ctx.setLineDash([18, 16])
-    ctx.beginPath()
-    ctx.moveTo(115, 758)
-    ctx.lineTo(MAP_WIDTH - 115, 758)
-    ctx.stroke()
-    ctx.setLineDash([])
-    ctx.translate(600, 758)
-    ctx.rotate(Math.PI / 4)
-    fillRounded(ctx, -43, -43, 86, 86, 16, "rgba(255,255,255,0.46)")
-    strokeRounded(ctx, -43, -43, 86, 86, 16, "rgba(50,126,168,0.45)", 3)
-    ctx.restore()
-
-    for (const [x, y, color] of [
-      [126, 694, "#E38A67"],
-      [914, 816, "#58AFCB"],
-    ]) {
-      ctx.fillStyle = "rgba(52,68,72,0.22)"
-      fillRounded(ctx, x + 10, y + 14, 160, 44, 12, "rgba(52,68,72,0.22)")
-      fillRounded(ctx, x, y, 160, 44, 12, color)
-      ctx.fillStyle = "rgba(255,255,255,0.55)"
-      ctx.fillRect(x + 18, y + 10, 124, 6)
-    }
-
-    // 底部操作层沿用 BA 的深蓝白色斜切语言，与战场明确分层。
-    const deck = ctx.createLinearGradient(0, 1420, MAP_WIDTH, MAP_HEIGHT)
-    deck.addColorStop(0, "#10253B")
-    deck.addColorStop(0.62, "#173B57")
-    deck.addColorStop(1, "#0B1C31")
-    ctx.fillStyle = deck
+    // 操作区继续使用纯色深蓝，和白色战场做清晰但克制的分区。
+    ctx.fillStyle = "#102A43"
     ctx.fillRect(0, 1420, MAP_WIDTH, MAP_HEIGHT - 1420)
-    polygonPath(ctx, [[0, 1420], [420, 1396], [780, 1420], [1200, 1388], [1200, 1446], [0, 1446]])
-    ctx.fillStyle = "rgba(246,251,255,0.92)"
-    ctx.fill()
-    polygonPath(ctx, [[0, 1442], [400, 1418], [790, 1442], [1200, 1410], [1200, 1460], [0, 1460]])
-    ctx.fillStyle = "#47B3E8"
-    ctx.fill()
-
-    if (state.round >= CFG.SD_START) {
-      const heat = ctx.createRadialGradient(600, 760, 40, 600, 760, 660)
-      heat.addColorStop(0, "rgba(245,76,64,0.11)")
-      heat.addColorStop(0.75, "rgba(245,76,64,0.03)")
-      heat.addColorStop(1, "rgba(245,76,64,0)")
-      ctx.fillStyle = heat
-      ctx.fillRect(0, 130, MAP_WIDTH, 1300)
-    }
+    ctx.fillStyle = state.round >= CFG.SD_START ? "#EF6B5B" : "#47B3E8"
+    ctx.fillRect(0, 1420, MAP_WIDTH, 5)
   }
 
   drawHeader(ctx, state) {
@@ -724,7 +613,7 @@ export class BaBattleImageGenerator {
     const visual = SIDE_VISUAL[sideIndex]
     const active = state.phase === "command" && state.activeSide === sideIndex
     const storedCost = Math.max(0, Math.min(CFG.COST_MAX, Math.floor(side.cost)))
-    const available = active ? turnCostOf(side) : storedCost
+    const available = state.phase === "command" ? turnCostOf(side) : storedCost
 
     polygonPath(ctx, [[x + 24, y], [x + width, y], [x + width - 22, y + height], [x, y + height]])
     ctx.fillStyle = active ? "rgba(10,32,51,0.88)" : "rgba(14,34,49,0.72)"
@@ -753,12 +642,24 @@ export class BaBattleImageGenerator {
     ctx.fillText(`${available}`, x + 300, y + 47)
     ctx.fillStyle = "#AFC5D1"
     ctx.font = font(12, "bold")
-    ctx.fillText(`/ ${CFG.COST_MAX}　回复 +${regenOf(side)}`, x + 331, y + 46)
+    ctx.fillText(
+      `/ ${CFG.COST_MAX}　${active ? "本回合" : state.phase === "command" ? "下回合预计" : "结算值"}`,
+      x + 331,
+      y + 46
+    )
 
     const hand = exHandOf(state, sideIndex).filter((pos) => side.units[pos]?.alive)
+    const queue = exDrawQueueOf(state, sideIndex).filter((pos) => side.units[pos]?.alive)
     ctx.fillStyle = "#AFC5D1"
     ctx.font = font(12, "bold")
     ctx.fillText("PUBLIC EX WINDOW", x + 474, y + 18)
+    ctx.textAlign = "right"
+    ctx.fillText(
+      queue.length ? `NEXT ${queue.map((pos) => pos + 1).join(" → ")}` : "NEXT 回补当前牌",
+      x + width - 20,
+      y + 18
+    )
+    ctx.textAlign = "left"
     for (let index = 0; index < CFG.EX_HAND_SIZE; index++) {
       const pos = hand[index]
       const cardX = x + 474 + index * 226
@@ -1027,7 +928,7 @@ export class BaBattleImageGenerator {
     return { x: curveX, y: curveY }
   }
 
-  drawEffectLabel(ctx, event, anchor, index, total, color) {
+  effectLabelLayout(ctx, event, anchor, index, total, shift = { x: 0, y: 0 }) {
     const isMiss = event.type === "miss"
     const isCost = event.type === "cost"
     const amount = isMiss ? "MISS" : isCost ? `COST ${event.amount}` : String(event.amount)
@@ -1044,16 +945,78 @@ export class BaBattleImageGenerator {
     const row = total > 3 ? index % 2 : 0
     const column = total > 3 ? Math.floor(index / 2) : index
     const offset = (column - (columns - 1) / 2) * 64
-    const x = anchor.x + offset
-    const y = anchor.y - 14 + row * 62
+    const x = anchor.x + offset + (shift.x || 0)
+    const y = anchor.y - 14 + row * 62 + (shift.y || 0)
 
-    ctx.save()
     ctx.font = font(size, "bold")
     const amountWidth = ctx.measureText(amount).width
     ctx.font = font(11, "bold")
     const qualifierWidth = qualifier ? ctx.measureText(qualifier).width + 8 : 0
     const width = Math.max(42, amountWidth + 18, qualifierWidth + 16)
     const height = qualifier ? size + 25 : size + 13
+    return { amount, qualifier, size, x, y, width, height }
+  }
+
+  effectLabelBounds(layout, event, padding = 7) {
+    return {
+      left: layout.x - layout.width / 2 - padding,
+      right: layout.x + layout.width / 2 + padding,
+      top: layout.y - layout.height / 2 - padding - (event.crit ? 15 : 0),
+      bottom: layout.y + layout.height / 2 + padding,
+    }
+  }
+
+  effectLabelsOverlap(a, b) {
+    return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+  }
+
+  placeEffectLabels(ctx, jobs) {
+    const occupied = []
+    const placements = []
+    const candidates = [
+      { x: 0, y: 0 },
+      { x: 0, y: -68 }, { x: 0, y: 68 },
+      { x: -78, y: 0 }, { x: 78, y: 0 },
+      { x: -78, y: -68 }, { x: 78, y: -68 },
+      { x: -78, y: 68 }, { x: 78, y: 68 },
+      { x: 0, y: -136 }, { x: 0, y: 136 },
+      { x: -156, y: 0 }, { x: 156, y: 0 },
+    ]
+
+    for (const job of jobs) {
+      let shift = candidates[0]
+      let bounds = null
+      for (const candidate of candidates) {
+        const layout = this.effectLabelLayout(ctx, job.event, job.anchor, job.index, job.total, candidate)
+        const nextBounds = this.effectLabelBounds(layout, job.event)
+        const insideArena = nextBounds.left >= 28 && nextBounds.right <= MAP_WIDTH - 28 &&
+          nextBounds.top >= 245 && nextBounds.bottom <= 1310
+        if (insideArena && occupied.every((current) => !this.effectLabelsOverlap(nextBounds, current))) {
+          shift = candidate
+          bounds = nextBounds
+          break
+        }
+      }
+      const layout = this.effectLabelLayout(ctx, job.event, job.anchor, job.index, job.total, shift)
+      const placedBounds = bounds || this.effectLabelBounds(layout, job.event)
+      occupied.push(placedBounds)
+      placements.push({ ...job, shift, bounds: placedBounds })
+      this.drawEffectLabel(ctx, job.event, job.anchor, job.index, job.total, job.color, shift)
+    }
+    return placements
+  }
+
+  drawEffectLabel(ctx, event, anchor, index, total, color, shift = { x: 0, y: 0 }) {
+    const { amount, qualifier, size, x, y, width, height } = this.effectLabelLayout(
+      ctx,
+      event,
+      anchor,
+      index,
+      total,
+      shift
+    )
+
+    ctx.save()
     fillRounded(ctx, x - width / 2, y - height / 2, width, height, 10, "rgba(8,24,36,0.88)")
     strokeRounded(ctx, x - width / 2, y - height / 2, width, height, 10, color, event.crit ? 3 : 1.5)
     ctx.fillStyle = color
@@ -1131,6 +1094,7 @@ export class BaBattleImageGenerator {
     // 每次实际行动都保留；同一技能的多段命中共用轨迹、数字逐段排列。
     const visible = actions.filter((action) => action.events.length).slice(-8)
     const pairUse = new Map()
+    const labelJobs = []
 
     for (const action of visible) {
       const source = this.unitEffectPoint(action.header.source)
@@ -1188,20 +1152,23 @@ export class BaBattleImageGenerator {
           anchor = this.drawArrowPath(ctx, source, group.point, groupVisual.color, repeatedPair ? 0 : used * 12)
         }
         const numeric = group.events.filter((event) => ["damage", "miss", "heal", "cost"].includes(event.type))
-        numeric.forEach((event, index) => this.drawEffectLabel(
-          ctx,
+        numeric.forEach((event, index) => labelJobs.push({
           event,
-          anchor || areaCenter || group.point,
+          anchor: anchor || areaCenter || group.point,
           index,
-          numeric.length,
-          event.type === "heal"
+          total: numeric.length,
+          color: event.type === "heal"
             ? EFFECT_VISUAL.治疗.color
             : event.type === "cost"
               ? EFFECT_VISUAL.Cost.color
-              : EFFECT_VISUAL[event.attackType]?.color || groupVisual.color
-        ))
+              : EFFECT_VISUAL[event.attackType]?.color || groupVisual.color,
+        }))
       }
     }
+
+    // 所有箭头、范围圈和脉冲先画完，最后统一画数字标签。
+    // 否则 EX 的弯折轨迹或后续普攻直线会覆盖先前动作的伤害数字。
+    this.placeEffectLabels(ctx, labelJobs)
   }
 
   drawArmorLegend(ctx, x, y) {
@@ -1222,7 +1189,7 @@ export class BaBattleImageGenerator {
     ctx.fillText("护盾", cursor + 24, y + 14)
   }
 
-  async drawExSkillIcon(ctx, state, sideIndex, pos, x, y, size, slotIndex) {
+  async drawExSkillIcon(ctx, state, sideIndex, pos, x, y, size) {
     const side = state.sides[sideIndex]
     const unit = side.units[pos]
     // 规则层会在阵亡时清牌并补位；绘制层再兜底，避免旧状态把阵亡头像带进窗口。
@@ -1326,6 +1293,45 @@ export class BaBattleImageGenerator {
     }
   }
 
+  drawExDrawQueue(ctx, state, sideIndex, x, y, width) {
+    const side = state.sides[sideIndex]
+    const queue = exDrawQueueOf(state, sideIndex).filter((pos) => side.units[pos]?.alive)
+
+    ctx.fillStyle = "#AFC5D1"
+    ctx.font = font(12, "bold")
+    ctx.textAlign = "left"
+    ctx.fillText("补牌顺序", x, y + 16)
+
+    if (!queue.length) {
+      ctx.fillStyle = "#7593A4"
+      ctx.font = font(11, "bold")
+      ctx.fillText(state.phase === "done" ? "战斗已结束" : "用牌后由当前存活牌回补", x, y + 48)
+      return
+    }
+
+    for (let index = 0; index < queue.length; index++) {
+      const pos = queue[index]
+      const tmpl = tmplOf(side.units[pos])
+      const effect = EFFECT_VISUAL[tmpl.atkType]
+      const rowY = y + 28 + index * 52
+      fillRounded(ctx, x, rowY, width, 42, 10, "rgba(255,255,255,0.07)")
+      strokeRounded(ctx, x, rowY, width, 42, 10, `${effect.color}AA`, 1.5)
+      ctx.fillStyle = effect.color
+      fillRounded(ctx, x + 5, rowY + 5, 74, 32, 8, effect.color)
+      ctx.fillStyle = "#FFFFFF"
+      ctx.font = font(11, "bold")
+      ctx.textAlign = "center"
+      ctx.fillText(index === 0 ? "下一张" : "随后", x + 42, rowY + 26)
+      ctx.textAlign = "left"
+      ctx.font = font(14, "bold")
+      ctx.fillText(`${pos + 1}.${tmpl.name}`, x + 92, rowY + 26)
+      ctx.textAlign = "right"
+      ctx.fillStyle = "#C9DAE3"
+      ctx.font = font(12, "bold")
+      ctx.fillText(`${tmpl.ex.cost} COST`, x + width - 14, rowY + 26)
+    }
+  }
+
   drawCostGauge(ctx, state, sideIndex, x, y, width) {
     const side = state.sides[sideIndex]
     const visual = SIDE_VISUAL[sideIndex]
@@ -1376,7 +1382,13 @@ export class BaBattleImageGenerator {
     ctx.fillStyle = "#91ADBC"
     ctx.font = font(11, "bold")
     ctx.textAlign = "left"
-    ctx.fillText(active ? `本回合回复 +${regenOf(side)} · 可用值已计入` : `储存 ${stored}/${CFG.COST_MAX}`, barX, y + 72)
+    ctx.fillText(
+      active
+        ? `本回合回复 +${regenOf(side)} · 当前可用 ${available}`
+        : `结算 Cost ${stored}/${CFG.COST_MAX}`,
+      barX,
+      y + 72
+    )
   }
 
   async drawCommandHud(ctx, state) {
@@ -1398,9 +1410,10 @@ export class BaBattleImageGenerator {
     for (let index = 0; index < CFG.EX_HAND_SIZE; index++) {
       const pos = hand[index]
       if (pos == null) continue
-      await this.drawExSkillIcon(ctx, state, sideIndex, pos, 330 + index * 218, 1458, 160, index)
+      await this.drawExSkillIcon(ctx, state, sideIndex, pos, 330 + index * 218, 1458, 160)
     }
 
+    this.drawExDrawQueue(ctx, state, sideIndex, 770, 1458, 374)
     this.drawCostGauge(ctx, state, sideIndex, 46, 1664, 1108)
     this.drawArmorLegend(ctx, 590, 1758)
     ctx.fillStyle = "#69899A"
@@ -1408,7 +1421,7 @@ export class BaBattleImageGenerator {
     ctx.textAlign = "left"
     ctx.fillText(`SEED ${state.seed}`, 47, 1783)
     ctx.textAlign = "right"
-    ctx.fillText("完整数值与过程保留在文字战报", 1152, 1783)
+    ctx.fillText("箭头与数值回放刚结算的行动", 1152, 1783)
   }
 
   async generateBattleMap(state, options = {}) {
@@ -1571,16 +1584,6 @@ export class BaBattleImageGenerator {
     this.drawStatCell(ctx, "闪避", tmpl.dodge, statX + statWidth + statGap, 412, statWidth)
     this.drawStatCell(ctx, "暴击", `${Math.round(tmpl.crit * 100)}%`, statX, 494, statWidth)
     this.drawStatCell(ctx, "EX Cost", tmpl.ex.cost, statX + statWidth + statGap, 494, statWidth, { color: attack.color })
-
-    fillRounded(ctx, 48, 588, 318, 112, 18, "rgba(7,14,27,0.70)")
-    strokeRounded(ctx, 48, 588, 318, 112, 18, `${armor.color}77`, 1.3)
-    ctx.fillStyle = armor.color
-    ctx.font = font(17, "bold")
-    ctx.fillText(`${armor.label}血条`, 65, 618)
-    this.drawHealthBar(ctx, { hp: tmpl.hp, maxhp: tmpl.hp }, tmpl, 65, 635, 284)
-    ctx.fillStyle = "#AFC0D3"
-    ctx.font = font(15)
-    ctx.fillText("满盾白条与真血条等长，受击后缩短", 65, 681)
 
     this.drawSkillPanel(
       ctx,

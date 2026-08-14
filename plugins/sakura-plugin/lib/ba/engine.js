@@ -254,6 +254,16 @@ export function exHandOf(state, sideIndex) {
   return [...syncExWindow(copy, sideIndex).exHand]
 }
 
+/**
+ * 不修改传入状态，返回当前窗口用牌后会依次补入的公开牌序。
+ * 牌库见底后弃牌区会按使用顺序接回，因此两区直接拼接就是当前可预见顺序。
+ */
+export function exDrawQueueOf(state, sideIndex) {
+  const copy = structuredClone(state)
+  const side = syncExWindow(copy, sideIndex)
+  return [...side.exDeck, ...side.exDiscard]
+}
+
 // ---------------- 白热化 ----------------
 
 function sdDmg(state) {
@@ -845,11 +855,13 @@ export function validateAction(state, action) {
   const side = draft.sides[sideIndex]
   // 玩家指令触发结算后会先回复 Cost，校验必须使用同一个回合起始预算。
   let budget = turnCostOf(side)
+  const exActors = new Set()
 
   for (const cast of action.casts) {
     const u = side.units[cast.pos]
     if (!u) return `没有 ${cast.pos + 1} 号位`
     if (!u.alive) return `${nameOf(u)} 已经倒下了`
+    if (exActors.has(cast.pos)) return `${nameOf(u)} 本回合已经释放过 EX`
     if (!side.exHand.includes(cast.pos)) {
       const cards = side.exHand
         .map((pos) => `${pos + 1}.${nameOf(side.units[pos])}(${tmplOf(side.units[pos]).ex.cost}费)`)
@@ -863,6 +875,7 @@ export function validateAction(state, action) {
     }
     budget -= cost
     side.cost = budget
+    exActors.add(cast.pos)
     cycleExCard(draft, sideIndex, cast.pos)
   }
   return null
@@ -890,7 +903,7 @@ export function playerTurn(prev, action) {
   const actionRound = state.round
   state.turnId += 1
 
-  // ① Cost 回复
+  // ① Cost 回复；createBattle 保留开局 0/3，正式进入回合后才在这里结算。
   const costAtStart = side.cost
   side.regenAcc += regenOf(side)
   const gain = Math.floor(side.regenAcc)

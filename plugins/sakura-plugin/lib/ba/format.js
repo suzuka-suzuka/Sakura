@@ -1,8 +1,8 @@
 /**
- * 战报渲染 —— 把引擎吐出的日志行组装成合并转发的节点
+ * 文本格式化工具。
  *
- * 用转发而不是图片：一个回合 6~10 行、一局约 24 个回合就是 150~200 行，
- * 直接刷群会炸；转发能把每回合折叠成一条，点开才看细节。
+ * 实际战斗只发送战场图；这里的战况文本保留给规则测试和渲染失败时的人工诊断，
+ * 图鉴文字则仍是角色卡生成失败时的降级内容。
  */
 
 import { CFG, ROSTER, BY_INDEX, combatRoleOf } from "./roster.js"
@@ -112,7 +112,8 @@ export function renderReveal(state) {
     `   ${line(0)}`,
     `${SIDE_MARK[0]} ${state.sides[0].name}`,
     "",
-    `${SIDE_NAME[state.first]}先手，${SIDE_NAME[1 - state.first]}开局补偿 +${CFG.SECOND_BONUS} Cost`,
+    `${SIDE_NAME[state.first]}先手 Cost ${CFG.COST_START}，${SIDE_NAME[1 - state.first]}后手 Cost ${CFG.COST_START + CFG.SECOND_BONUS}`,
+    "这是回复开始前的开局值；进入回合后按存活人数正常回复",
   ].join("\n")
 }
 

@@ -18,9 +18,9 @@ CFG = dict(
     COST_REGEN_PER_UNIT = 0.5,  # 每存活角色 ×N：满编每个己方回合 2，剩 2 人时 1
     COST_MAX         = 10,
     COST_PASS_BONUS  = 0,     # v4 删除：「过 +1」让回复取决于玩家行为，不对等
-    EX_HAND_SIZE     = 2,     # 4 张角色技能牌中同时只展示 2 张，用后补牌
+    EX_HAND_SIZE     = 2,     # 4 张牌中 2 张位于窗口，剩余补牌顺序公开
     # --- 先手补偿（实验开关）---
-    FIRST_SKIP_COST  = False,  # 先手方第 1 回合不回 Cost
+    FIRST_SKIP_COST  = False,  # 实验开关；正式规则保留首回合正常回复
     FIRST_PRICE      = None, # 备用计价方式：先手方自扣 N 点（默认改用 SECOND_BONUS 补偿制）  # 不为 None 时改用「先手方开局 Cost -N」计价
     SECOND_BONUS     = 3,     # 后手方开局补偿；技能牌窗口版扫描 0~3 后最接近五五开
     FIRST_NO_ACT     = False, # 先手方第 1 回合角色不自动行动
@@ -496,22 +496,22 @@ class Battle:
                     deck.extend(discard); discard.clear()
                 hand.append(deck.pop(0))
 
-        budget=me.cost; plan=[]
+        budget=me.cost; plan=[]; planned=set()
         # 终极流：牌在窗口里就留费；还没抽到时必须先打其他牌来轮转，不能原地等死。
         uc=CFG["ULT_COMMIT"]
         ult=next((u for u in me.alive if uc is not None and u.t.ex["cost"]>=uc), None)
 
         while hand:
-            if ult is not None and ult.idx in hand:
+            if ult is not None and ult.idx in hand and ult.idx not in planned:
                 cost=ult.t.ex["cost"]
                 if ult.stun>0 or budget<cost: break
-                plan.append(ult.idx); budget-=cost; cycle(ult.idx)
+                plan.append(ult.idx); planned.add(ult.idx); budget-=cost; cycle(ult.idx)
                 break
 
             cands=[]
             for idx in hand:
                 u=me.units[idx]
-                if not u.alive or u.stun>0: continue
+                if idx in planned or not u.alive or u.stun>0: continue
                 ex=u.t.ex; cost=ex["cost"]
                 if cost>budget: continue
                 sc=self.score_ex(u,ex,me,foes)
@@ -519,7 +519,7 @@ class Battle:
             if not cands: break
             cands.sort(reverse=True)
             _,cost,idx=cands[0]
-            budget-=cost; plan.append(idx); cycle(idx)
+            budget-=cost; plan.append(idx); planned.add(idx); cycle(idx)
         return plan
 
     def score_ex(self,u,ex,me,foes):
@@ -585,7 +585,7 @@ class Battle:
         for idx in self.plan_ex(side):
             team.normalize_ex_window()
             u=team.units[idx]
-            if not u.alive or u.stun>0 or idx not in team.ex_hand: continue
+            if idx in ex_actors or not u.alive or u.stun>0 or idx not in team.ex_hand: continue
             c=u.t.ex["cost"]
             if team.cost<c: continue
             team.cost-=c; team.cycle_ex(idx)
