@@ -1,13 +1,17 @@
 /**
  * 战斗内核压测：随机配队跑满整局，逐回合检查不变量。
  *
- * 改动 engine.js / roster.js 之后必跑。基线（4 人池，500 局）：
- *   0 错误 · 平均 8.8 轮 · 最长 24 轮 · 无一局打满 MAX_ROUND · 先手胜率 ≈51%
+ * 改动 engine.js / roster.js 之后必跑。基线（20 人池，2000 局）：
+ *   0 错误 · 平均 8.7 轮 · 中位 8 轮 · 先手胜率 ≈50%
  *
- * 中位 8 轮意味着白热化（第 36 轮）基本打不到 —— 与原作一致，多数 PvP 在此之前就结束了。
+ * 中位 7 轮意味着白热化（第 36 轮）基本打不到 —— 与原作一致，多数 PvP 在此之前就结束了。
+ * 2000 局里有几局打满 48 轮走时限结算、十来局摸到白热化 —— 都是正常路径不是卡死。
+ * 佳代子进池之后才出现：群控让战斗明显拉长。
+ *
+ * 先手胜率 500 局的标准误就有 ±2.2%，别拿一次 500 局的结果判断偏移，要看就跑 2000 局。
  *
  * 约 9% 的局全程一个普通技能都没放出来，这是对的不是 bug：冷却 5~6 轮 = 25~30 秒，
- * 而中位局只打 8 轮 = 40 秒，原作里 25 秒的技能在这么短的战斗里同样只放得出一发。
+ * 而中位局只打 7 轮 = 35 秒，原作里 25 秒的技能在这么短的战斗里同样只放得出一发。
  *
  * 注意本脚本只查不变量，查不出「打错人」——目标选择的规则回归在 target-test.mjs。
  *
@@ -20,6 +24,8 @@ import { createBattle, playerTurn, validateAction, exAvailableOf, exWaitOf, exLo
 import { ROSTER, CFG } from "../lib/ba/roster.js"
 
 const GAMES = Number(process.argv[2]) || 500
+/** 死循环保护：一局最多 MAX_ROUND 轮，一轮两回合，留几手余量 */
+const GUARD_MAX = CFG.MAX_ROUND * 2 + 8
 const ids = ROSTER.map((t) => t.id)
 /** 固定序列的伪随机，保证复现 */
 const rnd = (seed) => { let x = seed; return () => ((x = (x * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) }
@@ -41,8 +47,10 @@ for (let seed = 1; seed <= GAMES; seed++) {
     )
   } catch (e) { fail(`seed ${seed} 建局失败: ${e.message}`); continue }
 
+  // 上限从 CFG 推导，别写死：一局最多 MAX_ROUND 轮 = ×2 回合，写死的数字会在改 MAX_ROUND 后
+  // 悄悄把「打满时限正常结算」的局误报成「未收敛」
   let guard = 0
-  while (st.phase === "command" && guard < 80) {
+  while (st.phase === "command" && guard < GUARD_MAX) {
     const side = st.sides[st.activeSide]
     const hand = exAvailableOf(st, st.activeSide)
     let action = { type: "pass" }

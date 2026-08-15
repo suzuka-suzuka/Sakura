@@ -10,6 +10,7 @@ import path from "node:path"
 import { pluginresources } from "../path.js"
 
 const ASSET_DIR = path.join(pluginresources, "ba", "characters")
+const SUMMON_DIR = path.join(pluginresources, "ba", "summons")
 const FONT_FILE = path.join(pluginresources, "sign", "font", "FZFWZhuZiAYuanJWD.ttf")
 
 const cache = new Map()
@@ -26,6 +27,8 @@ function dataUri(file, mime) {
 
 /** @param {"portrait"|"chibi"|"icon"} part */
 export const artOf = (id, part) => dataUri(path.join(ASSET_DIR, id, `${part}.png`), "image/png")
+/** 召唤物只有 Q 版一张图，跟角色素材分目录放 */
+export const summonArtOf = (id) => dataUri(path.join(SUMMON_DIR, String(id), "chibi.png"), "image/png")
 export const fontUri = () => dataUri(FONT_FILE, "font/ttf")
 
 export const fontFace = () => {

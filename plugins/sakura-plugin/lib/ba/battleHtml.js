@@ -12,7 +12,7 @@
  */
 import { CFG } from "./roster.js"
 import { tmplOf, exWaitOf, turnCostOf } from "./engine.js"
-import { artOf, fontFace, FONT_STACK, ATTACK, ARMOR, inkOf, esc } from "./htmlAssets.js"
+import { artOf, summonArtOf, fontFace, FONT_STACK, ATTACK, ARMOR, inkOf, esc } from "./htmlAssets.js"
 
 export const MAP_WIDTH = 1200
 const HUD_HEIGHT = 288
@@ -184,7 +184,12 @@ function pullBack(from, to, d) {
  * marker 按颜色各建一个，不用 `context-stroke`（那个的浏览器支持没保证）。
  */
 function arrowLayer(state, events) {
-  const posOf = (ref) => ref ? { x: LANE_X[ref.pos], y: ref.side === 1 ? RED_Y : BLUE_Y } : null
+  const posOf = (ref) => {
+    if (!ref) return null
+    // 召唤物在中线附近那条带上，纵向偏移与 css 的 .sm.blue/.sm.red 保持一致
+    if (ref.summon) return { x: LANE_X[ref.pos], y: ARENA_H / 2 + (ref.side === 1 ? -64 : 64) }
+    return { x: LANE_X[ref.pos], y: ref.side === 1 ? RED_Y : BLUE_Y }
+  }
   const arrows = []
   const markers = new Map()
   for (const ev of events) {
@@ -253,7 +258,8 @@ function fxByUnit(events) {
   for (const ev of events) {
     // cost 事件不出标签：目前没有靠技能回费的角色，真加了也只落在文字日志里
     if (!["damage", "miss", "heal"].includes(ev.type) || !ev.target) continue
-    const key = `${ev.target.side}:${ev.target.pos}`
+    // 召唤物与同号位的角色必须分开挂，否则打人偶的数字会跑到队友血条下面
+    const key = `${ev.target.side}:${ev.target.pos}${ev.target.summon ? ":s" : ""}`
     if (!byUnit.has(key)) byUnit.set(key, [])
     byUnit.get(key).push(ev)
   }
@@ -414,6 +420,32 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 .engage{position:absolute;left:0;right:0;top:50%;height:1px;transform:translateY(-50%);
   background:linear-gradient(90deg,transparent,rgba(60,110,160,.3) 16%,rgba(60,110,160,.3) 84%,transparent)}
 
+/* 召唤物带：占中线附近的竖向空隙，不进 .laneRow 的 4 格 */
+.smRow{position:absolute;left:0;right:0;top:0;bottom:0;
+  display:grid;grid-template-columns:repeat(4,1fr);align-items:center;pointer-events:none}
+/* .sm 必须 position:relative —— .fxstack 是绝对定位的，不给锚点它会挂到 .smRow 上，
+   数字就飘到整条带的正中间去了 */
+.sm{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px}
+/* 贴着自己那一边，一眼看出是谁的墙。用 transform 不用 margin：
+   margin 会把整行撑高，align-items:center 再一居中，偏移就只剩一半 */
+.sm.blue{transform:translateY(64px)}
+.sm.red{transform:translateY(-64px)}
+/* 伤害数字往「中间那片空地」甩，别压住自己的血条，也别撞到本方那排 */
+.sm.blue .fxstack{top:auto;bottom:104px}
+.sm.red .fxstack{top:104px;bottom:auto}
+.smart{position:relative;width:86px;height:86px;display:flex;align-items:center;justify-content:center}
+.smart img{width:86px;height:86px;object-fit:contain;
+  filter:drop-shadow(0 4px 8px rgba(40,80,125,.28))}
+.sm .prov{position:absolute;right:-6px;top:-4px;width:26px;height:26px;border-radius:8px;
+  display:flex;align-items:center;justify-content:center;background:#D9485C;color:#fff;
+  box-shadow:0 2px 6px rgba(160,40,60,.4)}
+.sm .prov svg{width:17px;height:17px}
+.smhp{width:88px;height:7px;border-radius:4px;background:rgba(40,80,125,.18);overflow:hidden}
+.smhp s{display:block;height:100%;background:linear-gradient(90deg,#8A63D2,#6C4BC4)}
+.sm b{font-size:13px;color:#22384F;font-weight:600;display:flex;align-items:center;gap:5px;
+  background:rgba(255,255,255,.86);border-radius:8px;padding:1px 8px}
+.sm b em{font-style:normal;font-size:11px;color:#8397AC}
+
 /* 特效层 */
 .arrows{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
 /* 亮底上箭头比深底抢眼得多，压细压淡；白色外发光把它和角色分开 */
@@ -497,6 +529,35 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 `
 }
 
+/**
+ * 召唤物画在两排中间那条空带里 —— 用竖向空间，不占号位格，
+ * 所以 4 格布局、`LANE_X`、EX 卡一行都不用动。
+ *
+ * 列＝它挡的号位，纵向贴着**自己这一边**（蓝方的在中线下方、红方的在上方），
+ * 一眼看得出是谁的墙、挡的是哪一路。
+ */
+function summonBand(state, fx) {
+  const cells = []
+  for (const side of [0, 1]) {
+    for (const sm of state.sides[side].summons || []) {
+      if (!sm.alive) continue
+      const t = tmplOf(sm)
+      const pct = Math.max(0, Math.min(100, (sm.hp / sm.maxhp) * 100))
+      const art = summonArtOf(sm.id)
+      cells.push(`<div class="sm ${side === 1 ? "red" : "blue"}" style="grid-column:${sm.idx + 1}">
+        <div class="smart">
+          ${art ? `<img src="${art}" alt="">` : ""}
+          ${sm.taunt > 0 ? `<i class="prov">${ICON.taunt}</i>` : ""}
+        </div>
+        <div class="smhp"><s style="width:${pct}%"></s></div>
+        <b>${esc(t.name)}<em>${sm.turns}</em></b>
+        ${fx.get(`${side}:${sm.idx}:s`) || ""}
+      </div>`)
+    }
+  }
+  return cells.length ? `<div class="smRow">${cells.join("")}</div>` : ""
+}
+
 // ---------------- 主入口 ----------------
 
 export function buildBattleHtml(state, events = []) {
@@ -509,6 +570,7 @@ export function buildBattleHtml(state, events = []) {
   <div class="arena">
     <div class="laneRow red">${row(1)}</div>
     <div class="engage"></div>
+    ${summonBand(state, fx)}
     <div class="laneRow blue">${row(0)}</div>
     ${arrowLayer(state, events)}
   </div>

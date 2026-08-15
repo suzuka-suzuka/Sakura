@@ -13,7 +13,7 @@
  *   光凭名字分不出是哪一边的；不写就按技能自己的目标类型判定。
  */
 
-import { findUnit } from "./roster.js"
+import { findUnit, findSummon } from "./roster.js"
 
 /**
  * 解析配队。
@@ -66,6 +66,13 @@ export function parseAction(text) {
     if (!who) return { ok: false, error: `找不到角色「${mm[1]}」，写角色名，例：星野ex打白子` }
     const cast = { ...who }
     if (mm[3]) {
+      // 召唤物也能当目标 —— 不然墙立起来玩家只能干等它自己过期
+      const sm = findSummon(mm[3])
+      if (sm) {
+        cast.target = { scope: mm[2] && ALLY_VERB.includes(mm[2]) ? "ally" : "foe", summonId: sm.id }
+        casts.push(cast)
+        continue
+      }
       const tgt = refOf(mm[3])
       if (!tgt) return { ok: false, error: `找不到目标「${mm[3]}」，写角色名，例：星野ex打白子` }
       // 没写动词就留空，交给引擎按技能自己的目标类型判定

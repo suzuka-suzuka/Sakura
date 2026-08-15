@@ -9,7 +9,7 @@ import { CFG, ROSTER, combatRoleOf } from "./roster.js"
 import { ARMOR_LABEL } from "./htmlAssets.js"
 import {
   tmplOf, nameOf, regenOf, aliveOf, exWaitOf,
-  hitChance, critChance, defModOf, stabilityFloor,
+  hitChance, critChance, defModOf, stabilityFloor, CC_TEXT,
 } from "./engine.js"
 
 const SIDE_NAME = ["蓝方", "红方"]
@@ -193,6 +193,7 @@ const TARGET_TEXT = {
   enemy_adjacent: "指定目标+相邻",
   enemy_all: "敌方全体",
   enemy_random: "随机敌人",
+  enemy_chain: "连发换目标",
   ally_all: "己方全体",
   ally_adjacent: "指定友方+相邻",
   ally_lowest: "己方最残",
@@ -225,21 +226,41 @@ export function describeEffect(sk) {
   if (sk.hits?.length) {
     const total = sk.hits.reduce((a, b) => a + b, 0)
     const scope = sk.target === "enemy_adjacent" ? `${tg}共${sk.count}人` : tg
-    parts.push(`${scope} ${total.toFixed(0)}%攻击力${sk.hits.length > 1 ? ` 分${sk.hits.length}段` : ""}`)
+    // 连发是「N 枪各锁各的目标」，写成「合计 X% 分 N 段」会让人以为全砸在一个人身上
+    if (sk.target === "enemy_chain") {
+      parts.push(`连发 ${sk.hits.length} 枪，每枪 ${(total / sk.hits.length).toFixed(0)}%攻击力，逐枪换目标（同战场没人可换才重复）`)
+    } else {
+      parts.push(`${scope} ${total.toFixed(0)}%攻击力${sk.hits.length > 1 ? ` 分${sk.hits.length}段` : ""}`)
+    }
+    if (sk.splashHits?.length) {
+      parts.push(`扩散目标只吃 ${sk.splashHits.reduce((a, b) => a + b, 0).toFixed(0)}%`)
+    }
+    if (sk.falloff) {
+      parts.push(`每多打 1 人衰减 ${Math.round(sk.falloff.rate * 100)}%（最多 ${Math.round(sk.falloff.max * 100)}%）`)
+    }
   }
   for (const e of sk.effects || []) {
+    // 技能 1 级时数值为 0 的效果根本不存在 —— 与其写「无效」不如不写
+    if (e.inactive) continue
     const who = e.scope === "self" ? "自身" : e.scope === "ally_all" ? "己方全体" : "目标"
     switch (e.type) {
       case "buff":
         parts.push(`${who}${STAT_TEXT[e.stat] || e.stat} ${e.value > 0 ? "+" : ""}${/_flat$/.test(e.stat) ? flatText(e.stat, e.value) : pct(e.value)}（${e.turns}回合）`)
         break
       case "heal": parts.push(`${who}治疗 ${pct(e.scale)}治疗力`); break
-      case "regen": parts.push(`${who}持续治疗 ${pct(e.scale)}治疗力（${e.turns}回合，每${e.period}回合）`); break
+      case "regen":
+        parts.push(`${who}持续治疗 ${pct(e.scale)}治疗力` +
+          (e.lostHpRate ? ` + 已损生命 ${pct(e.lostHpRate)}` : "") +
+          `（${e.turns}回合，每${e.period}回合）`)
+        break
       case "shield": parts.push(`${who}护盾 ${pct(e.scale)}治疗力（${e.turns}回合）`); break
       // 技能 1 级时控制时长是 0，效果根本不存在 —— 与其写「无效」不如不写
       case "cc":
         if (e.inactive || !e.turns) break
-        parts.push(`${who}眩晕 ${e.turns} 回合${e.chance < 1 ? `（${pct(e.chance)}）` : ""}`)
+        parts.push(`${who}${CC_TEXT[e.icon] || "控制"} ${e.turns} 回合${e.chance < 1 ? `（${pct(e.chance)}）` : ""}`)
+        break
+      case "charge":
+        parts.push(`换弹强化：接下来 ${e.shots} 发普攻 ×${e.mult}` + (e.count > 1 ? `、打 ${e.count} 人` : ""))
         break
       case "cleanse": parts.push(`${who}清除减益`); break
       case "taunt": parts.push(`${who}嘲讽 ${e.turns} 回合`); break

@@ -89,5 +89,92 @@ const rAll = playerTurn(allSt, { type: "ex", casts: [{ pos: 0 }] })
 check("敌方全体命中数",
   rAll.events.find((e) => e.type === "action" && e.action === "ex").targets.length, 4)
 
+console.log("\n=== 7. 3 目标技能走「以主目标为中心的固定窗口」（睦月）===")
+const mutsuki = (idx) => {
+  const st = setup(["睦月", "野宫", "野宫", "野宫"], OUT)
+  const r = playerTurn(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx } }] })
+  return r.events.find((e) => e.type === "action" && e.action === "ex").targets
+    .map((t) => t.pos + 1).sort()
+}
+check("指定 1 号位 → 越界那发浪费，只炸 2 个", mutsuki(0), [1, 2])
+check("指定 2 号位 → 炸满 3 个且跨战场", mutsuki(1), [1, 2, 3])
+check("指定 3 号位 → 炸满 3 个且跨战场", mutsuki(2), [2, 3, 4])
+check("指定 4 号位 → 只炸 2 个", mutsuki(3), [3, 4])
+// 2 目标技能的战场分割限制不受影响，第 5 组已经断言过，这里再钉一次边界
+check("2 目标技能仍然不跨战场（星野指定 2 位）", pickIdx(setup(TANK1, OUT), 1).sort(), [1, 2])
+
+console.log("\n=== 8. 召唤物挡刀（日富美的佩洛洛人偶）===")
+/** 蓝1 = 日富美，EX 把人偶扔向红方 blockIdx 号位，返回随后红方普攻的 源→目标 */
+function withDoll(blockIdx, skipTaunt) {
+  const st = setup(["日富美", "野宫", "野宫", "野宫"], OUT)
+  playerTurn(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: blockIdx } }] })
+  let cur = playerTurn(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: blockIdx } }] }).state
+  if (skipTaunt) {
+    cur = playerTurn(cur, { type: "pass" }).state // 红方（嘲讽期）
+    cur = playerTurn(cur, { type: "pass" }).state // 蓝方
+  }
+  const r = playerTurn(cur, { type: "pass" })
+  return r.events
+    .filter((e) => e.type === "action" && e.action === "normal")
+    .map((e) => `${e.source.pos + 1}→${(e.targets || []).map((t) => (t.summon ? "偶" : t.pos + 1)).join("")}`)
+}
+check("嘲讽那一轮：红方全员都被拉去打人偶", withDoll(0, false), ["1→偶", "2→偶", "3→偶", "4→偶"])
+check("嘲讽过后扔在 1 号位：只有红1 打人偶", withDoll(0, true), ["1→偶", "2→2", "3→3", "4→4"])
+check("嘲讽过后扔在 3 号位：只有红3 打人偶", withDoll(2, true), ["1→1", "2→2", "3→偶", "4→4"])
+
+console.log("\n=== 9. 范围技撞上人偶：整发被接走，覆盖面按各自的规则算 ===")
+const FOE = ["白子", "野宫", "芹香", "睦月"] // 全输出，避免坦克优先把主目标拉偏
+/** who 站 pos 位放普通技能，敌方在 doll 号位有人偶；返回命中列表 */
+function skillVsDoll(who, pos, doll) {
+  const picks = ["伊织", "伊织", "伊织", "伊织"]
+  picks[pos] = who
+  const st = setup(picks, FOE)
+  st.sides[0].units[pos].skillCd = 0
+  if (doll != null) {
+    st.sides[1].summons = [{
+      summon: true, id: 40002, side: 1, idx: doll, blockIdx: doll,
+      hp: 99999, maxhp: 99999, shield: 0, shieldMax: 0, shieldTurns: 0,
+      buffs: [], regens: [], stun: 0, taunt: 0, turns: 6, st: -1, sourceKey: "x", alive: true,
+    }]
+  }
+  const r = playerTurn(st, { type: "pass" })
+  const ev = r.events.find((e) => e.type === "action" && e.action === "skill" && e.source.pos === pos)
+  return (ev?.targets || []).map((t) => (t.summon ? "偶" : t.pos + 1))
+}
+// 睦月在 2 位 → 主目标 2、窗口 {1,2,3}：人偶落在窗口里就全接走，隔一位也算
+check("睦月 3 目标 · 无人偶", skillVsDoll("睦月", 1, null).sort(), [1, 2, 3])
+check("睦月 3 目标 · 人偶挡 1 位（隔一位）", skillVsDoll("睦月", 1, 0), ["偶"])
+check("睦月 3 目标 · 人偶挡 3 位（隔一位）", skillVsDoll("睦月", 1, 2), ["偶"])
+check("睦月 3 目标 · 人偶挡 4 位（窗口外）", skillVsDoll("睦月", 1, 3).sort(), [1, 2, 3])
+// 白子在 1 位 → 2 目标，覆盖面是战场 {1,2}：只有同战场的人偶拦得住
+check("白子 2 目标 · 人偶挡 2 位（同战场）", skillVsDoll("白子", 0, 1), ["偶"])
+check("白子 2 目标 · 人偶挡 3 位（另一战场）", skillVsDoll("白子", 0, 2).sort(), [1, 2])
+
+console.log("\n=== 10. 伊织 EX 三发各自锁目标（不能和上一发相同）===")
+/** 伊织在 1 位，指定 pickIdx；kill 是开局就打死的号位，doll 是人偶挡的号位 */
+function iori(pickIdx, kill = [], doll = null) {
+  const st = setup(["伊织", "日富美", "野宫", "芹香"], FOE, kill.map((k) => [1, k]))
+  st.sides[0].cost = 10
+  if (doll != null) {
+    st.sides[1].summons = [{
+      summon: true, id: 40002, side: 1, idx: doll, blockIdx: doll,
+      hp: 99999, maxhp: 99999, shield: 0, shieldMax: 0, shieldTurns: 0,
+      buffs: [], regens: [], stun: 0, taunt: 0, turns: 6, st: -1, sourceKey: "x", alive: true,
+    }]
+  }
+  const r = playerTurn(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: pickIdx } }] })
+  return r.events.filter((e) => e.type === "damage" && e.source.side === 0 && e.source.pos === 0)
+    .map((e) => (e.target.summon ? "偶" : e.target.pos + 1))
+}
+check("指定同战场的 1 位 → 1·2·1", iori(0), [1, 2, 1])
+check("指定另一战场的 3 位 → 3 后回到本战场对位再换人", iori(2), [3, 1, 2])
+check("本战场只剩 1 位 → 后两发继续打它", iori(0, [1]), [1, 1, 1])
+check("人偶挡 1 位（同路）→ 第 2 发被接走，第 3 发换回人", iori(0, [], 0), [1, "偶", 1])
+// 连发对人偶是**按战场**拦，不是按号位 —— 挡 2 位一样接得住伊织（她在 1 位）
+check("人偶挡 2 位（同战场不同路）→ 照样接走第 2 发", iori(0, [], 1), [1, "偶", 1])
+check("人偶挡 3 位（另一战场）→ 本战场还有人时不接", iori(0, [], 2), [1, 2, 1])
+check("本战场打空 + 人偶在本战场 → 后两发全打人偶", iori(2, [0, 1], 0), [3, "偶", "偶"])
+check("本战场打空 + 人偶在另一战场 → 先拆墙再打人", iori(2, [0, 1], 2), [3, "偶", 3])
+
 console.log(bad ? `\n✗ ${bad} 条不符` : "\n全部符合")
 process.exit(bad ? 1 : 0)

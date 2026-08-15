@@ -11,7 +11,7 @@
  *   - 范围技能的几何形状塌缩成「打几个目标」，见 roster 里的 target/count
  */
 
-import { CFG, BY_ID, affinity } from "./roster.js"
+import { CFG, BY_ID, SUMMONS, affinity } from "./roster.js"
 
 // ---------------- 随机数 ----------------
 // 种子存进 state，整场战斗可复现：群友吵「凭什么这刀没暴击」时用同一个种子重放即可
@@ -29,12 +29,15 @@ const randPick = (state, arr) => arr[Math.floor(nextRandom(state) * arr.length)]
 
 // ---------------- 单位读取 ----------------
 
-const tmplOf = (u) => BY_ID[u.id]
+// 召唤物走 SUMMONS 表，其余一切（面板、命中、克制）照常走 tmplOf，不用到处加分支
+const tmplOf = (u) => (u.summon ? SUMMONS[u.id] : BY_ID[u.id])
 const nameOf = (u) => tmplOf(u).name
+/** 存活判定只看 units —— 召唤物不进这里，所以 sideDead / settle / EX 冷却天然不算它 */
 const aliveOf = (side) => side.units.filter((u) => u.alive)
 const sideDead = (side) => side.units.every((u) => !u.alive)
+const summonsOf = (side) => (side.summons || []).filter((s) => s.alive)
 
-const unitRef = (u) => (u ? { side: u.side, pos: u.idx } : null)
+const unitRef = (u) => (u ? { side: u.side, pos: u.idx, ...(u.summon ? { summon: true } : {}) } : null)
 
 function affinityMark(value) {
   if (value > 1.01) return "weak"
@@ -77,6 +80,12 @@ function flatOf(u, stat) {
 
 // 进攻类增益影响施放后的本回合行动，因此施放回合就算第 1 回合
 const CURRENT_TURN_STATS = new Set(["atk", "dmg_deal", "crit", "crit_dmg", "dfs", "dmg_take"])
+
+/** 控制类效果的中文名。原数据只给英文 Icon，写死一张表比逐个判断可靠 */
+const CC_TEXT = {
+  Stunned: "眩晕", Fear: "恐惧", Provoke: "嘲讽", Slow: "减速",
+  Confuse: "混乱", Sleep: "睡眠", Silence: "沉默", Bind: "束缚",
+}
 
 const STAT_LABEL = {
   atk: "攻击力", atk_flat: "攻击力", dfs: "防御力", dfs_flat: "防御力",
@@ -236,12 +245,14 @@ function makeUnit(tmpl, idx, side) {
     maxhp: tmpl.hp, hp: tmpl.hp,
     shield: 0, shieldMax: 0, shieldTurns: 0, shieldTickSide: 1 - side, shieldSt: -1,
     buffs: [], regens: [],
-    stun: 0, stunSt: -1,
+    stun: 0, stunSt: -1, stunIcon: null,
     taunt: 0, tauntSt: -1,
     // 普通技能：「每 X 秒」是周期，第一次落在 X 秒而不是开局，所以起始压满冷却；
     // 条件型（血量阈值）等条件满足，用 99 表示「不靠冷却解锁」
     skillCd: tmpl.skill?.trigger?.type === "cooldown" ? tmpl.skill.trigger.turns : 99,
     skillUses: 0,
+    // 换弹强化：{shots, mult, count}，鹤城 EX 之后的两发普攻走这个
+    charge: null,
     // 本方第几个 EX 是这个人放的；0 表示还没放过，开局全员可放
     exCastNo: 0,
     alive: true,
@@ -263,6 +274,7 @@ export function createBattle(a, b, opts = {}) {
       side, uid: String(s.uid), name: s.name || String(s.uid),
       cost: CFG.COST_START, regenAcc: 0,
       exCasts: 0, lastAlive: s.picks.length,
+      summons: [],
       units: s.picks.map((id, i) => makeUnit(BY_ID[id], i, side)),
     })),
   }
@@ -286,14 +298,41 @@ const isTank = (u) => tmplOf(u).role === "坦克"
  *   3. 战场内优先坦克 —— 坦克相当于站前一格，替同战场的队友挡刀
  *   4. 同号位 → |位置差| 最小 → 编号小
  */
-function laneTarget(u, foes) {
+/**
+ * @param {object} exclude 上一发打过的目标。伊织的连发要求「不能和上次相同」，
+ *   但**同战场只剩它一个时还是打它**——所以是「有别人才换」而不是硬排除。
+ * @param {boolean} wallZone 召唤物按**战场**拦而不是按号位拦。只有连发用：
+ *   普攻和普通技能仍是「扔哪一路挡哪一路」，放宽了那条规则就废了。
+ */
+function laneTarget(u, foes, exclude = null, wallZone = false) {
+  // 召唤物挡在最前面：入场那一轮的 Provoke 无视一切分割，之后只挡它扔向的那个号位。
+  // 「扔对面 1 号位就只挡 1 号的刀」—— 所以 EX 指哪扔，决定了它替谁挨打。
+  const sm = summonsOf(foes)
+  const provoking = sm.find((s) => s.taunt > 0)
+  if (provoking) return provoking
+
+  const alive = aliveOf(foes)
+  const zoneAlive = alive.filter((f) => zoneOf(f.idx) === zoneOf(u.idx))
+  const inMyZone = (s) => zoneOf(s.blockIdx) === zoneOf(u.idx)
+  const blocking = sm.find((s) => (wallZone ? inMyZone(s) : s.blockIdx === u.idx))
+    // 本战场的活人打光了，**任何**召唤物都比越界打人优先 —— 越界之前先拆墙
+    || (zoneAlive.length === 0 ? sm.find(inMyZone) || sm[0] : null)
+  if (blocking) {
+    // 「不能和上次相同」的例外是「同战场只剩它一个」：人偶就在本战场且这边没活人了，
+    // 那连发的后几枪全砸它身上；人偶在另一边的话，下一发照常换人。
+    const onlyOneHere = zoneAlive.length === 0 && inMyZone(blocking)
+    if (!(exclude === blocking && !onlyOneHere)) return blocking
+  }
+
   const taunts = foes.units.filter((f) => f.alive && f.taunt > 0)
   if (taunts.length) return taunts[0]
 
-  const alive = aliveOf(foes)
   if (!alive.length) return null
-  const sameZone = alive.filter((f) => zoneOf(f.idx) === zoneOf(u.idx))
-  const pool = sameZone.length ? sameZone : alive
+  let pool = zoneAlive.length ? zoneAlive : alive
+  if (exclude) {
+    const others = pool.filter((f) => f !== exclude)
+    if (others.length) pool = others
+  }
   const tanks = pool.filter(isTank)
   const cands = tanks.length ? tanks : pool
 
@@ -315,6 +354,18 @@ function laneTarget(u, foes) {
  * 指了 3 位就打 3·4，这是玩家用 EX 换来的选择权。
  */
 function expandAdjacent(pool, primary, count) {
+  // count≥3 是「以主目标为中心向两边炸开」（睦月的三连雷、日富美的圆），
+  // 走**固定窗口** [idx−half, idx+half] 而不是贪心找邻居：越界的那一发就是浪费掉，
+  // 不能往另一边多抓一个来凑满。指定 1 号位只炸 {1,2}，指定 2 号位才炸满 {1,2,3}。
+  //
+  // 战场分割也在这里放开 —— 一个战场只有 2 个人，不跨就永远达不到设计的目标数。
+  // 那条限制的本意是「别为了凑人数跑到另一边」，而固定窗口根本不凑人数。
+  if (count >= 3) {
+    const half = Math.floor((count - 1) / 2)
+    const hit = pool.filter((u) => u.alive && Math.abs(u.idx - primary.idx) <= half)
+    // 主目标必须排第一：splashHits / falloff 都靠 targets[0] 认主目标
+    return [primary, ...hit.filter((u) => u !== primary)]
+  }
   const seq = pool
     .filter((u) => u.alive && zoneOf(u.idx) === zoneOf(primary.idx))
     .sort((a, b) => a.idx - b.idx)
@@ -360,17 +411,34 @@ function resolveTargets(state, u, skill, foes, allies, pick, actionKind) {
   // 玩家指定主目标；EX 是唯一能打破对线格局的手段
   const pool = tg.startsWith("ally") ? allies : foes
   let primary = null
-  if (pick) {
+  if (pick?.summon) {
+    const sm = summonsOf(pick.scope === "ally" ? allies : foes).find((s) => s.idx === pick.idx)
+    if (sm) return [sm] // 指名打召唤物就只打它，不扩散
+  } else if (pick) {
     const p = (pick.scope === "ally" ? allies : foes).units[pick.idx]
     if (p?.alive && (pick.scope === "ally") === tg.startsWith("ally")) primary = p
   }
 
   if (tg === "enemy_random") return aliveOf(foes) // 逐段随机，在 strike 里再抽
+  if (tg === "enemy_chain") return primary ? [primary] : [] // 逐发换目标，在 execute 里再算
 
   // 不指定目标就一律走对线锁定：对位 → 同战场 → 最近。
   // EX 也一样 —— 「挑全场最肥的」那种启发式看着聪明，实际让玩家猜不到刀会落在谁头上。
   if (!primary) primary = tg.startsWith("ally") ? allyLaneTarget(u, allies) : laneTarget(u, foes)
   if (!primary) return []
+  // 召唤物不在 pool.units 里，扩散算不出邻居；打到它就只打它
+  if (primary.summon) return [primary]
+
+  // 范围技的落点里只要站着召唤物，整发就被它接走 —— 它是挡在那一片前面的墙。
+  // 覆盖面按技能自己的规则算：3 目标看中心窗口（睦月隔一位也拦得住），
+  // 2 目标看战场分割（白子要人偶跟她同战场才拦）。
+  if (tg.endsWith("adjacent") && count > 1) {
+    const half = Math.floor((count - 1) / 2)
+    const wall = summonsOf(pool).find((s) => (count >= 3
+      ? Math.abs(s.blockIdx - primary.idx) <= half
+      : zoneOf(s.blockIdx) === zoneOf(primary.idx)))
+    if (wall) return [wall]
+  }
   if (tg.endsWith("adjacent")) return expandAdjacent(pool.units, primary, count)
   return [primary]
 }
@@ -409,7 +477,7 @@ function applyDamage(ctx, src, tgt, dmg, meta = {}) {
     tgt.alive = false
     tgt.taunt = 0
     tgt.regens.length = 0
-    ctx.log(`  ✝ ${nameOf(tgt)} 倒下`)
+    ctx.log(`  ✝ ${nameOf(tgt)} ${tgt.summon ? "被打碎" : "倒下"}`)
   }
 }
 
@@ -483,6 +551,7 @@ function applyEffects(ctx, u, skill, dmgTargets, allies) {
   const me = state.sides[u.side]
 
   for (const eff of skill.effects || []) {
+    if (eff.inactive) continue // 技能 1 级时数值为 0，别占一层 buff
     const targets = scopeTargets(eff.scope, u, allies, dmgTargets)
     switch (eff.type) {
       case "buff": {
@@ -508,8 +577,10 @@ function applyEffects(ctx, u, skill, dmgTargets, allies) {
       case "regen":
         for (const t of targets) {
           if (!t.alive) continue
+          // 艾米的 EX 额外按「已损生命值」加成。与 healOf 一样在施放瞬间取快照，不逐跳重算
+          const lost = eff.lostHpRate ? (t.maxhp - t.hp) * eff.lostHpRate : 0
           t.regens.push({
-            amount: healOf(u) * eff.scale, turns: eff.turns, period: eff.period || 1,
+            amount: healOf(u) * eff.scale + lost, turns: eff.turns, period: eff.period || 1,
             tick: 0, sourceKey: sourceKeyOf(u.side, u.idx), srcSide: u.side, srcPos: u.idx, st: T,
           })
           ctx.log(`  ${nameOf(t)} 获得持续治疗（${eff.turns}回合，每${eff.period || 1}回合跳）`)
@@ -528,12 +599,44 @@ function applyEffects(ctx, u, skill, dmgTargets, allies) {
         }
         break
 
+      case "charge":
+        u.charge = { shots: eff.shots, mult: eff.mult, count: eff.count }
+        ctx.log(`  ${nameOf(u)} 换弹强化（接下来 ${eff.shots} 发普攻 ×${eff.mult}` +
+          (eff.count > 1 ? `，打 ${eff.count} 人` : "") + "）")
+        emitEvent(ctx, { type: "buff", source: unitRef(u), target: unitRef(u), effects: ["charge"] })
+        break
+
+      case "summon": {
+        const tpl = SUMMONS[eff.summonId]
+        if (!tpl) break
+        // 扔在哪＝伤害的主目标那一路。之后它只挡这个号位的刀
+        const blockIdx = (dmgTargets.find((t) => !t.summon) || dmgTargets[0])?.idx ?? u.idx
+        const key = sourceKeyOf(u.side, u.idx)
+        // 「重复使用该技能时，清除先前召唤的该召唤物」——原作行为
+        me.summons = summonsOf(me).filter((s) => s.sourceKey !== key)
+        const hp = Math.round(tpl.hp + tmplOf(u).hp * (eff.hpRate || 0))
+        me.summons.push({
+          summon: true, id: eff.summonId, side: u.side, idx: blockIdx, blockIdx,
+          hp, maxhp: hp, shield: 0, shieldMax: 0, shieldTurns: 0,
+          buffs: [], regens: [], stun: 0,
+          taunt: eff.taunt || 0, turns: eff.turns, st: T,
+          sourceKey: key, alive: true,
+        })
+        ctx.log(`  ${nameOf(u)} 召唤${tpl.name}（${hp} 生命，挡住 ${blockIdx + 1} 号位` +
+          (eff.taunt ? `，嘲讽 ${eff.taunt} 回合` : "") + `，${eff.turns}回合）`)
+        emitEvent(ctx, {
+          type: "summon", source: unitRef(u), target: { side: u.side, pos: blockIdx, summon: true },
+          name: tpl.name, hp, turns: eff.turns,
+        })
+        break
+      }
+
       case "cc":
         if (eff.inactive || !eff.turns) break // 技能 1 级时控制时长为 0
         for (const t of targets) {
           if (nextRandom(state) >= (eff.chance ?? 1)) continue
-          t.stun = Math.max(t.stun, eff.turns); t.stunSt = T
-          ctx.log(`  ${nameOf(t)} 被${eff.icon === "Stunned" ? "眩晕" : "控制"} ${eff.turns} 回合`)
+          t.stun = Math.max(t.stun, eff.turns); t.stunSt = T; t.stunIcon = eff.icon
+          ctx.log(`  ${nameOf(t)} 被${CC_TEXT[eff.icon] || "控制"} ${eff.turns} 回合`)
           emitEvent(ctx, { type: "debuff", source: unitRef(u), target: unitRef(t), effects: ["stun"] })
         }
         break
@@ -591,7 +694,18 @@ function execute(ctx, u, skill, label, actionKind, pick) {
 
   const hit = []
   if (skill.hits?.length) {
-    if (skill.target === "enemy_random") {
+    if (skill.target === "enemy_chain") {
+      // 连发：第一发打玩家指定的人，之后每一发重新锁定，且「不能和上一发相同」。
+      // 每发都在结算后重算，所以打死人会自动换目标（本战场清空就越界）。
+      let last = targets[0] || null
+      for (const [i, pct] of skill.hits.entries()) {
+        const t = i === 0 && last?.alive !== false ? last : laneTarget(u, foes, last, true)
+        if (!t) break
+        strike(ctx, u, t, [pct])
+        last = t
+        if (!hit.includes(t)) hit.push(t)
+      }
+    } else if (skill.target === "enemy_random") {
       // 弹射：每一段单独抽目标
       for (const pct of skill.hits) {
         const al = aliveOf(foes)
@@ -601,17 +715,40 @@ function execute(ctx, u, skill, label, actionKind, pick) {
         if (!hit.includes(t)) hit.push(t)
       }
     } else {
-      // AoE 无衰减：每个目标吃全额分段
-      for (const t of targets) { strike(ctx, u, t, skill.hits); hit.push(t) }
+      // AoE 默认无衰减，每个目标吃全额分段。两个例外，都靠「targets[0] 是主目标」成立
+      // （由 expandAdjacent 保证，生成器也只在 adjacent/all 上给这两个字段）：
+      //   splashHits —— 「单体 + 以其为中心的范围」，主目标吃直击＋爆风，扩散只吃爆风（爱露）
+      //   falloff    —— 贯穿逐个递减，第 i 个目标 ×(1 − min(rate×i, max))（晴奈）
+      for (const [i, t] of targets.entries()) {
+        const base = i > 0 && skill.splashHits ? skill.splashHits : skill.hits
+        const cut = skill.falloff ? Math.min(skill.falloff.rate * i, skill.falloff.max) : 0
+        strike(ctx, u, t, cut ? base.map((h) => h * (1 - cut)) : base)
+        hit.push(t)
+      }
     }
   }
 
   applyEffects(ctx, u, skill, hit.length ? hit : targets, me)
 }
 
-/** 普攻：对线锁定，分段独立判定。 */
+/**
+ * 普攻：对线锁定，分段独立判定。
+ *
+ * 处于换弹强化（鹤城的 EX）时，接下来 `shots` 发普攻倍率提高、打成扇形（多目标），
+ * 打完一发扣一发。仍然走 `laneTarget` 选主目标 —— 强化的是威力和覆盖面，不是选择权。
+ */
 function autoAttack(ctx, u) {
   const tmpl = tmplOf(u)
+  const c = u.charge
+  if (c?.shots > 0) {
+    c.shots -= 1
+    if (c.shots <= 0) u.charge = null
+    execute(ctx, u, {
+      target: c.count > 1 ? "enemy_adjacent" : "enemy_single", count: c.count,
+      hits: tmpl.autoAttack.hits.map((h) => Number((h * c.mult).toFixed(4))), effects: [],
+    }, "强化普攻", "normal")
+    return
+  }
   execute(ctx, u, { target: "enemy_single", count: 1, hits: tmpl.autoAttack.hits, effects: [] }, "普攻", "normal")
 }
 
@@ -660,6 +797,22 @@ function endTurn(ctx, side) {
         if (u.shieldTurns <= 0) { u.shield = 0; u.shieldMax = 0; u.shieldTurns = 0 }
       }
     }
+  }
+
+  // 召唤物按**敌方**回合跳：它挡的是敌人的攻击窗口，跟护盾同一套口径。
+  // 6 轮 = 撑过敌人 6 次出手；施放当回合不扣（st !== T）。
+  for (const s of state.sides) {
+    if (s.side === ticking) continue
+    for (const sm of [...(s.summons || [])]) {
+      if (!sm.alive || sm.st === T) continue
+      if (sm.taunt > 0) sm.taunt -= 1
+      sm.turns -= 1
+      if (sm.turns <= 0) {
+        sm.alive = false
+        ctx.log(`  ${tmplOf(sm).name} 消失了`)
+      }
+    }
+    s.summons = (s.summons || []).filter((x) => x.alive)
   }
 
   // 持续治疗按承受者自己的回合跳。
@@ -740,6 +893,16 @@ function resolveCasts(state, action) {
       pos = u.idx
     }
     const out = { pos }
+    if (c.target?.summonId != null) {
+      // 指名打召唤物：本方/敌方各找一遍，找不到就当没指定，退回技能默认规则
+      const scope = c.target.scope === "ally" ? "ally" : "foe"
+      const pool = scope === "ally" ? state.sides[state.activeSide] : state.sides[1 - state.activeSide]
+      const sm = (pool.summons || []).find((s) => s.alive && s.id === c.target.summonId)
+      if (!sm) return { error: `场上没有${SUMMONS[c.target.summonId]?.name || "那个召唤物"}` }
+      out.target = { scope, idx: sm.idx, summon: true }
+      casts.push(out)
+      continue
+    }
     if (c.target) {
       const { idx, id } = c.target
       // 没写「打/给」时按技能自己的目标类型猜边
@@ -785,7 +948,7 @@ export function validateAction(state, action) {
     if (exActors.has(cast.pos)) return `${nameOf(u)} 本回合已经释放过 EX`
     const wait = exWaitOf(side, u)
     if (wait > 0) return `${nameOf(u)} 的 EX 还在冷却，还需本方再放出 ${wait} 个 EX`
-    if (u.stun > 0) return `${nameOf(u)} 被眩晕，放不出 EX`
+    if (u.stun > 0) return `${nameOf(u)} 被${CC_TEXT[u.stunIcon] || "控制"}，放不出 EX`
     const cost = tmplOf(u).ex.cost
     if (budget < cost) return `Cost 不够：${nameOf(u)} 要 ${cost} 点，你还剩 ${budget} 点`
     budget -= cost
@@ -870,24 +1033,45 @@ export function playerTurn(prev, action) {
   }
   if (!usedEx) lines.push(`[${tag}] 过`)
 
-  // ③ 己方角色按位置 1→4 依次自动行动
-  for (const u of side.units) {
-    if (sideDead(state.sides[1 - state.activeSide])) break
-    if (!u.alive) continue
-    // 同一角色每回合只走一条行动分支：放过 EX 就不再自动出手
-    if (exActors.has(u.idx)) continue
+  // ③ 己方自动行动，**分两阶段跑完**：先全体普通技能，再全体普攻。
+  //
+  // 不能按站位 1→4 逐个挑「技能或普攻」——那样真纪的减防放在 4 号位时，
+  // 三个队友已经打完了，那一回合等于白放，站位反而成了隐藏的强度开关。
+  // 加上 EX 就是攻略页承诺的 EX → 普通技能 → 普攻。
+  const acted = new Set(exActors) // 同一角色每回合只走一条行动分支
+  const foes = () => state.sides[1 - state.activeSide]
 
+  // ③-a 普通技能。控制在这一阶段结算，被控的人后面也不普攻
+  for (const u of side.units) {
+    if (sideDead(foes())) break
+    if (!u.alive || acted.has(u.idx)) continue
     if (u.stun > 0) {
-      lines.push(`[${tag}] ${nameOf(u)} 眩晕，无法行动`)
+      const cc = CC_TEXT[u.stunIcon] || "控制"
+      // 被控时已经就绪的普通技能**当场被吞**，不是留到下回合：抬手被打断，照样进冷却。
+      // 冷却型重新压满，条件型（星野）会消耗一次 maxUses —— 这是被控的真实代价。
+      if (skillReady(u)) {
+        const sk = tmplOf(u).skill
+        consumeSkill(u)
+        lines.push(`[${tag}] ${nameOf(u)} ${cc}，「${sk.name}」被打断`)
+      } else {
+        lines.push(`[${tag}] ${nameOf(u)} ${cc}，无法行动`)
+      }
+      acted.add(u.idx)
       continue
     }
-    if (skillReady(u)) {
-      const sk = tmplOf(u).skill
-      consumeSkill(u)
-      execute(ctx, u, sk, `普通技能「${sk.name}」`, "skill")
-    } else {
-      autoAttack(ctx, u)
-    }
+    if (!skillReady(u)) continue
+    const sk = tmplOf(u).skill
+    consumeSkill(u)
+    acted.add(u.idx)
+    execute(ctx, u, sk, `普通技能「${sk.name}」`, "skill")
+    if (checkEnd(state)) { settle(state); return done() }
+  }
+
+  // ③-b 普攻
+  for (const u of side.units) {
+    if (sideDead(foes())) break
+    if (!u.alive || acted.has(u.idx)) continue
+    autoAttack(ctx, u)
     if (checkEnd(state)) { settle(state); return done() }
   }
 
@@ -904,4 +1088,4 @@ export function playerTurn(prev, action) {
   return done()
 }
 
-export { nameOf, tmplOf, aliveOf, sideDead, hitChance, critChance, defModOf, stabilityFloor }
+export { nameOf, tmplOf, aliveOf, sideDead, hitChance, critChance, defModOf, stabilityFloor, CC_TEXT }
