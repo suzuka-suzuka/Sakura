@@ -53,3 +53,8 @@ CLAUDE.md
 
 # Local-only tests
 test/
+
+# 碧蓝档案对战：官方角色素材（立绘/Q版/头像）
+# 数据和数值可以进仓库，美术资源不行 —— GitHub 的 DMCA 基本只打这个。
+# 用 plugins/sakura-plugin/scripts/fetch-art.mjs 重新拉取即可。
+plugins/sakura-plugin/resources/ba/characters/*/

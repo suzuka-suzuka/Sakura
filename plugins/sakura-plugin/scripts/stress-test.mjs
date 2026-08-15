@@ -1,0 +1,109 @@
+/**
+ * 战斗内核压测：随机配队跑满整局，逐回合检查不变量。
+ *
+ * 改动 engine.js / roster.js 之后必跑。基线（4 人池，500 局）：
+ *   0 错误 · 平均 6.8 轮 · 最长 15 轮 · 无一局打满 MAX_ROUND · 先手胜率 ≈53%
+ *
+ * 中位 6 轮意味着白热化（第 18 轮）基本打不到 —— 与原作一致，多数 PvP 在此之前就结束了。
+ *
+ * 注意本脚本只查不变量，查不出「打错人」——目标选择的规则回归在 target-test.mjs。
+ *
+ * 其中「全员被冷却锁死」是 EX 冷却机制的核心不变量：冷却长度 = 存活数−2，
+ * 最多锁得住最近 n−2 个施放者，所以可放的人永远不少于 2。
+ *
+ * 用法：node scripts/stress-test.mjs [局数]
+ */
+import { createBattle, playerTurn, validateAction, exAvailableOf, exWaitOf, exLockLenOf } from "../lib/ba/engine.js"
+import { ROSTER, CFG } from "../lib/ba/roster.js"
+
+const GAMES = Number(process.argv[2]) || 500
+const ids = ROSTER.map((t) => t.id)
+/** 固定序列的伪随机，保证复现 */
+const rnd = (seed) => { let x = seed; return () => ((x = (x * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) }
+
+let games = 0, errors = 0, turnsTotal = 0
+const winner = { 0: 0, 1: 0, "-1": 0 }
+const endRound = []
+const fail = (msg) => { errors++; console.log("  ✗ " + msg) }
+
+for (let seed = 1; seed <= GAMES; seed++) {
+  const R = rnd(seed)
+  const pick = () => Array.from({ length: 4 }, () => ids[Math.floor(R() * ids.length)])
+  let st
+  try {
+    st = createBattle(
+      { uid: "a", name: "A", picks: pick() },
+      { uid: "b", name: "B", picks: pick() },
+      { seed, first: R() < 0.5 ? 0 : 1 }
+    )
+  } catch (e) { fail(`seed ${seed} 建局失败: ${e.message}`); continue }
+
+  let guard = 0
+  while (st.phase === "command" && guard < 80) {
+    const side = st.sides[st.activeSide]
+    const hand = exAvailableOf(st, st.activeSide)
+    let action = { type: "pass" }
+
+    if (R() < 0.75 && hand.length) {
+      const casts = []
+      for (const p of hand) {
+        if (R() < 0.5) continue
+        if (!side.units[p]?.alive) continue
+        // 故意混入非法目标：越界索引、友敌错配
+        const roll = R()
+        let target
+        if (roll < 0.2) target = { scope: "foe", idx: Math.floor(R() * 4) }
+        else if (roll < 0.3) target = { scope: "ally", idx: Math.floor(R() * 4) }
+        else if (roll < 0.35) target = { scope: "foe", idx: 9 }
+        casts.push({ pos: p, target })
+      }
+      if (casts.length) {
+        action = { type: "ex", casts }
+        if (validateAction(st, action)) action = { type: "pass" }
+      }
+    }
+
+    let r
+    try { r = playerTurn(st, action) }
+    catch (e) { fail(`seed ${seed} 回合${guard} 崩溃: ${e.message}`); break }
+    if (r.error) r = playerTurn(st, { type: "pass" })
+
+    for (const s of r.state.sides) {
+      if (s.cost < 0 || s.cost > CFG.COST_MAX) fail(`seed ${seed} Cost 越界 ${s.cost}`)
+      for (const u of s.units) {
+        if (u.hp < 0 || u.hp > u.maxhp) fail(`seed ${seed} HP 越界 ${u.hp}/${u.maxhp}`)
+        if (u.alive && u.hp <= 0) fail(`seed ${seed} 血空但存活`)
+        if (!u.alive && u.hp > 0) fail(`seed ${seed} 已死但有血`)
+        if (u.shield < 0) fail(`seed ${seed} 负护盾`)
+      }
+      const h = exAvailableOf(r.state, s.side)
+      const aliveN = s.units.filter((u) => u.alive).length
+      if (new Set(h).size !== h.length) fail(`seed ${seed} 可用EX重复`)
+      if (h.some((p) => !s.units[p].alive)) fail(`seed ${seed} 可用EX含阵亡角色`)
+      for (const u of s.units) {
+        if (u.alive && exWaitOf(s, u) > exLockLenOf(s)) fail(`seed ${seed} EX冷却超出上限`)
+      }
+      // 反死锁：冷却长度 = 存活数−2，最多只锁得住最近 n−2 个施放者，
+      // 所以任何时刻可放的人都不该少于 2（不足 2 人时按存活数算）
+      if (aliveN > 0 && h.length < Math.min(2, aliveN)) {
+        fail(`seed ${seed} 全员被冷却锁死（存活 ${aliveN}，可放 ${h.length}）`)
+      }
+    }
+    st = r.state
+    guard++
+  }
+  if (st.phase !== "done") fail(`seed ${seed} 未收敛（${guard} 回合）`)
+  games++
+  turnsTotal += guard
+  endRound.push(st.round)
+  winner[String(st.winner)]++
+}
+
+endRound.sort((a, b) => a - b)
+console.log(`\n=== ${games} 局压测 ===`)
+console.log(`错误 / 不变量违例：${errors}`)
+console.log(`平均 ${(turnsTotal / games).toFixed(1)} 回合 / ${(endRound.reduce((a, b) => a + b, 0) / games).toFixed(1)} 轮`)
+console.log(`结束轮数：最短 ${endRound[0]}　中位 ${endRound[Math.floor(games / 2)]}　最长 ${endRound[games - 1]}`)
+console.log(`打满 ${CFG.MAX_ROUND} 轮：${endRound.filter((r) => r >= CFG.MAX_ROUND).length} 局`)
+console.log(`先手胜 ${winner[0]}　后手胜 ${winner[1]}　平局 ${winner["-1"]}`)
+process.exit(errors ? 1 : 0)

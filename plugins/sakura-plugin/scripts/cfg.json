@@ -1,0 +1,2033 @@
+{
+    "build": 1786184496,
+    "Regions": [
+        {
+            "Name": "Jp",
+            "StudentMaxLevel": 90,
+            "WeaponMaxLevel": 60,
+            "BondMaxLevel": 50,
+            "EquipmentMaxLevel": [
+                10,
+                10,
+                10
+            ],
+            "GearUnlock": true,
+            "GearBondReq": [
+                15,
+                20
+            ],
+            "PotentialMax": 25,
+            "CampaignMax": 30,
+            "CampaignExtra": true,
+            "Events": [
+                701,
+                801,
+                802,
+                803,
+                804,
+                805,
+                806,
+                808,
+                809,
+                810,
+                811,
+                812,
+                813,
+                814,
+                815,
+                816,
+                817,
+                818,
+                819,
+                820,
+                822,
+                824,
+                825,
+                826,
+                827,
+                828,
+                829,
+                830,
+                831,
+                832,
+                833,
+                834,
+                835,
+                836,
+                837,
+                838,
+                839,
+                840,
+                841,
+                842,
+                843,
+                844,
+                845,
+                846,
+                847,
+                848,
+                849,
+                850,
+                851,
+                852,
+                853,
+                855,
+                856,
+                857,
+                858,
+                859,
+                860,
+                10801,
+                10802,
+                10803,
+                10804,
+                10805,
+                10806,
+                10808,
+                10810,
+                10811,
+                10812,
+                10809,
+                10813,
+                10816,
+                10814,
+                10815,
+                10817,
+                10818,
+                10819,
+                10820,
+                10826,
+                10825,
+                10827,
+                10829,
+                10828,
+                10833,
+                10830,
+                10832,
+                10834,
+                10835,
+                10836,
+                10837,
+                10838,
+                10839,
+                10841,
+                10840,
+                10842,
+                10843,
+                10845,
+                10847,
+                10846
+            ],
+            "Event701Max": [
+                12,
+                10,
+                6
+            ],
+            "ChaserMax": 10,
+            "BloodMax": 14,
+            "FindGiftMax": 14,
+            "SchoolDungeonMax": 4,
+            "FurnitureSetMax": 124,
+            "FurnitureTemplateMax": 26,
+            "CurrentGacha": [
+                {
+                    "characters": [
+                        10148,
+                        20060,
+                        20041,
+                        10111
+                    ],
+                    "start": 1785895200,
+                    "end": 1786500000
+                }
+            ],
+            "CurrentEvents": [
+                {
+                    "event": 860,
+                    "start": 1785290400,
+                    "end": 1786500000
+                }
+            ],
+            "CurrentRaid": [
+                {
+                    "type": "MultiFloorRaid",
+                    "raid": 1000001,
+                    "start": 1785376800,
+                    "end": 1787684400
+                },
+                {
+                    "type": "Raid",
+                    "raid": 4,
+                    "terrain": "Street",
+                    "season": 95,
+                    "start": 1785895200,
+                    "end": 1786474800
+                }
+            ],
+            "UseNewCalculationLimit": true
+        },
+        {
+            "Name": "Global",
+            "StudentMaxLevel": 90,
+            "WeaponMaxLevel": 60,
+            "BondMaxLevel": 50,
+            "EquipmentMaxLevel": [
+                10,
+                10,
+                10
+            ],
+            "GearUnlock": true,
+            "GearBondReq": [
+                15,
+                20
+            ],
+            "PotentialMax": 25,
+            "CampaignMax": 30,
+            "CampaignExtra": true,
+            "Events": [
+                701,
+                801,
+                802,
+                803,
+                804,
+                805,
+                806,
+                808,
+                809,
+                810,
+                811,
+                812,
+                813,
+                814,
+                815,
+                816,
+                817,
+                818,
+                819,
+                820,
+                822,
+                824,
+                825,
+                826,
+                827,
+                828,
+                829,
+                830,
+                831,
+                832,
+                833,
+                834,
+                835,
+                836,
+                837,
+                838,
+                839,
+                840,
+                841,
+                842,
+                843,
+                844,
+                845,
+                846,
+                847,
+                848,
+                849,
+                850,
+                851,
+                852,
+                853,
+                855,
+                856,
+                10801,
+                10802,
+                10803,
+                10804,
+                10805,
+                10806,
+                10808,
+                10810,
+                10811,
+                10812,
+                10809,
+                10813,
+                10816,
+                10814,
+                10815,
+                10817,
+                10818,
+                10819,
+                10820,
+                10826,
+                10825,
+                10827,
+                10829,
+                10828,
+                10833,
+                10830,
+                10832,
+                10834,
+                10835,
+                10836,
+                10837,
+                10838,
+                10839,
+                10841,
+                10840,
+                10842,
+                10843
+            ],
+            "Event701Max": [
+                12,
+                10,
+                6
+            ],
+            "ChaserMax": 10,
+            "BloodMax": 14,
+            "FindGiftMax": 14,
+            "SchoolDungeonMax": 4,
+            "FurnitureSetMax": 122,
+            "FurnitureTemplateMax": 24,
+            "CurrentGacha": [
+                {
+                    "characters": [
+                        20057,
+                        10110,
+                        10112,
+                        10067
+                    ],
+                    "start": 1785808800,
+                    "end": 1787018400
+                }
+            ],
+            "CurrentEvents": [
+                {
+                    "event": 10843,
+                    "start": 1785808800,
+                    "end": 1787018400
+                }
+            ],
+            "CurrentRaid": [
+                {
+                    "type": "MultiFloorRaid",
+                    "raid": 1000004,
+                    "start": 1784685600,
+                    "end": 1786993200
+                },
+                {
+                    "type": "TimeAttack",
+                    "raid": 50,
+                    "start": 1785808800,
+                    "end": 1786388400
+                }
+            ],
+            "UseNewCalculationLimit": true
+        },
+        {
+            "Name": "Cn",
+            "StudentMaxLevel": 90,
+            "WeaponMaxLevel": 50,
+            "BondMaxLevel": 50,
+            "EquipmentMaxLevel": [
+                10,
+                10,
+                9
+            ],
+            "GearUnlock": true,
+            "GearBondReq": [
+                15,
+                20
+            ],
+            "PotentialMax": 25,
+            "CampaignMax": 28,
+            "CampaignExtra": true,
+            "Events": [
+                701,
+                801,
+                802,
+                803,
+                804,
+                805,
+                806,
+                808,
+                809,
+                810,
+                811,
+                812,
+                813,
+                814,
+                815,
+                816,
+                817,
+                818,
+                819,
+                820,
+                822,
+                824,
+                825,
+                826,
+                827,
+                828,
+                829,
+                830,
+                831,
+                832,
+                833,
+                834,
+                835,
+                836,
+                837,
+                838,
+                839,
+                840,
+                841,
+                842,
+                843,
+                844,
+                10801,
+                10802,
+                10803,
+                10804,
+                10805,
+                10806,
+                10808,
+                10810,
+                10811,
+                10812,
+                10809,
+                10813,
+                10816,
+                10814,
+                10815,
+                10817,
+                10818,
+                10819,
+                10820,
+                10826,
+                10825,
+                10827,
+                10829,
+                10828,
+                10833,
+                10830,
+                10832
+            ],
+            "Event701Max": [
+                12,
+                10,
+                6
+            ],
+            "ChaserMax": 9,
+            "BloodMax": 13,
+            "FindGiftMax": 13,
+            "SchoolDungeonMax": 4,
+            "FurnitureSetMax": 118,
+            "FurnitureTemplateMax": 19,
+            "CurrentGacha": [],
+            "CurrentEvents": [],
+            "CurrentRaid": [
+                {
+                    "type": "TimeAttack",
+                    "raid": 34,
+                    "start": 1785996000,
+                    "end": 1786564800
+                }
+            ],
+            "UseNewCalculationLimit": true
+        }
+    ],
+    "CommonFavorItemTags": [
+        "BC",
+        "Bc",
+        "ew"
+    ],
+    "TypeEffectiveness": {
+        "Normal": {
+            "LightArmor": 10000,
+            "HeavyArmor": 10000,
+            "Unarmed": 10000,
+            "Structure": 5000,
+            "ElasticArmor": 10000,
+            "CompositeArmor": 10000,
+            "Normal": 10000
+        },
+        "Explosion": {
+            "LightArmor": 20000,
+            "HeavyArmor": 10000,
+            "Unarmed": 5000,
+            "Structure": 5000,
+            "ElasticArmor": 5000,
+            "CompositeArmor": 10000,
+            "Normal": 10000
+        },
+        "Pierce": {
+            "LightArmor": 5000,
+            "HeavyArmor": 20000,
+            "Unarmed": 10000,
+            "Structure": 5000,
+            "ElasticArmor": 10000,
+            "CompositeArmor": 10000,
+            "Normal": 10000
+        },
+        "Mystic": {
+            "LightArmor": 10000,
+            "HeavyArmor": 5000,
+            "Unarmed": 20000,
+            "Structure": 5000,
+            "ElasticArmor": 10000,
+            "CompositeArmor": 5000,
+            "Normal": 10000
+        },
+        "Sonic": {
+            "LightArmor": 10000,
+            "HeavyArmor": 5000,
+            "Unarmed": 15000,
+            "Structure": 5000,
+            "ElasticArmor": 20000,
+            "CompositeArmor": 5000,
+            "Normal": 10000
+        },
+        "Chemical": {
+            "LightArmor": 5000,
+            "HeavyArmor": 15000,
+            "Unarmed": 10000,
+            "Structure": 5000,
+            "ElasticArmor": 10000,
+            "CompositeArmor": 20000,
+            "Normal": 10000
+        }
+    },
+    "StatLimit": {
+        "Student": {
+            "MaxHP": {
+                "Min": 0,
+                "Max": 10000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AttackPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DefensePower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "HealPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AccuracyPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AccuracyRate": {
+                "Min": -8000,
+                "Max": 8000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DodgePoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DodgeRate": {
+                "Min": -8000,
+                "Max": 8000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalChanceRate": {
+                "Min": -8000,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalDamageRate": {
+                "Min": 10000,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "MoveSpeed": {
+                "Min": 40,
+                "Max": 1000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "StabilityPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "StabilityRate": {
+                "Min": 0,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "HealEffectivenessRate": {
+                "Min": 2000,
+                "Max": 20000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalChanceResistPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalDamageResistRate": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AttackSpeed": {
+                "Min": 2000,
+                "Max": 30000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamageRatio": {
+                "Min": 2000,
+                "Max": 18000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamagedRatio": {
+                "Min": 2000,
+                "Max": 18000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "OppressionPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "OppressionResist": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "RegenCost": {
+                "Min": 0,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DefensePenetration": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamageRatio2Increase": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamageRatio2Decrease": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamagedRatio2Increase": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamagedRatio2Decrease": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "EnhanceExDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceExDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "EnhanceBasicsDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceBasicsDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "EnhanceWeakDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceWeakDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "WeakDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "EffectiveDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "NormalDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "ResistDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            }
+        },
+        "Minion": {
+            "MaxHP": {
+                "Min": 0,
+                "Max": 1000000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AttackPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DefensePower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "HealPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AccuracyPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AccuracyRate": {
+                "Min": -8000,
+                "Max": 8000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DodgePoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DodgeRate": {
+                "Min": -8000,
+                "Max": 8000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalChanceRate": {
+                "Min": -8000,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalDamageRate": {
+                "Min": 10000,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "MoveSpeed": {
+                "Min": 40,
+                "Max": 1000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "StabilityPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "StabilityRate": {
+                "Min": 0,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "HealEffectivenessRate": {
+                "Min": 2000,
+                "Max": 20000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalChanceResistPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalDamageResistRate": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AttackSpeed": {
+                "Min": 2000,
+                "Max": 30000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamageRatio": {
+                "Min": -50000,
+                "Max": 20000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamagedRatio": {
+                "Min": -50000,
+                "Max": 20000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "OppressionPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "OppressionResist": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "RegenCost": {
+                "Min": 0,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DefensePenetration": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamageRatio2Increase": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamageRatio2Decrease": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamagedRatio2Increase": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamagedRatio2Decrease": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "EnhanceExDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceExDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "EnhanceBasicsDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceBasicsDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "EnhanceWeakDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceWeakDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "WeakDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "EffectiveDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "NormalDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "ResistDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            }
+        },
+        "Elite": {
+            "MaxHP": {
+                "Min": 0,
+                "Max": 1000000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AttackPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DefensePower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "HealPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AccuracyPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AccuracyRate": {
+                "Min": -8000,
+                "Max": 8000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DodgePoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DodgeRate": {
+                "Min": -8000,
+                "Max": 8000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalChanceRate": {
+                "Min": -8000,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalDamageRate": {
+                "Min": 10000,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "MoveSpeed": {
+                "Min": 40,
+                "Max": 1000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "StabilityPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "StabilityRate": {
+                "Min": 0,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "HealEffectivenessRate": {
+                "Min": 2000,
+                "Max": 20000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalChanceResistPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalDamageResistRate": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AttackSpeed": {
+                "Min": 2000,
+                "Max": 30000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamageRatio": {
+                "Min": -50000,
+                "Max": 20000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamagedRatio": {
+                "Min": -50000,
+                "Max": 20000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "OppressionPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "OppressionResist": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "RegenCost": {
+                "Min": 0,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DefensePenetration": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamageRatio2Increase": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamageRatio2Decrease": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamagedRatio2Increase": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamagedRatio2Decrease": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "EnhanceExDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceExDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "EnhanceBasicsDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceBasicsDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "EnhanceWeakDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceWeakDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "WeakDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "EffectiveDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "NormalDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "ResistDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            }
+        },
+        "Champion": {
+            "MaxHP": {
+                "Min": 0,
+                "Max": 1000000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AttackPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DefensePower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "HealPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AccuracyPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AccuracyRate": {
+                "Min": -8000,
+                "Max": 8000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DodgePoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DodgeRate": {
+                "Min": -8000,
+                "Max": 8000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalChanceRate": {
+                "Min": -8000,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalDamageRate": {
+                "Min": 10000,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "MoveSpeed": {
+                "Min": 40,
+                "Max": 1000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "StabilityPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "StabilityRate": {
+                "Min": 0,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "HealEffectivenessRate": {
+                "Min": 2000,
+                "Max": 20000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalChanceResistPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalDamageResistRate": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AttackSpeed": {
+                "Min": 2000,
+                "Max": 30000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamageRatio": {
+                "Min": -50000,
+                "Max": 20000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamagedRatio": {
+                "Min": -50000,
+                "Max": 20000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "OppressionPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "OppressionResist": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "RegenCost": {
+                "Min": 0,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DefensePenetration": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamageRatio2Increase": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamageRatio2Decrease": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamagedRatio2Increase": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamagedRatio2Decrease": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "EnhanceExDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceExDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "EnhanceBasicsDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceBasicsDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "EnhanceWeakDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceWeakDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "WeakDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "EffectiveDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "NormalDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "ResistDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            }
+        },
+        "Boss": {
+            "MaxHP": {
+                "Min": 0,
+                "Max": 2000000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AttackPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DefensePower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "HealPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AccuracyPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AccuracyRate": {
+                "Min": -8000,
+                "Max": 8000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DodgePoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DodgeRate": {
+                "Min": -8000,
+                "Max": 8000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalChanceRate": {
+                "Min": -8000,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalDamageRate": {
+                "Min": 10000,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "MoveSpeed": {
+                "Min": 40,
+                "Max": 1000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "StabilityPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "StabilityRate": {
+                "Min": 0,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "HealEffectivenessRate": {
+                "Min": 2000,
+                "Max": 20000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalChanceResistPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalDamageResistRate": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AttackSpeed": {
+                "Min": 2000,
+                "Max": 30000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamageRatio": {
+                "Min": 2000,
+                "Max": 20000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamagedRatio": {
+                "Min": 2000,
+                "Max": 20000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "OppressionPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "OppressionResist": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "RegenCost": {
+                "Min": 0,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DefensePenetration": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamageRatio2Increase": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamageRatio2Decrease": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamagedRatio2Increase": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamagedRatio2Decrease": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "EnhanceExDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceExDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "EnhanceBasicsDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceBasicsDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "EnhanceWeakDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceWeakDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "WeakDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "EffectiveDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "NormalDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "ResistDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            }
+        },
+        "Summoned": {
+            "MaxHP": {
+                "Min": 0,
+                "Max": 1000000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AttackPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DefensePower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "HealPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AccuracyPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AccuracyRate": {
+                "Min": -8000,
+                "Max": 8000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DodgePoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DodgeRate": {
+                "Min": -8000,
+                "Max": 8000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalChanceRate": {
+                "Min": -8000,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalDamageRate": {
+                "Min": 10000,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "MoveSpeed": {
+                "Min": 40,
+                "Max": 1000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "StabilityPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "StabilityRate": {
+                "Min": 0,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "HealEffectivenessRate": {
+                "Min": 2000,
+                "Max": 20000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalChanceResistPoint": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "CriticalDamageResistRate": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "AttackSpeed": {
+                "Min": 2000,
+                "Max": 30000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamageRatio": {
+                "Min": 2000,
+                "Max": 20000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamagedRatio": {
+                "Min": 2000,
+                "Max": 20000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "OppressionPower": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "OppressionResist": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "RegenCost": {
+                "Min": 0,
+                "Max": 10000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DefensePenetration": {
+                "Min": 0,
+                "Max": 1000000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "DamageRatio2Increase": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamageRatio2Decrease": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamagedRatio2Increase": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "DamagedRatio2Decrease": {
+                "Min": 10000,
+                "Max": 100000,
+                "RatioMin": 0,
+                "RatioMax": 100000
+            },
+            "EnhanceExDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceExDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "EnhanceBasicsDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceBasicsDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "EnhanceWeakDamageRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "ReduceWeakDamagedRate": {
+                "Min": 2000,
+                "Max": 50000,
+                "RatioMin": -8000,
+                "RatioMax": 100000
+            },
+            "WeakDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "EffectiveDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "NormalDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            },
+            "ResistDamagedRatio": {
+                "Min": 2000,
+                "Max": 100000,
+                "RatioMin": -10000,
+                "RatioMax": 100000
+            }
+        }
+    },
+    "PotentialMaterial": [
+        {
+            "CostAmount": 100000,
+            "ArtifactGrade": 0,
+            "ArtifactAmount": 10,
+            "BookAmount": 2
+        },
+        {
+            "CostAmount": 100000,
+            "ArtifactGrade": 0,
+            "ArtifactAmount": 10,
+            "BookAmount": 2
+        },
+        {
+            "CostAmount": 100000,
+            "ArtifactGrade": 0,
+            "ArtifactAmount": 10,
+            "BookAmount": 2
+        },
+        {
+            "CostAmount": 100000,
+            "ArtifactGrade": 0,
+            "ArtifactAmount": 10,
+            "BookAmount": 2
+        },
+        {
+            "CostAmount": 100000,
+            "ArtifactGrade": 0,
+            "ArtifactAmount": 10,
+            "BookAmount": 2
+        },
+        {
+            "CostAmount": 100000,
+            "ArtifactGrade": 0,
+            "ArtifactAmount": 15,
+            "BookAmount": 2
+        },
+        {
+            "CostAmount": 100000,
+            "ArtifactGrade": 0,
+            "ArtifactAmount": 15,
+            "BookAmount": 2
+        },
+        {
+            "CostAmount": 100000,
+            "ArtifactGrade": 0,
+            "ArtifactAmount": 15,
+            "BookAmount": 2
+        },
+        {
+            "CostAmount": 100000,
+            "ArtifactGrade": 0,
+            "ArtifactAmount": 15,
+            "BookAmount": 2
+        },
+        {
+            "CostAmount": 100000,
+            "ArtifactGrade": 0,
+            "ArtifactAmount": 15,
+            "BookAmount": 2
+        },
+        {
+            "CostAmount": 100000,
+            "ArtifactGrade": 0,
+            "ArtifactAmount": 20,
+            "BookAmount": 2
+        },
+        {
+            "CostAmount": 100000,
+            "ArtifactGrade": 0,
+            "ArtifactAmount": 20,
+            "BookAmount": 2
+        },
+        {
+            "CostAmount": 100000,
+            "ArtifactGrade": 0,
+            "ArtifactAmount": 20,
+            "BookAmount": 2
+        },
+        {
+            "CostAmount": 100000,
+            "ArtifactGrade": 0,
+            "ArtifactAmount": 20,
+            "BookAmount": 2
+        },
+        {
+            "CostAmount": 100000,
+            "ArtifactGrade": 0,
+            "ArtifactAmount": 20,
+            "BookAmount": 2
+        },
+        {
+            "CostAmount": 200000,
+            "ArtifactGrade": 1,
+            "ArtifactAmount": 6,
+            "BookAmount": 4
+        },
+        {
+            "CostAmount": 200000,
+            "ArtifactGrade": 1,
+            "ArtifactAmount": 6,
+            "BookAmount": 4
+        },
+        {
+            "CostAmount": 200000,
+            "ArtifactGrade": 1,
+            "ArtifactAmount": 6,
+            "BookAmount": 4
+        },
+        {
+            "CostAmount": 200000,
+            "ArtifactGrade": 1,
+            "ArtifactAmount": 6,
+            "BookAmount": 4
+        },
+        {
+            "CostAmount": 200000,
+            "ArtifactGrade": 1,
+            "ArtifactAmount": 6,
+            "BookAmount": 4
+        },
+        {
+            "CostAmount": 200000,
+            "ArtifactGrade": 1,
+            "ArtifactAmount": 8,
+            "BookAmount": 4
+        },
+        {
+            "CostAmount": 200000,
+            "ArtifactGrade": 1,
+            "ArtifactAmount": 8,
+            "BookAmount": 4
+        },
+        {
+            "CostAmount": 200000,
+            "ArtifactGrade": 1,
+            "ArtifactAmount": 8,
+            "BookAmount": 4
+        },
+        {
+            "CostAmount": 200000,
+            "ArtifactGrade": 1,
+            "ArtifactAmount": 8,
+            "BookAmount": 4
+        },
+        {
+            "CostAmount": 200000,
+            "ArtifactGrade": 1,
+            "ArtifactAmount": 8,
+            "BookAmount": 4
+        }
+    ]
+}

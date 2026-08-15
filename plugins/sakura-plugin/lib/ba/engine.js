@@ -1,12 +1,14 @@
 /**
  * 碧蓝档案 · 回合制群战 —— 战斗内核
  *
- * 纯函数模块：不碰 Redis、不碰 e.reply，只做 (state, action) => { state, log }。
- * 状态全部是可 JSON 序列化的普通对象，能直接存进 Redis 再取出来接着打。
+ * 纯函数模块：不碰 Redis、不碰 e.reply，只做 (state, action) => { state, log, events }。
+ * 状态全部可 JSON 序列化，能直接存进 Redis 再取出来接着打。
  *
- * 与 Python 版（docs/ba-battle/sim/engine.py）的唯一结构差异：
- * Python 版一次跑完整局并由 AI 出招，这里改成一次跑一个回合、由玩家指令驱动。
- * 伤害公式、目标选择、状态计时三块逐行对应，改动时两边要同步。
+ * 伤害、命中、暴击、防御、稳定值五条公式全部照搬官方实现（见 roster.js 的 CFG 注释）。
+ * 与原作的唯一结构性差异：原作是实时战斗，这里是回合制，因此
+ *   - 秒 → 回合按 1 回合 = 5 秒折算（角色普攻循环实测 4~6.5 秒，与之吻合）
+ *   - 射程/位置/移动/击退全部无对应物，已在生成阶段丢弃
+ *   - 范围技能的几何形状塌缩成「打几个目标」，见 roster 里的 target/count
  */
 
 import { CFG, BY_ID, affinity } from "./roster.js"
@@ -22,21 +24,17 @@ function nextRandom(state) {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296
 }
 
-function randRange(state, lo, hi) {
-  return lo + nextRandom(state) * (hi - lo)
-}
-
-function randPick(state, arr) {
-  return arr[Math.floor(nextRandom(state) * arr.length)]
-}
+const randRange = (state, lo, hi) => lo + nextRandom(state) * (hi - lo)
+const randPick = (state, arr) => arr[Math.floor(nextRandom(state) * arr.length)]
 
 // ---------------- 单位读取 ----------------
 
 const tmplOf = (u) => BY_ID[u.id]
+const nameOf = (u) => tmplOf(u).name
+const aliveOf = (side) => side.units.filter((u) => u.alive)
+const sideDead = (side) => side.units.every((u) => !u.alive)
 
-function unitRef(u) {
-  return u ? { side: u.side, pos: u.idx } : null
-}
+const unitRef = (u) => (u ? { side: u.side, pos: u.idx } : null)
 
 function affinityMark(value) {
   if (value > 1.01) return "weak"
@@ -44,257 +42,199 @@ function affinityMark(value) {
   return "normal"
 }
 
-function emitEvent(ctx, event) {
-  ctx.emit?.(event)
-}
+const emitEvent = (ctx, event) => ctx.emit?.(event)
+const sourceKeyOf = (side, pos) => `${side}:${pos}`
 
-function sourceKeyOf(side, pos) {
-  return `${side}:${pos}`
-}
+// ---------------- 状态层 ----------------
 
-function statusSourceKey(status) {
-  return status.sourceKey
-}
-
-function sameStatusLayer(current, next) {
-  const currentSource = statusSourceKey(current)
-  const nextSource = statusSourceKey(next)
-  return Boolean(currentSource && nextSource) &&
-    currentSource === nextSource &&
-    current.effectKind === next.effectKind &&
-    current.stat === next.stat
+function sameStatusLayer(a, b) {
+  return Boolean(a.sourceKey && b.sourceKey) &&
+    a.sourceKey === b.sourceKey && a.effectKind === b.effectKind && a.stat === b.stat
 }
 
 /** 同一施加者的同类状态以最新一层覆盖；不同施加者各自保留一层。 */
 function upsertStatusLayer(list, next) {
-  const first = list.findIndex((current) => sameStatusLayer(current, next))
-  if (first < 0) {
-    list.push(next)
-    return next
-  }
+  const first = list.findIndex((cur) => sameStatusLayer(cur, next))
+  if (first < 0) { list.push(next); return next }
   list[first] = next
-  for (let i = list.length - 1; i > first; i--) {
-    if (sameStatusLayer(list[i], next)) list.splice(i, 1)
-  }
-  return next
-}
-
-function upsertDotLayer(list, next) {
-  const nextSource = statusSourceKey(next)
-  const first = list.findIndex((current) =>
-    nextSource && statusSourceKey(current) === nextSource
-  )
-  if (first < 0) {
-    list.push(next)
-    return next
-  }
-  list[first] = next
-  for (let i = list.length - 1; i > first; i--) {
-    if (statusSourceKey(list[i]) === nextSource) list.splice(i, 1)
-  }
+  for (let i = list.length - 1; i > first; i--) if (sameStatusLayer(list[i], next)) list.splice(i, 1)
   return next
 }
 
 /** 不同施加者的同类百分比状态逐层乘算。 */
 function factorOf(u, stat) {
-  let factor = 1
-  for (const status of u.buffs) {
-    if (status.stat === stat) factor *= 1 + status.value
-  }
-  return factor
+  let f = 1
+  for (const s of u.buffs) if (s.stat === stat) f *= 1 + s.value
+  return f
 }
 
-// 这类友方增益会影响施放后的 EX 与本回合自动行动，因此施放回合就是第 1 回合。
-const CURRENT_TURN_BUFF_STATS = new Set(["atk", "dmg_deal", "crit", "crit_dmg"])
-// 这类减益会改变施放方本回合后续攻击的结果，因此也把施放回合算作第 1 回合。
-const CURRENT_TURN_DEBUFF_STATS = new Set(["dfs", "dmg_take"])
+/** 同名固定值加成逐层相加。 */
+function flatOf(u, stat) {
+  let v = 0
+  for (const s of u.buffs) if (s.stat === stat) v += s.value
+  return v
+}
 
-function timedFriendlyBuff(buff, turnId, source) {
+// 进攻类增益影响施放后的本回合行动，因此施放回合就算第 1 回合
+const CURRENT_TURN_STATS = new Set(["atk", "dmg_deal", "crit", "crit_dmg", "dfs", "dmg_take"])
+
+const STAT_LABEL = {
+  atk: "攻击力", atk_flat: "攻击力", dfs: "防御力", dfs_flat: "防御力",
+  heal: "治疗力", heal_flat: "治疗力", maxhp: "生命上限", maxhp_flat: "生命上限",
+  crit: "暴击值", crit_dmg: "暴击伤害", crit_dmg_flat: "暴击伤害",
+  acc: "命中值", dodge: "闪避值", dmg_deal: "造成伤害", dmg_take: "受到伤害",
+  heal_taken: "受治疗量",
+}
+
+function makeStatus(eff, turnId, source, kind) {
   return {
-    ...buff,
-    effectKind: "buff",
+    stat: eff.stat, value: eff.value, turns: eff.turns ?? 2,
+    effectKind: kind,
     sourceKey: sourceKeyOf(source.side, source.idx),
-    srcSide: source.side,
-    srcPos: source.idx,
+    srcSide: source.side, srcPos: source.idx,
     st: turnId,
-    countCurrent: CURRENT_TURN_BUFF_STATS.has(buff.stat),
+    countCurrent: CURRENT_TURN_STATS.has(eff.stat),
   }
 }
 
-function timedEnemyDebuff(debuff, turnId, source, targetSide) {
-  const countCurrent = CURRENT_TURN_DEBUFF_STATS.has(debuff.stat)
-  return {
-    ...debuff,
-    effectKind: "debuff",
-    sourceKey: sourceKeyOf(source.side, source.idx),
-    srcSide: source.side,
-    srcPos: source.idx,
-    st: turnId,
-    countCurrent,
-    // 降防、易伤等跟随施放方的攻击窗口倒计时；降攻等则跟随目标的行动倒计时。
-    tickSide: countCurrent ? source.side : targetSide,
-  }
+// ---------------- 面板（基础值 × 各来源修正层）----------------
+
+export const atkOf = (u) => tmplOf(u).atk * Math.max(0.2, factorOf(u, "atk")) + flatOf(u, "atk_flat")
+export const dfsOf = (u) => Math.max(0, tmplOf(u).dfs * Math.max(0.2, factorOf(u, "dfs")) + flatOf(u, "dfs_flat"))
+export const healOf = (u) => tmplOf(u).healPower * Math.max(0.2, factorOf(u, "heal")) + flatOf(u, "heal_flat")
+const accOf = (u) => tmplOf(u).acc * Math.max(0.2, factorOf(u, "acc"))
+const dodgeOf = (u) => tmplOf(u).dodge * Math.max(0.2, factorOf(u, "dodge"))
+const critOf = (u) => tmplOf(u).crit * Math.max(0, factorOf(u, "crit"))
+const critDmgOf = (u) => tmplOf(u).critDmg * Math.max(0, factorOf(u, "crit_dmg")) + flatOf(u, "crit_dmg_flat")
+
+// ---------------- 官方战斗公式 ----------------
+
+/** 防御系数（乘在伤害上，不是减伤率）：DEF_BASE / (防御 × DEF_C + DEF_BASE) */
+const defModOf = (tgt) => CFG.DEF_BASE / (dfsOf(tgt) * CFG.DEF_C + CFG.DEF_BASE)
+
+/** 命中率：命中值 ≥ 闪避值时必中，否则 HIT_BASE / (差值 × HIT_C + HIT_BASE) */
+function hitChance(src, tgt) {
+  const gap = Math.max(dodgeOf(tgt) - accOf(src), 0)
+  return Math.min(1, Math.max(0, CFG.HIT_BASE / (gap * CFG.HIT_C + CFG.HIT_BASE)))
 }
 
-/** 实际攻击力：基础 × 各来源修正层，下限 20% */
-export function atkOf(u) {
-  return tmplOf(u).atk * Math.max(0.2, factorOf(u, "atk"))
+/** 暴击率：1 − CRIT_BASE / ((暴击值 − 目标暴击抵抗) × CRIT_C + CRIT_BASE)，取不到 100% */
+function critChance(src, tgt) {
+  const gap = Math.max(critOf(src) - tmplOf(tgt).critRes, 0)
+  return Math.min(1, Math.max(0, 1 - CFG.CRIT_BASE / (gap * CFG.CRIT_C + CFG.CRIT_BASE)))
 }
 
-/** 实际防御力：走除法减伤曲线，不做减法 */
-export function dfsOf(u) {
-  return tmplOf(u).dfs * Math.max(0.2, factorOf(u, "dfs"))
+/** 暴击倍率：(暴击伤害 − 目标暴伤抵抗) / 10000 */
+const critMultOf = (src, tgt) => Math.max(1, (critDmgOf(src) - tmplOf(tgt).critDmgRes) / 10000)
+
+/** 伤害浮动下限：稳定值/(稳定值+STAB_BASE) + 稳定率/10000，实际伤害在 [下限, 1] 均匀分布 */
+function stabilityFloor(src) {
+  const sp = tmplOf(src).stability
+  return Math.min(1, Math.max(0, sp / (sp + CFG.STAB_BASE) + CFG.DEFAULT_STAB_RATE / 10000))
 }
 
-const aliveOf = (side) => side.units.filter((u) => u.alive)
-const sideDead = (side) => side.units.every((u) => !u.alive)
-
-// ---------------- EX 技能牌窗口 ----------------
+// ---------------- EX 冷却 ----------------
 
 /**
- * 技能牌初始顺序只由战斗种子和阵营决定，不占用战斗伤害的随机数序列。
+ * 四个角色的 EX 随时可选，但放完要压一段冷却，冷却按「本方之后又放了几个 EX」计，
+ * 不按回合计：长度 = 存活人数 − 2。
+ *
+ * 满编 4 人时放完要等另外 2 个 EX 才轮回来，等价于同一个人最快隔 2 次 EX；
+ * 死到只剩 2 人时长度归零，剩下的人可以连放 —— 人越少越不该被冷却锁死。
  */
-function initialExOrder(state, sideIndex) {
-  const order = state.sides[sideIndex].units.map((_, i) => i)
-  let x = ((Number(state.seed) || 0) ^ Math.imul(sideIndex + 1, 0x9e3779b9)) >>> 0
-  if (!x) x = 0x6d2b79f5
-  const next = () => {
-    x ^= x << 13
-    x ^= x >>> 17
-    x ^= x << 5
-    return x >>> 0
-  }
-  for (let i = order.length - 1; i > 0; i--) {
-    const j = next() % (i + 1)
-    const tmp = order[i]
-    order[i] = order[j]
-    order[j] = tmp
-  }
-  return order
+export const exLockLenOf = (side) => Math.max(0, aliveOf(side).length - CFG.EX_COOLDOWN_SLACK)
+
+/** 距离解锁还差几个 EX，0 表示现在就能放 */
+export function exWaitOf(side, u) {
+  if (!u.exCastNo) return 0
+  return Math.max(0, exLockLenOf(side) - (side.exCasts - u.exCastNo))
 }
 
-function initializeExWindows(state) {
-  for (let sideIndex = 0; sideIndex < state.sides.length; sideIndex++) {
-    const side = state.sides[sideIndex]
-    const order = initialExOrder(state, sideIndex)
-    side.exHand = order.slice(0, CFG.EX_HAND_SIZE)
-    side.exDeck = order.slice(CFG.EX_HAND_SIZE)
-    side.exDiscard = []
-  }
-}
+export const exReadyOf = (side, u) => u.alive && exWaitOf(side, u) === 0
 
-/** 阵亡角色从三个牌区移除，空出的窗口立即补牌。 */
-function syncExWindow(state, sideIndex) {
+/** 不修改传入状态，返回一侧当前能放 EX 的 0-based 角色位置。 */
+export function exAvailableOf(state, sideIndex) {
   const side = state.sides[sideIndex]
-  const order = initialExOrder(state, sideIndex)
-
-  const live = new Set(side.units.filter((u) => u.alive).map((u) => u.idx))
-  const seen = new Set()
-  const clean = (cards) => cards.filter((pos) => {
-    if (!Number.isInteger(pos) || !live.has(pos) || seen.has(pos)) return false
-    seen.add(pos)
-    return true
-  })
-  side.exHand = clean(side.exHand)
-  side.exDeck = clean(side.exDeck)
-  side.exDiscard = clean(side.exDiscard)
-
-  // 始终维持每名存活角色恰好一张牌；缺失牌按初始牌序回到牌库。
-  for (const pos of order) {
-    if (live.has(pos) && !seen.has(pos)) {
-      side.exDeck.push(pos)
-      seen.add(pos)
-    }
-  }
-
-  const target = Math.min(CFG.EX_HAND_SIZE, live.size)
-  while (side.exHand.length < target) {
-    if (!side.exDeck.length) {
-      if (!side.exDiscard.length) break
-      side.exDeck = side.exDiscard
-      side.exDiscard = []
-    }
-    side.exHand.push(side.exDeck.shift())
-  }
-
-  return side
+  return side.units.filter((u) => exReadyOf(side, u)).map((u) => u.idx)
 }
 
-function syncAllExWindows(state) {
-  for (let side = 0; side < state.sides.length; side++) syncExWindow(state, side)
+/** 记一次 EX 释放，把释放者压进冷却 */
+function markExCast(side, u) {
+  side.exCasts = (side.exCasts || 0) + 1
+  u.exCastNo = side.exCasts
 }
 
-function pruneInvalidDots(state) {
-  for (const side of state.sides) {
-    for (const target of side.units) {
-      if (!target.alive) {
-        target.dots = []
-        continue
-      }
-      target.dots = target.dots.filter((dot) =>
-        Boolean(state.sides[dot.srcSide]?.units[dot.srcPos])
-      )
-    }
-  }
-}
-
-function cycleExCard(state, sideIndex, pos) {
-  const side = syncExWindow(state, sideIndex)
-  const i = side.exHand.indexOf(pos)
-  if (i < 0) return false
-  side.exHand.splice(i, 1)
-  if (side.units[pos]?.alive) side.exDiscard.push(pos)
-  syncExWindow(state, sideIndex)
+/**
+ * 己方回合开始时若比上个回合少了人，直接清空全部冷却。
+ *
+ * 没有这一条的话，减员会让冷却长度缩短、却缩不掉已经欠下的等待，
+ * 出现「全队都在冷却、这一回合谁都放不出 EX」的死局。
+ * validateAction 与 playerTurn 都要先跑一遍，否则校验和结算会对不上。
+ */
+function refreshExOnCasualty(side, log) {
+  const now = aliveOf(side).length
+  const dropped = side.lastAlive != null && now < side.lastAlive
+  side.lastAlive = now
+  if (!dropped) return false
+  side.exCasts = 0
+  for (const u of side.units) u.exCastNo = 0
+  log?.()
   return true
 }
 
-/** 不修改传入状态，返回一侧当前可见的 0-based 角色位置。 */
-export function exHandOf(state, sideIndex) {
-  const copy = structuredClone(state)
-  return [...syncExWindow(copy, sideIndex).exHand]
-}
+// ---------------- 白热化 / FEVER TIME ----------------
 
 /**
- * 不修改传入状态，返回当前窗口用牌后会依次补入的公开牌序。
- * 牌库见底后弃牌区会按使用顺序接回，因此两区直接拼接就是当前可预见顺序。
+ * 原作的白热化在「剩余时间不足 1 分钟」时进入，不是打满多少回合触发。
+ * 按 1 回合 = 5 秒折算：总时长 4 分钟 = 48 回合，白热化从第 36 回合起（= 第 18 轮）。
+ *
+ * 原作的**基础效果只有一条**：EX Cost 攒得明显更快。
+ * 防御 / 闪避 / 受治疗下降是赛季附加规则（S10、S11 都带），一并抄了，
+ * 不想要把 CFG.FEVER_DEBUFF 设成 0 即可。
  */
-export function exDrawQueueOf(state, sideIndex) {
-  const copy = structuredClone(state)
-  const side = syncExWindow(copy, sideIndex)
-  return [...side.exDeck, ...side.exDiscard]
-}
+const feverOn = (state) => state.turnId >= CFG.FEVER_TURN
 
-// ---------------- 白热化 ----------------
-
-function sdDmg(state) {
-  const n = state.round - CFG.SD_START + 1
-  return Math.max(0, n) * CFG.SD_DMG_STEP
-}
-
-function sdHeal(state) {
-  const n = state.round - CFG.SD_START + 1
-  return Math.max(0.15, 1 - Math.max(0, n) * CFG.SD_HEAL_STEP)
+/**
+ * 进入白热化时给全场挂一次永久减益。
+ * 走 buff 系统而不是在伤害公式里加系数：状态格会自动画出来，玩家能看见发生了什么。
+ */
+function enterFever(ctx) {
+  const { state } = ctx
+  if (state.fever || !feverOn(state)) return
+  state.fever = true
+  if (CFG.FEVER_DEBUFF > 0) {
+    for (const s of state.sides) {
+      for (const u of s.units) {
+        for (const stat of ["dfs", "dodge", "heal_taken"]) {
+          u.buffs.push({
+            stat, value: -CFG.FEVER_DEBUFF, turns: 9999, st: -1,
+            srcSide: u.side, effectKind: "fever", sourceKey: "fever",
+          })
+        }
+      }
+    }
+  }
+  ctx.log(`🔥 白热化：Cost 回复 ×${CFG.FEVER_COST_MULT}` +
+    (CFG.FEVER_DEBUFF > 0 ? `，全场防御 / 闪避 / 受治疗 −${Math.round(CFG.FEVER_DEBUFF * 100)}%` : ""))
 }
 
 // ---------------- 建局 ----------------
 
 function makeUnit(tmpl, idx, side) {
-  const u = {
-    id: tmpl.id,
-    idx,
-    side,
-    // 角色表中的生命就是战斗实际最大生命，不再经过隐藏倍率换算。
-    maxhp: tmpl.hp,
-    hp: tmpl.hp,
+  return {
+    id: tmpl.id, idx, side,
+    maxhp: tmpl.hp, hp: tmpl.hp,
     shield: 0, shieldMax: 0, shieldTurns: 0, shieldTickSide: 1 - side, shieldSt: -1,
-    buffs: [], dots: [],
+    buffs: [], regens: [],
     stun: 0, stunSt: -1,
     taunt: 0, tauntSt: -1,
-    reflect: 0, reflectTurns: 0, reflectSt: -1,
-    skillCd: tmpl.skill?.cd ?? 99,
+    // 普通技能：冷却型开局即就绪，条件型等条件满足
+    skillCd: tmpl.skill?.trigger?.type === "cooldown" ? 0 : 99,
+    skillUses: 0,
+    // 本方第几个 EX 是这个人放的；0 表示还没放过，开局全员可放
+    exCastNo: 0,
     alive: true,
   }
-  return u
 }
 
 /**
@@ -305,25 +245,16 @@ function makeUnit(tmpl, idx, side) {
 export function createBattle(a, b, opts = {}) {
   const seed = opts.seed ?? (Math.random() * 0xffffffff) >>> 0
   const state = {
-    seed,
-    rng: seed,
-    round: 1,
-    turnId: 0,
-    first: opts.first ?? 0,
-    activeSide: opts.first ?? 0,
-    phase: "command",
-    winner: null,
+    seed, rng: seed, round: 1, turnId: 0,
+    first: opts.first ?? 0, activeSide: opts.first ?? 0,
+    phase: "command", winner: null, fever: false,
     sides: [a, b].map((s, side) => ({
-      side,
-      uid: String(s.uid),
-      name: s.name || String(s.uid),
-      cost: CFG.COST_START,
-      regenAcc: 0,
+      side, uid: String(s.uid), name: s.name || String(s.uid),
+      cost: CFG.COST_START, regenAcc: 0,
+      exCasts: 0, lastAlive: s.picks.length,
       units: s.picks.map((id, i) => makeUnit(BY_ID[id], i, side)),
     })),
   }
-  initializeExWindows(state)
-  // 后手方开局补偿：技能牌窗口版扫描 0~3 后，3 点最接近五五开。
   state.sides[1 - state.first].cost += CFG.SECOND_BONUS
   return state
 }
@@ -331,501 +262,423 @@ export function createBattle(a, b, opts = {}) {
 // ---------------- 目标选择 ----------------
 
 /**
- * 普攻 / 普通技能的对线锁定，按顺序判定：
- *   1. 敌方有嘲讽 → 打它（多个取编号最小）
- *   2. 同号位存活 → 打同号位
- *   3. 存活敌人中取 |位置差| 最小者，同距离取编号小的
+ * 战场分割：1·2 号位是一个战场，3·4 号位是另一个，两边各打各的。
+ * 这是原作的机制，直接决定了站位是有讲究的 —— 把坦克放 1 位只保护得了 1·2。
+ */
+const zoneOf = (idx) => (idx < 2 ? 0 : 1)
+const isTank = (u) => tmplOf(u).role === "坦克"
+
+/**
+ * 普攻 / 普通技能的对线锁定，按优先级：
+ *   1. 嘲讽 —— 最高，直接无视战场分割
+ *   2. 同战场：只打 1·2 或只打 3·4；本战场敌人全灭了才越界
+ *   3. 战场内优先坦克 —— 坦克相当于站前一格，替同战场的队友挡刀
+ *   4. 同号位 → |位置差| 最小 → 编号小
  */
 function laneTarget(u, foes) {
   const taunts = foes.units.filter((f) => f.alive && f.taunt > 0)
   if (taunts.length) return taunts[0]
 
-  const direct = foes.units[u.idx]
-  if (direct?.alive) return direct
+  const alive = aliveOf(foes)
+  if (!alive.length) return null
+  const sameZone = alive.filter((f) => zoneOf(f.idx) === zoneOf(u.idx))
+  const pool = sameZone.length ? sameZone : alive
+  const tanks = pool.filter(isTank)
+  const cands = tanks.length ? tanks : pool
 
-  const cands = aliveOf(foes)
-  if (!cands.length) return null
+  const direct = cands.find((f) => f.idx === u.idx)
+  if (direct) return direct
   return cands.reduce((best, f) => {
-    const d = Math.abs(f.idx - u.idx)
-    const bd = Math.abs(best.idx - u.idx)
+    const d = Math.abs(f.idx - u.idx), bd = Math.abs(best.idx - u.idx)
     if (d < bd) return f
     if (d === bd && f.idx < best.idx) return f
     return best
   })
 }
 
-/** 角色统一命中对当前目标的命中率。 */
-function hitRate(src, tgt) {
-  const dr = Math.min(
-    CFG.DODGE_CAP,
-    Math.max(0, (tmplOf(tgt).dodge - tmplOf(src).acc) / CFG.DODGE_K)
-  )
-  return 1 - dr
-}
-
-function estDamage(src, tgt, mult) {
-  const raw = (
-    atkOf(src) * mult *
-    affinity(tmplOf(src).atkType, tmplOf(tgt).defType) *
-    (CFG.DEF_K / (CFG.DEF_K + dfsOf(tgt)))
-  )
-  return raw * hitRate(src, tgt)
-}
-
-/** enemy_single 未指定目标时的默认选择：优先能打死的，其次残血、高攻 */
-function pickBestEnemy(src, eff, foes) {
-  let best = null
-  let bs = -Infinity
-  for (const f of aliveOf(foes)) {
-    const est = estDamage(src, f, eff.mult ?? 1)
-    let s = est
-    if (est >= f.hp + f.shield) s += 100000
-    s += (1 - f.hp / f.maxhp) * 300 + atkOf(f) * 0.3
-    if (s > bs) { bs = s; best = f }
+/**
+ * 从主目标向外扩散选人：反复从「与已选集合相邻的存活单位」里挑百分比血量最低的。
+ *
+ * **扩散不跨战场**：主目标在 3 位，就只可能波及 4 位；同战场只剩一个人时，
+ * 范围技当场退化成单体。主目标本身不受限制 —— EX 想指哪打哪，
+ * 指了 3 位就打 3·4，这是玩家用 EX 换来的选择权。
+ */
+function expandAdjacent(pool, primary, count) {
+  const seq = pool
+    .filter((u) => u.alive && zoneOf(u.idx) === zoneOf(primary.idx))
+    .sort((a, b) => a.idx - b.idx)
+  const chosen = [primary]
+  while (chosen.length < count) {
+    const idxs = chosen.map((c) => seq.indexOf(c)).filter((i) => i >= 0)
+    const cands = seq.filter((u, i) => !chosen.includes(u) && idxs.some((j) => Math.abs(j - i) === 1))
+    if (!cands.length) break
+    chosen.push(cands.reduce((m, u) => (u.hp / u.maxhp < m.hp / m.maxhp ? u : m)))
   }
-  return best
+  return chosen
+}
+
+/**
+ * 己方目标未指定时的默认选择，规则与 laneTarget 对称：
+ * 对位（对自己而言就是自己）→ 同战场最近 → 全场最近。
+ */
+function allyLaneTarget(u, allies) {
+  if (u.alive) return u
+  const alive = aliveOf(allies)
+  if (!alive.length) return null
+  const sameZone = alive.filter((a) => zoneOf(a.idx) === zoneOf(u.idx))
+  const pool = sameZone.length ? sameZone : alive
+  return pool.reduce((best, a) => (Math.abs(a.idx - u.idx) < Math.abs(best.idx - u.idx) ? a : best))
 }
 
 /**
  * @param {object} pick 玩家指定的目标 {scope:'foe'|'ally', idx:0-3}，可为空
- * @returns {Array} 伤害类返回 [unit]，lane_splash 返回 [[unit, 倍率修正]]
+ * @returns {Array<object>} 命中的单位列表（AoE 无衰减，每个目标吃全额）
  */
-function resolveTargets(state, u, eff, foes, allies, pick) {
-  const tg = eff.target || "lane"
+function resolveTargets(state, u, skill, foes, allies, pick, actionKind) {
+  const tg = skill.target || "enemy_single"
+  const count = skill.count || 1
 
-  // 玩家显式指定目标时，单体类效果直接采用（EX 是唯一能打破对线格局的手段）
-  if (pick) {
-    const pool = pick.scope === "ally" ? allies : foes
-    const t = pool.units[pick.idx]
-    if (t?.alive) {
-      if (tg === "enemy_single") return [t]
-      if (tg === "ally_lowest") return [t]
-      if (tg === "lane_splash") {
-        const out = [[t, 1.0]]
-        for (const j of [t.idx - 1, t.idx + 1]) {
-          if (j >= 0 && j < 4 && foes.units[j]?.alive) out.push([foes.units[j], eff.splash ?? 0.5])
-        }
-        return out
-      }
-    }
-  }
-
-  if (tg === "lane") {
-    const t = laneTarget(u, foes)
-    return t ? [t] : []
-  }
-  if (tg === "lane_splash") {
-    let base = eff.ignoreDeadLane ? foes.units[u.idx] : laneTarget(u, foes)
-    if (!base || !base.alive) base = laneTarget(u, foes)
-    if (!base) return []
-    const out = [[base, 1.0]]
-    for (const j of [base.idx - 1, base.idx + 1]) {
-      if (j >= 0 && j < 4 && foes.units[j]?.alive) out.push([foes.units[j], eff.splash ?? 0.5])
-    }
-    return out.filter(([t]) => t.alive)
-  }
-  if (tg === "enemy_all") return aliveOf(foes)
-  if (tg === "enemy_random") return aliveOf(foes)
-  if (tg === "enemy_single") {
-    const t = pickBestEnemy(u, eff, foes)
-    return t ? [t] : []
-  }
+  if (tg === "self") return [u]
   if (tg === "ally_all") return aliveOf(allies)
   if (tg === "ally_lowest") {
     const al = aliveOf(allies)
-    if (!al.length) return []
-    return [al.reduce((m, a) => (a.hp / a.maxhp < m.hp / m.maxhp ? a : m))]
+    return al.length ? [al.reduce((m, a) => (a.hp / a.maxhp < m.hp / m.maxhp ? a : m))] : []
   }
-  if (tg === "self") return [u]
-  return []
+  if (tg === "enemy_all") return aliveOf(foes)
+
+  // 玩家指定主目标；EX 是唯一能打破对线格局的手段
+  const pool = tg.startsWith("ally") ? allies : foes
+  let primary = null
+  if (pick) {
+    const p = (pick.scope === "ally" ? allies : foes).units[pick.idx]
+    if (p?.alive && (pick.scope === "ally") === tg.startsWith("ally")) primary = p
+  }
+
+  if (tg === "enemy_random") return aliveOf(foes) // 逐段随机，在 strike 里再抽
+
+  // 不指定目标就一律走对线锁定：对位 → 同战场 → 最近。
+  // EX 也一样 —— 「挑全场最肥的」那种启发式看着聪明，实际让玩家猜不到刀会落在谁头上。
+  if (!primary) primary = tg.startsWith("ally") ? allyLaneTarget(u, allies) : laneTarget(u, foes)
+  if (!primary) return []
+  if (tg.endsWith("adjacent")) return expandAdjacent(pool.units, primary, count)
+  return [primary]
 }
 
 // ---------------- 伤害 ----------------
 
-const nameOf = (u) => tmplOf(u).name
-
-function applyDamage(ctx, src, tgt, dmg, crit = false, aff = 1.0, eventMeta = {}) {
-  const totalDamage = dmg
+function applyDamage(ctx, src, tgt, dmg, meta = {}) {
+  const total = dmg
   let absorbed = 0
   if (tgt.shield > 0) {
     absorbed = Math.min(tgt.shield, dmg)
     tgt.shield -= absorbed
     dmg -= absorbed
-    if (tgt.shield <= 0) {
-      tgt.shield = 0
-      tgt.shieldMax = 0
-      tgt.shieldTurns = 0
-    }
+    if (tgt.shield <= 0) { tgt.shield = 0; tgt.shieldMax = 0; tgt.shieldTurns = 0 }
   }
   tgt.hp -= dmg
 
   emitEvent(ctx, {
     type: "damage",
-    source: unitRef(eventMeta.sourceUnit || src),
-    target: unitRef(tgt),
-    amount: Math.round(dmg),
-    absorbed: Math.round(absorbed),
-    totalAmount: Math.round(totalDamage),
-    crit,
-    affinity: affinityMark(aff),
-    attackType: eventMeta.attackType || (src ? tmplOf(src).atkType : "持续"),
-    reflected: Boolean(eventMeta.reflected),
-    burn: Boolean(eventMeta.burn),
+    source: unitRef(src), target: unitRef(tgt),
+    amount: Math.round(dmg), absorbed: Math.round(absorbed), totalAmount: Math.round(total),
+    crit: Boolean(meta.crit), affinity: affinityMark(meta.aff ?? 1),
+    attackType: src ? tmplOf(src).atkType : "持续",
+    hits: meta.hits, landed: meta.landed,
   })
 
-  const tag =
-    (crit ? "暴击" : "") +
-    (aff > 1.01 ? "·克制" : aff < 0.99 ? "·抵抗" : "") +
-    (eventMeta.burn ? "·灼烧" : "")
+  const tag = (meta.crit ? "暴击" : "") +
+    (meta.aff > 1.01 ? "·克制" : meta.aff < 0.99 ? "·抵抗" : "")
   const ab = absorbed > 0 ? `（护盾吸收 ${Math.round(absorbed)}）` : ""
-  ctx.log(`  ${src ? nameOf(src) : "持续伤害"} → ${nameOf(tgt)} ${Math.round(dmg)}${ab} ${tag}`.trimEnd())
+  const seg = meta.hits ? ` [${meta.landed}/${meta.hits}段]` : ""
+  ctx.log(`  ${src ? nameOf(src) : "持续"} → ${nameOf(tgt)} ${Math.round(dmg)}${ab}${seg} ${tag}`.trimEnd())
 
   if (tgt.hp <= 0) {
     tgt.hp = 0
     tgt.alive = false
     tgt.taunt = 0
+    tgt.regens.length = 0
     ctx.log(`  ✝ ${nameOf(tgt)} 倒下`)
   }
 }
 
 /**
- * 灼烧不再在目标回合末独立跳伤害，而是在施加者后续行动时点各触发一次。
- * 若施加者正常攻击则并入该行动；若眩晕、阵亡或没有伤害行动则建立灼烧专用事件组。
- * 灼烧直接调用 applyDamage，不经过 deal 的命中判定，因此固定命中。
+ * 对单个目标打出一组分段攻击。每段独立判定命中与暴击（与原作一致），
+ * 因此段数越多伤害方差越小；结算后合并成一条伤害事件，避免刷屏。
  */
-function triggerBurns(ctx, src, standalone = false) {
-  const { state } = ctx
-  const T = state.turnId
-  const foes = state.sides[1 - src.side]
-  const pending = []
-  for (const tgt of foes.units) {
-    if (!tgt.alive) continue
-    for (const dot of [...tgt.dots]) {
-      if (dot.srcSide !== src.side || dot.srcPos !== src.idx) continue
-      if (dot.st === T || dot.lastProcTurn === T) continue
-      pending.push([tgt, dot])
-    }
-  }
-  if (!pending.length) return false
-
-  if (standalone) {
-    ctx.log(`[${src.side === 0 ? "蓝" : "红"}] ${nameOf(src)} 灼烧结算`)
-    const targets = [...new Map(pending.map(([tgt]) => [`${tgt.side}:${tgt.idx}`, unitRef(tgt)])).values()]
-    emitEvent(ctx, {
-      type: "action",
-      source: unitRef(src),
-      action: "burn",
-      kind: "damage",
-      targetType: "burn",
-      targets,
-    })
-  }
-
-  for (const [tgt, dot] of pending) {
-    if (!tgt.alive || !tgt.dots.includes(dot)) continue
-    dot.lastProcTurn = T
-    applyDamage(
-      ctx,
-      src,
-      tgt,
-      dot.srcAtk * dot.value * (1 + sdDmg(state)),
-      false,
-      1.0,
-      { attackType: "持续", burn: true }
-    )
-    dot.turns -= 1
-    if (dot.turns <= 0) tgt.dots.splice(tgt.dots.indexOf(dot), 1)
-    if (!tgt.alive) tgt.dots.length = 0
-  }
-  return true
-}
-
-function deal(ctx, src, tgt, mult, eff, mod = 1.0) {
+function strike(ctx, src, tgt, hits) {
   const { state } = ctx
   if (!tgt.alive || !src.alive) return 0
 
-  // 每名角色只有一个统一命中值，普攻、普通技能与 EX 全部读取它。
-  const dr = 1 - hitRate(src, tgt)
-  if (dr > 0 && nextRandom(state) < dr) {
-    ctx.log(`  ${nameOf(tgt)} 闪避了 ${nameOf(src)}`)
+  const aff = affinity(tmplOf(src).atkType, tmplOf(tgt).defType)
+  const hr = hitChance(src, tgt)
+  const cr = critChance(src, tgt)
+  const critMul = critMultOf(src, tgt)
+  const dm = defModOf(tgt)
+  const floor = stabilityFloor(src)
+  const atk = atkOf(src)
+  const dealF = Math.max(0.1, factorOf(src, "dmg_deal"))
+  const takeF = Math.max(0.1, factorOf(tgt, "dmg_take"))
+
+  let total = 0, landed = 0, anyCrit = false
+  for (const pct of hits) {
+    if (nextRandom(state) >= hr) continue // 这一段被闪避
+    landed++
+    const crit = nextRandom(state) < cr
+    if (crit) anyCrit = true
+    let d = atk * (pct / 100) * aff * dm * dealF * takeF
+    d *= randRange(state, floor, 1)
+    if (crit) d *= critMul
+    total += Math.max(1, d)
+  }
+
+  if (!landed) {
+    ctx.log(`  ${nameOf(tgt)} 闪避了 ${nameOf(src)}${hits.length > 1 ? `（${hits.length}段全空）` : ""}`)
     emitEvent(ctx, {
-      type: "miss",
-      source: unitRef(src),
-      target: unitRef(tgt),
-      attackType: tmplOf(src).atkType,
+      type: "miss", source: unitRef(src), target: unitRef(tgt),
+      attackType: tmplOf(src).atkType, hits: hits.length, landed: 0,
     })
     return 0
   }
-
-  const cr = Math.min(CFG.CRIT_CAP, Math.max(0, tmplOf(src).crit * factorOf(src, "crit")))
-  const crit = eff.forceCrit ? true : nextRandom(state) < cr
-
-  const aff = affinity(tmplOf(src).atkType, tmplOf(tgt).defType)
-  let dmg = atkOf(src) * mult * mod * aff * (CFG.DEF_K / (CFG.DEF_K + dfsOf(tgt)))
-
-  const eb = eff.execBonus
-  if (eb && tgt.hp / tgt.maxhp <= eb[0]) dmg *= eb[1]
-
-  dmg *= Math.max(0.1, factorOf(src, "dmg_deal"))
-  dmg *= Math.max(0.1, factorOf(tgt, "dmg_take"))
-  dmg *= 1 + sdDmg(state)
-  if (crit) dmg *= CFG.CRIT_DMG * Math.max(0.1, factorOf(src, "crit_dmg"))
-  if (CFG.DMG_JITTER) dmg *= 1 + randRange(state, -CFG.DMG_JITTER, CFG.DMG_JITTER)
-  dmg = Math.max(1, dmg)
-
-  applyDamage(ctx, src, tgt, dmg, crit, aff)
-
-  if (tgt.reflect > 0 && tgt.alive && src.alive) {
-    const r = dmg * tgt.reflect
-    ctx.log(`  ⟲ ${nameOf(tgt)} 反伤 ${Math.round(r)}`)
-    applyDamage(ctx, null, src, r, false, 1.0, {
-      sourceUnit: tgt,
-      attackType: tmplOf(tgt).atkType,
-      reflected: true,
-    })
-  }
-  return dmg
+  applyDamage(ctx, src, tgt, total, { crit: anyCrit, aff, hits: hits.length, landed })
+  return total
 }
 
 function heal(ctx, src, tgt, amount) {
   if (!tgt.alive) return
-  amount *= sdHeal(ctx.state)
+  // 受治疗量走 buff 系统（白热化的减益也在里面）
+  amount *= Math.max(0.1, factorOf(tgt, "heal_taken"))
   const h = Math.min(amount, tgt.maxhp - tgt.hp)
+  if (h <= 0) return
   tgt.hp += h
-  if (h > 0) {
-    ctx.log(`  ${nameOf(src)} 治疗 ${tgt === src ? "自身" : nameOf(tgt)} +${Math.round(h)}`)
-    emitEvent(ctx, {
-      type: "heal",
-      source: unitRef(src),
-      target: unitRef(tgt),
-      amount: Math.round(h),
-    })
-  }
+  ctx.log(`  ${nameOf(src)} 治疗 ${tgt === src ? "自身" : nameOf(tgt)} +${Math.round(h)}`)
+  emitEvent(ctx, { type: "heal", source: unitRef(src), target: unitRef(tgt), amount: Math.round(h) })
 }
 
 // ---------------- 效果执行 ----------------
 
-function execute(ctx, u, eff, label, pick) {
+/** 非伤害效果的作用域：self / ally_all / enemy（跟随伤害目标） */
+function scopeTargets(scope, u, allies, dmgTargets) {
+  if (scope === "self") return [u]
+  if (scope === "ally_all") return aliveOf(allies)
+  return dmgTargets.filter((t) => t.alive)
+}
+
+function applyEffects(ctx, u, skill, dmgTargets, allies) {
+  const { state } = ctx
+  const T = state.turnId
+  const me = state.sides[u.side]
+
+  for (const eff of skill.effects || []) {
+    const targets = scopeTargets(eff.scope, u, allies, dmgTargets)
+    switch (eff.type) {
+      case "buff": {
+        const shown = /_flat$/.test(eff.stat) ? eff.value : `${Math.round(eff.value * 100)}%`
+        for (const t of targets) {
+          upsertStatusLayer(t.buffs, makeStatus(eff, T, u, eff.value < 0 ? "debuff" : "buff"))
+          ctx.log(`  ${nameOf(t)} ${STAT_LABEL[eff.stat] || eff.stat} ${eff.value > 0 ? "+" : ""}${shown}（${eff.turns ?? 2}回合）`)
+        }
+        if (targets.length) emitEvent(ctx, {
+          type: eff.value < 0 ? "debuff" : "buff",
+          source: unitRef(u), target: unitRef(targets[0]), effects: [eff.stat],
+        })
+        break
+      }
+
+      case "heal":
+        for (const t of targets) heal(ctx, u, t, healOf(u) * eff.scale)
+        break
+
+      case "regen":
+        for (const t of targets) {
+          if (!t.alive) continue
+          t.regens.push({
+            amount: healOf(u) * eff.scale, turns: eff.turns, period: eff.period || 1,
+            tick: 0, sourceKey: sourceKeyOf(u.side, u.idx), srcSide: u.side, srcPos: u.idx, st: T,
+          })
+          ctx.log(`  ${nameOf(t)} 获得持续治疗（${eff.turns}回合，每${eff.period || 1}回合跳）`)
+        }
+        break
+
+      case "shield":
+        for (const t of targets) {
+          // 重复施加只把护盾恢复为本次的新容量并刷新时长，不与旧护盾叠加
+          const amount = Math.max(0, healOf(u) * eff.scale * Math.max(0.1, factorOf(t, "heal_taken")))
+          t.shield = amount; t.shieldMax = amount
+          t.shieldTurns = eff.turns ?? 2
+          t.shieldTickSide = 1 - t.side; t.shieldSt = T
+          ctx.log(`  ${nameOf(t)} 获得护盾 ${Math.round(amount)}（${t.shieldTurns}回合）`)
+          emitEvent(ctx, { type: "shield", source: unitRef(u), target: unitRef(t), amount: Math.round(amount), turns: t.shieldTurns })
+        }
+        break
+
+      case "cc":
+        if (eff.inactive || !eff.turns) break // 技能 1 级时控制时长为 0
+        for (const t of targets) {
+          if (nextRandom(state) >= (eff.chance ?? 1)) continue
+          t.stun = Math.max(t.stun, eff.turns); t.stunSt = T
+          ctx.log(`  ${nameOf(t)} 被${eff.icon === "Stunned" ? "眩晕" : "控制"} ${eff.turns} 回合`)
+          emitEvent(ctx, { type: "debuff", source: unitRef(u), target: unitRef(t), effects: ["stun"] })
+        }
+        break
+
+      case "cleanse":
+        for (const t of targets) {
+          t.buffs = t.buffs.filter((s) => s.effectKind !== "debuff")
+          ctx.log(`  ${nameOf(t)} 减益被清除`)
+        }
+        break
+
+      case "taunt":
+        for (const t of targets) {
+          t.taunt = eff.turns ?? 1; t.tauntSt = T
+          ctx.log(`  ${nameOf(t)} 嘲讽 ${t.taunt} 回合`)
+        }
+        break
+
+      case "cost": {
+        const before = me.cost
+        me.cost = Math.min(CFG.COST_MAX, Math.max(0, me.cost + eff.value))
+        const got = me.cost - before
+        if (got) {
+          ctx.skillCostGained = (ctx.skillCostGained || 0) + got
+          ctx.log(`  ${nameOf(u)} Cost ${got > 0 ? "+" : ""}${got}`)
+          emitEvent(ctx, { type: "cost", source: unitRef(u), target: unitRef(u), amount: got })
+        }
+        break
+      }
+    }
+  }
+}
+
+/**
+ * 执行一个技能（EX / 普通技能 / 普攻）。
+ * @param {string} label 日志抬头，含技能名
+ * @param {"ex"|"skill"|"normal"} actionKind 供渲染层区分动作类型
+ */
+function execute(ctx, u, skill, label, actionKind, pick) {
   const { state } = ctx
   const me = state.sides[u.side]
   const foes = state.sides[1 - u.side]
-  const tgs = resolveTargets(state, u, eff, foes, me, pick)
-  if (!tgs.length) return
+  const targets = resolveTargets(state, u, skill, foes, me, pick, actionKind)
+  if (!targets.length && skill.target !== "self") return
 
   ctx.log(`[${u.side === 0 ? "蓝" : "红"}] ${nameOf(u)} ${label}`)
   emitEvent(ctx, {
-    type: "action",
-    source: unitRef(u),
-    action: label.startsWith("EX") ? "ex" : label === "普通技能" ? "skill" : "normal",
-    kind: eff.kind || "damage",
-    targetType: eff.target || "lane",
-    targets: tgs.map((target) => unitRef(Array.isArray(target) ? target[0] : target)),
+    type: "action", source: unitRef(u),
+    action: actionKind,
+    skillName: skill.name || null,
+    kind: skill.hits ? "damage" : "support",
+    targetType: skill.target || "enemy_single",
+    targets: targets.map(unitRef),
   })
-  const T = state.turnId
 
-  if ((eff.kind || "damage") === "damage") {
-    const mult = eff.mult
-    const dotsToApply = []
-    if (eff.target === "enemy_random") {
-      for (let i = 0; i < (eff.hits || 1); i++) {
+  const hit = []
+  if (skill.hits?.length) {
+    if (skill.target === "enemy_random") {
+      // 弹射：每一段单独抽目标
+      for (const pct of skill.hits) {
         const al = aliveOf(foes)
         if (!al.length) break
-        deal(ctx, u, randPick(state, al), mult, eff)
+        const t = randPick(state, al)
+        strike(ctx, u, t, [pct])
+        if (!hit.includes(t)) hit.push(t)
       }
-    } else if (eff.target === "lane_splash") {
-      for (const [tgt, m] of tgs) deal(ctx, u, tgt, mult, eff, m)
     } else {
-      for (const tgt of tgs) {
-        // 引爆：清空目标身上的灼烧，换成一次性追加伤害
-        if (eff.detonate && tgt.dots.length) {
-          const hit = deal(ctx, u, tgt, mult + eff.detonate, eff) > 0
-          if (hit) tgt.dots.length = 0
-        } else {
-          deal(ctx, u, tgt, mult, eff)
-        }
-        if (!tgt.alive) continue
-        // 附加 debuff 是技能效果而非弹体伤害：伤害未命中时仍然施加。
-        // 降防、易伤等属性减益立刻影响本回合后续攻击；MISS 也不阻止附加效果。
-        for (const db of eff.debuffs || []) {
-          upsertStatusLayer(tgt.buffs, timedEnemyDebuff(db, T, u, tgt.side))
-        }
-        if (eff.dot) {
-          dotsToApply.push([tgt, {
-            value: eff.dot.value,
-            turns: eff.dot.turns,
-            srcAtk: atkOf(u),
-            srcSide: u.side,
-            srcPos: u.idx,
-            sourceKey: sourceKeyOf(u.side, u.idx),
-            effectKind: "dot",
-            st: T,
-          }])
-        }
-        if (eff.stun) { tgt.stun = Math.max(tgt.stun, eff.stun); tgt.stunSt = T }
-        if (eff.debuffs?.length || eff.dot || eff.stun) {
-          emitEvent(ctx, {
-            type: "debuff",
-            source: unitRef(u),
-            target: unitRef(tgt),
-            effects: [
-              ...(eff.debuffs || []).map((debuff) => debuff.stat),
-              ...(eff.dot ? ["dot"] : []),
-              ...(eff.stun ? ["stun"] : []),
-            ],
-          })
-        }
-      }
-    }
-    // 先结算同一施加者已有的灼烧，再用本次新灼烧刷新该来源的层；这样刷新
-    // 不会吞掉原本应在本次攻击中触发的最后一跳。
-    // 命中的引爆会先清除灼烧；未命中的目标仍照常受到本回合的必中灼烧。
-    triggerBurns(ctx, u)
-    for (const [target, dot] of dotsToApply) {
-      if (target.alive) upsertDotLayer(target.dots, dot)
-    }
-  } else {
-    for (const tgt of tgs) {
-      if (eff.heal) heal(ctx, u, tgt, atkOf(u) * eff.heal)
-      if (eff.shield) {
-        // 重复施加只把护盾恢复为本次的新容量并刷新时长，不与旧护盾叠加。
-        const amount = Math.max(0, atkOf(u) * eff.shield * sdHeal(state))
-        tgt.shield = amount
-        tgt.shieldMax = amount
-        tgt.shieldTurns = eff.shieldTurns ?? 2
-        tgt.shieldTickSide = 1 - tgt.side
-        tgt.shieldSt = T
-        ctx.log(`  ${nameOf(tgt)} 获得护盾 ${Math.round(amount)}（${tgt.shieldTurns}回合）`)
-        emitEvent(ctx, {
-          type: "shield",
-          source: unitRef(u),
-          target: unitRef(tgt),
-          amount: Math.round(amount),
-          turns: tgt.shieldTurns,
-        })
-      }
-      if (eff.cleanse) {
-        tgt.buffs = tgt.buffs.filter((status) => status.effectKind !== "debuff")
-        tgt.dots.length = 0
-      }
-      if (eff.taunt) { tgt.taunt = eff.taunt; tgt.tauntSt = T }
-      if (eff.reflect) {
-        tgt.reflect = eff.reflect
-        tgt.reflectTurns = eff.reflectTurns ?? 1
-        tgt.reflectSt = T
-      }
-      for (const b of eff.buffs || []) {
-        upsertStatusLayer(tgt.buffs, timedFriendlyBuff(b, T, u))
-      }
-      if (eff.cleanse || eff.taunt || eff.reflect || eff.buffs?.length) {
-        emitEvent(ctx, {
-          type: "buff",
-          source: unitRef(u),
-          target: unitRef(tgt),
-          effects: [
-            ...(eff.cleanse ? ["cleanse"] : []),
-            ...(eff.taunt ? ["taunt"] : []),
-            ...(eff.reflect ? ["reflect"] : []),
-            ...(eff.buffs || []).map((buff) => buff.stat),
-          ],
-        })
-      }
+      // AoE 无衰减：每个目标吃全额分段
+      for (const t of targets) { strike(ctx, u, t, skill.hits); hit.push(t) }
     }
   }
 
-  // 回费是技能自身效果，不依赖伤害是否命中；自动行动阶段获得的 Cost 留到后续回合使用。
-  if (eff.costGain) {
-    const before = me.cost
-    me.cost = Math.min(CFG.COST_MAX, me.cost + eff.costGain)
-    const recovered = me.cost - before
-    ctx.skillCostGained = (ctx.skillCostGained || 0) + recovered
-    ctx.log(`  ${nameOf(u)} 回复 Cost ${recovered}${recovered < eff.costGain ? `（溢出 ${eff.costGain - recovered}）` : ""}`)
-    if (recovered > 0) {
-      emitEvent(ctx, {
-        type: "cost",
-        source: unitRef(u),
-        target: unitRef(u),
-        amount: recovered,
-      })
-    }
-  }
-  for (const b of eff.selfBuffs || []) {
-    upsertStatusLayer(u.buffs, timedFriendlyBuff(b, T, u))
-  }
-  if (eff.selfBuffs?.length) {
-    emitEvent(ctx, {
-      type: "buff",
-      source: unitRef(u),
-      target: unitRef(u),
-      effects: eff.selfBuffs.map((buff) => buff.stat),
-    })
-  }
-  if (eff.selfHeal) heal(ctx, u, u, atkOf(u) * eff.selfHeal)
+  applyEffects(ctx, u, skill, hit.length ? hit : targets, me)
+}
+
+/** 普攻：对线锁定，分段独立判定。 */
+function autoAttack(ctx, u) {
+  const tmpl = tmplOf(u)
+  execute(ctx, u, { target: "enemy_single", count: 1, hits: tmpl.autoAttack.hits, effects: [] }, "普攻", "normal")
+}
+
+// ---------------- 普通技能触发 ----------------
+
+/** 普通技能是否就绪。冷却型看 skillCd，条件型看血量阈值，两者都受 maxUses 限制。 */
+function skillReady(u) {
+  const sk = tmplOf(u).skill
+  const tr = sk?.trigger
+  if (!sk || !tr) return false
+  if (tr.maxUses && u.skillUses >= tr.maxUses) return false
+  if (tr.type === "hp_below") return u.hp / u.maxhp <= tr.value
+  return u.skillCd <= 0
+}
+
+function consumeSkill(u) {
+  const tr = tmplOf(u).skill.trigger
+  u.skillUses += 1
+  u.skillCd = tr.type === "cooldown" ? tr.turns : 99
 }
 
 // ---------------- 回合结算 ----------------
 
 /**
- * 状态都从施放瞬间写入。友方进攻 Buff 与降防/易伤跟随施放方的攻击窗口计时，
- * 当前回合算第 1 回合；护盾按敌方实际攻击窗口计时，其余控制与防御状态跟随目标
- * 实际行动窗口计时。灼烧在攻击内结算。
+ * 状态都从施放瞬间写入。进攻类 Buff 跟随施放方的攻击窗口计时（施放回合算第 1 回合），
+ * 护盾按敌方实际攻击窗口计时，控制与持续治疗跟随目标自己的行动窗口。
  */
 function endTurn(ctx, side) {
   const { state } = ctx
   const T = state.turnId
-  const tickingSide = side.units[0]?.side ?? state.activeSide
+  const ticking = side.side
 
-  // Buff 可能挂在敌方身上却跟随施放方的攻击窗口倒计时，因此单独扫描双方。
-  for (const affectedSide of state.sides) {
-    for (const u of affectedSide.units) {
+  for (const s of state.sides) {
+    for (const u of s.units) {
       if (!u.alive) continue
       for (const b of [...u.buffs]) {
-        const tickSide = Number.isInteger(b.tickSide) ? b.tickSide : u.side
-        if (tickSide !== tickingSide || b.turns >= 9999) continue
+        const tickSide = b.countCurrent ? b.srcSide : u.side
+        if (tickSide !== ticking || b.turns >= 9999) continue
         if (b.st === T && !b.countCurrent) continue
         b.turns -= 1
         if (b.turns <= 0) u.buffs.splice(u.buffs.indexOf(b), 1)
       }
-
-      const shieldTickSide = Number.isInteger(u.shieldTickSide) ? u.shieldTickSide : 1 - u.side
-      if (u.shieldTurns > 0 && shieldTickSide === tickingSide && u.shieldSt !== T) {
+      const shieldTick = Number.isInteger(u.shieldTickSide) ? u.shieldTickSide : 1 - u.side
+      if (u.shieldTurns > 0 && shieldTick === ticking && u.shieldSt !== T) {
         u.shieldTurns -= 1
-        if (u.shieldTurns <= 0) {
-          u.shield = 0
-          u.shieldMax = 0
-          u.shieldTurns = 0
-        }
+        if (u.shieldTurns <= 0) { u.shield = 0; u.shieldMax = 0; u.shieldTurns = 0 }
       }
     }
   }
 
+  // 持续治疗按承受者自己的回合跳
   for (const u of side.units) {
     if (!u.alive) continue
+    for (const r of [...u.regens]) {
+      if (r.st === T) continue
+      r.tick += 1
+      if (r.tick % r.period === 0) {
+        const h = Math.min(r.amount, u.maxhp - u.hp)
+        if (h > 0) {
+          u.hp += h
+          ctx.log(`  ${nameOf(u)} 持续治疗 +${Math.round(h)}`)
+          emitEvent(ctx, { type: "heal", source: unitRef(u), target: unitRef(u), amount: Math.round(h) })
+        }
+      }
+      r.turns -= 1
+      if (r.turns <= 0) u.regens.splice(u.regens.indexOf(r), 1)
+    }
 
     if (u.stun > 0 && u.stunSt !== T) u.stun -= 1
     if (u.taunt > 0 && u.tauntSt !== T) u.taunt -= 1
-    if (u.reflectTurns > 0 && u.reflectSt !== T) {
-      u.reflectTurns -= 1
-      if (u.reflectTurns === 0) u.reflect = 0
-    }
-    if (u.skillCd > 0) u.skillCd -= 1
+    if (u.skillCd > 0 && u.skillCd < 99) u.skillCd -= 1
   }
 }
 
-function checkEnd(state) {
-  return sideDead(state.sides[0]) || sideDead(state.sides[1])
-}
+const checkEnd = (state) => sideDead(state.sides[0]) || sideDead(state.sides[1])
 
 function settle(state) {
-  const a = sideDead(state.sides[0])
-  const b = sideDead(state.sides[1])
+  const a = sideDead(state.sides[0]), b = sideDead(state.sides[1])
   if (a && b) state.winner = -1
   else if (b) state.winner = 0
   else if (a) state.winner = 1
   else {
-    const ratio = (s) =>
-      s.units.reduce((x, u) => x + u.hp, 0) / s.units.reduce((x, u) => x + u.maxhp, 0)
-    const ra = ratio(state.sides[0])
-    const rb = ratio(state.sides[1])
+    const ratio = (s) => s.units.reduce((x, u) => x + u.hp, 0) / s.units.reduce((x, u) => x + u.maxhp, 0)
+    const ra = ratio(state.sides[0]), rb = ratio(state.sides[1])
     state.winner = ra > rb ? 0 : rb > ra ? 1 : -1
   }
   state.phase = "done"
@@ -834,16 +687,60 @@ function settle(state) {
 
 // ---------------- 对外主接口 ----------------
 
-/** Cost 回复只取决于存活人数，与本回合做了什么无关 */
-export function regenOf(side) {
-  const n = aliveOf(side).length
-  return CFG.COST_REGEN + CFG.COST_REGEN_PER_UNIT * n
+/** Cost 回复只取决于存活人数；白热化期间翻倍（原作 FEVER 的核心效果就是这条） */
+export const regenOf = (side, state) =>
+  CFG.COST_REGEN_PER_UNIT * aliveOf(side).length * (state && feverOn(state) ? CFG.FEVER_COST_MULT : 1)
+
+/**
+ * 当前行动方本回合实际可用的 Cost。
+ * 回复发生在每个回合「结束时」，所以进入回合时手上的就是全部预算，不再预支。
+ */
+export function turnCostOf(side) {
+  return Math.min(CFG.COST_MAX, Math.floor(side.cost))
 }
 
-/** 当前行动方在本回合完成自动回复后，实际可用的 Cost。 */
-export function turnCostOf(side) {
-  const gain = Math.floor((Number(side.regenAcc) || 0) + regenOf(side))
-  return Math.min(CFG.COST_MAX, side.cost + gain)
+/**
+ * 把指令里的角色名换算成号位。
+ * 同队不允许重名，所以名字能唯一定位——战场图上也就不用再标号位了。
+ * @returns {{casts:Array}|{error:string}}
+ */
+function resolveCasts(state, action) {
+  if (action.type !== "ex") return { casts: [] }
+  const mine = state.sides[state.activeSide].units
+  const foes = state.sides[1 - state.activeSide].units
+  const pick = (units, id) => units.find((u) => u.id === id)
+  const label = (id) => BY_ID[id]?.name || id
+
+  const casts = []
+  for (const c of action.casts) {
+    let pos = c.pos
+    if (pos == null) {
+      const u = pick(mine, c.id)
+      if (!u) return { error: `你的队伍里没有${label(c.id)}` }
+      pos = u.idx
+    }
+    const out = { pos }
+    if (c.target) {
+      const { idx, id } = c.target
+      // 没写「打/给」时按技能自己的目标类型猜边
+      const exTarget = String(tmplOf(mine[pos]).ex.target || "enemy_single")
+      const scope = c.target.scope || (exTarget.startsWith("enemy") ? "foe" : "ally")
+      if (idx != null) out.target = { scope, idx }
+      else {
+        // 猜错了就翻到另一边找 —— 没写动词本来就是模糊的，别拿猜测去卡玩家
+        let u = pick(scope === "ally" ? mine : foes, id)
+        let side = scope
+        if (!u && !c.target.scope) {
+          side = scope === "ally" ? "foe" : "ally"
+          u = pick(side === "ally" ? mine : foes, id)
+        }
+        if (!u) return { error: `${scope === "ally" ? "你的队伍" : "对方队伍"}里没有${label(id)}` }
+        out.target = { scope: side, idx: u.idx }
+      }
+    }
+    casts.push(out)
+  }
+  return { casts }
 }
 
 /** 校验一条指令能不能执行，返回错误文案或 null。不改动 state。 */
@@ -851,34 +748,30 @@ export function validateAction(state, action) {
   if (state.phase !== "command") return "这局已经结束了"
   if (action.type === "pass") return null
 
+  const resolved = resolveCasts(state, action)
+  if (resolved.error) return resolved.error
+
   const draft = structuredClone(state)
-  syncAllExWindows(draft)
-  const sideIndex = draft.activeSide
-  const side = draft.sides[sideIndex]
-  // 玩家指令触发结算后会先回复 Cost，校验必须使用同一个回合起始预算。
+  const side = draft.sides[draft.activeSide]
+  refreshExOnCasualty(side)
   let budget = turnCostOf(side)
   const exActors = new Set()
 
-  for (const cast of action.casts) {
+  // 边走边记冷却：一条指令里连放多个时，前面的释放会把后面的人解锁
+  for (const cast of resolved.casts) {
     const u = side.units[cast.pos]
     if (!u) return `没有 ${cast.pos + 1} 号位`
     if (!u.alive) return `${nameOf(u)} 已经倒下了`
     if (exActors.has(cast.pos)) return `${nameOf(u)} 本回合已经释放过 EX`
-    if (!side.exHand.includes(cast.pos)) {
-      const cards = side.exHand
-        .map((pos) => `${pos + 1}.${nameOf(side.units[pos])}(${tmplOf(side.units[pos]).ex.cost}费)`)
-        .join(" / ") || "无"
-      return `${nameOf(u)} 当前不在 EX 窗口；现在可用：${cards}`
-    }
+    const wait = exWaitOf(side, u)
+    if (wait > 0) return `${nameOf(u)} 的 EX 还在冷却，还需本方再放出 ${wait} 个 EX`
     if (u.stun > 0) return `${nameOf(u)} 被眩晕，放不出 EX`
     const cost = tmplOf(u).ex.cost
-    if (budget < cost) {
-      return `Cost 不够：${nameOf(u)} 要 ${cost} 点，你还剩 ${budget} 点`
-    }
+    if (budget < cost) return `Cost 不够：${nameOf(u)} 要 ${cost} 点，你还剩 ${budget} 点`
     budget -= cost
     side.cost = budget
     exActors.add(cast.pos)
-    cycleExCard(draft, sideIndex, cast.pos)
+    markExCast(side, u)
   }
   return null
 }
@@ -887,65 +780,71 @@ export function validateAction(state, action) {
  * 打完当前行动方的一个回合。
  * @param {object} prev 战斗状态（不会被修改）
  * @param {{type:'pass'}|{type:'ex', casts:Array<{pos:number, target?:object}>}} action
- * @returns {{state:object, log:string[], events:object[], round?:number, error?:string}} round 是刚结算回合所属轮数，events 保留逐段命中供 Canvas 绘制
+ * @returns {{state, log, events, round, error?}}
  */
 export function playerTurn(prev, action) {
   const err = validateAction(prev, action)
   if (err) return { state: prev, log: [], error: err }
 
   const state = structuredClone(prev)
-  syncAllExWindows(state)
   const lines = []
   const events = []
-  const ctx = { state, log: (s) => lines.push(s), emit: (event) => events.push(event) }
+  const ctx = { state, log: (s) => lines.push(s), emit: (e) => events.push(e) }
 
   const side = state.sides[state.activeSide]
   const tag = state.activeSide === 0 ? "蓝" : "红"
-
   const actionRound = state.round
   state.turnId += 1
 
-  // ① Cost 回复；createBattle 保留开局 0/3，正式进入回合后才在这里结算。
+  // Cost 在回合末才回复，因此进入回合时手上的就是本回合的全部预算
   const costAtStart = side.cost
-  side.regenAcc += regenOf(side)
-  const gain = Math.floor(side.regenAcc)
-  side.regenAcc -= gain
-  side.cost = Math.min(CFG.COST_MAX, side.cost + gain)
-  const gained = side.cost - costAtStart // 撞上限时实际到手会少于 gain
+  let gained = 0
   let spent = 0
 
+  /** 回合结束时的 Cost 回复：只取决于存活人数，与本回合做了什么无关 */
+  const applyRegen = () => {
+    const before = side.cost
+    side.regenAcc += regenOf(side, state)
+    const g = Math.floor(side.regenAcc)
+    side.regenAcc -= g
+    side.cost = Math.min(CFG.COST_MAX, side.cost + g)
+    gained = side.cost - before
+  }
+
   const done = () => {
-    syncAllExWindows(state)
-    pruneInvalidDots(state)
     return {
-      state,
-      log: lines,
-      events,
-      costBefore: costAtStart,
-      gained,
-      skillGained: ctx.skillCostGained || 0,
-      spent,
+      state, log: lines, events,
+      costBefore: costAtStart, gained, skillGained: ctx.skillCostGained || 0, spent,
       round: actionRound,
     }
   }
 
   lines.push(`--- ${tag}方回合（Cost ${side.cost}）---`)
 
+  // ⓪ 白热化按累计回合数（＝经过的秒数）判定，所以放在回合最开头
+  enterFever(ctx)
+
+  // ① 减员刷新要在指令之前跑：这一回合就该能放，不能等到下回合
+  refreshExOnCasualty(side, () => lines.push(`[${tag}] 有人阵亡，全员 EX 冷却清空`))
+
   // ② 玩家指令：EX
   let usedEx = false
   const exActors = new Set()
   if (action.type === "ex") {
-    for (const cast of action.casts) {
+    // 已经过校验，这里不会再出 error
+    for (const cast of resolveCasts(state, action).casts) {
       const u = side.units[cast.pos]
-      if (!u.alive || u.stun > 0 || !side.exHand.includes(cast.pos)) continue
+      if (!u.alive || u.stun > 0 || exWaitOf(side, u) > 0 || exActors.has(cast.pos)) continue
       const ex = tmplOf(u).ex
       if (side.cost < ex.cost) continue
       side.cost -= ex.cost
       spent += ex.cost
-      cycleExCard(state, state.activeSide, cast.pos)
+      markExCast(side, u)
       usedEx = true
       exActors.add(cast.pos)
-      execute(ctx, u, ex, `EX(-${ex.cost})`, cast.target)
+      execute(ctx, u, ex, `EX「${ex.name}」(-${ex.cost})`, "ex", cast.target)
+      // 「立即换弹」：上完效果立刻普攻一次
+      if (ex.thenAutoAttack && u.alive && !checkEnd(state)) autoAttack(ctx, u)
       if (checkEnd(state)) { settle(state); return done() }
     }
   }
@@ -954,45 +853,29 @@ export function playerTurn(prev, action) {
   // ③ 己方角色按位置 1→4 依次自动行动
   for (const u of side.units) {
     if (sideDead(state.sides[1 - state.activeSide])) break
-    if (!u.alive) {
-      triggerBurns(ctx, u, true)
-      if (checkEnd(state)) { settle(state); return done() }
-      continue
-    }
-    // 同一角色每回合只走一条行动分支：已经释放 EX，就不再自动放普技或普攻。
-    if (exActors.has(u.idx)) {
-      // 伤害 EX 已在 execute 内触发；无伤害 EX 则在原自动行动时点补做灼烧结算。
-      triggerBurns(ctx, u, true)
-      if (checkEnd(state)) { settle(state); return done() }
-      continue
-    }
-    const tmpl = tmplOf(u)
+    if (!u.alive) continue
+    // 同一角色每回合只走一条行动分支：放过 EX 就不再自动出手
+    if (exActors.has(u.idx)) continue
+
     if (u.stun > 0) {
-      if (u.skillCd <= 0) {
-        // 小技能已经轮到就绪点：即使被眩晕打断，也视为本回合释放过并重新进入冷却。
-        u.skillCd = tmpl.skill.cd
-        lines.push(`[${tag}] ${nameOf(u)} 眩晕，普通技能被吞掉并进入冷却`)
-      } else {
-        lines.push(`[${tag}] ${nameOf(u)} 眩晕，无法行动`)
-      }
-      triggerBurns(ctx, u, true)
-      if (checkEnd(state)) { settle(state); return done() }
+      lines.push(`[${tag}] ${nameOf(u)} 眩晕，无法行动`)
       continue
     }
-    if (u.skillCd <= 0) {
-      u.skillCd = tmpl.skill.cd
-      execute(ctx, u, tmpl.skill, "普通技能")
+    if (skillReady(u)) {
+      const sk = tmplOf(u).skill
+      consumeSkill(u)
+      execute(ctx, u, sk, `普通技能「${sk.name}」`, "skill")
     } else {
-      execute(ctx, u, { kind: "damage", mult: 1.0, target: "lane" }, "普攻")
+      autoAttack(ctx, u)
     }
     if (checkEnd(state)) { settle(state); return done() }
   }
 
-  // ④ 回合结束结算
+  // ④ 回合结束：先结算状态时长，再回复 Cost（所以首轮双方都不回）
   endTurn(ctx, side)
+  applyRegen()
   if (checkEnd(state)) { settle(state); return done() }
 
-  // 交棒
   state.activeSide = 1 - state.activeSide
   if (state.activeSide === state.first) {
     if (state.round >= CFG.MAX_ROUND) settle(state)
@@ -1001,4 +884,4 @@ export function playerTurn(prev, action) {
   return done()
 }
 
-export { nameOf, tmplOf, aliveOf, sideDead }
+export { nameOf, tmplOf, aliveOf, sideDead, hitChance, critChance, defModOf, stabilityFloor }
