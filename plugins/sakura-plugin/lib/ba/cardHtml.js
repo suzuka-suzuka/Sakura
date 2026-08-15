@@ -19,6 +19,8 @@ function triggerLabel(tr) {
   if (!tr) return "被动"
   const uses = tr.maxUses ? ` · 每场${tr.maxUses}次` : ""
   if (tr.type === "hp_below") return `生命≤${Math.round(tr.value * 100)}%${uses}`
+  if (tr.type === "on_auto") return `普攻${Math.round((tr.chance ?? 1) * 100)}% · CD${tr.turns}${uses}`
+  if (tr.type === "on_kill") return tr.turns ? `击杀 · CD${tr.turns}${uses}` : `击杀${uses}`
   return `CD${tr.turns}${uses}`
 }
 

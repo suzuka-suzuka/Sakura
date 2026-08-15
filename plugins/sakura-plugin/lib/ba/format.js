@@ -216,12 +216,24 @@ const TRIGGER_TEXT = (tr) => {
   if (!tr) return ""
   const uses = tr.maxUses ? `，每场限 ${tr.maxUses} 次` : ""
   if (tr.type === "hp_below") return `生命≤${Math.round(tr.value * 100)}% 时触发${uses}`
+  if (tr.type === "on_auto") {
+    return `普攻时 ${Math.round((tr.chance ?? 1) * 100)}% 概率（冷却 ${tr.turns} 回合）${uses}`
+  }
+  if (tr.type === "on_kill") {
+    return tr.turns ? `自己击杀时（冷却 ${tr.turns} 回合）${uses}` : `自己击杀时${uses}`
+  }
   return `每 ${tr.turns} 回合${uses}`
 }
 
 export function describeEffect(sk) {
   if (!sk) return "无"
   const parts = []
+  if (sk.trigger?.type === "on_auto") {
+    parts.push(`普攻时 ${Math.round((sk.trigger.chance ?? 1) * 100)}% 概率`)
+  }
+  if (sk.trigger?.type === "on_kill") {
+    parts.push(sk.trigger.turns ? `自己击杀时（冷却 ${sk.trigger.turns} 回合）` : "自己击杀时")
+  }
   const tg = TARGET_TEXT[sk.target] || sk.target
   if (sk.hits?.length) {
     const total = sk.hits.reduce((a, b) => a + b, 0)

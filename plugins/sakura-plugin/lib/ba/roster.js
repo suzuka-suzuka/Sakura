@@ -719,8 +719,9 @@ export const ROSTER = [
       "count": 1,
       "effects": [],
       "trigger": {
-        "type": "cooldown",
-        "turns": 5
+        "type": "on_auto",
+        "chance": 0.2,
+        "turns": 2
       },
       "hits": [
         20.7269,
@@ -962,8 +963,8 @@ export const ROSTER = [
         }
       ],
       "trigger": {
-        "type": "cooldown",
-        "turns": 5
+        "type": "on_kill",
+        "turns": 2
       }
     },
     "ex": {
@@ -1159,8 +1160,9 @@ export const ROSTER = [
         }
       ],
       "trigger": {
-        "type": "cooldown",
-        "turns": 5
+        "type": "on_auto",
+        "chance": 0.1,
+        "turns": 3
       }
     },
     "ex": {
@@ -1218,8 +1220,8 @@ export const ROSTER = [
         }
       ],
       "trigger": {
-        "type": "cooldown",
-        "turns": 5
+        "type": "on_kill",
+        "turns": 0
       },
       "thenAutoAttack": true
     },

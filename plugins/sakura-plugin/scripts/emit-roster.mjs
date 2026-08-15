@@ -130,6 +130,27 @@ function parseTrigger(desc) {
   const once = /仅可触发\s*(\d+)\s*次/.exec(desc)
   const hp = /生命值不高于\s*([\d.]+)%/.exec(desc)
   const sec = /每\s*([\d.]+)\s*秒/.exec(desc)
+  const chance = /(\d+(?:\.\d+)?)\s*%\s*概率/.exec(desc)
+  const icd = /冷却\s*([\d.]+)\s*秒/.exec(desc)
+  // 鹤城 / 莲见：自己击杀掉才触发。别当成「每 5 回合必回血」。
+  // 不认「击败 N 名 / 每击败」那种叠层计数（池外丽、纱织礼服）。
+  if (/自身击败敌方单位时/.test(desc) && !/击败\s*\d+\s*名/.test(desc) && !/每击败/.test(desc)) {
+    return {
+      type: "on_kill",
+      turns: icd ? secToTurns(Number(icd[1])) : 0,
+      ...(once ? { maxUses: Number(once[1]) } : {}),
+    }
+  }
+  // 泉 / 明里：普通技能挂在普攻上，不是「每 X 秒必放」。冷却写在括号里，只有触发成功才进 CD。
+  const onAuto = /自身普通攻击时/.test(desc)
+  if (onAuto) {
+    return {
+      type: "on_auto",
+      chance: chance ? Number(chance[1]) / 100 : 1,
+      turns: icd ? secToTurns(Number(icd[1])) : 2,
+      ...(once ? { maxUses: Number(once[1]) } : {}),
+    }
+  }
   if (hp) return { type: "hp_below", value: Number(hp[1]) / 100, maxUses: once ? Number(once[1]) : 1 }
   if (sec) return { type: "cooldown", turns: secToTurns(Number(sec[1])), ...(once ? { maxUses: Number(once[1]) } : {}) }
   return { type: "cooldown", turns: 5, ...(once ? { maxUses: Number(once[1]) } : {}) }

@@ -8,6 +8,7 @@
  */
 import { createBattle, playerTurn } from "../lib/ba/engine.js"
 import { ROSTER } from "../lib/ba/roster.js"
+import { describeEffect } from "../lib/ba/format.js"
 
 const id = (n) => ROSTER.find((t) => t.name === n).id
 
@@ -286,6 +287,32 @@ check("放完一个 EX 且还能再放时回合还开着",
   playerTurn(setup(["真纪", "野宫", "野宫", "茜"], ["白子", "星野", "日奈", "爱露"]), {
     type: "ex", casts: [{ pos: 3, target: { scope: "foe", idx: 0 } }],
   }).state.turnOpen, true)
+
+console.log("\n=== 14. 泉普技是普攻触发，不是每 5 回合必放 ===")
+const izumi = ROSTER.find((t) => t.name === "泉")
+const akari = ROSTER.find((t) => t.name === "明里")
+check("泉 trigger = 普攻 20%、冷却 2 回合", izumi.skill.trigger, { type: "on_auto", chance: 0.2, turns: 2 })
+check("明里 trigger = 普攻 10%、冷却 3 回合", akari.skill.trigger, { type: "on_auto", chance: 0.1, turns: 3 })
+check("泉描述带普攻概率", /普攻时 20%/.test(describeEffect(izumi.skill)), true)
+const izumiTurn = run(setup(["泉", "野宫", "野宫", "野宫"], OUT), { type: "pass" })
+const izumiActs = izumiTurn.events.filter((e) => e.type === "action" && e.source.pos === 0)
+check("过的时候泉一定先普攻", izumiActs[0]?.action, "normal")
+check("泉不会在技能阶段单独放普技", izumiActs[0]?.action === "skill", false)
+
+console.log("\n=== 15. 鹤城回血按自己击杀判定 ===")
+const tsurugi = ROSTER.find((t) => t.name === "鹤城")
+const hasumi = ROSTER.find((t) => t.name === "莲见")
+check("鹤城 trigger = 击杀、冷却 2 回合", tsurugi.skill.trigger, { type: "on_kill", turns: 2 })
+check("莲见 trigger = 击杀、无冷却", hasumi.skill.trigger, { type: "on_kill", turns: 0 })
+const noKill = run(setup(["鹤城", "野宫", "野宫", "野宫"], OUT), { type: "pass" })
+check("没击杀不回血", noKill.events.some((e) => e.type === "heal" && e.source.pos === 0), false)
+const killSt = setup(["鹤城", "野宫", "野宫", "野宫"], OUT)
+killSt.sides[0].units[0].hp = 800
+killSt.sides[0].units[0].skillCd = 0
+killSt.sides[1].units[0].hp = 1
+const didKill = run(killSt, { type: "pass" })
+check("自己击杀掉才回血", didKill.events.some((e) => e.type === "heal" && e.source.pos === 0), true)
+check("击杀回血后进冷却", didKill.state.sides[0].units[0].skillCd > 0, true)
 
 console.log(bad ? `\n✗ ${bad} 条不符` : "\n全部符合")
 process.exit(bad ? 1 : 0)

@@ -287,8 +287,10 @@ function makeUnit(tmpl, idx, side) {
     stun: 0, stunSt: -1, stunIcon: null,
     taunt: 0, tauntSt: -1,
     // 普通技能：「每 X 秒」是周期，第一次落在 X 秒而不是开局，所以起始压满冷却；
-    // 条件型（血量阈值）等条件满足，用 99 表示「不靠冷却解锁」
-    skillCd: tmpl.skill?.trigger?.type === "cooldown" ? tmpl.skill.trigger.turns : 99,
+    // 条件型（血量阈值）等条件满足，用 99 表示「不靠冷却解锁」；
+    // 普攻触发（泉 / 明里）第一次就能 roll，起始 0
+    skillCd: tmpl.skill?.trigger?.type === "cooldown" ? tmpl.skill.trigger.turns
+      : (tmpl.skill?.trigger?.type === "on_auto" || tmpl.skill?.trigger?.type === "on_kill") ? 0 : 99,
     skillUses: 0,
     // 换弹强化：{shots, mult, count}，鹤城 EX 之后的两发普攻走这个
     charge: null,
@@ -561,6 +563,7 @@ function applyDamage(ctx, src, tgt, dmg, meta = {}) {
     tgt.regens.length = 0
     tgt.dots.length = 0
     ctx.log(`  ✝ ${nameOf(tgt)} ${tgt.summon ? "被打碎" : "倒下"}`)
+    if (src && src !== tgt && src.alive) tryKillProc(ctx, src)
   }
 }
 
@@ -733,7 +736,7 @@ function applyEffects(ctx, u, skill, dmgTargets, allies) {
           hp, maxhp: hp, shield: 0, shieldMax: 0, shieldTurns: 0,
           // dots 不能漏：场地技打到人偶时会往这里 push，缺了直接崩
           buffs: [], regens: [], dots: [], stun: 0,
-          taunt: eff.taunt || 0, turns: eff.turns, st: T,
+          taunt: eff.taunt || 0, turns: eff.turns, turnsMax: eff.turns, st: T,
           sourceKey: key, alive: true,
         })
         ctx.log(`  ${nameOf(u)} 召唤${tpl.name}（${hp} 生命，挡住 ${blockIdx + 1} 号位` +
@@ -869,6 +872,7 @@ function autoAttack(ctx, u) {
       target: c.count > 1 ? "enemy_adjacent" : "enemy_single", count: c.count,
       hits: tmpl.autoAttack.hits.map((h) => Number((h * c.mult).toFixed(4))), effects: [],
     }, "强化普攻", "normal")
+    tryAutoProc(ctx, u)
     return
   }
   // 普攻本身也可能是范围的（千世的圆形普攻），照模板里的 target/count 走
@@ -877,6 +881,7 @@ function autoAttack(ctx, u) {
     count: tmpl.autoAttack.count || 1,
     hits: tmpl.autoAttack.hits, effects: [],
   }, "普攻", "normal")
+  tryAutoProc(ctx, u)
 }
 
 // ---------------- 普通技能触发 ----------------
@@ -886,6 +891,8 @@ function skillReady(u) {
   const sk = tmplOf(u).skill
   const tr = sk?.trigger
   if (!sk || !tr) return false
+  // 普攻 / 击杀触发不进技能阶段，分别跟着普攻和击杀掉落走
+  if (tr.type === "on_auto" || tr.type === "on_kill") return false
   if (tr.maxUses && u.skillUses >= tr.maxUses) return false
   if (tr.type === "hp_below") return u.hp / u.maxhp <= tr.value
   return u.skillCd <= 0
@@ -894,7 +901,32 @@ function skillReady(u) {
 function consumeSkill(u) {
   const tr = tmplOf(u).skill.trigger
   u.skillUses += 1
-  u.skillCd = tr.type === "cooldown" ? tr.turns : 99
+  if (tr.type === "on_kill") u.skillCd = tr.turns || 0
+  else u.skillCd = (tr.type === "cooldown" || tr.type === "on_auto") ? tr.turns : 99
+}
+
+/** 鹤城 / 莲见：自己击杀掉才触发。鹤城有 10 秒 CD，莲见每刀都能换弹补枪。 */
+function tryKillProc(ctx, u) {
+  const sk = tmplOf(u).skill
+  const tr = sk?.trigger
+  if (tr?.type !== "on_kill" || !u.alive) return
+  if (tr.maxUses && u.skillUses >= tr.maxUses) return
+  if (u.skillCd > 0) return
+  consumeSkill(u)
+  execute(ctx, u, sk, `普通技能「${sk.name}」`, "skill")
+  if (sk.thenAutoAttack && u.alive && !checkEnd(ctx.state)) autoAttack(ctx, u)
+}
+
+/** 泉 / 明里：普攻出手后按概率触发普通技能，只有触发成功才进冷却。 */
+function tryAutoProc(ctx, u) {
+  const sk = tmplOf(u).skill
+  const tr = sk?.trigger
+  if (tr?.type !== "on_auto" || !u.alive) return
+  if (tr.maxUses && u.skillUses >= tr.maxUses) return
+  if (u.skillCd > 0) return
+  if (nextRandom(ctx.state) >= (tr.chance ?? 1)) return
+  consumeSkill(u)
+  execute(ctx, u, sk, `普通技能「${sk.name}」`, "skill")
 }
 
 // ---------------- 回合结算 ----------------

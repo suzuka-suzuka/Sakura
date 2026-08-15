@@ -148,7 +148,8 @@ function statusMarks(u) {
   if (u.stun > 0) marks.push(`<i class="mk debuff">${ICON.stun}</i>`)
 
   // 普通技能就绪 = 下个己方回合就会放，属于「预警」而不是状态
-  if (u.skillCd <= 0 && tmplOf(u).skill?.trigger?.type === "cooldown") {
+  const tr = tmplOf(u).skill?.trigger?.type
+  if (u.skillCd <= 0 && (tr === "cooldown" || tr === "on_auto" || tr === "on_kill")) {
     marks.push(`<i class="mk warn">${ICON.warn}</i>`)
   }
   return marks.join("")
@@ -468,9 +469,11 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 .sm .prov svg{width:17px;height:17px}
 .smhp{width:88px;height:7px;border-radius:4px;background:rgba(40,80,125,.18);overflow:hidden}
 .smhp s{display:block;height:100%;background:linear-gradient(90deg,#8A63D2,#6C4BC4)}
-.sm b{font-size:13px;color:#22384F;font-weight:600;display:flex;align-items:center;gap:5px;
+/* 持续时间：血条下面一条橙色，按剩余回合缩，不再用数字 */
+.smdur{width:88px;height:5px;border-radius:3px;background:rgba(40,80,125,.16);overflow:hidden}
+.smdur s{display:block;height:100%;background:linear-gradient(90deg,#F3B14A,#E07A22)}
+.sm b{font-size:13px;color:#22384F;font-weight:600;
   background:rgba(255,255,255,.86);border-radius:8px;padding:1px 8px}
-.sm b em{font-style:normal;font-size:11px;color:#8397AC}
 
 /* 特效层 */
 .arrows{position:absolute;inset:0;width:100%;height:100%;z-index:3;pointer-events:none;overflow:visible}
@@ -629,6 +632,7 @@ function summonBand(state, fx) {
       if (!sm.alive) continue
       const t = tmplOf(sm)
       const pct = Math.max(0, Math.min(100, (sm.hp / sm.maxhp) * 100))
+      const dur = Math.max(0, Math.min(100, (sm.turns / (sm.turnsMax || sm.turns || 6)) * 100))
       const art = summonArtOf(sm.id)
       cells.push(`<div class="sm ${side === 1 ? "red" : "blue"}" style="grid-column:${sm.idx + 1}">
         <div class="smart">
@@ -636,7 +640,8 @@ function summonBand(state, fx) {
           ${sm.taunt > 0 ? `<i class="prov">${ICON.taunt}</i>` : ""}
         </div>
         <div class="smhp"><s style="width:${pct}%"></s></div>
-        <b>${esc(t.name)}<em>${sm.turns}</em></b>
+        <div class="smdur"><s style="width:${dur.toFixed(1)}%"></s></div>
+        <b>${esc(t.name)}</b>
         ${fx.get(`${side}:${sm.idx}:s`) || ""}
       </div>`)
     }
