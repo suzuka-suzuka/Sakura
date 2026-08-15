@@ -2,7 +2,8 @@
  * 碧蓝档案 · 回合制群战 —— 角色表（自 SchaleDB 官方数据生成）
  *
  * 本文件由 scripts/emit-roster.mjs 生成，不要手改。
- * 折算口径：等级 1 / 无装备 / 无羁绊 / 统一 3★ / 技能 1 级 / 1 轮 = 5 秒
+ * 折算口径：等级 1 / 无装备 / 统一 3★ / 技能 1 级 / 1 轮 = 5 秒
+ * 有爱用品的角色用强化版普通技能（GearPublic）；爱用品的属性加成不取，那是按满级标定的定值
  * 战斗公式与克制表均取自官方实现，见 CFG 注释。
  */
 
@@ -136,24 +137,32 @@ export const ROSTER = [
         33.33
       ]
     },
+    "gearSkill": true,
     "skill": {
-      "name": "急救治疗",
+      "name": "急救治疗+",
       "target": "self",
       "count": 1,
       "effects": [
         {
           "type": "regen",
           "scope": "self",
-          "scale": 1.006,
+          "scale": 1.3718,
           "source": "heal",
           "turns": 4,
           "period": 1
+        },
+        {
+          "type": "buff",
+          "scope": "self",
+          "stat": "crit_dmg_res_flat",
+          "value": 1579,
+          "turns": 4
         }
       ],
       "trigger": {
         "type": "hp_below",
         "value": 0.3,
-        "maxUses": 1
+        "maxUses": 2
       }
     },
     "ex": {
@@ -210,8 +219,9 @@ export const ROSTER = [
         33.34
       ]
     },
+    "gearSkill": true,
     "skill": {
-      "name": "投掷手榴弹",
+      "name": "投掷手榴弹+",
       "target": "enemy_adjacent",
       "count": 2,
       "area": 31416,
@@ -221,7 +231,7 @@ export const ROSTER = [
         "turns": 5
       },
       "hits": [
-        193.65
+        290.51
       ]
     },
     "ex": {
@@ -275,8 +285,9 @@ export const ROSTER = [
         20
       ]
     },
+    "gearSkill": true,
     "skill": {
-      "name": "闪亮登场~☆",
+      "name": "闪亮登场~☆+",
       "target": "self",
       "count": 1,
       "effects": [
@@ -284,7 +295,14 @@ export const ROSTER = [
           "type": "buff",
           "scope": "self",
           "stat": "atk",
-          "value": 0.2184,
+          "value": 0.2233,
+          "turns": 4
+        },
+        {
+          "type": "buff",
+          "scope": "self",
+          "stat": "acc",
+          "value": 0.1936,
           "turns": 4
         }
       ],
@@ -335,8 +353,9 @@ export const ROSTER = [
         33.34
       ]
     },
+    "gearSkill": true,
     "skill": {
-      "name": "瞄准射击",
+      "name": "瞄准射击+",
       "target": "enemy_single",
       "count": 1,
       "effects": [],
@@ -345,17 +364,17 @@ export const ROSTER = [
         "turns": 5
       },
       "hits": [
-        20.3598,
-        20.3598,
-        20.3598,
-        20.3598,
-        20.3598,
-        20.3598,
-        20.3598,
-        20.3598,
-        20.3598,
-        20.3598,
-        20.3822
+        30.5397,
+        30.5397,
+        30.5397,
+        30.5397,
+        30.5397,
+        30.5397,
+        30.5397,
+        30.5397,
+        30.5397,
+        30.5397,
+        30.5733
       ]
     },
     "ex": {

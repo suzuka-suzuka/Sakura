@@ -100,6 +100,8 @@ const ICON = {
 const ICON_OF_STAT = {
   atk: "atk", dmg_deal: "atk", dfs: "dfs", dmg_take: "dfs",
   heal: "heal", heal_taken: "heal", dodge: "dodge", acc: "acc",
+  // 暴击/暴伤抵抗是挨打时才生效的，跟防御同一个盾图标
+  crit_res: "dfs", crit_dmg_res_flat: "dfs",
 }
 
 /**

@@ -16,6 +16,15 @@ const arr = (() => {
 const cfg = JSON.parse(fs.readFileSync(path.join(HERE, "cfg.json"), "utf8"))
 
 const FORCE_STAR = 3, LEVEL = 1, SKILL_LV = 0, ROUND_SEC = 5
+/**
+ * 有爱用品的角色，普通技能取爱用品强化版（`Skills.GearPublic`，272 人里 66 人有）。
+ *
+ * 只吃技能强化，**不吃爱用品的属性加成**：那些是 `_Base` 定值、按满级面板标定，
+ * 套到 LEVEL=1 上中位会放大到角色本体攻击的 288%（野宫 263 → 763，×2.9）。
+ * 技能强化则是 Scale（万分比）与 Coefficient（百分比），与等级无关，
+ * 36 件带伤害的倍率提升中位只有 ×1.20，量纲干净。
+ */
+const USE_GEAR_SKILL = true
 /** 原作 PvP 的时间参数：一局 4 分钟，剩余不足 1 分钟进白热化 */
 const BATTLE_SEC = 240, FEVER_LEFT_SEC = 60
 const TRANS = [[0, 1000, 1200, 1400, 1700], [0, 500, 700, 900, 1400], [0, 750, 1000, 1200, 1500]]
@@ -82,6 +91,9 @@ const STAT_MAP = {
   CriticalPoint_Coefficient: "crit", CriticalDamageRate_Coefficient: "crit_dmg",
   CriticalDamageRate_Base: "crit_dmg_flat",
   AccuracyPoint_Coefficient: "acc", DodgePoint_Coefficient: "dodge",
+  // 爱用品强化技能会给这两项抵抗上增益，引擎侧 critResOf / critDmgResOf 有对应的层
+  CriticalDamageResistRate_Base: "crit_dmg_res_flat",
+  CriticalChanceResistPoint_Coefficient: "crit_res",
   // 攻速在回合制里等价于 DPS 提升，折成增伤
   AttackSpeed_Coefficient: "dmg_deal",
   DamagedRatio2_Coefficient: "dmg_take", HealEffectivenessRate_Coefficient: "heal_taken",
@@ -166,11 +178,28 @@ function buildSkill(sk, { isEx }) {
   return out
 }
 
+/** buildSkill 处理不了的效果类型：碰上就退回未强化版，别生成半个空技能 */
+const UNBUILDABLE = /^(Special|Summon|Accumulation)$/
+
+/**
+ * 普通技能取哪一条。`GearPublic` 与 `Public` 同结构，buildSkill 不用改。
+ * 强化版含 Special / Summon（妮露、莲华、歌原）时退回 Public —— 那几类要手写逻辑。
+ */
+function pickPublicSkill(c) {
+  const one = (x) => (Array.isArray(x) ? x[0] : x)
+  const base = one(c.Skills.Public)
+  if (!USE_GEAR_SKILL) return { sk: base, gear: false }
+  const g = one(c.Skills.GearPublic)
+  if (!g || (g.Effects || []).some((e) => UNBUILDABLE.test(e.Type))) return { sk: base, gear: false }
+  return { sk: g, gear: true }
+}
+
 const units = IDS.map(([sid, code]) => {
   const c = arr.find((x) => x.Id === sid)
   const m = starMul(FORCE_STAR)
   const na = Array.isArray(c.Skills.Normal) ? c.Skills.Normal[0] : c.Skills.Normal
   const nd = (na?.Effects || []).find((e) => e.Type === "Damage")
+  const pub = pickPublicSkill(c)
   return {
     id: code, sid, name: c.Name, star: FORCE_STAR, baseStar: c.StarGrade,
     atkType: BULLET_CN[c.BulletType], defType: ARMOR_CN[c.ArmorType], role: ROLE_CN[c.TacticRole],
@@ -182,7 +211,8 @@ const units = IDS.map(([sid, code]) => {
     acc: c.AccuracyPoint, dodge: c.DodgePoint, crit: c.CriticalPoint,
     critDmg: c.CriticalDamageRate, critRes: 100, critDmgRes: 5000, stability: c.StabilityPoint,
     autoAttack: { hits: (nd ? nd.Hits.map((h) => Number(((nd.Scale[0] * h) / 1e4 / 100).toFixed(4))) : [1]) },
-    skill: buildSkill(Array.isArray(c.Skills.Public) ? c.Skills.Public[0] : c.Skills.Public, { isEx: false }),
+    gearSkill: pub.gear,
+    skill: buildSkill(pub.sk, { isEx: false }),
     ex: buildSkill(Array.isArray(c.Skills.Ex) ? c.Skills.Ex[0] : c.Skills.Ex, { isEx: true }),
   }
 })
@@ -204,7 +234,8 @@ const js = `/**
  * 碧蓝档案 · 回合制群战 —— 角色表（自 SchaleDB 官方数据生成）
  *
  * 本文件由 scripts/emit-roster.mjs 生成，不要手改。
- * 折算口径：等级 ${LEVEL} / 无装备 / 无羁绊 / 统一 ${FORCE_STAR}★ / 技能 ${SKILL_LV + 1} 级 / 1 轮 = ${ROUND_SEC} 秒
+ * 折算口径：等级 ${LEVEL} / 无装备 / 统一 ${FORCE_STAR}★ / 技能 ${SKILL_LV + 1} 级 / 1 轮 = ${ROUND_SEC} 秒
+ * ${USE_GEAR_SKILL ? "有爱用品的角色用强化版普通技能（GearPublic）；爱用品的属性加成不取，那是按满级标定的定值" : "不取爱用品"}
  * 战斗公式与克制表均取自官方实现，见 CFG 注释。
  */
 
@@ -275,6 +306,9 @@ export function findUnit(token) {
 fs.writeFileSync(OUT, js)
 console.log("生成完毕 → lib/ba/roster.js")
 console.log("角色:", units.map((u) => `${u.name}(${u.id})`).join(" "))
+const gearUnits = units.filter((u) => u.gearSkill)
+console.log(`爱用品强化普通技能：${gearUnits.length}/${units.length} 人` +
+  (gearUnits.length ? ` —— ${gearUnits.map((u) => `${u.name}「${u.skill.name}」`).join("　")}` : ""))
 console.log("\n=== 转换告警 ===")
 console.log(warn.length ? warn.join("\n") : "无")
 console.log("\n=== 技能结构预览 ===")

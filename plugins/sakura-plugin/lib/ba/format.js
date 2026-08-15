@@ -204,7 +204,12 @@ const STAT_TEXT = {
   crit: "暴击值", crit_dmg: "暴击伤害", acc: "命中值", dodge: "闪避值",
   dmg_deal: "造成伤害", dmg_take: "受到伤害", heal_taken: "受治疗量",
   atk_flat: "攻击力", dfs_flat: "防御力", heal_flat: "治疗力",
+  crit_res: "暴击抵抗", crit_dmg_res_flat: "暴伤抵抗",
 }
+
+/** 暴击伤害系的「固定值」单位是万分比（10000 = 100%），直接印原始数字玩家读不懂 */
+const BP_FLAT = new Set(["crit_dmg_flat", "crit_dmg_res_flat"])
+const flatText = (stat, v) => (BP_FLAT.has(stat) ? pct(v / 1e4) : String(v))
 
 const TRIGGER_TEXT = (tr) => {
   if (!tr) return ""
@@ -226,7 +231,7 @@ export function describeEffect(sk) {
     const who = e.scope === "self" ? "自身" : e.scope === "ally_all" ? "己方全体" : "目标"
     switch (e.type) {
       case "buff":
-        parts.push(`${who}${STAT_TEXT[e.stat] || e.stat} ${e.value > 0 ? "+" : ""}${/_flat$/.test(e.stat) ? e.value : pct(e.value)}（${e.turns}回合）`)
+        parts.push(`${who}${STAT_TEXT[e.stat] || e.stat} ${e.value > 0 ? "+" : ""}${/_flat$/.test(e.stat) ? flatText(e.stat, e.value) : pct(e.value)}（${e.turns}回合）`)
         break
       case "heal": parts.push(`${who}治疗 ${pct(e.scale)}治疗力`); break
       case "regen": parts.push(`${who}持续治疗 ${pct(e.scale)}治疗力（${e.turns}回合，每${e.period}回合）`); break

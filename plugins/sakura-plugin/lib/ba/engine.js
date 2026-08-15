@@ -84,6 +84,7 @@ const STAT_LABEL = {
   crit: "暴击值", crit_dmg: "暴击伤害", crit_dmg_flat: "暴击伤害",
   acc: "命中值", dodge: "闪避值", dmg_deal: "造成伤害", dmg_take: "受到伤害",
   heal_taken: "受治疗量",
+  crit_res: "暴击抵抗", crit_dmg_res_flat: "暴伤抵抗",
 }
 
 function makeStatus(eff, turnId, source, kind) {
@@ -118,14 +119,19 @@ function hitChance(src, tgt) {
   return Math.min(1, Math.max(0, CFG.HIT_BASE / (gap * CFG.HIT_C + CFG.HIT_BASE)))
 }
 
+// 两项抵抗都要过 buff 层：爱用品强化后的普通技能会给它们上增益
+// （星野的急救治疗+ 加暴伤抵抗，绫音的加暴击抵抗），直接读模板常量就吃不到
+const critResOf = (u) => Math.max(0, tmplOf(u).critRes * Math.max(0, factorOf(u, "crit_res")))
+const critDmgResOf = (u) => Math.max(0, tmplOf(u).critDmgRes + flatOf(u, "crit_dmg_res_flat"))
+
 /** 暴击率：1 − CRIT_BASE / ((暴击值 − 目标暴击抵抗) × CRIT_C + CRIT_BASE)，取不到 100% */
 function critChance(src, tgt) {
-  const gap = Math.max(critOf(src) - tmplOf(tgt).critRes, 0)
+  const gap = Math.max(critOf(src) - critResOf(tgt), 0)
   return Math.min(1, Math.max(0, 1 - CFG.CRIT_BASE / (gap * CFG.CRIT_C + CFG.CRIT_BASE)))
 }
 
 /** 暴击倍率：(暴击伤害 − 目标暴伤抵抗) / 10000 */
-const critMultOf = (src, tgt) => Math.max(1, (critDmgOf(src) - tmplOf(tgt).critDmgRes) / 10000)
+const critMultOf = (src, tgt) => Math.max(1, (critDmgOf(src) - critDmgResOf(tgt)) / 10000)
 
 /** 伤害浮动下限：稳定值/(稳定值+STAB_BASE) + 稳定率/10000，实际伤害在 [下限, 1] 均匀分布 */
 function stabilityFloor(src) {
@@ -480,7 +486,10 @@ function applyEffects(ctx, u, skill, dmgTargets, allies) {
     const targets = scopeTargets(eff.scope, u, allies, dmgTargets)
     switch (eff.type) {
       case "buff": {
-        const shown = /_flat$/.test(eff.stat) ? eff.value : `${Math.round(eff.value * 100)}%`
+        // 暴击伤害系的固定值单位是万分比，印原始数字玩家读不懂
+        const bp = eff.stat === "crit_dmg_flat" || eff.stat === "crit_dmg_res_flat"
+        const shown = bp ? `${Math.round(eff.value / 100)}%`
+          : /_flat$/.test(eff.stat) ? eff.value : `${Math.round(eff.value * 100)}%`
         for (const t of targets) {
           upsertStatusLayer(t.buffs, makeStatus(eff, T, u, eff.value < 0 ? "debuff" : "buff"))
           ctx.log(`  ${nameOf(t)} ${STAT_LABEL[eff.stat] || eff.stat} ${eff.value > 0 ? "+" : ""}${shown}（${eff.turns ?? 2}回合）`)
