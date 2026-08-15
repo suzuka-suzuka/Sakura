@@ -386,7 +386,8 @@ function applyDamage(ctx, src, tgt, dmg, meta = {}) {
     type: "damage",
     source: unitRef(src), target: unitRef(tgt),
     amount: Math.round(dmg), absorbed: Math.round(absorbed), totalAmount: Math.round(total),
-    crit: Boolean(meta.crit), affinity: affinityMark(meta.aff ?? 1),
+    crit: Boolean(meta.crit), critHits: meta.critHits ?? (meta.crit ? 1 : 0),
+    affinity: affinityMark(meta.aff ?? 1),
     attackType: src ? tmplOf(src).atkType : "持续",
     hits: meta.hits, landed: meta.landed,
   })
@@ -424,12 +425,12 @@ function strike(ctx, src, tgt, hits) {
   const dealF = Math.max(0.1, factorOf(src, "dmg_deal"))
   const takeF = Math.max(0.1, factorOf(tgt, "dmg_take"))
 
-  let total = 0, landed = 0, anyCrit = false
+  let total = 0, landed = 0, critHits = 0
   for (const pct of hits) {
     if (nextRandom(state) >= hr) continue // 这一段被闪避
     landed++
     const crit = nextRandom(state) < cr
-    if (crit) anyCrit = true
+    if (crit) critHits++
     let d = atk * (pct / 100) * aff * dm * dealF * takeF
     d *= randRange(state, floor, 1)
     if (crit) d *= critMul
@@ -444,7 +445,9 @@ function strike(ctx, src, tgt, hits) {
     })
     return 0
   }
-  applyDamage(ctx, src, tgt, total, { crit: anyCrit, aff, hits: hits.length, landed })
+  // crit 是「有没有暴击」（文字战报用），critHits 是「几段暴击」（战场图按占比缩放爆裂框）：
+  // 单靠 crit 的话，段数越多越必然为真——芹香 11 段有 88% 概率亮框，那个通道就废了
+  applyDamage(ctx, src, tgt, total, { crit: critHits > 0, critHits, aff, hits: hits.length, landed })
   return total
 }
 
@@ -650,11 +653,14 @@ function endTurn(ctx, side) {
     }
   }
 
-  // 持续治疗按承受者自己的回合跳
+  // 持续治疗按承受者自己的回合跳。
+  //
+  // 这里**不能**照抄 buff/护盾那套 `st === T 就跳过本回合` 的写法：持续治疗永远由己方
+  // 施加，也就永远在自己的回合结算，跳过施放回合等于把第一跳推迟整整一轮。星野的急救
+  // 治疗是「生命≤30% 触发、每场限 1 次」的救命技能，延后一轮基本等于没放。
   for (const u of side.units) {
     if (!u.alive) continue
     for (const r of [...u.regens]) {
-      if (r.st === T) continue
       r.tick += 1
       if (r.tick % r.period === 0) {
         const h = Math.min(r.amount, u.maxhp - u.hp)

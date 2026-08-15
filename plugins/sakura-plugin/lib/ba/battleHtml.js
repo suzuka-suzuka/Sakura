@@ -38,17 +38,29 @@ const BLUE_Y = ARENA_H - 175
  *
  * 长短半径交替成尖刺，外圈半径再按固定序列做长短不齐 —— 规则星形看着像徽章，
  * 不齐才像炸开。序列写死，保证同一份战报每次渲染完全一致。
+ *
+ * 尖刺长度按**暴击段占命中段的比例**缩放：每段独立判定，段数一多「至少一段暴击」
+ * 就趋近必然（芹香 11 段有 88% 的局面会中至少一段），只看有没有暴击的话这个通道
+ * 等于常亮，实际编码的是「段数多」而不是「这一发很痛」。
+ *
+ * 只动外圈半径，内圈不动 —— 坐标是百分比，框会在原有留白里自己缩小，
+ * 下面 .fxlabel.crit 那圈给尖刺让位的 margin 按最大尖刺算，不用跟着改。
  */
-const BURST = (() => {
-  const OUT = [50, 42, 50, 38, 47, 50, 40, 46, 50, 39, 48, 44]
-  const IN = [28, 24, 30, 25, 27, 23]
-  const n = OUT.length * 2
+const BURST_OUT = [50, 42, 50, 38, 47, 50, 40, 46, 50, 39, 48, 44]
+const BURST_IN = [28, 24, 30, 25, 27, 23]
+const BURST_BASE = 33 // 占比趋近 0 时的外圈：仍留得出缺口，不塌成圆
+
+function burstPolygon(q) {
+  const k = Math.max(0, Math.min(1, Number(q) || 0))
+  const n = BURST_OUT.length * 2
   return Array.from({ length: n }, (_, i) => {
-    const r = i % 2 === 0 ? OUT[i / 2] : IN[((i - 1) / 2) % IN.length]
+    const r = i % 2 === 0
+      ? BURST_BASE + (BURST_OUT[i / 2] - BURST_BASE) * k
+      : BURST_IN[((i - 1) / 2) % BURST_IN.length]
     const a = (Math.PI * 2 * i) / n - Math.PI / 2
     return `${(50 + r * Math.cos(a)).toFixed(1)}% ${(50 + r * Math.sin(a)).toFixed(1)}%`
   }).join(",")
-})()
+}
 
 // ---------------- 单位格 ----------------
 
@@ -202,11 +214,14 @@ function arrowLayer(state, events) {
   return `<svg class="arrows" viewBox="0 0 ${ARENA_W} ${ARENA_H}"><defs>${defs}</defs>${arrows.join("")}</svg>`
 }
 
-/** 暴击只换外框形状，不换字号也不加 CRIT 字样 */
+/** 暴击只换外框形状，不换字号也不加 CRIT 字样；尖刺长度按暴击段占比走 */
 function fxLabel(ev, wide) {
   const segs = Number(ev.hits) > 1
     ? { total: Number(ev.hits), landed: Math.max(0, Math.min(Number(ev.hits), Number(ev.landed ?? ev.hits))) }
     : null
+  // critHits 是后加的字段：老对局（Redis 里存着的）没有，按满爆退化回原来的样子
+  const landed = Number(ev.landed) || (segs ? segs.landed : 1) || 1
+  const critQ = ev.critHits == null ? 1 : Math.min(1, Number(ev.critHits) / landed)
   const kind = ev.type === "miss" ? "miss" : ev.type === "heal" ? "heal" : "dmg"
   const text = ev.type === "miss" ? "MISS"
     : ev.type === "heal" ? `+${ev.amount}`
@@ -214,7 +229,7 @@ function fxLabel(ev, wide) {
   const qual = ev.affinity === "weak" ? "WEAK" : ev.affinity === "resist" ? "RESIST" : ""
   return `
     <div class="fxlabel ${kind} ${ev.crit ? "crit" : ""} ${wide ? "wide" : ""}">
-      ${ev.crit ? '<span class="burst"></span>' : ""}
+      ${ev.crit ? `<span class="burst" style="--burst:polygon(${burstPolygon(critQ)})"></span>` : ""}
       <b>${esc(text)}</b>
       ${qual ? `<i>${qual}</i>` : ""}
       ${segs ? `<div class="segs">${Array.from({ length: segs.total }, (_, i) =>
@@ -433,11 +448,12 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
    相邻的爆裂框会咬在一起糊成一条 */
 .fxlabel.crit{background:none;border:none;box-shadow:none;min-width:70px;padding:10px 16px 11px;margin:16px 15px}
 .fxlabel.crit>b,.fxlabel.crit>i,.fxlabel.crit>.segs{position:relative}
+/* 轮廓由行内 --burst 下发（按暴击段占比缩放）；::after 是 .burst 的伪元素，自动继承到 */
 .fxlabel .burst{position:absolute;inset:-19px -22px;
-  clip-path:polygon(${BURST});background:linear-gradient(155deg,#FFC53D,#F26D2B);
+  clip-path:var(--burst,polygon(${burstPolygon(1)}));background:linear-gradient(155deg,#FFC53D,#F26D2B);
   filter:drop-shadow(0 3px 8px rgba(190,90,20,.38))}
 .fxlabel .burst::after{content:"";position:absolute;inset:4px;
-  clip-path:polygon(${BURST});background:linear-gradient(180deg,#FFFDF4,#FFEFD6)}
+  clip-path:var(--burst,polygon(${burstPolygon(1)}));background:linear-gradient(180deg,#FFFDF4,#FFEFD6)}
 /* :not(.on) 不能省 —— 与上面 .fxlabel .segs s.on 同特异度，写在后面会把亮段一起盖掉 */
 .fxlabel.crit .segs s:not(.on){background:rgba(194,51,26,.22)}
 
