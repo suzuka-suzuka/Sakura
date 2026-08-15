@@ -20,12 +20,12 @@
  *
  * 用法：node scripts/stress-test.mjs [局数]
  */
-import { createBattle, playerTurn, validateAction, exAvailableOf, exWaitOf, exLockLenOf } from "../lib/ba/engine.js"
+import { createBattle, playerTurn, validateAction, exAvailableOf, exCastableOf, exWaitOf, exLockLenOf } from "../lib/ba/engine.js"
 import { ROSTER, CFG } from "../lib/ba/roster.js"
 
 const GAMES = Number(process.argv[2]) || 500
-/** 死循环保护：一局最多 MAX_ROUND 轮，一轮两回合，留几手余量 */
-const GUARD_MAX = CFG.MAX_ROUND * 2 + 8
+/** 死循环保护：一轮两回合，每回合最多几次 EX + 一次过，再留余量 */
+const GUARD_MAX = CFG.MAX_ROUND * 2 * 6 + 16
 const ids = ROSTER.map((t) => t.id)
 /** 固定序列的伪随机，保证复现 */
 const rnd = (seed) => { let x = seed; return () => ((x = (x * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) }
@@ -52,26 +52,19 @@ for (let seed = 1; seed <= GAMES; seed++) {
   let guard = 0
   while (st.phase === "command" && guard < GUARD_MAX) {
     const side = st.sides[st.activeSide]
-    const hand = exAvailableOf(st, st.activeSide)
+    const hand = exCastableOf(st, st.activeSide)
     let action = { type: "pass" }
 
     if (R() < 0.75 && hand.length) {
-      const casts = []
-      for (const p of hand) {
-        if (R() < 0.5) continue
-        if (!side.units[p]?.alive) continue
-        // 故意混入非法目标：越界索引、友敌错配
-        const roll = R()
-        let target
-        if (roll < 0.2) target = { scope: "foe", idx: Math.floor(R() * 4) }
-        else if (roll < 0.3) target = { scope: "ally", idx: Math.floor(R() * 4) }
-        else if (roll < 0.35) target = { scope: "foe", idx: 9 }
-        casts.push({ pos: p, target })
-      }
-      if (casts.length) {
-        action = { type: "ex", casts }
-        if (validateAction(st, action)) action = { type: "pass" }
-      }
+      const p = hand[Math.floor(R() * hand.length)]
+      // 故意混入非法目标：越界索引、友敌错配
+      const roll = R()
+      let target
+      if (roll < 0.2) target = { scope: "foe", idx: Math.floor(R() * 4) }
+      else if (roll < 0.3) target = { scope: "ally", idx: Math.floor(R() * 4) }
+      else if (roll < 0.35) target = { scope: "foe", idx: 9 }
+      action = { type: "ex", casts: [{ pos: p, target }] }
+      if (validateAction(st, action)) action = { type: "pass" }
     }
 
     let r

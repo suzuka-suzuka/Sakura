@@ -90,6 +90,9 @@ const ICON = {
   // 命中：准星
   acc: SVG(`<path d="M12 2.2a1.4 1.4 0 0 1 1.4 1.4v1.6a7 7 0 0 1 5.4 5.4h1.6a1.4 1.4 0 0 1 0 2.8h-1.6a7 7 0 0 1-5.4 5.4v1.6a1.4 1.4 0 0 1-2.8 0v-1.6a7 7 0 0 1-5.4-5.4H3.6a1.4 1.4 0 0 1 0-2.8h1.6a7 7 0 0 1 5.4-5.4V3.6A1.4 1.4 0 0 1 12 2.2Zm0 5.6a4.2 4.2 0 1 0 0 8.4 4.2 4.2 0 0 0 0-8.4Z"/>
     <circle cx="12" cy="12" r="2"/>`),
+  // 持续伤害：火苗（灼烧/中毒/场地共用一个 —— 玩家要知道的是「在掉血」，不是掉血的花色）
+  dot: SVG(`<path d="M12.6 2.2c.4 3.1-1.2 4.4-2.7 5.9C8.2 9.8 6.4 11.6 6.4 14.6a5.6 5.6 0 0 0 11.2 0
+    c0-2.4-1-3.9-2.1-5.2-.5 1.3-1.3 2-2.2 2.3.8-3-.2-6.7-.7-9.5Z"/>`),
   // 预警：感叹号
   warn: SVG(`<rect x="10.3" y="3.2" width="3.4" height="11" rx="1.7"/>
     <circle cx="12" cy="18.4" r="2.2"/>`),
@@ -133,6 +136,14 @@ function statusMarks(u) {
       ${ICON[ICON_OF_STAT[stat]] || ICON.other}${n > 1 ? `<s>×${n}</s>` : ""}</i>`)
   }
   if (u.regens?.length) marks.push(`<i class="mk buff">${ICON.heal}</i>`)
+  // 灼烧/中毒这类**挂在身上的 debuff** 才出状态格。
+  // 千世的 EX 是固定场地，不是 debuff，状态格不出图标 —— 地上的蓝圈已经表达了。
+  // 她的 ExtraPassive 灼烧现在也没接（被动先不上），所以这条目前不会亮。
+  const dotMarks = (u.dots || []).filter((d) => d.icon !== "Zone")
+  if (dotMarks.length) {
+    marks.push(`<i class="mk debuff ${Math.min(...dotMarks.map((d) => d.turns)) <= 1 ? "fading" : ""}">
+      ${ICON.dot}${dotMarks.length > 1 ? `<s>×${dotMarks.length}</s>` : ""}</i>`)
+  }
   if (u.taunt > 0) marks.push(`<i class="mk buff">${ICON.taunt}</i>`)
   if (u.stun > 0) marks.push(`<i class="mk debuff">${ICON.stun}</i>`)
 
@@ -229,7 +240,9 @@ function fxLabel(ev, wide) {
   // critHits 是后加的字段：老对局（Redis 里存着的）没有，按满爆退化回原来的样子
   const landed = Number(ev.landed) || (segs ? segs.landed : 1) || 1
   const critQ = ev.critHits == null ? 1 : Math.min(1, Number(ev.critHits) / landed)
-  const kind = ev.type === "miss" ? "miss" : ev.type === "heal" ? "heal" : "dmg"
+  // 持续伤害单独一种颜色：它没有施法者连线（施加者可能已阵亡），
+  // 不换色的话玩家会以为是谁打的、然后去找那根不存在的线
+  const kind = ev.type === "miss" ? "miss" : ev.type === "heal" ? "heal" : ev.dot ? "dot" : "dmg"
   const text = ev.type === "miss" ? "MISS"
     : ev.type === "heal" ? `+${ev.amount}`
       : String(ev.totalAmount ?? ev.amount)
@@ -381,7 +394,7 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
   border:1px solid rgba(70,120,175,.16);
   background:linear-gradient(180deg,rgba(217,72,92,.08) 0%,rgba(255,255,255,.52) 27%,
     rgba(255,255,255,.52) 73%,rgba(46,127,212,.13) 100%)}
-.laneRow{position:absolute;left:0;right:0;display:grid;grid-template-columns:repeat(4,1fr)}
+.laneRow{position:absolute;left:0;right:0;z-index:1;display:grid;grid-template-columns:repeat(4,1fr)}
 .laneRow.red{top:0}
 .laneRow.blue{bottom:0}
 .unit{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px}
@@ -420,8 +433,21 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 .engage{position:absolute;left:0;right:0;top:50%;height:1px;transform:translateY(-50%);
   background:linear-gradient(90deg,transparent,rgba(60,110,160,.3) 16%,rgba(60,110,160,.3) 84%,transparent)}
 
+/* 场地：脚边一片普通蓝的立体圈（透视椭圆，躺在地上），压在立绘底下。
+   浅蓝在战场底上看不清，描边和填充都走 UI 蓝 #2E7FD4。
+   蓝方脚贴 arena 底边，圈身往中线收，别往下探被裁掉。 */
+.zones{position:absolute;inset:0;width:100%;height:100%;z-index:0;
+  pointer-events:none;overflow:visible}
+.zones .pad{fill:url(#zoneFill)}
+.zones .ring{fill:none;stroke:#2E7FD4;stroke-width:3}
+.zones .inner{fill:none;stroke:rgba(46,127,212,.55);stroke-width:1.4}
+.zones .near{fill:none;stroke:#2E7FD4;stroke-width:4.6;stroke-linecap:round}
+.zones text{font-size:18px;fill:#1A5FA8;text-anchor:middle;dominant-baseline:middle;
+  paint-order:stroke;stroke:#fff;stroke-width:4.5px}
+.zones .fading{opacity:.45}
+
 /* 召唤物带：占中线附近的竖向空隙，不进 .laneRow 的 4 格 */
-.smRow{position:absolute;left:0;right:0;top:0;bottom:0;
+.smRow{position:absolute;left:0;right:0;top:0;bottom:0;z-index:2;
   display:grid;grid-template-columns:repeat(4,1fr);align-items:center;pointer-events:none}
 /* .sm 必须 position:relative —— .fxstack 是绝对定位的，不给锚点它会挂到 .smRow 上，
    数字就飘到整条带的正中间去了 */
@@ -447,7 +473,7 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 .sm b em{font-style:normal;font-size:11px;color:#8397AC}
 
 /* 特效层 */
-.arrows{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.arrows{position:absolute;inset:0;width:100%;height:100%;z-index:3;pointer-events:none;overflow:visible}
 /* 亮底上箭头比深底抢眼得多，压细压淡；白色外发光把它和角色分开 */
 /* 必须是直接子选择器：marker 里的箭头也是 <path>，被 fill:none 命中就整个消失
    （CSS 声明压过 SVG 的 fill 表现属性） */
@@ -473,6 +499,10 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 .fxlabel.dmg{border-color:#E0574F}
 .fxlabel.miss{border-color:#9BB0C2;color:#5D7488}
 .fxlabel.heal{border-color:#37B87C;color:#1A8A55}
+/* 持续伤害：橙色，跟普通伤害的红分开 —— 它是没有来源连线的那一类 */
+.fxlabel.dot{border-color:#E9854F;color:#C2571B}
+.fxlabel.dot::before{content:"";position:absolute;left:-5px;top:50%;transform:translateY(-50%);
+  width:3px;height:60%;border-radius:2px;background:#E9854F}
 .fxlabel .segs{display:flex;gap:1.5px;margin-top:4px;justify-content:center}
 .fxlabel .segs s{flex:1;max-width:9px;height:3.5px;border-radius:2px;background:rgba(40,80,125,.22)}
 .fxlabel .segs s.on{background:currentColor}
@@ -530,6 +560,62 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 }
 
 /**
+ * 场地技画在生效范围的脚边：一片普通蓝的立体圈。
+ *
+ * 正圆贴在脸上太大，也读不出「躺在地上」。压扁成透视椭圆（约 3.4:1），
+ * 外圈 + 内圈 + 靠中线一侧加粗，才像地面上的范围指示。
+ * 位置读 `side.fields`，人死了圈不缩、不换人。
+ * 老对局里没有 `fields`，才退回从身上的 Zone 反推。
+ */
+function fieldsOf(side) {
+  if (side.fields?.length) return side.fields
+  const inZone = (side.units || []).filter((u) => (u.dots || []).some((d) => d.icon === "Zone"))
+  if (!inZone.length) return []
+  return [{
+    lo: Math.min(...inZone.map((u) => u.idx)),
+    hi: Math.max(...inZone.map((u) => u.idx)),
+    turns: Math.max(...inZone.flatMap((u) => u.dots.filter((d) => d.icon === "Zone").map((d) => d.turns))),
+  }]
+}
+
+function zoneLayer(state) {
+  const laneW = ARENA_W / 4
+  const rings = []
+  for (const side of [0, 1]) {
+    for (const f of fieldsOf(state.sides[side])) {
+      const cx = ((f.lo + f.hi + 1) / 2) * laneW
+      const lanes = f.hi - f.lo + 1
+      const rx = Math.max(92, lanes * laneW * 0.40)
+      const ry = Math.max(40, rx * 0.29)
+      // 红方脚在 unit 底；蓝方脚贴 arena 底，圆心往中线收，避免下沿被裁
+      const cy = side === 1 ? 308 : ARENA_H - ry - 18
+      const ty = cy + (side === 1 ? 10 : -10)
+      const left = (cx - rx).toFixed(1)
+      const right = (cx + rx).toFixed(1)
+      const sweep = side === 1 ? 0 : 1
+      rings.push(`<g class="${f.turns <= 1 ? "fading" : ""}">
+        <ellipse class="pad" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}"/>
+        <ellipse class="ring" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}"/>
+        <ellipse class="inner" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${(rx - 12).toFixed(1)}" ry="${(ry - 7).toFixed(1)}"/>
+        <path class="near" d="M${left},${cy.toFixed(1)} A${rx.toFixed(1)} ${ry.toFixed(1)} 0 0 ${sweep} ${right},${cy.toFixed(1)}"/>
+        <text x="${cx.toFixed(1)}" y="${ty.toFixed(1)}">${f.turns}</text>
+      </g>`)
+    }
+  }
+  if (!rings.length) return ""
+  return `<svg class="zones" viewBox="0 0 ${ARENA_W} ${ARENA_H}">
+    <defs>
+      <radialGradient id="zoneFill" cx="50%" cy="42%" r="62%">
+        <stop offset="0%" stop-color="rgba(46,127,212,.28)"/>
+        <stop offset="68%" stop-color="rgba(46,127,212,.14)"/>
+        <stop offset="100%" stop-color="rgba(46,127,212,.04)"/>
+      </radialGradient>
+    </defs>
+    ${rings.join("")}
+  </svg>`
+}
+
+/**
  * 召唤物画在两排中间那条空带里 —— 用竖向空间，不占号位格，
  * 所以 4 格布局、`LANE_X`、EX 卡一行都不用动。
  *
@@ -568,6 +654,7 @@ export function buildBattleHtml(state, events = []) {
 <div id="map">
   ${header(state)}
   <div class="arena">
+    ${zoneLayer(state)}
     <div class="laneRow red">${row(1)}</div>
     <div class="engage"></div>
     ${summonBand(state, fx)}

@@ -28,6 +28,16 @@ function setup(bluePicks, redPicks, kills = []) {
   return st
 }
 
+/** 把一步打完：EX 之后若还停着，自动「过」把技能/普攻收掉。测对线/技能落点要用完整回合。 */
+function run(st, action) {
+  let r = playerTurn(st, action)
+  while (!r.error && r.state.phase === "command" && r.state.turnOpen) {
+    const n = playerTurn(r.state, { type: "pass" })
+    r = { ...n, events: r.events.concat(n.events || []), log: r.log.concat(n.log || []) }
+  }
+  return r
+}
+
 /** 跑一个「过」的回合，收集普攻的 源→目标 对 */
 function autoPairs(st) {
   const r = playerTurn(st, { type: "pass" })
@@ -76,7 +86,7 @@ check("蓝4 不受坦克影响", tank.find((p) => p.from === 4).to, [4])
 
 console.log("\n=== 5. 星野 EX（2 目标范围）不跨战场 ===")
 const pickIdx = (st, idx) => {
-  const r = playerTurn(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx } }] })
+  const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx } }] })
   return r.events.find((e) => e.type === "action" && e.action === "ex").targets.map((t) => t.pos + 1)
 }
 check("指定红3 → 波及红4", pickIdx(setup(TANK1, OUT), 2), [3, 4])
@@ -85,14 +95,14 @@ check("红4 已阵亡，指定红3 → 退化成单体", pickIdx(setup(TANK1, OU
 
 console.log("\n=== 6. 野宫全体技能仍然打 4 个 ===")
 const allSt = setup(["野宫", "星野", "野宫", "野宫"], OUT)
-const rAll = playerTurn(allSt, { type: "ex", casts: [{ pos: 0 }] })
+const rAll = run(allSt, { type: "ex", casts: [{ pos: 0 }] })
 check("敌方全体命中数",
   rAll.events.find((e) => e.type === "action" && e.action === "ex").targets.length, 4)
 
 console.log("\n=== 7. 3 目标技能走「以主目标为中心的固定窗口」（睦月）===")
 const mutsuki = (idx) => {
   const st = setup(["睦月", "野宫", "野宫", "野宫"], OUT)
-  const r = playerTurn(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx } }] })
+  const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx } }] })
   return r.events.find((e) => e.type === "action" && e.action === "ex").targets
     .map((t) => t.pos + 1).sort()
 }
@@ -107,13 +117,13 @@ console.log("\n=== 8. 召唤物挡刀（日富美的佩洛洛人偶）===")
 /** 蓝1 = 日富美，EX 把人偶扔向红方 blockIdx 号位，返回随后红方普攻的 源→目标 */
 function withDoll(blockIdx, skipTaunt) {
   const st = setup(["日富美", "野宫", "野宫", "野宫"], OUT)
-  playerTurn(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: blockIdx } }] })
-  let cur = playerTurn(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: blockIdx } }] }).state
+  run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: blockIdx } }] })
+  let cur = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: blockIdx } }] }).state
   if (skipTaunt) {
-    cur = playerTurn(cur, { type: "pass" }).state // 红方（嘲讽期）
-    cur = playerTurn(cur, { type: "pass" }).state // 蓝方
+    cur = run(cur, { type: "pass" }).state // 红方（嘲讽期）
+    cur = run(cur, { type: "pass" }).state // 蓝方
   }
-  const r = playerTurn(cur, { type: "pass" })
+  const r = run(cur, { type: "pass" })
   return r.events
     .filter((e) => e.type === "action" && e.action === "normal")
     .map((e) => `${e.source.pos + 1}→${(e.targets || []).map((t) => (t.summon ? "偶" : t.pos + 1)).join("")}`)
@@ -162,7 +172,7 @@ function iori(pickIdx, kill = [], doll = null) {
       buffs: [], regens: [], stun: 0, taunt: 0, turns: 6, st: -1, sourceKey: "x", alive: true,
     }]
   }
-  const r = playerTurn(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: pickIdx } }] })
+  const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: pickIdx } }] })
   return r.events.filter((e) => e.type === "damage" && e.source.side === 0 && e.source.pos === 0)
     .map((e) => (e.target.summon ? "偶" : e.target.pos + 1))
 }
@@ -175,6 +185,107 @@ check("人偶挡 2 位（同战场不同路）→ 照样接走第 2 发", iori(0
 check("人偶挡 3 位（另一战场）→ 本战场还有人时不接", iori(0, [], 2), [1, 2, 1])
 check("本战场打空 + 人偶在本战场 → 后两发全打人偶", iori(2, [0, 1], 0), [3, "偶", "偶"])
 check("本战场打空 + 人偶在另一战场 → 先拆墙再打人", iori(2, [0, 1], 2), [3, "偶", 3])
+
+console.log("\n=== 11. 千世场地：盖在生效范围，人死不转移 ===")
+function chiseCast(kills = [], pick = 0) {
+  const st = setup(["千世", "野宫", "野宫", "野宫"], OUT, kills)
+  st.sides[0].cost = 10
+  return run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: pick } }] })
+}
+const zoneOn = (side) => side.units
+  .filter((u) => (u.dots || []).some((d) => d.icon === "Zone"))
+  .map((u) => u.idx + 1)
+const kill = (st, idx) => {
+  const u = st.sides[1].units[idx]
+  u.alive = false
+  u.hp = 0
+  u.dots = []
+}
+
+const drop = chiseCast()
+check("指定红1 → 地上的圈盖住 1·2 整个战场", drop.state.sides[1].fields, [{ lo: 0, hi: 1, turns: 2, st: drop.state.turnId }])
+check("指定红1 → 当时站在里面的 1·2 挨烧", zoneOn(drop.state.sides[1]), [1, 2])
+check("指定红1 → 另一战场的 3·4 没有场地", zoneOn(drop.state.sides[1]).includes(3) || zoneOn(drop.state.sides[1]).includes(4), false)
+
+const emptyNeighbor = chiseCast([[1, 1]])
+check("红2 已死再打红1 → 圈仍盖 1·2（生效范围，不缩成单体）",
+  emptyNeighbor.state.sides[1].fields.map((f) => [f.lo, f.hi]), [[0, 1]])
+check("红2 已死再打红1 → 只有红1 身上有 DoT", zoneOn(emptyNeighbor.state.sides[1]), [1])
+
+const afterKill = chiseCast()
+kill(afterKill.state, 0)
+const afterRed = playerTurn(afterKill.state, { type: "pass" })
+check("场里红1 死后，圈还在原处 1·2", afterRed.state.sides[1].fields.map((f) => [f.lo, f.hi]), [[0, 1]])
+check("场里红1 死后，不会把 DoT 转给 3·4", zoneOn(afterRed.state.sides[1]), [2])
+
+const bothDead = chiseCast()
+kill(bothDead.state, 0)
+kill(bothDead.state, 1)
+const afterEmpty = playerTurn(bothDead.state, { type: "pass" })
+check("场里两人都死后，圈仍留在 1·2", afterEmpty.state.sides[1].fields.map((f) => [f.lo, f.hi]), [[0, 1]])
+check("场里两人都死后，3·4 不会走进空场地", zoneOn(afterEmpty.state.sides[1]), [])
+check("EX 不是 debuff：身上不加 buff", drop.state.sides[1].units.every((u) => !(u.buffs || []).length), true)
+check("EX 不是 debuff：不发 debuff 事件", drop.events.some((e) => e.type === "debuff"), false)
+check("EX 的持续伤害标成 Zone，不是灼烧",
+  drop.state.sides[1].units.filter((u) => (u.dots || []).length)
+    .every((u) => u.dots.every((d) => d.icon === "Zone")), true)
+
+console.log("\n=== 12. 千世圆形普攻依旧被人偶挡 ===")
+/** who 站 pos 位普攻，敌方 doll 号位有人偶；返回这一发普攻的命中 */
+function autoVsDoll(who, pos, doll) {
+  const picks = ["野宫", "野宫", "野宫", "野宫"]
+  picks[pos] = who
+  const st = setup(picks, FOE)
+  if (doll != null) {
+    st.sides[1].summons = [{
+      summon: true, id: 40002, side: 1, idx: doll, blockIdx: doll,
+      hp: 99999, maxhp: 99999, shield: 0, shieldMax: 0, shieldTurns: 0,
+      buffs: [], regens: [], dots: [], stun: 0, taunt: 0, turns: 6, st: -1, sourceKey: "x", alive: true,
+    }]
+  }
+  const r = playerTurn(st, { type: "pass" })
+  const ev = r.events.find((e) => e.type === "action" && e.action === "normal" && e.source.pos === pos)
+  return (ev?.targets || []).map((t) => (t.summon ? "偶" : t.pos + 1))
+}
+check("千世普攻 · 无人偶 → 圆形盖住同战场 1·2", autoVsDoll("千世", 0, null).sort(), [1, 2])
+check("千世普攻 · 人偶挡 1 位（同路）→ 整发被接走", autoVsDoll("千世", 0, 0), ["偶"])
+check("千世普攻 · 人偶挡 2 位（同战场另一路）→ 整发被接走", autoVsDoll("千世", 0, 1), ["偶"])
+check("千世普攻 · 人偶挡 3 位（另一战场）→ 不拦，仍打 1·2", autoVsDoll("千世", 0, 2).sort(), [1, 2])
+check("野宫单体普攻 · 人偶挡 2 位 → 不管（只挡对位那一路）", autoVsDoll("野宫", 0, 1), [1])
+
+console.log("\n=== 13. 指定目标已死：按施法者同战场对线，空了越界打最近 ===")
+/** 真纪 1 位 + 茜 4 位都点名打红1。kills 是开局已死的红方号位（0-based） */
+function stackedEx(kills = [], hp0 = 1) {
+  const st = setup(["真纪", "野宫", "野宫", "茜"], ["白子", "星野", "日奈", "爱露"], kills.map((i) => [1, i]))
+  if (st.sides[1].units[0].alive) st.sides[1].units[0].hp = hp0
+  const first = playerTurn(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] })
+  const second = playerTurn(first.state, { type: "ex", casts: [{ pos: 3, target: { scope: "foe", idx: 0 } }] })
+  const akane = second.events.find((e) => e.type === "action" && e.action === "ex" && e.source.pos === 3)
+  return (akane?.targets || []).map((t) => t.pos + 1)
+}
+check("红1 被真纪秒了，茜仍点红1 → 打茜自己同战场的红4", stackedEx(), [4])
+// 只放茜，避免真纪先把红2 也打掉。红1 已死、茜这边 3·4 也空，只剩红2
+const onlyAkane = (() => {
+  const st = setup(["野宫", "野宫", "野宫", "茜"], ["白子", "星野", "日奈", "爱露"], [[1, 0], [1, 2], [1, 3]])
+  const r = playerTurn(st, { type: "ex", casts: [{ pos: 3, target: { scope: "foe", idx: 0 } }] })
+  const ev = r.events.find((e) => e.type === "action" && e.action === "ex" && e.source.pos === 3)
+  return (ev?.targets || []).map((t) => t.pos + 1)
+})()
+check("红1 已死且茜这边 3·4 也空 → 越界打最近的红2", onlyAkane, [2])
+
+const two = setup(["真纪", "野宫", "野宫", "茜"], ["白子", "星野", "日奈", "爱露"])
+const rejected = playerTurn(two, {
+  type: "ex",
+  casts: [
+    { pos: 0, target: { scope: "foe", idx: 0 } },
+    { pos: 3, target: { scope: "foe", idx: 0 } },
+  ],
+})
+check("一条指令两个 EX 被拒绝", Boolean(rejected.error), true)
+check("放完一个 EX 且还能再放时回合还开着",
+  playerTurn(setup(["真纪", "野宫", "野宫", "茜"], ["白子", "星野", "日奈", "爱露"]), {
+    type: "ex", casts: [{ pos: 3, target: { scope: "foe", idx: 0 } }],
+  }).state.turnOpen, true)
 
 console.log(bad ? `\n✗ ${bad} 条不符` : "\n全部符合")
 process.exit(bad ? 1 : 0)

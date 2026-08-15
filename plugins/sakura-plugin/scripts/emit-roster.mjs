@@ -139,12 +139,29 @@ function parseTrigger(desc) {
 function hitsOf(dmg) {
   const total = dmg.Scale[SKILL_LV]
   const split = dmg.Hits || [10000]
-  // 「固定场地」类技能（全 272 人里 5 个）Hits 只写一段，真正跳几次在 HitFrames 里。
-  // 回合制没有场地，按跳数摊成等量分段一次性打完 —— 不然千世 4 费的 EX 只有 56%，
-  // 比她自己的普通技能还弱。
-  const ticks = dmg.HitFrames?.length > split.length ? dmg.HitFrames.length : 1
-  const parts = ticks > 1 ? Array.from({ length: ticks }, () => split).flat() : split
-  return parts.map((h) => Number(((total * h) / 1e4 / 100).toFixed(4)))
+  return split.map((h) => Number(((total * h) / 1e4 / 100).toFixed(4)))
+}
+
+/**
+ * 「固定场地」类技能（全 272 人里 5 个：惠、千世、纱绫×2、切里诺）：
+ * 在地上留一片区域，站在里面的人**持续挨打**，施放者死了场地也还在。
+ *
+ * `Hits` 只写一段，真正的跳数在 `HitFrames` 里（帧号，30fps）。**最后一帧就是场地存续时间**
+ * ——千世的 `HitFrames` 收在 300 帧 = 10 秒 = 2 轮，跟技能描述的「持续10秒」对得上。
+ *
+ * 折成回合制不能一次性打完（那是 616% 的瞬间爆发，跟「持续」的语义完全相反），
+ * 而是摊到存续的每一轮上：总伤害 ÷ 轮数。
+ * @returns {object|null} 场地持续伤害效果，非场地技能返回 null
+ */
+function zoneDot(dmg) {
+  const frames = dmg.HitFrames
+  if (!(frames?.length > (dmg.Hits || [10000]).length)) return null
+  const turns = msToTurns((Math.max(...frames) / 30) * 1000) ?? 2
+  const totalPct = hitsOf(dmg).reduce((a, b) => a + b, 0) * frames.length
+  return {
+    type: "dot", scope: "enemy", icon: "Zone",
+    scale: Number((totalPct / 100 / turns).toFixed(4)), turns, period: 1,
+  }
 }
 
 /**
@@ -239,8 +256,12 @@ function buildSkill(sk, { isEx, student }) {
   // 「发射 N 发子弹，每发子弹各对其锁定的敌方单位」—— 每发单独锁目标、逐发换人。
   // 全 272 人里只有伊织一个（日和（泳装）也是「发射5发子弹」，但明写了 5 发全打第 1 名）。
   const chain = /发射\s*(\d+)\s*发子弹[^。]*?每发子弹各对其锁定的/.exec(String(sk.Desc || ""))
-  const inst = chain ? 0 : instanceCount(sk, dmgs[0])
-  if (chain && dmgs.length) {
+  const zone = dmgs.length ? zoneDot(dmgs[0]) : null
+  const inst = chain || zone ? 0 : instanceCount(sk, dmgs[0])
+  if (zone) {
+    // 场地技没有直接伤害，全部化成持续伤害挂在目标身上
+    out.effects.push(zone)
+  } else if (chain && dmgs.length) {
     out.hits = hitsOf(dmgs[0])
     out.target = "enemy_chain"
     out.count = Number(chain[1])
@@ -279,6 +300,9 @@ function buildSkill(sk, { isEx, student }) {
           type: "buff", scope, stat,
           value: /_Base$/.test(e.Stat) ? v : Number((v / 1e4).toFixed(4)),
           turns: turns ?? 2,
+          // Channel 是原作的**槽位号**：同槽后来的顶掉先来的，不同槽才共存。
+          // 一个 Channel 只装一种属性、且正负不混（全 272 人零例外），所以它本身就够唯一。
+          ...(e.Channel != null ? { channel: e.Channel } : {}),
         })
         break
       }
@@ -328,7 +352,16 @@ function buildSkill(sk, { isEx, student }) {
       case "Dispel": out.effects.push({ type: "cleanse", scope }); break
       case "CostChange": out.effects.push({ type: "cost", scope, value: (e.Value?.[0]?.[SKILL_LV] ?? e.Scale?.[SKILL_LV] ?? 0) / 1e4 }); break
       case "ConcentratedTarget": out.effects.push({ type: "taunt", scope, turns: turns ?? 1 }); break
-      case "DamageDebuff": out.effects.push({ type: "buff", scope, stat: "dmg_deal", value: -((e.Scale?.[SKILL_LV] ?? 0) / 1e4), turns: turns ?? 2 }); break
+      // `DamageDebuff` **全都是持续伤害**（灼烧/中毒/冰冻/感电），不是「造成伤害降低」——
+      // 全 272 人的 33 个无一例外都带 Icon 和 Period。当成 dmg_deal 减益的话，
+      // 千世那条 54% 会变成 −54% 输出，方向都反了。
+      case "DamageDebuff":
+        out.effects.push({
+          type: "dot", scope, icon: e.Icon || "Burn",
+          scale: Number(((e.Scale?.[SKILL_LV] ?? 0) / 1e4).toFixed(4)),
+          turns: turns ?? 4, period: msToTurns(e.Period) ?? 1,
+        })
+        break
       case "Knockback": out.effects.push({ type: "dropped", raw: "Knockback", why: "回合制无位置" }); break
       default: out.effects.push({ type: "unmapped", raw: e.Type })
     }
@@ -380,7 +413,12 @@ const units = IDS.map(([sid, code]) => {
     healPower: interp(c.HealPower1, c.HealPower100, LEVEL, m.heal),
     acc: c.AccuracyPoint, dodge: c.DodgePoint, crit: c.CriticalPoint,
     critDmg: c.CriticalDamageRate, critRes: 100, critDmgRes: 5000, stability: c.StabilityPoint,
-    autoAttack: { hits: (nd ? nd.Hits.map((h) => Number(((nd.Scale[0] * h) / 1e4 / 100).toFixed(4))) : [1]) },
+    // 普攻也可能是范围的（全 272 人里 11 个带 Radius，池内只有千世）——
+    // 只取 hits 不看 Radius 的话，她的圆形普攻会被当成单体
+    autoAttack: {
+      hits: nd ? nd.Hits.map((h) => Number(((nd.Scale[0] * h) / 1e4 / 100).toFixed(4))) : [1],
+      ...(na?.Radius ? (({ target, count }) => ({ target, count }))(resolveTarget(na, [])) : {}),
+    },
     gearSkill: pub.gear,
     skill: buildSkill(pub.sk, { isEx: false, student: c }),
     ex: buildSkill(Array.isArray(c.Skills.Ex) ? c.Skills.Ex[0] : c.Skills.Ex, { isEx: true, student: c }),

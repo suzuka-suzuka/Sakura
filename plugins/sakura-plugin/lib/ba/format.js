@@ -254,6 +254,14 @@ export function describeEffect(sk) {
           `（${e.turns}回合，每${e.period}回合）`)
         break
       case "shield": parts.push(`${who}护盾 ${pct(e.scale)}治疗力（${e.turns}回合）`); break
+      case "dot":
+        // 场地是地上的圈，不是贴在人身上的减益，别写成「灼烧 / 减益」
+        if (e.icon === "Zone") {
+          parts.push(`场地持续伤害 ${pct(e.scale)}攻击力（${e.turns}回合）`)
+        } else {
+          parts.push(`${who}持续伤害 ${pct(e.scale)}攻击力（${e.turns}回合）`)
+        }
+        break
       // 技能 1 级时控制时长是 0，效果根本不存在 —— 与其写「无效」不如不写
       case "cc":
         if (e.inactive || !e.turns) break

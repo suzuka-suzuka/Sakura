@@ -50,12 +50,29 @@ const sourceKeyOf = (side, pos) => `${side}:${pos}`
 
 // ---------------- 状态层 ----------------
 
+/**
+ * 两个状态是不是占同一个槽位。
+ *
+ * **优先按原作的 `Channel` 判**：它就是槽位号，同槽后来的顶掉先来的、不同槽才共存。
+ * 一个 Channel 只装一种属性且正负不混（全 272 人零例外），所以 channel 本身就够唯一。
+ * 真纪和茜的减防都是 Channel 603 —— 原作里它们**不叠**，后放的顶掉先放的。
+ *
+ * 没有 Channel 的退回「按施加者分层」：白热化的全局减益，以及原数据本来就不带
+ * Channel 的 `DamageDebuff`（30 个）。
+ */
 function sameStatusLayer(a, b) {
+  if (a.channel != null && b.channel != null) return a.channel === b.channel
   return Boolean(a.sourceKey && b.sourceKey) &&
     a.sourceKey === b.sourceKey && a.effectKind === b.effectKind && a.stat === b.stat
 }
 
-/** 同一施加者的同类状态以最新一层覆盖；不同施加者各自保留一层。 */
+/**
+ * 同槽只留一层（判据见 sameStatusLayer），**后放的直接覆盖先放的**，不比大小。
+ *
+ * 代价是队友会互相拆台：茜的 EX 先减 29%，真纪的普技随后减 18%，最终只剩 18%。
+ * 这是槽位制的固有性质，不是 bug —— 同槽的两个减防角色本来就不该同队，
+ * 站位和出手顺序（EX 永远先于普通技能结算）都会影响最后留下的是哪一层。
+ */
 function upsertStatusLayer(list, next) {
   const first = list.findIndex((cur) => sameStatusLayer(cur, next))
   if (first < 0) { list.push(next); return next }
@@ -87,6 +104,12 @@ const CC_TEXT = {
   Confuse: "混乱", Sleep: "睡眠", Silence: "沉默", Bind: "束缚",
 }
 
+/** 持续伤害的中文名。Zone 是「固定场地」，其余取自原数据的 Icon */
+const DOT_TEXT = {
+  Zone: "范围持续伤害", Burn: "灼烧", Poison: "中毒",
+  Chill: "冰冻", ElectricShock: "感电",
+}
+
 const STAT_LABEL = {
   atk: "攻击力", atk_flat: "攻击力", dfs: "防御力", dfs_flat: "防御力",
   heal: "治疗力", heal_flat: "治疗力", maxhp: "生命上限", maxhp_flat: "生命上限",
@@ -104,6 +127,7 @@ function makeStatus(eff, turnId, source, kind) {
     srcSide: source.side, srcPos: source.idx,
     st: turnId,
     countCurrent: CURRENT_TURN_STATS.has(eff.stat),
+    channel: eff.channel ?? null, // 原作的槽位号，见 sameStatusLayer
   }
 }
 
@@ -167,10 +191,23 @@ export function exWaitOf(side, u) {
 
 export const exReadyOf = (side, u) => u.alive && exWaitOf(side, u) === 0
 
-/** 不修改传入状态，返回一侧当前能放 EX 的 0-based 角色位置。 */
+/** 不修改传入状态，返回一侧当前能放 EX 的 0-based 角色位置（只看冷却，不含本回合已放 / Cost）。 */
 export function exAvailableOf(state, sideIndex) {
   const side = state.sides[sideIndex]
   return side.units.filter((u) => exReadyOf(side, u)).map((u) => u.idx)
+}
+
+/**
+ * 这一步真正能出手的 EX：冷却好、没晕、本回合还没放过、Cost 也够。
+ * 放完一发后用它决定要不要停下来等玩家再操作。
+ */
+export function exCastableOf(state, sideIndex) {
+  const side = state.sides[sideIndex]
+  const used = new Set(state.turnEx || [])
+  const budget = turnCostOf(side)
+  return side.units
+    .filter((u) => exReadyOf(side, u) && u.stun <= 0 && !used.has(u.idx) && tmplOf(u).ex.cost <= budget)
+    .map((u) => u.idx)
 }
 
 /** 记一次 EX 释放，把释放者压进冷却 */
@@ -245,6 +282,8 @@ function makeUnit(tmpl, idx, side) {
     maxhp: tmpl.hp, hp: tmpl.hp,
     shield: 0, shieldMax: 0, shieldTurns: 0, shieldTickSide: 1 - side, shieldSt: -1,
     buffs: [], regens: [],
+    // 持续伤害（场地/灼烧）。跟施加者解绑：他阵亡、被控都照跳，所以只存算好的数值
+    dots: [],
     stun: 0, stunSt: -1, stunIcon: null,
     taunt: 0, tauntSt: -1,
     // 普通技能：「每 X 秒」是周期，第一次落在 X 秒而不是开局，所以起始压满冷却；
@@ -270,11 +309,16 @@ export function createBattle(a, b, opts = {}) {
     seed, rng: seed, round: 1, turnId: 0,
     first: opts.first ?? 0, activeSide: opts.first ?? 0,
     phase: "command", winner: null, fever: false,
+    // 本回合已开但还没「过」：已经放过的 EX 记在 turnEx 里，技能和普攻等过了再跑
+    turnOpen: false, turnEx: [],
     sides: [a, b].map((s, side) => ({
       side, uid: String(s.uid), name: s.name || String(s.uid),
       cost: CFG.COST_START, regenAcc: 0,
       exCasts: 0, lastAlive: s.picks.length,
       summons: [],
+      // 场地是留在地上的区域，不是贴在人身上的状态。覆盖范围按技能规则算，
+      // 人死了圈也不跟着缩、更不会换人（回合制没有「走进场地」）。
+      fields: [],
       units: s.picks.map((id, i) => makeUnit(BY_ID[id], i, side)),
     })),
   }
@@ -380,6 +424,38 @@ function expandAdjacent(pool, primary, count) {
 }
 
 /**
+ * 场地技的覆盖范围：按技能自己的规则算，不是按「当时打中了谁」。
+ *
+ * 千世是 2 目标圆，盖住主目标所在的整个战场；邻居空着或已经死了，圈也还是那两路。
+ * 3 目标走固定窗口（跟 expandAdjacent 同一套）；全体就是 1~4。
+ * 人偶把整发接走时退化成它挡的那一路。
+ */
+function fieldLanes(skill, targets) {
+  const primary = targets.find((t) => !t.summon) || targets[0]
+  if (!primary) return null
+  if (primary.summon) return { lo: primary.idx, hi: primary.idx }
+  const count = skill.count || 1
+  const tg = skill.target || ""
+  if (tg === "enemy_all" || tg === "ally_all" || count >= 4) return { lo: 0, hi: 3 }
+  if (tg.endsWith("adjacent") && count >= 3) {
+    const half = Math.floor((count - 1) / 2)
+    return { lo: Math.max(0, primary.idx - half), hi: Math.min(3, primary.idx + half) }
+  }
+  if (tg.endsWith("adjacent") && count === 2) {
+    return zoneOf(primary.idx) === 0 ? { lo: 0, hi: 1 } : { lo: 2, hi: 3 }
+  }
+  return { lo: primary.idx, hi: primary.idx }
+}
+
+/** 同一片地上只留一个场地，后放的刷新时长。 */
+function upsertField(side, next) {
+  if (!side.fields) side.fields = []
+  const i = side.fields.findIndex((f) => f.lo === next.lo && f.hi === next.hi)
+  if (i < 0) side.fields.push(next)
+  else side.fields[i] = next
+}
+
+/**
  * 己方目标未指定时的默认选择，规则与 laneTarget 对称：
  * 对位（对自己而言就是自己）→ 同战场最近 → 全场最近。
  */
@@ -417,10 +493,16 @@ function resolveTargets(state, u, skill, foes, allies, pick, actionKind) {
   } else if (pick) {
     const p = (pick.scope === "ally" ? allies : foes).units[pick.idx]
     if (p?.alive && (pick.scope === "ally") === tg.startsWith("ally")) primary = p
+    // 指定的人已经倒下：不当成「还打他那一片」。下面走施法者自己的对线 ——
+    // 先打施法者同战场，那一边空了再越界打最近的。
   }
 
   if (tg === "enemy_random") return aliveOf(foes) // 逐段随机，在 strike 里再抽
-  if (tg === "enemy_chain") return primary ? [primary] : [] // 逐发换目标，在 execute 里再算
+  // 连发第一发也要有人：指定的死了走上面的同战场溢出，再空就对线（会越界）
+  if (tg === "enemy_chain") {
+    if (!primary) primary = laneTarget(u, foes)
+    return primary ? [primary] : []
+  }
 
   // 不指定目标就一律走对线锁定：对位 → 同战场 → 最近。
   // EX 也一样 —— 「挑全场最肥的」那种启发式看着聪明，实际让玩家猜不到刀会落在谁头上。
@@ -477,6 +559,7 @@ function applyDamage(ctx, src, tgt, dmg, meta = {}) {
     tgt.alive = false
     tgt.taunt = 0
     tgt.regens.length = 0
+    tgt.dots.length = 0
     ctx.log(`  ✝ ${nameOf(tgt)} ${tgt.summon ? "被打碎" : "倒下"}`)
   }
 }
@@ -599,6 +682,36 @@ function applyEffects(ctx, u, skill, dmgTargets, allies) {
         }
         break
 
+      // 持续伤害：伤害值在施放瞬间按施加者攻击力算死，之后跟他再无关系 ——
+      // 场地是留在地上的，施加者阵亡、被控都不影响它继续跳。
+      case "dot":
+        // 固定场地先落在地上：圈按技能生效范围画，不按当时站了几个人。
+        // 伤害仍然只打施放瞬间站在里面的人，之后谁死了都不换目标。
+        if (eff.icon === "Zone") {
+          const aimed = dmgTargets.length ? dmgTargets : targets
+          const lanes = fieldLanes(skill, aimed)
+          const ground = (aimed[0] || targets[0])
+            ? state.sides[(aimed[0] || targets[0]).side]
+            : null
+          if (lanes && ground) {
+            upsertField(ground, { lo: lanes.lo, hi: lanes.hi, turns: eff.turns, st: T })
+          }
+        }
+        for (const t of targets) {
+          if (!t.alive) continue
+          t.dots.push({
+            icon: eff.icon || "Burn", amount: atkOf(u) * eff.scale,
+            turns: eff.turns, period: eff.period || 1, tick: 0,
+            attackType: tmplOf(u).atkType, st: T,
+          })
+          ctx.log(`  ${nameOf(t)} 陷入${DOT_TEXT[eff.icon] || "持续伤害"}（${eff.turns}回合，每${eff.period || 1}回合跳）`)
+          // 场地不是 debuff：它是留在地上的区域，状态格也不出图标。灼烧类才发 debuff 事件。
+          if (eff.icon !== "Zone") {
+            emitEvent(ctx, { type: "debuff", source: unitRef(u), target: unitRef(t), effects: ["dot"] })
+          }
+        }
+        break
+
       case "charge":
         u.charge = { shots: eff.shots, mult: eff.mult, count: eff.count }
         ctx.log(`  ${nameOf(u)} 换弹强化（接下来 ${eff.shots} 发普攻 ×${eff.mult}` +
@@ -618,7 +731,8 @@ function applyEffects(ctx, u, skill, dmgTargets, allies) {
         me.summons.push({
           summon: true, id: eff.summonId, side: u.side, idx: blockIdx, blockIdx,
           hp, maxhp: hp, shield: 0, shieldMax: 0, shieldTurns: 0,
-          buffs: [], regens: [], stun: 0,
+          // dots 不能漏：场地技打到人偶时会往这里 push，缺了直接崩
+          buffs: [], regens: [], dots: [], stun: 0,
           taunt: eff.taunt || 0, turns: eff.turns, st: T,
           sourceKey: key, alive: true,
         })
@@ -683,6 +797,14 @@ function execute(ctx, u, skill, label, actionKind, pick) {
   if (!targets.length && skill.target !== "self") return
 
   ctx.log(`[${u.side === 0 ? "蓝" : "红"}] ${nameOf(u)} ${label}`)
+  // 集火时第一个 EX 已经把指定目标打死，这一发按施法者对线重锁
+  if (pick && pick.idx != null && !pick.summon && actionKind === "ex") {
+    const intended = (pick.scope === "ally" ? me : foes).units[pick.idx]
+    const got = targets[0]
+    if (intended && !intended.alive && got && got !== intended) {
+      ctx.log(`  ${nameOf(intended)} 已倒下，转打 ${nameOf(got)}`)
+    }
+  }
   emitEvent(ctx, {
     type: "action", source: unitRef(u),
     action: actionKind,
@@ -749,7 +871,12 @@ function autoAttack(ctx, u) {
     }, "强化普攻", "normal")
     return
   }
-  execute(ctx, u, { target: "enemy_single", count: 1, hits: tmpl.autoAttack.hits, effects: [] }, "普攻", "normal")
+  // 普攻本身也可能是范围的（千世的圆形普攻），照模板里的 target/count 走
+  execute(ctx, u, {
+    target: tmpl.autoAttack.target || "enemy_single",
+    count: tmpl.autoAttack.count || 1,
+    hits: tmpl.autoAttack.hits, effects: [],
+  }, "普攻", "normal")
 }
 
 // ---------------- 普通技能触发 ----------------
@@ -813,6 +940,47 @@ function endTurn(ctx, side) {
       }
     }
     s.summons = (s.summons || []).filter((x) => x.alive)
+  }
+
+  /**
+   * 持续伤害（场地/灼烧）在承受者自己的回合跳。三条性质都是有意的：
+   *
+   * - **不发 `action` 事件**，战场图上就不会画连线 —— 施加者可能已经阵亡，
+   *   从他身上拉一根线出来是错的；伤害直接记在承受者头上，靠橙色区分来源。
+   * - **不转移目标**：场地在施放瞬间就贴到当时站在里面的人身上，其中一个死了，
+   *   剩下的照跳，但不会跑去烧别人。
+   * - **召唤物也在列**：人偶站在场地里一样挨烧，所以这里要连 summons 一起遍历。
+   */
+  for (const u of [...side.units, ...summonsOf(side)]) {
+    for (const d of [...(u.dots || [])]) {
+      if (d.st === T) continue
+      d.tick += 1
+      if (d.tick % d.period === 0 && u.alive) {
+        const hurt = Math.max(1, d.amount)
+        u.hp -= hurt
+        ctx.log(`  ${nameOf(u)} ${DOT_TEXT[d.icon] || "持续伤害"} ${Math.round(hurt)}`)
+        emitEvent(ctx, {
+          type: "damage", source: null, target: unitRef(u), dot: true, dotIcon: d.icon,
+          amount: Math.round(hurt), totalAmount: Math.round(hurt), absorbed: 0,
+          crit: false, critHits: 0, affinity: "none", attackType: d.attackType || "持续",
+        })
+        if (u.hp <= 0) {
+          u.hp = 0; u.alive = false; u.taunt = 0
+          u.regens.length = 0; u.dots.length = 0
+          ctx.log(`  ✝ ${nameOf(u)} ${u.summon ? "被烧毁" : "倒下"}`)
+          break
+        }
+      }
+      d.turns -= 1
+      if (d.turns <= 0) u.dots.splice(u.dots.indexOf(d), 1)
+    }
+  }
+
+  // 地上的圈跟身上的 DoT 分开计时：人死了 DoT 清掉，圈还在原处，直到自己的时长走完。
+  for (const f of [...(side.fields || [])]) {
+    if (f.st === T) continue
+    f.turns -= 1
+    if (f.turns <= 0) side.fields.splice(side.fields.indexOf(f), 1)
   }
 
   // 持续治疗按承受者自己的回合跳。
@@ -933,34 +1101,33 @@ export function validateAction(state, action) {
 
   const resolved = resolveCasts(state, action)
   if (resolved.error) return resolved.error
+  if (resolved.casts.length > 1) return "一次只能放一个 EX，看完结果再决定下一发，或发「过」"
+  if (!resolved.casts.length) return "要指定放哪个角色的 EX"
 
   const draft = structuredClone(state)
   const side = draft.sides[draft.activeSide]
-  refreshExOnCasualty(side)
-  let budget = turnCostOf(side)
-  const exActors = new Set()
-
-  // 边走边记冷却：一条指令里连放多个时，前面的释放会把后面的人解锁
-  for (const cast of resolved.casts) {
-    const u = side.units[cast.pos]
-    if (!u) return `没有 ${cast.pos + 1} 号位`
-    if (!u.alive) return `${nameOf(u)} 已经倒下了`
-    if (exActors.has(cast.pos)) return `${nameOf(u)} 本回合已经释放过 EX`
-    const wait = exWaitOf(side, u)
-    if (wait > 0) return `${nameOf(u)} 的 EX 还在冷却，还需本方再放出 ${wait} 个 EX`
-    if (u.stun > 0) return `${nameOf(u)} 被${CC_TEXT[u.stunIcon] || "控制"}，放不出 EX`
-    const cost = tmplOf(u).ex.cost
-    if (budget < cost) return `Cost 不够：${nameOf(u)} 要 ${cost} 点，你还剩 ${budget} 点`
-    budget -= cost
-    side.cost = budget
-    exActors.add(cast.pos)
-    markExCast(side, u)
-  }
+  if (!draft.turnOpen) refreshExOnCasualty(side)
+  const budget = turnCostOf(side)
+  const used = new Set(draft.turnEx || [])
+  const cast = resolved.casts[0]
+  const u = side.units[cast.pos]
+  if (!u) return `没有 ${cast.pos + 1} 号位`
+  if (!u.alive) return `${nameOf(u)} 已经倒下了`
+  if (used.has(cast.pos)) return `${nameOf(u)} 本回合已经释放过 EX`
+  const wait = exWaitOf(side, u)
+  if (wait > 0) return `${nameOf(u)} 的 EX 还在冷却，还需本方再放出 ${wait} 个 EX`
+  if (u.stun > 0) return `${nameOf(u)} 被${CC_TEXT[u.stunIcon] || "控制"}，放不出 EX`
+  const cost = tmplOf(u).ex.cost
+  if (budget < cost) return `Cost 不够：${nameOf(u)} 要 ${cost} 点，你还剩 ${budget} 点`
   return null
 }
 
 /**
- * 打完当前行动方的一个回合。
+ * 结算当前行动方的一步。
+ *
+ * 一次只能放一个 EX。放完若还能再放，停住等玩家看图再决定；
+ * 发「过」或放不出下一发时，才跑普通技能 → 普攻 → 收回合。
+ *
  * @param {object} prev 战斗状态（不会被修改）
  * @param {{type:'pass'}|{type:'ex', casts:Array<{pos:number, target?:object}>}} action
  * @returns {{state, log, events, round, error?}}
@@ -977,14 +1144,24 @@ export function playerTurn(prev, action) {
   const side = state.sides[state.activeSide]
   const tag = state.activeSide === 0 ? "蓝" : "红"
   const actionRound = state.round
-  state.turnId += 1
+  const continuing = Boolean(state.turnOpen)
+
+  if (!continuing) {
+    state.turnOpen = true
+    state.turnEx = []
+    state.turnId += 1
+    // ⓪ 白热化按轮数判定，只在回合开头跑一次
+    enterFever(ctx)
+    // ① 减员刷新要在指令之前跑：这一回合就该能放
+    refreshExOnCasualty(side, () => lines.push(`[${tag}] 有人阵亡，全员 EX 冷却清空`))
+    lines.push(`--- ${tag}方回合（Cost ${side.cost}）---`)
+  }
 
   // Cost 在回合末才回复，因此进入回合时手上的就是本回合的全部预算
   const costAtStart = side.cost
   let gained = 0
   let spent = 0
 
-  /** 回合结束时的 Cost 回复：只取决于存活人数，与本回合做了什么无关 */
   const applyRegen = () => {
     const before = side.cost
     side.regenAcc += regenOf(side, state)
@@ -1002,43 +1179,50 @@ export function playerTurn(prev, action) {
     }
   }
 
-  lines.push(`--- ${tag}方回合（Cost ${side.cost}）---`)
-
-  // ⓪ 白热化按轮数（＝经过的秒数）判定，所以放在回合最开头
-  enterFever(ctx)
-
-  // ① 减员刷新要在指令之前跑：这一回合就该能放，不能等到下回合
-  refreshExOnCasualty(side, () => lines.push(`[${tag}] 有人阵亡，全员 EX 冷却清空`))
-
-  // ② 玩家指令：EX
-  let usedEx = false
-  const exActors = new Set()
-  if (action.type === "ex") {
-    // 已经过校验，这里不会再出 error
-    for (const cast of resolveCasts(state, action).casts) {
-      const u = side.units[cast.pos]
-      if (!u.alive || u.stun > 0 || exWaitOf(side, u) > 0 || exActors.has(cast.pos)) continue
-      const ex = tmplOf(u).ex
-      if (side.cost < ex.cost) continue
-      side.cost -= ex.cost
-      spent += ex.cost
-      markExCast(side, u)
-      usedEx = true
-      exActors.add(cast.pos)
-      execute(ctx, u, ex, `EX「${ex.name}」(-${ex.cost})`, "ex", cast.target)
-      // 「立即换弹」：上完效果立刻普攻一次
-      if (ex.thenAutoAttack && u.alive && !checkEnd(state)) autoAttack(ctx, u)
-      if (checkEnd(state)) { settle(state); return done() }
+  const closeTurn = () => {
+    state.turnOpen = false
+    state.turnEx = []
+    state.activeSide = 1 - state.activeSide
+    if (state.activeSide === state.first) {
+      if (state.round >= CFG.MAX_ROUND) settle(state)
+      else state.round += 1
     }
   }
-  if (!usedEx) lines.push(`[${tag}] 过`)
+
+  // ② 玩家指令：最多一个 EX
+  if (action.type === "ex") {
+    const cast = resolveCasts(state, action).casts[0]
+    const u = side.units[cast.pos]
+    const used = new Set(state.turnEx || [])
+    if (u?.alive && u.stun <= 0 && exWaitOf(side, u) <= 0 && !used.has(u.idx)) {
+      const ex = tmplOf(u).ex
+      if (side.cost >= ex.cost) {
+        side.cost -= ex.cost
+        spent += ex.cost
+        markExCast(side, u)
+        state.turnEx = [...used, u.idx]
+        execute(ctx, u, ex, `EX「${ex.name}」(-${ex.cost})`, "ex", cast.target)
+        if (ex.thenAutoAttack && u.alive && !checkEnd(state)) autoAttack(ctx, u)
+        if (checkEnd(state)) {
+          state.turnOpen = false
+          state.turnEx = []
+          settle(state)
+          return done()
+        }
+        // 还能再放就停：技能和普攻等「过」或放不出时再跑
+        if (exCastableOf(state, state.activeSide).length) return done()
+      }
+    }
+  } else {
+    lines.push(`[${tag}] 过`)
+  }
 
   // ③ 己方自动行动，**分两阶段跑完**：先全体普通技能，再全体普攻。
   //
   // 不能按站位 1→4 逐个挑「技能或普攻」——那样真纪的减防放在 4 号位时，
   // 三个队友已经打完了，那一回合等于白放，站位反而成了隐藏的强度开关。
   // 加上 EX 就是攻略页承诺的 EX → 普通技能 → 普攻。
-  const acted = new Set(exActors) // 同一角色每回合只走一条行动分支
+  const acted = new Set(state.turnEx || [])
   const foes = () => state.sides[1 - state.activeSide]
 
   // ③-a 普通技能。控制在这一阶段结算，被控的人后面也不普攻
@@ -1064,7 +1248,12 @@ export function playerTurn(prev, action) {
     consumeSkill(u)
     acted.add(u.idx)
     execute(ctx, u, sk, `普通技能「${sk.name}」`, "skill")
-    if (checkEnd(state)) { settle(state); return done() }
+    if (checkEnd(state)) {
+      state.turnOpen = false
+      state.turnEx = []
+      settle(state)
+      return done()
+    }
   }
 
   // ③-b 普攻
@@ -1072,19 +1261,25 @@ export function playerTurn(prev, action) {
     if (sideDead(foes())) break
     if (!u.alive || acted.has(u.idx)) continue
     autoAttack(ctx, u)
-    if (checkEnd(state)) { settle(state); return done() }
+    if (checkEnd(state)) {
+      state.turnOpen = false
+      state.turnEx = []
+      settle(state)
+      return done()
+    }
   }
 
   // ④ 回合结束：先结算状态时长，再回复 Cost（所以首轮双方都不回）
   endTurn(ctx, side)
   applyRegen()
-  if (checkEnd(state)) { settle(state); return done() }
-
-  state.activeSide = 1 - state.activeSide
-  if (state.activeSide === state.first) {
-    if (state.round >= CFG.MAX_ROUND) settle(state)
-    else state.round += 1
+  if (checkEnd(state)) {
+    state.turnOpen = false
+    state.turnEx = []
+    settle(state)
+    return done()
   }
+
+  closeTurn()
   return done()
 }
 

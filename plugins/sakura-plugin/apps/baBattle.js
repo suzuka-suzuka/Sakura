@@ -14,13 +14,13 @@ import { Segment } from "../../../src/api/client.js"
 import { getRedis } from "../../../src/utils/redis.js"
 import { logger } from "../../../src/utils/logger.js"
 
-import { CFG, BY_ID, findUnit } from "../lib/ba/roster.js"
-import { createBattle, playerTurn, validateAction, turnCostOf } from "../lib/ba/engine.js"
+import { CFG, BY_ID, ROSTER, findUnit } from "../lib/ba/roster.js"
+import { createBattle, playerTurn, validateAction } from "../lib/ba/engine.js"
 import { BattleStore } from "../lib/ba/store.js"
 import { parseDraft, parseAction } from "../lib/ba/parse.js"
 import { baBattleImageGenerator } from "../lib/ba/BaBattleImageGenerator.js"
 import {
-  renderRosterByType, renderExWindow, renderOne, mergeTurnLog, SIDE_MARK,
+  renderRosterByType, renderOne, mergeTurnLog, SIDE_MARK,
 } from "../lib/ba/format.js"
 
 /** 把文本、图片段或段数组包成合并转发节点。群聊和私聊都能用。 */
@@ -53,13 +53,12 @@ function renderGuideFallback() {
     "应战后角色图鉴以合并转发私聊发给双方；直接在私聊回 4 个角色名完成暗配队，例如：星野 白子 野宫 芹香",
     "配队顺序就是左起站位，决定普攻对位。",
     "",
-    "出招：星野ex　/　星野ex打白子　/　星野ex给芹香　/　星野ex打白子 芹香ex　/　过",
+    "出招：星野ex　/　星野ex打白子　/　星野ex给芹香　/　过",
     "一律写角色名，不用编号；同队不许重名，所以名字就能唯一定位。",
     "中间的字决定目标在哪一边：打/攻/揍 是敌方，给/帮/治 是己方；不写就按技能自己的目标类型判定。",
-    "一条指令连放多个用空格隔开，按写的先后依次结算，先放的先进冷却。",
-    "普攻锁定对位；EX 与范围型普通技能由你指定主目标。",
-    "动作优先级：EX → 普通技能 → 普攻，整队分三段跑完——全队技能结算完才轮到普攻，所以减防/增伤一定赶在本方普攻之前，站位不影响。同一角色每回合只行动一次。",
-    "放过 EX 后本回合不再自动出手（换弹类 EX 除外，它会紧接着补一次普攻）。",
+    "一次只放一个 EX。放完会先出图，还能再放就继续写；发「过」才结算普通技能和普攻、交给对方。",
+    "普攻锁定对位；EX 由你指定主目标。放过 EX 的人本回合不再普攻（换弹类 EX 除外，它会紧接着补一次普攻）。",
+    "动作顺序：玩家 EX（可停下来再放）→ 全体普通技能 → 全体普攻。技能一定赶在普攻前，减防/增伤不会白放。",
     "",
     "【战场分割】1·2 号位是一个战场，3·4 号位是另一个，两边各打各的（原作机制）。",
     "本战场的敌人全灭了才会越界打另一边；所以坦克放 1 位只保护 1·2，站位是有讲究的。",
@@ -74,7 +73,7 @@ function renderGuideFallback() {
     "",
     `Cost：在每个回合「结束时」回复 = 存活人数 × ${CFG.COST_REGEN_PER_UNIT}，上限 ${CFG.COST_MAX}（与原作一致）。`,
     `因此首轮双方都不回复：先手首轮 ${CFG.COST_START} 点，后手首轮 ${CFG.COST_START + CFG.SECOND_BONUS} 点，之后后手恒定领先 ${CFG.SECOND_BONUS} 点。`,
-    "四个角色的 EX 随时可选，一条指令可以连续释放多个；同一角色每回合最多释放一次。",
+    "四个角色的 EX 随时可选，一次只放一个；同一角色每回合最多释放一次。",
     "放完 EX 要压冷却：得等本方之后再放出「存活人数 − 2」个 EX 才轮回来（满编 4 人＝隔 2 个）。",
     "自己回合开始时若有人阵亡，全员冷却立即清空，不会出现谁都放不出来的死局。",
     "",
@@ -149,20 +148,13 @@ export class BaBattle extends plugin {
   }
 
   /**
-   * 一个回合结束后固定发三条：战报转发 → 战场图 → @下一个人。
-   * 拆成三条是有意的：转发要点开才看，图要直接看到，@ 要能在通知里点开。
+   * 一步之后 @ 当前该动手的人。图里已经有 Cost / EX / 血量，这里只喊一声。
    */
   async pingTurn(bot, groupId, session) {
-    const st = session.state
-    const player = session.players[st.activeSide]
-    const side = st.sides[st.activeSide]
+    const player = session.players[session.state.activeSide]
     await this.sayToGroup(bot, groupId, [
       Segment.at(player.uid),
-      Segment.text(
-        ` 轮到你了　${SIDE_MARK[st.activeSide]} 第 ${st.round} 轮　Cost ${turnCostOf(side)}/${CFG.COST_MAX}\n` +
-        `${renderExWindow(st, st.activeSide)}\n` +
-        "出招：星野ex打白子　多个用空格隔开　不动就发「过」"
-      ),
+      Segment.text(" 轮到你了，请行动"),
     ])
   }
 
@@ -184,25 +176,31 @@ export class BaBattle extends plugin {
     }
   }
 
-  /** 图鉴按攻击属性拆开发，一个属性一条 —— 配队时要比的就是属性对位。私聊发不出去时的兜底 */
+  /**
+   * 图鉴的合并转发节点：按攻击属性一个属性一个节点 —— 配队时要比的就是属性对位。
+   * **一律走合并转发**，不管发给谁：拆成一个属性一条普通消息会刷三屏，
+   * 而且配队时还得往回翻聊天记录。
+   * @param {string|null} hint 首节点的用法说明，私聊配队时才给
+   */
+  rosterNodes(hint = null) {
+    return [hint, ...renderRosterByType()].filter(Boolean)
+  }
+
+  /** 私聊发不出去时的兜底：图鉴照样以合并转发发在群里 */
   async sendRosterByType(bot, groupId) {
-    for (const block of renderRosterByType()) {
-      await this.sayToGroup(bot, groupId, block)
-    }
+    return this.forwardToGroup(bot, groupId, this.rosterNodes())
   }
 
   /**
-   * 图鉴私聊发给一个玩家：一条合并转发，一个属性一个节点。
-   * 配队本来就在私聊做，图鉴跟着走私聊；发群里既刷屏，配队时还得往回翻。
+   * 图鉴私聊发给一个玩家。配队本来就在私聊做，图鉴跟着走私聊。
    * @returns {Promise<boolean>} 没加好友 / 被风控时返回 false，调用方兜回群里
    */
   async sendRosterToUser(bot, uid) {
-    const nodes = toNodes([
+    const nodes = toNodes(this.rosterNodes(
       "📖 角色图鉴　直接回复 4 个角色名完成配队\n" +
       "例：星野 白子 野宫 芹香\n" +
-      "写的顺序就是左起站位，决定普攻对位",
-      ...renderRosterByType(),
-    ], bot.self_id, bot.nickname)
+      "写的顺序就是左起站位，决定普攻对位"
+    ), bot.self_id, bot.nickname)
     try {
       await bot.pickFriend(uid).sendForwardMsg(nodes)
       return true
@@ -519,7 +517,10 @@ export class BaBattle extends plugin {
   guide = Command(/^#?档案图鉴\s*(.*)$/, { event: "message.group" }, async function (e) {
     const key = (e.match?.[1] || "").trim()
     if (!key) {
-      await this.sendRosterByType(e.bot, String(e.group_id))
+      await this.sendForward(e, this.rosterNodes(), {
+        source: "档案对战 · 角色图鉴",
+        summary: `${ROSTER.length} 名角色，按攻击属性分组`,
+      })
       return true
     }
     const t = findUnit(key)

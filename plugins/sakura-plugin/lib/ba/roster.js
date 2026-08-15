@@ -356,7 +356,8 @@ export const ROSTER = [
           "scope": "enemy",
           "stat": "acc",
           "value": -0.1686,
-          "turns": 6
+          "turns": 6,
+          "channel": 605
         }
       ],
       "trigger": {
@@ -432,7 +433,8 @@ export const ROSTER = [
           "scope": "self",
           "stat": "atk",
           "value": 0.2296,
-          "turns": 4
+          "turns": 4,
+          "channel": 2
         }
       ],
       "trigger": {
@@ -510,7 +512,8 @@ export const ROSTER = [
           "scope": "self",
           "stat": "crit_dmg_res_flat",
           "value": 1579,
-          "turns": 4
+          "turns": 4,
+          "channel": 23
         }
       ],
       "trigger": {
@@ -641,7 +644,8 @@ export const ROSTER = [
           "scope": "enemy",
           "stat": "dfs",
           "value": -0.1837,
-          "turns": 3
+          "turns": 3,
+          "channel": 603
         }
       ],
       "trigger": {
@@ -659,7 +663,8 @@ export const ROSTER = [
           "scope": "self",
           "stat": "atk",
           "value": 0.4194,
-          "turns": 6
+          "turns": 6,
+          "channel": 2
         }
       ],
       "cost": 5,
@@ -758,6 +763,7 @@ export const ROSTER = [
           "stat": "dmg_deal",
           "value": 0,
           "turns": 5,
+          "channel": 24,
           "inactive": true
         }
       ],
@@ -871,14 +877,16 @@ export const ROSTER = [
           "scope": "self",
           "stat": "atk",
           "value": 0.2752,
-          "turns": 4
+          "turns": 4,
+          "channel": 2
         },
         {
           "type": "buff",
           "scope": "self",
           "stat": "dfs",
           "value": 0.1102,
-          "turns": 4
+          "turns": 4,
+          "channel": 3
         }
       ],
       "trigger": {
@@ -949,7 +957,8 @@ export const ROSTER = [
           "scope": "self",
           "stat": "dmg_deal",
           "value": 0.2559,
-          "turns": 4
+          "turns": 4,
+          "channel": 24
         }
       ],
       "trigger": {
@@ -974,7 +983,8 @@ export const ROSTER = [
           "scope": "self",
           "stat": "atk",
           "value": 0.2588,
-          "turns": 2
+          "turns": 2,
+          "channel": 2
         }
       ],
       "cost": 3,
@@ -1032,7 +1042,8 @@ export const ROSTER = [
           "scope": "enemy",
           "stat": "dfs",
           "value": -0.2904,
-          "turns": 6
+          "turns": 6,
+          "channel": 603
         }
       ],
       "cost": 2,
@@ -1066,7 +1077,9 @@ export const ROSTER = [
     "autoAttack": {
       "hits": [
         100
-      ]
+      ],
+      "target": "enemy_adjacent",
+      "count": 2
     },
     "gearSkill": true,
     "skill": {
@@ -1088,21 +1101,17 @@ export const ROSTER = [
       "target": "enemy_adjacent",
       "count": 2,
       "area": 125664,
-      "effects": [],
-      "cost": 4,
-      "hits": [
-        56.03,
-        56.03,
-        56.03,
-        56.03,
-        56.03,
-        56.03,
-        56.03,
-        56.03,
-        56.03,
-        56.03,
-        56.03
-      ]
+      "effects": [
+        {
+          "type": "dot",
+          "scope": "enemy",
+          "icon": "Zone",
+          "scale": 3.0817,
+          "turns": 2,
+          "period": 1
+        }
+      ],
+      "cost": 4
     }
   },
   {
@@ -1145,7 +1154,8 @@ export const ROSTER = [
           "scope": "self",
           "stat": "atk",
           "value": 0.3877,
-          "turns": 4
+          "turns": 4,
+          "channel": 2
         }
       ],
       "trigger": {
@@ -1203,7 +1213,8 @@ export const ROSTER = [
           "scope": "self",
           "stat": "crit_dmg",
           "value": 0.3512,
-          "turns": 6
+          "turns": 6,
+          "channel": 11
         }
       ],
       "trigger": {
@@ -1265,14 +1276,16 @@ export const ROSTER = [
           "scope": "self",
           "stat": "atk",
           "value": 0.2233,
-          "turns": 4
+          "turns": 4,
+          "channel": 2
         },
         {
           "type": "buff",
           "scope": "self",
           "stat": "acc",
           "value": 0.1936,
-          "turns": 4
+          "turns": 4,
+          "channel": 5
         }
       ],
       "trigger": {
@@ -1481,7 +1494,8 @@ export const ROSTER = [
           "scope": "self",
           "stat": "atk",
           "value": 0.3565,
-          "turns": 6
+          "turns": 6,
+          "channel": 2
         }
       ],
       "cost": 2,
