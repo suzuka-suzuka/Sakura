@@ -218,11 +218,14 @@ function markExCast(side, u) {
 }
 
 /**
- * 己方回合开始时若比上个回合少了人，直接清空全部冷却。
+ * 轮到这一方时若比上次少了人，直接清空全部冷却。
  *
- * 没有这一条的话，减员会让冷却长度缩短、却缩不掉已经欠下的等待，
- * 出现「全队都在冷却、这一回合谁都放不出 EX」的死局。
- * validateAction 与 playerTurn 都要先跑一遍，否则校验和结算会对不上。
+ * 没有这一条的话，减员会让冷却长度缩短、却缩不掉已经欠下的等待
+ * （4→3 时上回合放过的人 wait 从 2 变成 1，看起来还锁着）。
+ *
+ * 必须在把回合交出去时就跑（closeTurn），不能等下一位发出第一口指令：
+ * 战场图是交回合时发出去的，那时候冷却还没清，卡面上仍是灰的。
+ * validateAction / playerTurn 开头再跑一次，给「图已经发出、指令才进来」兜底。
  */
 function refreshExOnCasualty(side, log) {
   const now = aliveOf(side).length
@@ -233,6 +236,14 @@ function refreshExOnCasualty(side, log) {
   for (const u of side.units) u.exCastNo = 0
   log?.()
   return true
+}
+
+/** 交回合之后、第一口指令进来之前：减员刷新还没落到 state 上 */
+export function exRefreshPending(state, side) {
+  const s = side ?? state.sides[state.activeSide]
+  if (state.phase !== "command" || state.turnOpen) return false
+  if (s !== state.sides[state.activeSide]) return false
+  return s.lastAlive != null && aliveOf(s).length < s.lastAlive
 }
 
 // ---------------- 白热化 / FEVER TIME ----------------
@@ -1218,6 +1229,10 @@ export function playerTurn(prev, action) {
     state.turnOpen = false
     state.turnEx = []
     state.activeSide = 1 - state.activeSide
+    // 交出去就刷新：下一位看见的图必须已经是清过冷却的状态
+    const next = state.sides[state.activeSide]
+    const nextTag = state.activeSide === 0 ? "蓝" : "红"
+    refreshExOnCasualty(next, () => lines.push(`[${nextTag}] 有人阵亡，全员 EX 冷却清空`))
     if (state.activeSide === state.first) {
       if (state.round >= CFG.MAX_ROUND) settle(state)
       else state.round += 1

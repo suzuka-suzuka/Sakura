@@ -11,7 +11,7 @@
  * 转换结果按角色缓存，同一局只算一次。
  */
 import { CFG } from "./roster.js"
-import { tmplOf, exWaitOf, turnCostOf } from "./engine.js"
+import { tmplOf, exWaitOf, turnCostOf, exRefreshPending } from "./engine.js"
 import { artOf, summonArtOf, fontFace, FONT_STACK, ATTACK, ARMOR, inkOf, esc } from "./htmlAssets.js"
 
 export const MAP_WIDTH = 1200
@@ -302,7 +302,8 @@ function hud(state) {
     const icon = artOf(t.id, "icon")
     const ac = ATTACK[t.atkType] || "#8AA"
     // 冷却只压灰，不写「还需 N」—— 具体还差几个属于文字战报的信息量，图上给不到
-    const blocked = active && (exWaitOf(s, u) > 0 || u.stun > 0)
+    // 减员刷新在交回合时落地；老对局若还没跑过，按「待刷新」把冷却卡画成可放
+    const blocked = active && !exRefreshPending(state, s) && (exWaitOf(s, u) > 0 || u.stun > 0)
     const ready = active && !blocked && avail >= t.ex.cost
     const progress = Math.max(0, Math.min(1, avail / Math.max(1, t.ex.cost)))
     // 两种遮罩表达两件不同的事：冷却/眩晕是「现在轮不到你」，整张压灰盖平；

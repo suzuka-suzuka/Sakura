@@ -6,7 +6,7 @@
  *
  *   node scripts/target-test.mjs
  */
-import { createBattle, playerTurn, validateAction, exCastableOf } from "../lib/ba/engine.js"
+import { createBattle, playerTurn, validateAction, exCastableOf, exWaitOf } from "../lib/ba/engine.js"
 import { ROSTER } from "../lib/ba/roster.js"
 import { describeEffect } from "../lib/ba/format.js"
 
@@ -363,6 +363,23 @@ function leftover(n, cost = 10) {
   check("满编放完茜不能立刻再放", exCastableOf(first.state, 0).includes(0), false)
   check("满编同一人连放被冷却拦住",
     /冷却/.test(validateAction(first.state, { type: "ex", casts: [{ pos: 0 }] }) || ""), true)
+}
+{
+  // 4→3：蓝方放过茜，红方打死伊织，交回合时就必须清冷却，不能等蓝方再出招
+  let st = leftover(4)
+  const used = playerTurn(st, { type: "ex", casts: [{ pos: 0 }] })
+  st = used.state.turnOpen ? playerTurn(used.state, { type: "pass" }).state : used.state
+  st.sides[0].units[3].alive = false
+  st.sides[0].units[3].hp = 0
+  const handed = playerTurn(st, { type: "pass" })
+  const blue = handed.state.sides[0]
+  check("4→3 交回合后 lastAlive 已更新", blue.lastAlive, 3)
+  check("4→3 交回合后上回合的茜 wait 为 0", exWaitOf(blue, blue.units[0]), 0)
+  check("4→3 交回合后茜在可放名单", exCastableOf(handed.state, 0).includes(0), true)
+  const reuse = playerTurn(handed.state, { type: "ex", casts: [{ pos: 0 }] })
+  check("4→3 下回合能再用上回合放过的茜", Boolean(reuse.error), false)
+  check("4→3 再用茜确实结算了 EX",
+    reuse.events.some((e) => e.type === "action" && e.action === "ex" && e.source.pos === 0), true)
 }
 
 console.log(bad ? `\n✗ ${bad} 条不符` : "\n全部符合")

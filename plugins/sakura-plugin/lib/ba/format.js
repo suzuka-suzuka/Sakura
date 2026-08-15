@@ -8,7 +8,7 @@
 import { CFG, ROSTER, combatRoleOf } from "./roster.js"
 import { ARMOR_LABEL } from "./htmlAssets.js"
 import {
-  tmplOf, nameOf, regenOf, aliveOf, exWaitOf,
+  tmplOf, nameOf, regenOf, aliveOf, exWaitOf, exRefreshPending,
   hitChance, critChance, defModOf, stabilityFloor, CC_TEXT,
 } from "./engine.js"
 
@@ -87,7 +87,7 @@ export function renderExWindow(state, side) {
   for (const u of s.units) {
     if (!u.alive) continue
     const label = `${tmplOf(u).name}(${tmplOf(u).ex.cost}费)`
-    const wait = exWaitOf(s, u)
+    const wait = exRefreshPending(state, s) ? 0 : exWaitOf(s, u)
     if (wait) cooling.push(`${label}还需${wait}`)
     else ready.push(label)
   }
