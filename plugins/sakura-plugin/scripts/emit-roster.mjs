@@ -15,7 +15,7 @@ const arr = (() => {
 })()
 const cfg = JSON.parse(fs.readFileSync(path.join(HERE, "cfg.json"), "utf8"))
 
-const FORCE_STAR = 3, LEVEL = 1, SKILL_LV = 0, TURN_SEC = 5
+const FORCE_STAR = 3, LEVEL = 1, SKILL_LV = 0, ROUND_SEC = 5
 /** 原作 PvP 的时间参数：一局 4 分钟，剩余不足 1 分钟进白热化 */
 const BATTLE_SEC = 240, FEVER_LEFT_SEC = 60
 const TRANS = [[0, 1000, 1200, 1400, 1700], [0, 500, 700, 900, 1400], [0, 750, 1000, 1200, 1500]]
@@ -39,8 +39,13 @@ const starMul = (g) => {
   for (let i = 0; i < g; i++) { a += TRANS[0][i] / 1e4; h += TRANS[1][i] / 1e4; e += TRANS[2][i] / 1e4 }
   return { atk: a, hp: h, heal: e }
 }
-const msToTurns = (ms) => (ms ? Math.max(1, Math.ceil(ms / (TURN_SEC * 1000))) : null)
-const secToTurns = (s) => Math.max(1, Math.ceil(s / TURN_SEC))
+/**
+ * 秒 → `turns`。原作双方是同时打的，蓝回合与红回合是同一段 5 秒的两次呈现，
+ * 各自跑完一遍四人普攻循环（实测 4.0~6.6 秒），所以时间刻度是**轮**不是回合。
+ * 引擎里冷却与时长都只在自己方的回合跳，一轮正好跳一次，故除数就是 ROUND_SEC。
+ */
+const msToTurns = (ms) => (ms ? Math.max(1, Math.ceil(ms / (ROUND_SEC * 1000))) : null)
+const secToTurns = (s) => Math.max(1, Math.ceil(s / ROUND_SEC))
 
 const shapeArea = (r) => {
   switch (r.Type) {
@@ -199,7 +204,7 @@ const js = `/**
  * 碧蓝档案 · 回合制群战 —— 角色表（自 SchaleDB 官方数据生成）
  *
  * 本文件由 scripts/emit-roster.mjs 生成，不要手改。
- * 折算口径：等级 ${LEVEL} / 无装备 / 无羁绊 / 统一 ${FORCE_STAR}★ / 技能 ${SKILL_LV + 1} 级 / 1 回合 = ${TURN_SEC} 秒
+ * 折算口径：等级 ${LEVEL} / 无装备 / 无羁绊 / 统一 ${FORCE_STAR}★ / 技能 ${SKILL_LV + 1} 级 / 1 轮 = ${ROUND_SEC} 秒
  * 战斗公式与克制表均取自官方实现，见 CFG 注释。
  */
 
@@ -228,7 +233,7 @@ export const CFG = {
   CRIT_C: 6000, CRIT_BASE: 4000000,  // 暴击率  = 1 − CRIT_BASE / (max(暴击−暴抵,0) × CRIT_C + CRIT_BASE)
   STAB_BASE: 1000,                   // 伤害下限 = 稳定值/(稳定值+STAB_BASE) + 稳定率/10000
   DEFAULT_STAB_RATE: 2000,
-  TURN_SECONDS: ${TURN_SEC},
+  ROUND_SECONDS: ${ROUND_SEC},       // 1 轮（双方各行动一次）= 5 秒，技能时长与冷却都按这把尺子折算
 
   // ---- 对战框架（非 BA 原生，为回合制 PvP 而设）----
   // Cost 在每个回合「结束时」回复，因此首轮双方都是开局值直接开打：
@@ -239,13 +244,13 @@ export const CFG = {
   EX_COOLDOWN_SLACK: 2,              // EX 冷却长度 = 存活人数 − 这个值
   SECOND_BONUS: 2,                   // 后手方开局补偿
 
-  // ---- 白热化 / FEVER TIME（照搬原作，按 1 回合 = ${TURN_SEC} 秒折算）----
+  // ---- 白热化 / FEVER TIME（照搬原作，按 1 轮 = ${ROUND_SEC} 秒折算）----
   // 原作 PvP：总时长 ${BATTLE_SEC} 秒，剩余不足 ${FEVER_LEFT_SEC} 秒进入白热化，
   // 时间耗尽则比双方「当前血量 / 最大血量」的比值定胜负。
-  FEVER_TURN: ${(BATTLE_SEC - FEVER_LEFT_SEC) / TURN_SEC},   // 第几个回合进入白热化（= 第 ${(BATTLE_SEC - FEVER_LEFT_SEC) / TURN_SEC / 2} 轮）
+  FEVER_ROUND: ${(BATTLE_SEC - FEVER_LEFT_SEC) / ROUND_SEC},  // 第几轮进入白热化 = ${BATTLE_SEC - FEVER_LEFT_SEC} 秒
   FEVER_COST_MULT: 2,                // 白热化唯一的基础效果：Cost 攒得更快
   FEVER_DEBUFF: 0.5,                 // 赛季附加规则：防御 / 闪避 / 受治疗下降，设 0 可关掉
-  MAX_ROUND: ${BATTLE_SEC / TURN_SEC / 2},                    // 时间耗尽 = ${BATTLE_SEC} 秒 = ${BATTLE_SEC / TURN_SEC} 回合
+  MAX_ROUND: ${BATTLE_SEC / ROUND_SEC},                   // 时间耗尽 = ${BATTLE_SEC} 秒 = ${BATTLE_SEC / ROUND_SEC} 轮
 }
 
 export const ROSTER = ${JSON.stringify(units, null, 2)}

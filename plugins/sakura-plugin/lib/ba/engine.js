@@ -186,13 +186,17 @@ function refreshExOnCasualty(side, log) {
 
 /**
  * 原作的白热化在「剩余时间不足 1 分钟」时进入，不是打满多少回合触发。
- * 按 1 回合 = 5 秒折算：总时长 4 分钟 = 48 回合，白热化从第 36 回合起（= 第 18 轮）。
+ *
+ * 判定用**轮数**而不是 turnId：原作双方是同时打的，蓝回合与红回合是同一段 5 秒的
+ * 两次呈现，所以流逝的秒数 = 轮数 × 5。按 1 轮 = 5 秒折算，总时长 4 分钟 = 48 轮，
+ * 白热化从第 36 轮起。冷却与状态时长走的也是这把尺子（只在自己方回合跳，一轮正好
+ * 跳一次），两边口径必须一致，改成 turnId 就又差了 2 倍。
  *
  * 原作的**基础效果只有一条**：EX Cost 攒得明显更快。
  * 防御 / 闪避 / 受治疗下降是赛季附加规则（S10、S11 都带），一并抄了，
  * 不想要把 CFG.FEVER_DEBUFF 设成 0 即可。
  */
-const feverOn = (state) => state.turnId >= CFG.FEVER_TURN
+const feverOn = (state) => state.round >= CFG.FEVER_ROUND
 
 /**
  * 进入白热化时给全场挂一次永久减益。
@@ -228,8 +232,9 @@ function makeUnit(tmpl, idx, side) {
     buffs: [], regens: [],
     stun: 0, stunSt: -1,
     taunt: 0, tauntSt: -1,
-    // 普通技能：冷却型开局即就绪，条件型等条件满足
-    skillCd: tmpl.skill?.trigger?.type === "cooldown" ? 0 : 99,
+    // 普通技能：「每 X 秒」是周期，第一次落在 X 秒而不是开局，所以起始压满冷却；
+    // 条件型（血量阈值）等条件满足，用 99 表示「不靠冷却解锁」
+    skillCd: tmpl.skill?.trigger?.type === "cooldown" ? tmpl.skill.trigger.turns : 99,
     skillUses: 0,
     // 本方第几个 EX 是这个人放的；0 表示还没放过，开局全员可放
     exCastNo: 0,
@@ -821,7 +826,7 @@ export function playerTurn(prev, action) {
 
   lines.push(`--- ${tag}方回合（Cost ${side.cost}）---`)
 
-  // ⓪ 白热化按累计回合数（＝经过的秒数）判定，所以放在回合最开头
+  // ⓪ 白热化按轮数（＝经过的秒数）判定，所以放在回合最开头
   enterFever(ctx)
 
   // ① 减员刷新要在指令之前跑：这一回合就该能放，不能等到下回合

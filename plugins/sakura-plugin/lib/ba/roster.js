@@ -2,7 +2,7 @@
  * 碧蓝档案 · 回合制群战 —— 角色表（自 SchaleDB 官方数据生成）
  *
  * 本文件由 scripts/emit-roster.mjs 生成，不要手改。
- * 折算口径：等级 1 / 无装备 / 无羁绊 / 统一 3★ / 技能 1 级 / 1 回合 = 5 秒
+ * 折算口径：等级 1 / 无装备 / 无羁绊 / 统一 3★ / 技能 1 级 / 1 轮 = 5 秒
  * 战斗公式与克制表均取自官方实现，见 CFG 注释。
  */
 
@@ -86,7 +86,7 @@ export const CFG = {
   CRIT_C: 6000, CRIT_BASE: 4000000,  // 暴击率  = 1 − CRIT_BASE / (max(暴击−暴抵,0) × CRIT_C + CRIT_BASE)
   STAB_BASE: 1000,                   // 伤害下限 = 稳定值/(稳定值+STAB_BASE) + 稳定率/10000
   DEFAULT_STAB_RATE: 2000,
-  TURN_SECONDS: 5,
+  ROUND_SECONDS: 5,       // 1 轮（双方各行动一次）= 5 秒，技能时长与冷却都按这把尺子折算
 
   // ---- 对战框架（非 BA 原生，为回合制 PvP 而设）----
   // Cost 在每个回合「结束时」回复，因此首轮双方都是开局值直接开打：
@@ -97,13 +97,13 @@ export const CFG = {
   EX_COOLDOWN_SLACK: 2,              // EX 冷却长度 = 存活人数 − 这个值
   SECOND_BONUS: 2,                   // 后手方开局补偿
 
-  // ---- 白热化 / FEVER TIME（照搬原作，按 1 回合 = 5 秒折算）----
+  // ---- 白热化 / FEVER TIME（照搬原作，按 1 轮 = 5 秒折算）----
   // 原作 PvP：总时长 240 秒，剩余不足 60 秒进入白热化，
   // 时间耗尽则比双方「当前血量 / 最大血量」的比值定胜负。
-  FEVER_TURN: 36,   // 第几个回合进入白热化（= 第 18 轮）
+  FEVER_ROUND: 36,  // 第几轮进入白热化 = 180 秒
   FEVER_COST_MULT: 2,                // 白热化唯一的基础效果：Cost 攒得更快
   FEVER_DEBUFF: 0.5,                 // 赛季附加规则：防御 / 闪避 / 受治疗下降，设 0 可关掉
-  MAX_ROUND: 24,                    // 时间耗尽 = 240 秒 = 48 回合
+  MAX_ROUND: 48,                   // 时间耗尽 = 240 秒 = 48 轮
 }
 
 export const ROSTER = [

@@ -1,8 +1,9 @@
 /**
  * 碧蓝档案 · 回合制群战
  *
- * 4v4 单排对线 / 暗配队 / 交替回合 / Cost 驱动 EX。
- * 设计与数值验证见 docs/ba-battle/设计文档.md，战斗内核在 lib/ba/engine.js。
+ * 4v4 战场分割对线 / 暗配队 / 交替回合 / Cost 驱动 EX。
+ * 数值与技能全部照搬原作（SchaleDB 生成），战斗内核在 lib/ba/engine.js，
+ * 折算口径与各项约定见 .claude/skills/ba-battle/SKILL.md。
  *
  * 测试期约定：不做超时判负，一局靠 Redis TTL（3 小时）兜底；
  * 卡住了用 #结束对战 手动清。先把游戏性跑出来再补运营向的东西。
@@ -19,7 +20,7 @@ import { BattleStore } from "../lib/ba/store.js"
 import { parseDraft, parseAction } from "../lib/ba/parse.js"
 import { baBattleImageGenerator } from "../lib/ba/BaBattleImageGenerator.js"
 import {
-  renderRosterByType, renderExWindow, renderOne, SIDE_MARK,
+  renderRosterByType, renderExWindow, renderOne, mergeTurnLog, SIDE_MARK,
 } from "../lib/ba/format.js"
 
 /** 把文本、图片段或段数组包成合并转发节点。群聊和私聊都能用。 */
@@ -49,7 +50,7 @@ function renderGuideFallback() {
     "指令都可以不加 #。",
     "档案对战 @某人　发起（不 @ 则公开邀战）",
     "应战　　　　　　接受",
-    "应战后角色图鉴按属性发在群里；双方再私聊 bot 发 4 个角色名完成暗配队，例如：星野 白子 野宫 芹香",
+    "应战后角色图鉴以合并转发私聊发给双方；直接在私聊回 4 个角色名完成暗配队，例如：星野 白子 野宫 芹香",
     "配队顺序就是左起站位，决定普攻对位。",
     "",
     "出招：星野ex　/　星野ex打白子　/　星野ex给芹香　/　星野ex打白子 芹香ex　/　过",
@@ -77,13 +78,14 @@ function renderGuideFallback() {
     "放完 EX 要压冷却：得等本方之后再放出「存活人数 − 2」个 EX 才轮回来（满编 4 人＝隔 2 个）。",
     "自己回合开始时若有人阵亡，全员冷却立即清空，不会出现谁都放不出来的死局。",
     "",
-    "【普通技能】原作是按秒自动触发，这里折成回合冷却（1 回合 = 5 秒）；血量条件类技能满足条件才触发，部分每场限用几次。",
+    `【普通技能】原作是按秒自动触发，这里折成冷却（1 轮 = ${CFG.ROUND_SECONDS} 秒）；冷却和 Buff/护盾时长都只在自己方回合跳，对面行动时不动，所以「N 回合」= N 轮。`,
+    "开局压满冷却，第一次发动要等冷却走完；血量条件类技能满足条件才触发，部分每场限用几次。",
     "命中失败只取消该段伤害，技能的附加效果仍然生效。",
     "Buff / Debuff 从施放瞬间生效；同一施加者刷新，不同施加者同类效果分层乘算。",
     "护盾是真血上方的独立蓝色假血条，重复施加以最后一次盾量和持续时间为准。",
     "",
-    `【时限】原作一局 4 分钟 = ${CFG.MAX_ROUND * 2} 回合（${CFG.MAX_ROUND} 轮）；打满则比双方「当前血量 ÷ 最大血量」定胜负。`,
-    `【白热化】剩余不足 1 分钟时进入，即第 ${CFG.FEVER_TURN} 回合（第 ${CFG.FEVER_TURN / 2} 轮）。`,
+    `【时限】原作一局 4 分钟 = ${CFG.MAX_ROUND} 轮；打满则比双方「当前血量 ÷ 最大血量」定胜负。`,
+    `【白热化】剩余不足 1 分钟时进入，即第 ${CFG.FEVER_ROUND} 轮。`,
     `Cost 回复 ×${CFG.FEVER_COST_MULT}（原作 FEVER 的核心效果），并全场防御 / 闪避 / 受治疗 −${Math.round(CFG.FEVER_DEBUFF * 100)}%，持续到结束。`,
     "",
     "【目标】不指定目标时一律走对位：对位 → 同战场最近 → 全场最近。EX 想打谁就写谁。",
@@ -182,10 +184,31 @@ export class BaBattle extends plugin {
     }
   }
 
-  /** 图鉴按攻击属性拆开发，一个属性一条 —— 配队时要比的就是属性对位 */
+  /** 图鉴按攻击属性拆开发，一个属性一条 —— 配队时要比的就是属性对位。私聊发不出去时的兜底 */
   async sendRosterByType(bot, groupId) {
     for (const block of renderRosterByType()) {
       await this.sayToGroup(bot, groupId, block)
+    }
+  }
+
+  /**
+   * 图鉴私聊发给一个玩家：一条合并转发，一个属性一个节点。
+   * 配队本来就在私聊做，图鉴跟着走私聊；发群里既刷屏，配队时还得往回翻。
+   * @returns {Promise<boolean>} 没加好友 / 被风控时返回 false，调用方兜回群里
+   */
+  async sendRosterToUser(bot, uid) {
+    const nodes = toNodes([
+      "📖 角色图鉴　直接回复 4 个角色名完成配队\n" +
+      "例：星野 白子 野宫 芹香\n" +
+      "写的顺序就是左起站位，决定普攻对位",
+      ...renderRosterByType(),
+    ], bot.self_id, bot.nickname)
+    try {
+      await bot.pickFriend(uid).sendForwardMsg(nodes)
+      return true
+    } catch (error) {
+      logger.warn(`[档案对战] 图鉴私聊发送失败（${uid}）：${error.message}`)
+      return false
     }
   }
 
@@ -276,10 +299,20 @@ export class BaBattle extends plugin {
 
     await e.reply(
       `⚔️ ${session.players[0].name}（${SIDE_MARK[0]}蓝方） vs ${session.players[1].name}（${SIDE_MARK[1]}红方）\n` +
-      "角色图鉴按属性发在下面，双方私聊回复 4 个角色名完成配队。\n" +
+      "角色图鉴已私聊发给双方，直接回私聊 4 个角色名完成配队。\n" +
       "配队是暗的，两边都提交后才揭晓。要看某人的完整数值：档案图鉴 星野"
     )
-    await this.sendRosterByType(e.bot, session.groupId)
+
+    // 私聊发不出去（没加好友/被风控）就兜回群里，否则这局根本开不起来
+    const failed = []
+    for (const p of session.players) {
+      if (!(await this.sendRosterToUser(e.bot, p.uid))) failed.push(p.name)
+    }
+    if (failed.length) {
+      await this.sayToGroup(e.bot, session.groupId,
+        `私聊发不出图鉴（${failed.join("、")}），先加 bot 好友；这次改发群里`)
+      await this.sendRosterByType(e.bot, session.groupId)
+    }
     return true
   })
 
@@ -427,7 +460,8 @@ export class BaBattle extends plugin {
     const bot = e.bot
     const gid = session.groupId
 
-    await this.forwardToGroup(bot, gid, log?.length ? log : ["（本回合没有产生日志）"])
+    const nodes = mergeTurnLog(log)
+    await this.forwardToGroup(bot, gid, nodes.length ? nodes : ["（本回合没有产生日志）"])
     await this.sendBattleImage(bot, gid, st, log, events)
 
     if (st.phase !== "done") {

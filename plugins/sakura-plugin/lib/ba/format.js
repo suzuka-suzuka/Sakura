@@ -127,6 +127,25 @@ export function renderReveal(state) {
   ].join("\n")
 }
 
+/**
+ * 逐行日志 → 合并转发的节点，**一次行动一个节点**。
+ *
+ * 引擎的日志是「[方] 谁干了什么」加若干条两空格缩进的明细，一行一个节点会把
+ * 转发撑成十几条，点开全是碎片；按行动归并正好是玩家读战报的粒度（4 人满编约 5 条）。
+ * 回合头和「过」并进第一个节点——它们不是行动，单独占一条纯属噪音。
+ */
+export function mergeTurnLog(log) {
+  const nodes = []
+  for (const line of log || []) {
+    if (line == null || line === "") continue
+    // 缩进行是上一条行动的明细；回合头与「过」不单独成节点
+    const attach = /^\s{2}/.test(line) || /^\[[^\]]+\]\s*过$/.test(line)
+    if (attach && nodes.length) nodes[nodes.length - 1] += `\n${line}`
+    else nodes.push(line)
+  }
+  return nodes
+}
+
 /** 一个回合的战报节点数组。 */
 export function renderTurn(state, log, side, meta = {}) {
   const nodes = []

@@ -18,8 +18,8 @@ export function guidePages() {
           accent: "#58B8F6",
           items: [
             { label: "01  发起", text: "#档案对战 @某人；不 @ 时会成为公开邀战。" },
-            { label: "02  应战", text: "对手发送 #应战，完整角色图鉴随后在群里统一发送一次。" },
-            { label: "03  暗配队", text: "双方各自私聊 bot 发 4 个角色名，例如「星野 白子 野宫 芹香」；写的顺序就是左起站位。" },
+            { label: "02  应战", text: "对手发送 #应战，角色图鉴随即以合并转发私聊发给双方（没加 bot 好友则兜底发在群里）。" },
+            { label: "03  暗配队", text: "直接在私聊回 4 个角色名，例如「星野 白子 野宫 芹香」；写的顺序就是左起站位。" },
             { label: "04  揭晓", text: `双方都提交后公开阵容并随机先手；Cost 在回合末才回复，所以先手首轮 ${CFG.COST_START} 点、后手首轮 ${CFG.COST_START + CFG.SECOND_BONUS} 点。` },
           ],
         },
@@ -28,10 +28,11 @@ export function guidePages() {
           accent: "#66D2C0",
           items: [
             { label: "回合", text: "一方从 Cost 回复到状态、冷却结算，完成一次行动，叫 1 回合。" },
-            { label: "轮", text: "先手与后手各完成 1 回合，合起来才叫 1 轮。" },
+            { label: "轮", text: "先手与后手各完成 1 回合，合起来才叫 1 轮。原作双方是同时打的，所以一轮才对应 5 秒。" },
+            { label: "时长单位", text: `技能冷却、Buff、护盾写的「N 回合」，数的都是自己方的回合——对面行动时不会跳，所以 N 回合 = N 轮 = ${CFG.ROUND_SECONDS} × N 秒。` },
             { label: "结算图", text: "每个回合结算后发三条：战报转发 → 战场图 → @下一位。箭头回放刚结束的行动。" },
-            { label: "时限", text: `原作一局 4 分钟，按 1 回合 = 5 秒折算就是 ${CFG.MAX_ROUND * 2} 回合（${CFG.MAX_ROUND} 轮）。打满则比双方「当前血量 ÷ 最大血量」，高的一方获胜。` },
-            { label: "白热化", text: `剩余时间不足 1 分钟时进入，也就是第 ${CFG.FEVER_TURN} 回合（第 ${CFG.FEVER_TURN / 2} 轮）。Cost 回复 ×${CFG.FEVER_COST_MULT}，同时全场防御 / 闪避 / 受治疗 −${Math.round(CFG.FEVER_DEBUFF * 100)}%，一直持续到结束。` },
+            { label: "时限", text: `原作一局 4 分钟，按 1 轮 = ${CFG.ROUND_SECONDS} 秒折算就是 ${CFG.MAX_ROUND} 轮。打满则比双方「当前血量 ÷ 最大血量」，高的一方获胜。` },
+            { label: "白热化", text: `剩余时间不足 1 分钟时进入，也就是第 ${CFG.FEVER_ROUND} 轮。Cost 回复 ×${CFG.FEVER_COST_MULT}，同时全场防御 / 闪避 / 受治疗 −${Math.round(CFG.FEVER_DEBUFF * 100)}%，一直持续到结束。` },
           ],
         },
         {
