@@ -178,8 +178,9 @@ function stabilityFloor(src) {
  * 四个角色的 EX 随时可选，但放完要压一段冷却，冷却按「本方之后又放了几个 EX」计，
  * 不按回合计：长度 = 存活人数 − 2。
  *
- * 满编 4 人时放完要等另外 2 个 EX 才轮回来，等价于同一个人最快隔 2 次 EX；
- * 死到只剩 2 人时长度归零，剩下的人可以连放 —— 人越少越不该被冷却锁死。
+ * 满编 4 人时放完要等另外 2 个 EX 才轮回来（1→2→3→1）；
+ * 剩 3 人隔 1 个就能轮回来（1→2→1）；
+ * 剩 2 人及以下长度归零，Cost 够就能连放同一人 —— 人越少越不该被冷却锁死。
  */
 export const exLockLenOf = (side) => Math.max(0, aliveOf(side).length - CFG.EX_COOLDOWN_SLACK)
 
@@ -198,15 +199,15 @@ export function exAvailableOf(state, sideIndex) {
 }
 
 /**
- * 这一步真正能出手的 EX：冷却好、没晕、本回合还没放过、Cost 也够。
+ * 这一步真正能出手的 EX：冷却好、没晕、Cost 也够。
+ * 冷却是唯一的锁：剩 3 人是 1→2→1，剩 2 人及以下同一人可以连放。
  * 放完一发后用它决定要不要停下来等玩家再操作。
  */
 export function exCastableOf(state, sideIndex) {
   const side = state.sides[sideIndex]
-  const used = new Set(state.turnEx || [])
   const budget = turnCostOf(side)
   return side.units
-    .filter((u) => exReadyOf(side, u) && u.stun <= 0 && !used.has(u.idx) && tmplOf(u).ex.cost <= budget)
+    .filter((u) => exReadyOf(side, u) && u.stun <= 0 && tmplOf(u).ex.cost <= budget)
     .map((u) => u.idx)
 }
 
@@ -808,14 +809,17 @@ function execute(ctx, u, skill, label, actionKind, pick) {
       ctx.log(`  ${nameOf(intended)} 已倒下，转打 ${nameOf(got)}`)
     }
   }
-  emitEvent(ctx, {
+  // action.targets 是「这一发实际打到谁」，战场图按它画连线。
+  // 连发 / 弹射会在结算过程中换人，先占位再回填，否则图上只剩第一发那条线。
+  const actionEv = {
     type: "action", source: unitRef(u),
     action: actionKind,
     skillName: skill.name || null,
     kind: skill.hits ? "damage" : "support",
     targetType: skill.target || "enemy_single",
     targets: targets.map(unitRef),
-  })
+  }
+  emitEvent(ctx, actionEv)
 
   const hit = []
   if (skill.hits?.length) {
@@ -852,6 +856,7 @@ function execute(ctx, u, skill, label, actionKind, pick) {
       }
     }
   }
+  if (hit.length) actionEv.targets = hit.map(unitRef)
 
   applyEffects(ctx, u, skill, hit.length ? hit : targets, me)
 }
@@ -1140,12 +1145,10 @@ export function validateAction(state, action) {
   const side = draft.sides[draft.activeSide]
   if (!draft.turnOpen) refreshExOnCasualty(side)
   const budget = turnCostOf(side)
-  const used = new Set(draft.turnEx || [])
   const cast = resolved.casts[0]
   const u = side.units[cast.pos]
   if (!u) return `没有 ${cast.pos + 1} 号位`
   if (!u.alive) return `${nameOf(u)} 已经倒下了`
-  if (used.has(cast.pos)) return `${nameOf(u)} 本回合已经释放过 EX`
   const wait = exWaitOf(side, u)
   if (wait > 0) return `${nameOf(u)} 的 EX 还在冷却，还需本方再放出 ${wait} 个 EX`
   if (u.stun > 0) return `${nameOf(u)} 被${CC_TEXT[u.stunIcon] || "控制"}，放不出 EX`
@@ -1225,14 +1228,13 @@ export function playerTurn(prev, action) {
   if (action.type === "ex") {
     const cast = resolveCasts(state, action).casts[0]
     const u = side.units[cast.pos]
-    const used = new Set(state.turnEx || [])
-    if (u?.alive && u.stun <= 0 && exWaitOf(side, u) <= 0 && !used.has(u.idx)) {
+    if (u?.alive && u.stun <= 0 && exWaitOf(side, u) <= 0) {
       const ex = tmplOf(u).ex
       if (side.cost >= ex.cost) {
         side.cost -= ex.cost
         spent += ex.cost
         markExCast(side, u)
-        state.turnEx = [...used, u.idx]
+        state.turnEx = [...(state.turnEx || []), u.idx]
         execute(ctx, u, ex, `EX「${ex.name}」(-${ex.cost})`, "ex", cast.target)
         if (ex.thenAutoAttack && u.alive && !checkEnd(state)) autoAttack(ctx, u)
         if (checkEnd(state)) {

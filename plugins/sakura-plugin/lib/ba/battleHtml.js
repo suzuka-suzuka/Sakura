@@ -252,7 +252,7 @@ function fxLabel(ev, wide) {
     <div class="fxlabel ${kind} ${ev.crit ? "crit" : ""} ${wide ? "wide" : ""}">
       ${ev.crit ? `<span class="burst" style="--burst:polygon(${burstPolygon(critQ)})"></span>` : ""}
       <b>${esc(text)}</b>
-      ${qual ? `<i>${qual}</i>` : ""}
+      ${qual ? `<i class="${ev.affinity}">${qual}</i>` : ""}
       ${segs ? `<div class="segs">${Array.from({ length: segs.total }, (_, i) =>
       `<s class="${i < segs.landed ? "on" : ""}"></s>`).join("")}</div>` : ""}
     </div>`
@@ -496,6 +496,9 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
   box-shadow:0 3px 10px rgba(40,80,125,.18)}
 .fxlabel b{display:block;font-size:20px}
 .fxlabel i{display:block;font-style:normal;font-size:11px;margin-top:2px;color:#6E88A0}
+/* 克制走小字本身换色，不换伤害数字：WEAK 红、RESIST 蓝 */
+.fxlabel i.weak{color:#D9485C}
+.fxlabel i.resist{color:#2E7FD4}
 /* 伤害只用一个颜色 —— 克制与暴击各有自己的表达位（WEAK/RESIST 文字、爆裂外框），
    再拿颜色重复编码一遍只会让人以为那是第三种东西 */
 .fxlabel.dmg,.fxlabel.crit{color:#C0342C}

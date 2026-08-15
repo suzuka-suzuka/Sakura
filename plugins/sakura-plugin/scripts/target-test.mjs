@@ -6,7 +6,7 @@
  *
  *   node scripts/target-test.mjs
  */
-import { createBattle, playerTurn } from "../lib/ba/engine.js"
+import { createBattle, playerTurn, validateAction, exCastableOf } from "../lib/ba/engine.js"
 import { ROSTER } from "../lib/ba/roster.js"
 import { describeEffect } from "../lib/ba/format.js"
 
@@ -186,6 +186,15 @@ check("人偶挡 2 位（同战场不同路）→ 照样接走第 2 发", iori(0
 check("人偶挡 3 位（另一战场）→ 本战场还有人时不接", iori(0, [], 2), [1, 2, 1])
 check("本战场打空 + 人偶在本战场 → 后两发全打人偶", iori(2, [0, 1], 0), [3, "偶", "偶"])
 check("本战场打空 + 人偶在另一战场 → 先拆墙再打人", iori(2, [0, 1], 2), [3, "偶", 3])
+// 战场图按 action.targets 画线：必须是实际打到的人，不能只写 resolveTargets 给出的第一发
+{
+  const st = setup(["伊织", "日富美", "野宫", "芹香"], FOE)
+  st.sides[0].cost = 10
+  const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] })
+  const ev = r.events.find((e) => e.type === "action" && e.action === "ex" && e.source.pos === 0)
+  check("伊织三发换人后 action.targets 含 1 和 2",
+    (ev?.targets || []).map((t) => t.pos + 1).sort(), [1, 2])
+}
 
 console.log("\n=== 11. 千世场地：盖在生效范围，人死不转移 ===")
 function chiseCast(kills = [], pick = 0) {
@@ -313,6 +322,48 @@ killSt.sides[1].units[0].hp = 1
 const didKill = run(killSt, { type: "pass" })
 check("自己击杀掉才回血", didKill.events.some((e) => e.type === "heal" && e.source.pos === 0), true)
 check("击杀回血后进冷却", didKill.state.sides[0].units[0].skillCd > 0, true)
+
+console.log("\n=== 16. 人少时同一人可以连放 EX ===")
+/** 蓝方只留前 n 个人，茜 2 费站 1 位 */
+function leftover(n, cost = 10) {
+  const kills = []
+  for (let i = n; i < 4; i++) kills.push([0, i])
+  const st = setup(["茜", "芹香", "野宫", "伊织"], OUT, kills)
+  st.sides[0].cost = cost
+  return st
+}
+{
+  const first = playerTurn(leftover(2), { type: "ex", casts: [{ pos: 0 }] })
+  check("剩 2 人放完茜，回合还开着", first.state.turnOpen, true)
+  check("剩 2 人放完茜，茜仍在可放名单", exCastableOf(first.state, 0).includes(0), true)
+  const second = playerTurn(first.state, { type: "ex", casts: [{ pos: 0 }] })
+  check("剩 2 人同一人连放不报错", Boolean(second.error), false)
+  check("剩 2 人第二发仍是茜的 EX",
+    second.events.some((e) => e.type === "action" && e.action === "ex" && e.source.pos === 0), true)
+}
+{
+  const first = playerTurn(leftover(1), { type: "ex", casts: [{ pos: 0 }] })
+  check("剩 1 人放完回合还开着", first.state.turnOpen, true)
+  check("剩 1 人放完仍能再放", exCastableOf(first.state, 0).includes(0), true)
+  const second = playerTurn(first.state, { type: "ex", casts: [{ pos: 0 }] })
+  check("剩 1 人连放不报错", Boolean(second.error), false)
+}
+{
+  const first = playerTurn(leftover(3), { type: "ex", casts: [{ pos: 0 }] })
+  check("剩 3 人放完 1 不能立刻再放 1", exCastableOf(first.state, 0).includes(0), false)
+  const second = playerTurn(first.state, { type: "ex", casts: [{ pos: 1 }] })
+  check("剩 3 人放完 1→2 之后 1 解锁", exCastableOf(second.state, 0).includes(0), true)
+  const third = playerTurn(second.state, { type: "ex", casts: [{ pos: 0 }] })
+  check("剩 3 人 1→2→1 不报错", Boolean(third.error), false)
+  check("剩 3 人第三发仍是 1 的 EX",
+    third.events.some((e) => e.type === "action" && e.action === "ex" && e.source.pos === 0), true)
+}
+{
+  const first = playerTurn(leftover(4), { type: "ex", casts: [{ pos: 0 }] })
+  check("满编放完茜不能立刻再放", exCastableOf(first.state, 0).includes(0), false)
+  check("满编同一人连放被冷却拦住",
+    /冷却/.test(validateAction(first.state, { type: "ex", casts: [{ pos: 0 }] }) || ""), true)
+}
 
 console.log(bad ? `\n✗ ${bad} 条不符` : "\n全部符合")
 process.exit(bad ? 1 : 0)
