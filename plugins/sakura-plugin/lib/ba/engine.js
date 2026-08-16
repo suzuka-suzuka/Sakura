@@ -764,8 +764,18 @@ function allyLaneTarget(u, allies) {
  * @returns {Array<object>} 命中的单位列表（AoE 无衰减，每个目标吃全额）
  */
 function resolveTargets(state, u, skill, foes, allies, pick, actionKind) {
-  const tg = skill.target || "enemy_single"
+  let tg = skill.target || "enemy_single"
   const count = skill.count || 1
+  /**
+   * 「一个圈，砸哪边就只有那边生效」（小春的神圣手榴弹，全 272 人只有她）。
+   * 原文是「对圆形范围内的**我方**单位回复 / 对上述范围内的**敌方**单位造成伤害」，
+   * 但那个圈半径只有 200、投掷距离 950 —— 敌我两队隔着整个场地，
+   * **圈里不可能同时站着两边的人**，所以这两半永远只成立一个。
+   *
+   * 指令层用中间那个动词选边：`小春ex打白子` 是伤害圈，`小春ex奶桃` 是治疗圈。
+   * 选了己方就整发换成己方那一套 adjacent（同战场同身位 2 人），伤害在 `execute` 里跳过。
+   */
+  if (skill.circle && pick?.scope === "ally") tg = "ally_adjacent"
 
   if (tg === "self") return [u]
   if (tg === "ally_all") return aliveOf(allies)
@@ -831,7 +841,8 @@ function resolveTargets(state, u, skill, foes, allies, pick, actionKind) {
   // 范围技的落点只要碰到召唤物所在的**战场**，整发就被它接走 —— 它是挡在那半边前面的墙，
   // 跟 laneTarget 里的挡刀同一条口径（按战场，不按号位）。
   // 2 目标的覆盖面本来就是主目标那个战场；3 目标是中心窗口，跨到哪半边就被哪半边的墙接。
-  if (tg.endsWith("adjacent") && count > 1) {
+  // 只挡敌方那一侧：小春的治疗圈落在己方，自己家的墙没有理由吃掉自己的奶。
+  if (tg.startsWith("enemy") && tg.endsWith("adjacent") && count > 1) {
     const half = count >= 3 ? Math.floor((count - 1) / 2) : 0
     const lanes = count >= 3
       ? [primary.idx - half, primary.idx + half]
@@ -847,7 +858,8 @@ function resolveTargets(state, u, skill, foes, allies, pick, actionKind) {
   if (tg.endsWith("adjacent")) {
     const hits = expandAdjacent(pool.units, primary, count)
     // 横向圆/扇锁同层（睦月、白子、千世普攻…）。直线贯穿（晴奈、纯子）圈到谁打谁。
-    if (tg.startsWith("enemy") && count > 1 && skill.depth !== "through") {
+    // 己方那一侧同理 —— 小春的治疗圈跟她的伤害圈是同一个圈，一样是同战场同身位 2 人。
+    if (count > 1 && skill.depth !== "through") {
       return sameLineHits(hits, primary, count)
     }
     return hits
@@ -989,8 +1001,8 @@ function heal(ctx, src, tgt, amount) {
  * - `ally_target` 单体奶选中的那一个人（绿 / 小春的普技）。跟默认分支同义，
  *   但名字不同才读得出「这是我方那一个」而不是「打到的敌人」
  * - `ally_named`  指名给某个队友，人不在场就整条不生效（绿 ⇄ 桃 的联动）
- * - `ally_mirror` 同一个圈盖住敌我两边的**同号位**：伤害落在敌方那两路，
- *   治疗就落在己方那两路（小春的神圣手榴弹）
+ * - `circle_ally` 圈里的我方单位（小春的神圣手榴弹）。圈砸在对面时这里**返回空** ——
+ *   敌我隔着整个场地，一个圈装不下两边，「打」和「奶」永远只成立一个
  */
 function scopeTargets(scope, u, allies, dmgTargets, eff) {
   if (scope === "self") return [u]
@@ -999,11 +1011,8 @@ function scopeTargets(scope, u, allies, dmgTargets, eff) {
     const t = allies.units.find((a) => a.id === eff?.ally && a.alive)
     return t ? [t] : []
   }
-  if (scope === "ally_mirror") {
-    return dmgTargets
-      .filter((t) => !t.summon)
-      .map((t) => allies.units[t.idx])
-      .filter((a) => a?.alive)
+  if (scope === "circle_ally") {
+    return dmgTargets.filter((t) => t.side === u.side && !t.summon && t.alive)
   }
   return dmgTargets.filter((t) => t.alive)
 }
@@ -1355,13 +1364,20 @@ function execute(ctx, u, skill, label, actionKind, pick, lockedTargets) {
   // 小春的「我来治疗！」要求队友血量 ≤50%，全队满血时她不该白白扣掉冷却和普攻
   if (!targets.length && skill.target !== "self") return false
 
+  /**
+   * 圈砸在自己这半边（`小春ex奶桃`）：圈里没有敌人，那半个伤害就没有对象。
+   * 反过来砸对面时 `circle_ally` 选不出人，治疗那半边自然落空 —— 两半互斥是几何决定的，
+   * 不是这里额外加的规则。
+   */
+  const onAlly = Boolean(skill.circle) && targets[0]?.side === u.side
+
   ctx.log(`[${u.side === 0 ? "蓝" : "红"}] ${nameOf(u)} ${label}`)
   // 集火时第一个 EX 已经把指定目标打死，这一发按施法者对线重锁
   if (pick && pick.idx != null && !pick.summon && actionKind === "ex") {
     const intended = (pick.scope === "ally" ? me : foes).units[pick.idx]
     const got = targets[0]
     if (intended && !intended.alive && got && got !== intended) {
-      ctx.log(`  ${nameOf(intended)} 已倒下，转打 ${nameOf(got)}`)
+      ctx.log(`  ${nameOf(intended)} 已倒下，${onAlly ? "改落在" : "转打"} ${nameOf(got)}`)
     }
   }
   // action.targets 是「这一发实际打到谁」，战场图按它画连线。
@@ -1370,15 +1386,15 @@ function execute(ctx, u, skill, label, actionKind, pick, lockedTargets) {
     type: "action", source: unitRef(u),
     action: actionKind,
     skillName: skill.name || null,
-    kind: skill.hits ? "damage" : "support",
-    targetType: skill.target || "enemy_single",
+    kind: skill.hits && !onAlly ? "damage" : "support",
+    targetType: onAlly ? "ally_adjacent" : (skill.target || "enemy_single"),
     targets: targets.map(unitRef),
   }
   emitEvent(ctx, actionEv)
 
   const hit = []
   // 条件追伤：状态到了哪一档就换哪一组倍率（妮露的 Fury、爱丽丝的能量充能）
-  const hits = altHitsOf(u, skill) || skill.hits
+  const hits = onAlly ? null : (altHitsOf(u, skill) || skill.hits)
   if (hits?.length) {
     // ③-a 同时锁定后不再走连发/弹射的「打死换人」——那是单发技能内部的逐段重锁
     if (!locked && skill.target === "enemy_cycle") {
@@ -1757,10 +1773,12 @@ function resolveCasts(state, action) {
     }
     if (c.target) {
       const { idx, id } = c.target
-      // 没写「打/给」时按技能自己的目标类型猜边
+      // 没写「打/给」时按技能自己的目标类型猜边。猜出来的标记 `guessed`：
+      // 对小春那种「砸哪边就只有那边生效」的圈，这个字决定的是打还是奶，不能靠猜
       const exTarget = String(tmplOf(mine[pos]).ex.target || "enemy_single")
       const scope = c.target.scope || (exTarget.startsWith("enemy") ? "foe" : "ally")
-      if (idx != null) out.target = { scope, idx }
+      const guessed = c.target.scope ? {} : { guessed: true }
+      if (idx != null) out.target = { scope, idx, ...guessed }
       else {
         // 猜错了就翻到另一边找 —— 没写动词本来就是模糊的，别拿猜测去卡玩家
         let u = pick(scope === "ally" ? mine : foes, id)
@@ -1770,7 +1788,7 @@ function resolveCasts(state, action) {
           u = pick(side === "ally" ? mine : foes, id)
         }
         if (!u) return { error: `${scope === "ally" ? "你的队伍" : "对方队伍"}里没有${label(id)}` }
-        out.target = { scope: side, idx: u.idx }
+        out.target = { scope: side, idx: u.idx, ...guessed }
       }
     }
     casts.push(out)
@@ -1802,6 +1820,17 @@ export function validateAction(state, action) {
   if (lock) return `${nameOf(u)} 被${lock}，放不出 EX`
   const cost = exCostOf(u)
   if (budget < cost) return `Cost 不够：${nameOf(u)} 要 ${cost} 点，你还剩 ${budget} 点`
+  /**
+   * 一个圈砸哪边（小春）：中间那个字在这儿不是可省的修饰，而是**技能的一半**——
+   * 写「打」是 227% 的手榴弹，写「奶」是 101% 治愈力的回复，两者互斥。
+   * 而双方可能选到同名角色，光按 `ex.target` 猜边就会把「奶桃」办成炸桃。
+   * 跟位移一样在这儿拦下来，别等 Cost 扣完、图也发出去了才发现放反了。
+   */
+  if (tmplOf(u).ex?.circle && cast.target?.idx != null && cast.target.guessed) {
+    return `${nameOf(u)} 的 EX 是一个圈，砸哪边就只有那边生效，中间要带上那个字：`
+      + `${nameOf(u)}ex打<敌方角色> 是伤害，${nameOf(u)}ex奶<己方角色> 是治疗`
+      + `（打/攻/揍… 都算敌方，给/帮/治/奶… 都算己方）`
+  }
   // 位移（泉奈）：只能跟隔壁那一格的队友换。指错了在这儿就说清楚，
   // 别等 Cost 扣完、图也发出去了，才发现她压根没动
   const rep = tmplOf(u).ex?.effects?.find((e) => e.type === "reposition")

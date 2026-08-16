@@ -15,13 +15,20 @@ import { getRedis } from "../../../src/utils/redis.js"
 import { logger } from "../../../src/utils/logger.js"
 
 import { CFG, BY_ID, ROSTER, findUnit } from "../lib/ba/roster.js"
-import { createBattle, playerTurn, validateAction, exSealedOf, exLockedOf } from "../lib/ba/engine.js"
+import { createBattle, playerTurn, validateAction, exCastableOf, exSealedOf, exLockedOf } from "../lib/ba/engine.js"
 import { BattleStore } from "../lib/ba/store.js"
 import { parseDraft, parseAction } from "../lib/ba/parse.js"
 import { baBattleImageGenerator } from "../lib/ba/BaBattleImageGenerator.js"
 import {
   renderRosterByType, renderOne, mergeTurnLog, SIDE_MARK,
 } from "../lib/ba/format.js"
+
+/**
+ * 连续自动过的上限。正常打不到 —— 贪心打法 300 局的极值是 9 连
+ * （开局 Cost 为 0，97% 的局先手第一回合就没得放）。
+ * 纯粹是防某天改坏了 `exCastableOf` 之后一口气把整局刷完，撞上限就交还给玩家发「过」。
+ */
+const AUTO_PASS_MAX = 12
 
 /** 把文本、图片段或段数组包成合并转发节点。群聊和私聊都能用。 */
 function toNodes(items, botId, botName) {
@@ -53,10 +60,12 @@ function renderGuideFallback() {
     "应战后角色图鉴以合并转发私聊发给双方；直接在私聊回 4 个角色名完成暗配队，例如：星野 白子 野宫 芹香",
     "配队顺序就是左起站位，决定普攻对位。",
     "",
-    "出招：星野ex　/　星野ex打白子　/　星野ex给芹香　/　泉奈ex换野宫（位移）　/　过",
+    "出招：星野ex　/　星野ex打白子　/　星野ex给芹香　/　小春ex奶桃　/　泉奈ex换野宫（位移）　/　过",
     "一律写角色名，不用编号；同队不许重名，所以名字就能唯一定位。",
-    "中间的字决定目标在哪一边：打/攻/揍 是敌方，给/帮/治 是己方；不写就按技能自己的目标类型判定。",
+    "中间的字决定目标在哪一边，认的是意思不是某个字：打攻揍轰砸捶秒锤 都是敌方，给帮为治奶助换跳 都是己方；不写就按技能自己的目标类型判定。",
+    "小春 EX 是丢一个圈：砸对面就只有伤害（小春ex打白子），砸自己人就只有治疗（小春ex奶桃 / 小春ex给桃 / 小春ex治桃 都行），二选一，都是同战场同身位 2 人。",
     "一次只放一个 EX。放完会先出图，还能再放就继续写；发「过」才结算普通技能和普攻、交给对方。",
+    "只有在你确实有 EX 能放的时候才会 @ 你。一个都放不出来（Cost 不够 / 全在冷却 / 全员被嘲讽或恐惧）时机器人直接替你过，战报和战场图照发。",
     "普攻锁定对位；EX 由你指定主目标。放过 EX 的人本回合不再放小技能；换弹类（鹤城 / 芹香）本回合仍普攻，跟普攻阶段一起结算。",
     "动作顺序：玩家 EX（可停下来再放）→ 全体普通技能 → 全体普攻。技能一定赶在普攻前，减防/增伤不会白放。",
     "",
@@ -149,13 +158,14 @@ export class BaBattle extends plugin {
 
   /**
    * 一步之后 @ 当前该动手的人。图里已经有 Cost / EX / 血量，这里只喊一声。
-   * 全员被嘲讽 / 恐惧封住时还是要喊 —— 不能替他们把回合过掉，只把可选项收成「过」。
+   * **只在他真有得选的时候才喊** —— 没有可放的 EX 时 `autoSteps` 已经把回合过掉了。
    */
   async pingTurn(bot, groupId, session) {
     const st = session.state
     const player = session.players[st.activeSide]
     let text = " 轮到你了，请行动"
-    if (exSealedOf(st, st.activeSide)) {
+    // 走到这儿还没得放，只可能是连过撞了 AUTO_PASS_MAX。说清楚原因，别让他对着空名单发呆
+    if (!exCastableOf(st, st.activeSide).length) {
       const reasons = new Set(
         st.sides[st.activeSide].units
           .filter((u) => u.alive)
@@ -163,12 +173,45 @@ export class BaBattle extends plugin {
           .filter(Boolean)
       )
       const why = reasons.size === 1 ? [...reasons][0] : "控制"
-      text = ` 全员被${why}，只能发「过」`
+      text = exSealedOf(st, st.activeSide)
+        ? ` 全员被${why}，发「过」继续`
+        : " 现在没有能放的 EX，发「过」继续"
     }
     await this.sayToGroup(bot, groupId, [
       Segment.at(player.uid),
       Segment.text(text),
     ])
+  }
+
+  /**
+   * 没有可放的 EX 就替他把回合过掉。
+   *
+   * 那一步玩家没有任何选择权 —— 名单是空的，发「过」是唯一的合法输入，
+   * 让他打这一句只是多一次往返（开局 Cost 为 0，97% 的局第一回合就是这样）。
+   * **有得选才停下来等指令**，这条是「回合停在哪」的唯一判据。
+   *
+   * 嘲讽 / 恐惧封住全队时 `exCastableOf` 同样返回空，所以走同一条路自动过 ——
+   * 原先在这儿停下来，是为了给**支援位**留出手的余地（那类角色不站在场上、
+   * 吃不到场地嘲讽，被封的那一轮仍能行动）。现在池里一个支援位都没有，
+   * 停下来只是让被控的一方多打一句「过」。等支援位进池要把这条改回去。
+   *
+   * @returns {Array<{state, log, events}>} 自动过掉的每一回合，按顺序播报
+   */
+  autoSteps(state) {
+    const steps = []
+    let st = state
+    while (st.phase !== "done"
+      && !exCastableOf(st, st.activeSide).length
+      && steps.length < AUTO_PASS_MAX) {
+      const { state: next, log, events, error } = playerTurn(st, { type: "pass" })
+      if (error) {
+        logger.warn(`[档案对战] 自动过回合失败：${error}`)
+        break
+      }
+      st = next
+      steps.push({ state: st, log, events })
+    }
+    return steps
   }
 
   async battleMapSegment(state, log = [], events = [], options = {}) {
@@ -398,7 +441,14 @@ export class BaBattle extends plugin {
       `先手：${SIDE_MARK[st.first]} ${session.players[st.first].name}`,
     ])
     await this.sendBattleImage(e.bot, session.groupId, st)
-    await this.pingTurn(e.bot, session.groupId, session)
+    // 开局 Cost 为 0，97% 的局先手第一回合根本没得放 —— 直接推到第一个有得选的回合
+    const steps = this.autoSteps(st)
+    if (steps.length) {
+      session.state = steps.at(-1).state
+      if (session.state.phase === "done") session.phase = "done"
+      await this.store.save(scope, session)
+    }
+    await this.report(e, session, steps)
   }
 
   async sendBattleImage(bot, groupId, state, log = [], events = []) {
@@ -454,10 +504,13 @@ export class BaBattle extends plugin {
         )
         if (error) return { error }
 
-        fresh.state = next
-        if (next.phase === "done") fresh.phase = "done"
+        // 这一步之后对方（或他自己，如果还能接着放）没得选的话，顺手把那些回合过掉，
+        // 一并在锁里推完再统一播报 —— 免得中间插进来另一条指令用了半路的状态
+        const steps = [{ state: next, log, events }, ...this.autoSteps(next)]
+        fresh.state = steps.at(-1).state
+        if (fresh.state.phase === "done") fresh.phase = "done"
         await this.store.save(scope, fresh)
-        return { session: fresh, log, events }
+        return { session: fresh, steps }
       })
 
       if (!lock.locked) {
@@ -471,20 +524,25 @@ export class BaBattle extends plugin {
         return true
       }
 
-      await this.report(e, r.session, r.log, r.events)
+      await this.report(e, r.session, r.steps)
       return true
     }
   )
 
-  /** 战报转发 → 战场图 → @下一个人（或结算） */
-  async report(e, session, log, events) {
+  /**
+   * 每一回合各发一份「战报转发 → 战场图」，最后 @ 下一个人（或结算）。
+   * 自动过掉的回合照样出图出战报 —— 省掉的只是玩家那句「过」，不是他该看的东西。
+   */
+  async report(e, session, steps) {
     const st = session.state
     const bot = e.bot
     const gid = session.groupId
 
-    const nodes = mergeTurnLog(log)
-    await this.forwardToGroup(bot, gid, nodes.length ? nodes : ["（本回合没有产生日志）"])
-    await this.sendBattleImage(bot, gid, st, log, events)
+    for (const s of steps) {
+      const nodes = mergeTurnLog(s.log)
+      await this.forwardToGroup(bot, gid, nodes.length ? nodes : ["（本回合没有产生日志）"])
+      await this.sendBattleImage(bot, gid, s.state, s.log, s.events)
+    }
 
     if (st.phase !== "done") {
       await this.pingTurn(bot, gid, session)

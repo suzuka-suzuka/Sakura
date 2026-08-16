@@ -3083,7 +3083,7 @@ export const ROSTER = [
       "effects": [
         {
           "type": "heal",
-          "scope": "ally_mirror",
+          "scope": "circle_ally",
           "scale": 1.0145,
           "source": "heal"
         }
@@ -3091,7 +3091,8 @@ export const ROSTER = [
       "cost": 3,
       "hits": [
         227.31
-      ]
+      ],
+      "circle": true
     }
   }
 ]

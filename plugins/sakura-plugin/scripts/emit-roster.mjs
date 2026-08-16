@@ -526,14 +526,16 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
     const t = Array.isArray(e.Target) ? e.Target : e.Target ? [e.Target] : dflt
     let scope = t.every((x) => x === "Self") ? "self" : t.some((x) => /Ally/.test(x)) ? "ally_all" : "enemy"
     /**
-     * `Any` = 「上述范围内」的双方单位（全 272 人 6 处，池内只有小春）。
+     * `Any` = 「上述范围内」的单位，不分敌我（全 272 人 8 处）。
      * 非伤害效果落在**我方**那一半 —— 原文写得很清楚「对圆形范围内的**我方**单位…回复」。
      * 照原来「不含 Ally ⇒ 敌方」的判定，小春炸完还会给对面回血。
      *
-     * 技能同时打伤害时用 `ally_mirror`：同一个圈盖住敌我两边的**同号位**，
-     * 伤害落在敌方那两路，治疗就落在己方那两路。没有伤害时退回 ally_all。
+     * 技能**同时带伤害**时（全 272 人只有小春的神圣手榴弹）标成 `circle_ally`，
+     * 并在下面给技能补一个 `circle: true`：一个 r=200 的圈丢出去，
+     * **圈里是敌人就只有伤害、是队友就只有治疗**。敌我两队隔着整个场地，
+     * 一个圈装不下两边 —— 所以这两半永远只成立一个，见引擎的 `circle` 分支。
      */
-    if (t.includes("Any")) scope = dmgs.length ? "ally_mirror" : "ally_all"
+    if (t.includes("Any")) scope = dmgs.length ? "circle_ally" : "ally_all"
     // 这条效果在不在编队条件那一段里
     const pct = pctOfEffect(e)
     const inCond = Boolean(cond && condCode && pct != null
@@ -724,6 +726,12 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
     // 编队条件盖在这一轮刚 push 进去的效果上（一个 Effect 可能 push 出不止一条）
     if (inCond) for (let i = before; i < out.effects.length; i++) Object.assign(out.effects[i], condFields)
   }
+  /**
+   * 「一个圈，砸哪边只有那边生效」——`Target: "Any"` 的效果跟伤害同时存在时才成立。
+   * 指令层靠中间那个动词选边（`小春ex打白子` / `小春ex奶桃`），两半互斥。
+   */
+  if (out.effects.some((e) => e.scope === "circle_ally")) out.circle = true
+
   // 「获得 N 技能COST」（往 Cost 池加点，跟上面的 CostChange 打折是两回事）**没有结构化效果**
   // —— 瞬的普通技能 `Effects` 是个空数组（全 272 人里这样的技能有 9 个），数值只在描述里。
   if (!out.effects.some((e) => e.type === "cost")) {

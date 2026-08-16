@@ -257,6 +257,9 @@ export function describeEffect(sk) {
     parts.push(sk.trigger.turns ? `自己击杀时（冷却 ${sk.trigger.turns} 回合）` : "自己击杀时")
   }
   const tg = TARGET_TEXT[sk.target] || sk.target
+  // 小春：一个圈丢出去，圈里是敌人就只有伤害、是队友就只有治疗。这条得排在倍率前面，
+  // 不然卡面读起来像是「炸完还顺手奶一口」——那正是原来搞错的地方
+  if (sk.circle) parts.push("一个圈，砸哪边就只有那边生效，指令里中间那个字选边")
   // 柚子 / 切里诺：「攻击力最高」只写在描述里。有伤害时这条是索敌，没伤害时是集火的选人条件
   if (sk.pick === "max_atk") {
     parts.push("以攻击力最高的敌人为目标（无视战场分割、身位和挡刀）")
@@ -278,7 +281,9 @@ export function describeEffect(sk) {
       parts.push(`点名 ${sk.hits.length} 次，每次 ${(total / sk.hits.length).toFixed(0)}%攻击力；` +
         `从跟自己对位的号位起按号位循环（4 人时有一个吃两下，只剩 1 人就全落他身上），无法指定目标`)
     } else {
-      parts.push(`${scope} ${total.toFixed(0)}%攻击力${sk.hits.length > 1 ? ` 分${sk.hits.length}段` : ""}`)
+      // 小春的两半是互斥的，各挂一个「砸敌方 →」「砸己方 →」才读得出是二选一而不是一发两收。
+      // 写「砸哪边」而不是写某个动词 —— 认的是意思，打/攻/揍… 八个字都是敌方
+      parts.push(`${sk.circle ? "砸敌方 → " : ""}${scope} ${total.toFixed(0)}%攻击力${sk.hits.length > 1 ? ` 分${sk.hits.length}段` : ""}`)
     }
     // 条件追伤：不写的话卡面上只有最低那一档，玩家看不出这个 EX 为什么值这个费
     for (const a of sk.altHits || []) {
@@ -306,7 +311,7 @@ export function describeEffect(sk) {
     const who = e.scope === "self" ? "自身"
       : e.scope === "ally_all" ? "己方全体"
         : e.scope === "ally_named" ? `${BY_ID[e.ally]?.name || e.ally}（不在场则不生效）`
-          : e.scope === "ally_mirror" ? "己方同号位"
+          : e.scope === "circle_ally" ? "砸己方 → 同战场同身位 2 人"
             : e.scope === "ally_target" ? "该队友" : "目标"
     switch (e.type) {
       case "buff":

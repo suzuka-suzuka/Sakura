@@ -9,6 +9,7 @@
 import { createBattle, playerTurn, validateAction, exCastableOf, exWaitOf, exCostOf, tmplOf, provokedBy, focusedOf, exLockedOf, exSealedOf, autoProcChance } from "../lib/ba/engine.js"
 import { ROSTER } from "../lib/ba/roster.js"
 import { describeEffect } from "../lib/ba/format.js"
+import { parseAction } from "../lib/ba/parse.js"
 
 const id = (n) => ROSTER.find((t) => t.name === n).id
 
@@ -1285,19 +1286,93 @@ console.log("\n=== 35. 妮露的 Fury / 爱丽丝的能量充能：条件追伤 
   })(), 0)
 }
 
-console.log("\n=== 36. 小春：一个圈，敌方那两路挨打、己方那两路回血 ===")
+console.log("\n=== 36. 小春：一个圈，砸哪边就只有那边生效 ===")
 {
-  const st = setup(["小春", "野宫", "野宫", "野宫"], ["椿", "椿", "椿", "椿"])
-  for (const u of st.sides[0].units) { u.hp = Math.round(u.maxhp / 2) }
-  noMiss(st.sides[0].units[0])
-  st.sides[0].cost = 10
-  const r = playerTurn(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 2 } }] })
-  const hurt = r.events.filter((e) => e.type === "damage" && e.target.side === 1).map((e) => e.target.pos + 1)
-  const healed = r.events.filter((e) => e.type === "heal" && e.target.side === 0).map((e) => e.target.pos + 1)
-  check("伤害落在指定的敌方 3·4 路", hurt, [3, 4])
-  check("治疗落在**己方**同两路，不是敌方", healed, [3, 4])
-  check("治疗的 scope 是 ally_mirror",
-    ROSTER.find((t) => t.name === "小春").ex.effects[0].scope, "ally_mirror")
+  /**
+   * 原文「对圆形范围内的**我方**单位回复 / 对上述范围内的**敌方**单位造成伤害」，
+   * 但圈只有 r=200、投掷距离 950 —— 敌我两队隔着整个场地，圈里装不下两边。
+   * 所以「打」和「奶」互斥，中间那个字选的是技能的哪一半。两边都是同战场同身位 2 人。
+   */
+  const cast = (picks, target) => {
+    const st = setup(picks, ["椿", "椿", "椿", "椿"])
+    for (const u of st.sides[0].units) { u.hp = Math.round(u.maxhp / 2) }
+    noMiss(st.sides[0].units[0])
+    st.sides[0].cost = 10
+    const r = playerTurn(st, { type: "ex", casts: [{ pos: 0, ...(target ? { target } : {}) }] })
+    const at = (type, side) => r.events
+      .filter((e) => e.type === type && e.target.side === side).map((e) => e.target.pos + 1)
+    return { r, dmg: at("damage", 1), heal: at("heal", 0), selfDmg: at("damage", 0) }
+  }
+  const four = ["小春", "野宫", "野宫", "野宫"]
+
+  // ① 砸对面：只有伤害
+  const foe = cast(four, { scope: "foe", idx: 2 })
+  check("打：伤害落在指定的敌方 3·4", foe.dmg, [3, 4])
+  check("打：己方一滴血都不回（圈里没有自己人）", foe.heal, [])
+
+  // ② 砸自己人：只有治疗，且**不能**误伤自家。桃和切里诺都是中排，同战场同身位吃满 2 人
+  const ally = cast(["小春", "野宫", "桃", "切里诺"], { scope: "ally", idx: 2 })
+  check("奶：治疗落在己方 3·4（桃和同身位的切里诺）", ally.heal, [3, 4])
+  check("奶：对面一点伤害都不吃", ally.dmg, [])
+  check("奶：更不会砸到自己人头上", ally.selfDmg, [])
+  // 身位过滤跟伤害圈同一套：4 号位换成不同身位的人就只奶得到桃
+  check("奶：同战场但不同身位的奶不到",
+    cast(["小春", "野宫", "桃", "野宫"], { scope: "ally", idx: 2 }).heal, [3])
+
+  // ③ 不写目标：走技能自己的 target（enemy_adjacent）+ 对线锁定，还是伤害圈
+  const bare = cast(four, null)
+  check("不写目标：默认伤害圈，走小春自己的对线 1·2", bare.dmg, [1, 2])
+  check("不写目标：没有治疗", bare.heal, [])
+
+  // ④ 写了名字却不写那个字：直接打回，不猜。双方可能有同名角色，猜错就是把奶办成炸
+  // （`scope: null` 就是 parseAction 在「小春ex椿」这种没写动词时给出的形状）
+  {
+    const st = setup(four, ["椿", "椿", "椿", "椿"])
+    st.sides[0].cost = 10
+    const err = validateAction(st, {
+      type: "ex", casts: [{ pos: 0, target: { scope: null, id: "TSUBAKI" } }],
+    })
+    check("没写「打/奶」就报错，不替玩家猜", /砸哪边/.test(err || ""), true)
+    check("写了就放行", validateAction(st, {
+      type: "ex", casts: [{ pos: 0, target: { scope: "foe", id: "TSUBAKI" } }],
+    }), null)
+    // 别人不受影响：星野没写动词照样按技能默认规则走
+    check("只卡小春这种圈，星野照常", validateAction(
+      setup(["星野", "野宫", "野宫", "野宫"], ["椿", "椿", "椿", "椿"]),
+      { type: "ex", casts: [{ pos: 0, target: { scope: null, id: "TSUBAKI" } }] },
+    ), null)
+  }
+
+  check("治疗的 scope 是 circle_ally、技能标了 circle",
+    [ROSTER.find((t) => t.name === "小春").ex.effects[0].scope,
+      ROSTER.find((t) => t.name === "小春").ex.circle], ["circle_ally", true])
+
+  /**
+   * ⑤ 从**指令字符串**走一遍：认的是哪一档动词，不是某个字。
+   * 打攻揍轰砸捶秒锤 八个字全是伤害圈，给帮为治奶助换跳 八个字全是治疗圈 ——
+   * `小春ex给桃` 跟 `小春ex奶桃` 必须完全等价，引擎只看 `pick.scope`。
+   * 文案里拿「打 / 奶」举例，别让哪天有人把判定收窄成只认这两个字。
+   */
+  {
+    const verbs = (chars) => [...chars].map((v) => {
+      const st = setup(["小春", "野宫", "桃", "切里诺"], ["椿", "白子", "桃", "野宫"])
+      for (const u of st.sides[0].units) { u.hp = Math.round(u.maxhp / 2) }
+      noMiss(st.sides[0].units[0])
+      st.sides[0].cost = 10
+      const p = parseAction(`小春ex${v}桃`)
+      if (!p?.ok) return `${v}:解析失败`
+      if (validateAction(st, p.action)) return `${v}:被拦`
+      const r = playerTurn(st, p.action)
+      const d = r.events.some((e) => e.type === "damage")
+      const h = r.events.some((e) => e.type === "heal")
+      return `${v}:${d ? "伤害" : ""}${h ? "治疗" : ""}`
+    })
+    check("给帮为治奶助换跳 八个字都是治疗圈",
+      verbs("给帮为治奶助换跳"), [..."给帮为治奶助换跳"].map((v) => `${v}:治疗`))
+    check("打攻揍轰砸捶秒锤 八个字都是伤害圈",
+      verbs("打攻揍轰砸捶秒锤"), [..."打攻揍轰砸捶秒锤"].map((v) => `${v}:伤害`))
+  }
+
   // 她的单奶：排除自己、且只挑血量 ≤50% 的
   const koharu = ROSTER.find((t) => t.name === "小春")
   // 原文只写「不高于 50%」没说「最低」，所以是 ally_hurt（按站位就近）而不是 ally_lowest
