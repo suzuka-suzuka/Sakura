@@ -11,7 +11,7 @@
  * 转换结果按角色缓存，同一局只算一次。
  */
 import { CFG } from "./roster.js"
-import { tmplOf, exWaitOf, turnCostOf, exRefreshPending } from "./engine.js"
+import { tmplOf, exWaitOf, turnCostOf, exRefreshPending, exCostOf, provokedBy, exLockedOf } from "./engine.js"
 import { artOf, summonArtOf, fontFace, FONT_STACK, ATTACK, ARMOR, inkOf, esc } from "./htmlAssets.js"
 
 export const MAP_WIDTH = 1200
@@ -78,8 +78,9 @@ const ICON = {
     <rect x="10.7" y="16.8" width="2.6" height="5" rx="1.3"/>`),
   dfs: SVG(`<path d="M12 2.2 20 5.4V12c0 4.9-3.4 8.3-8 9.8-4.6-1.5-8-4.9-8-9.8V5.4Z"/>`),
   heal: SVG(`<path d="M9.8 3.4h4.4v6.4h6.4v4.4h-6.4v6.4H9.8v-6.4H3.4V9.8h6.4Z"/>`),
-  // 嘲讽：同心圆靶
-  taunt: SVG(`<path d="M12 2.4a9.6 9.6 0 1 0 0 19.2 9.6 9.6 0 0 0 0-19.2Zm0 2.6a7 7 0 1 1 0 14 7 7 0 0 1 0-14Z"/>
+  // 集火：同心圆靶。**这不是嘲讽的图标** —— 集火是「我方都打这个人」，
+  // 标记落在被点名的那个人身上、蓝底减益。目前池里没有集火角色，这个图标先留着
+  focus: SVG(`<path d="M12 2.4a9.6 9.6 0 1 0 0 19.2 9.6 9.6 0 0 0 0-19.2Zm0 2.6a7 7 0 1 1 0 14 7 7 0 0 1 0-14Z"/>
     <circle cx="12" cy="12" r="3.4"/>`),
   // 眩晕：六角爆星
   stun: SVG(`<path d="M12 2.4 13.7 9.3 20.4 7.2 15.7 12l4.7 4.8-6.7-2.1L12 21.6l-1.7-6.9-6.7 2.1L8.3 12 3.6 7.2l6.7 2.1Z"/>`),
@@ -93,6 +94,17 @@ const ICON = {
   // 持续伤害：火苗（灼烧/中毒/场地共用一个 —— 玩家要知道的是「在掉血」，不是掉血的花色）
   dot: SVG(`<path d="M12.6 2.2c.4 3.1-1.2 4.4-2.7 5.9C8.2 9.8 6.4 11.6 6.4 14.6a5.6 5.6 0 0 0 11.2 0
     c0-2.4-1-3.9-2.1-5.2-.5 1.3-1.3 2-2.2 2.3.8-3-.2-6.7-.7-9.5Z"/>`),
+  // 暴击：大小两枚星芒（凹边四角星，跟眩晕的六角爆星、兜底的实心菱形都分得开）
+  crit: SVG(`<path d="M10 2.2c.9 4.4 2.5 6 6.9 6.9-4.4.9-6 2.5-6.9 6.9-.9-4.4-2.5-6-6.9-6.9 4.4-.9 6-2.5 6.9-6.9Z"/>
+    <path d="M17.4 13.6c.5 2.4 1.4 3.3 3.8 3.8-2.4.5-3.3 1.4-3.8 3.8-.5-2.4-1.4-3.3-3.8-3.8 2.4-.5 3.3-1.4 3.8-3.8Z"/>`),
+  // 强化形态：上扬的双折线（鹤城的换弹强化、瞬的强化索敌）
+  charge: SVG(`<path d="M12 2.4 21 11.4l-2.7 2.7L12 7.8l-6.3 6.3L3 11.4Z"/>
+    <path d="M12 10.5 21 19.5l-2.7 2.7L12 15.9l-6.3 6.3L3 19.5Z"/>`),
+  // 不死：心形（治疗用的是十字，两者形状差得远，不会串）
+  immortal: SVG(`<path d="M12 21.1 4.3 13.3a5.3 5.3 0 1 1 7.7-7.3 5.3 5.3 0 1 1 7.7 7.3Z"/>`),
+  // EX 打折：落到底线上的下箭头。跟强化形态那个上扬双折线反着来，一眼分得开
+  exDiscount: SVG(`<path d="M10.5 2.6h3v8.4l3.4-3.4 2.1 2.1-7 7-7-7 2.1-2.1 3.4 3.4Z"/>
+    <rect x="4" y="19.2" width="16" height="2.6" rx="1.3"/>`),
   // 预警：感叹号
   warn: SVG(`<rect x="10.3" y="3.2" width="3.4" height="11" rx="1.7"/>
     <circle cx="12" cy="18.4" r="2.2"/>`),
@@ -103,6 +115,7 @@ const ICON = {
 const ICON_OF_STAT = {
   atk: "atk", dmg_deal: "atk", dfs: "dfs", dmg_take: "dfs",
   heal: "heal", heal_taken: "heal", dodge: "dodge", acc: "acc",
+  crit: "crit", crit_dmg: "crit", crit_dmg_flat: "crit",
   // 暴击/暴伤抵抗是挨打时才生效的，跟防御同一个盾图标
   crit_res: "dfs", crit_dmg_res_flat: "dfs",
 }
@@ -114,7 +127,7 @@ const ICON_OF_STAT = {
  * 增益红底、减益蓝底、技能预警黄底 —— 跟着原作走，不是「红=坏」那套。
  * 只剩 1 回合的效果整格变浅：本回合结束就没了，得先给出预告。
  */
-function statusMarks(u) {
+function statusMarks(u, provoked) {
   if (!u.alive) return ""
   const marks = []
 
@@ -144,8 +157,23 @@ function statusMarks(u) {
     marks.push(`<i class="mk debuff ${Math.min(...dotMarks.map((d) => d.turns)) <= 1 ? "fading" : ""}">
       ${ICON.dot}${dotMarks.length > 1 ? `<s>×${dotMarks.length}</s>` : ""}</i>`)
   }
-  if (u.taunt > 0) marks.push(`<i class="mk buff">${ICON.taunt}</i>`)
+  // **嘲讽的减益标记落在被拉走的人身上，不是放嘲讽的那个人身上**（原作就是这么画的）：
+  // 中了嘲讽的顶一个紫底感叹号，椿自己什么都不多。集火是另一回事，蓝底靶心画在被点名的人头上。
+  if (provoked) marks.push(`<i class="mk provoke">${ICON.warn}</i>`)
+  if (u.taunt > 0 && u.tauntKind === "focus") marks.push(`<i class="mk debuff">${ICON.focus}</i>`)
   if (u.stun > 0) marks.push(`<i class="mk debuff">${ICON.stun}</i>`)
+  // 强化形态：普攻的威力、覆盖面和索敌都变了。瞬在这个状态下会越过战场分割去点主 C，
+  // 不出格的话对手只能看见一串莫名其妙的连线
+  if (u.charge) {
+    const left = u.charge.turns ?? u.charge.shots
+    marks.push(`<i class="mk buff ${left <= 1 ? "fading" : ""}">${ICON.charge}</i>`)
+  }
+  // 不死：残血 1 点却打不死，不出格的话对手会以为是自己算错了伤害
+  if (u.immortal > 0) marks.push(`<i class="mk buff ${u.immortal <= 1 ? "fading" : ""}">${ICON.immortal}</i>`)
+  // EX 打折：卡上的费用数字已经变了，这一格是给对手看的 —— 血条在谁头上就是谁便宜
+  if (u.exDiscount?.uses) {
+    marks.push(`<i class="mk buff">${ICON.exDiscount}${u.exDiscount.uses > 1 ? `<s>×${u.exDiscount.uses}</s>` : ""}</i>`)
+  }
 
   // 普通技能就绪 = 下个己方回合就会放，属于「预警」而不是状态
   const tr = tmplOf(u).skill?.trigger?.type
@@ -163,7 +191,7 @@ function unitCell(state, side, u, fx) {
   // 一个小盾一上来就只有一小截，看不出它还剩几成
   const shieldPct = u.shield > 0 ? Math.min(100, (u.shield / (u.shieldMax || u.shield)) * 100) : 0
   const chibi = artOf(t.id, "chibi")
-  const marks = statusMarks(u)
+  const marks = statusMarks(u, Boolean(provokedBy(state, u)))
   return `
   <div class="unit ${u.alive ? "" : "dead"}">
     <div class="bars">
@@ -303,11 +331,15 @@ function hud(state) {
     const ac = ATTACK[t.atkType] || "#8AA"
     // 冷却只压灰，不写「还需 N」—— 具体还差几个属于文字战报的信息量，图上给不到
     // 减员刷新在交回合时落地；老对局若还没跑过，按「待刷新」把冷却卡画成可放
-    const blocked = active && !exRefreshPending(state, s) && (exWaitOf(s, u) > 0 || u.stun > 0)
-    const ready = active && !blocked && avail >= t.ex.cost
-    const progress = Math.max(0, Math.min(1, avail / Math.max(1, t.ex.cost)))
-    // 两种遮罩表达两件不同的事：冷却/眩晕是「现在轮不到你」，整张压灰盖平；
+    const locked = Boolean(exLockedOf(state, u))
+    const blocked = active && !exRefreshPending(state, s) && (exWaitOf(s, u) > 0 || locked)
+    // 打过折的按折后价画：卡上写 1 费、放的时候说 Cost 不够，那是最糟的一种不一致
+    const cost = exCostOf(u)
+    const ready = active && !blocked && avail >= cost
+    const progress = Math.max(0, Math.min(1, avail / Math.max(1, cost)))
+    // 两种遮罩表达两件不同的事：冷却 / 嘲讽 / 恐惧是「现在放不出」，整张压灰盖平；
     // Cost 不够是「还在攒」，用扇形扫过去，扫掉多少就是攒了多少。
+    // 嘲讽和恐惧的「为什么」画在角色头上（紫底感叹号 / 眩晕格），不在卡上再写一遍。
     // .frame 是比 .face 大 3px 的同形状底板 —— clip-path 会把 box-shadow 一起裁掉，
     // 平行四边形的描边只能靠垫一层实现。
     return `
@@ -319,7 +351,7 @@ function hud(state) {
         : ready ? "" : `<div class="sweep" style="--p:${(progress * 100).toFixed(1)}%"></div>`}
         </div>
       </div>
-      <span class="cost">${t.ex.cost}</span>
+      <span class="cost ${cost < t.ex.cost ? "cut" : ""}">${cost}</span>
       <span class="nm">${esc(t.name)}</span>
     </div>`
   }).join("")
@@ -412,6 +444,9 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 .mk.buff{background:#E0463F}
 .mk.debuff{background:#2F6FD0}
 .mk.warn{background:#F5B915;color:#4A3100}
+/* 被嘲讽：紫底感叹号，跟原作一致。它既不是增益也不是减益那两种底色，单独一档 */
+.mk.provoke{background:#8B4FD6}
+.mk.provoke svg{width:13px;height:13px}
 .mk.warn svg{width:13px;height:13px}
 /* 只剩 1 回合的效果整格变浅：本回合一结束就没了，要先给出预告 */
 .mk.fading{opacity:.4}
@@ -464,16 +499,18 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 .smart{position:relative;width:86px;height:86px;display:flex;align-items:center;justify-content:center}
 .smart img{width:86px;height:86px;object-fit:contain;
   filter:drop-shadow(0 4px 8px rgba(40,80,125,.28))}
-.sm .prov{position:absolute;right:-6px;top:-4px;width:26px;height:26px;border-radius:8px;
-  display:flex;align-items:center;justify-content:center;background:#D9485C;color:#fff;
-  box-shadow:0 2px 6px rgba(160,40,60,.4)}
-.sm .prov svg{width:17px;height:17px}
-.smhp{width:88px;height:7px;border-radius:4px;background:rgba(40,80,125,.18);overflow:hidden}
-.smhp s{display:block;height:100%;background:linear-gradient(90deg,#8A63D2,#6C4BC4)}
+/* 召唤物的血条**直接复用 .hpbar**，只改宽度：一样的高度、圆角、装甲色填充、四段白线。
+   它照吃属性克制，凭什么用一条自成一派的细紫条 —— 玩家得能一眼看出拆墙该带什么属性。
+   只有宽度收窄，因为它到底不是第 5 个队员 */
+.smhp{width:130px}
 /* 持续时间：血条下面一条橙色，按剩余回合缩，不再用数字 */
-.smdur{width:88px;height:5px;border-radius:3px;background:rgba(40,80,125,.16);overflow:hidden}
+.smdur{width:130px;height:5px;border-radius:3px;background:rgba(40,80,125,.16);overflow:hidden}
 .smdur s{display:block;height:100%;background:linear-gradient(90deg,#F3B14A,#E07A22)}
-.sm b{font-size:13px;color:#22384F;font-weight:600;
+/* **必须是直接子选择器**：血条里的四段分隔线 .seg 也是 <b>，被这条命中就会顶着
+   8px 圆角和 1px 8px 内边距变成三坨白药丸 —— 跟 .arrows path{fill:none} 干掉箭头
+   是同一种错法：拿元素名当选择器，顺手把别人的元素也改了。
+   （这段 CSS 整个活在模板字符串里，注释里也不能出现反引号） */
+.sm > b{font-size:13px;color:#22384F;font-weight:600;
   background:rgba(255,255,255,.86);border-radius:8px;padding:1px 8px}
 
 /* 特效层 */
@@ -555,6 +592,9 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
   background:#fff;border:2.5px solid rgba(70,120,175,.4);color:#5B7590;
   font-size:22px;line-height:39px;text-align:center}
 .excard.ready .cost{border-color:var(--ac);color:var(--ink);box-shadow:0 3px 10px rgba(40,80,125,.22)}
+/* 打过折的费用换成绿圈：数字本身已经是折后价，不额外写「原价 5」——
+   一个信息一个通道，圈的颜色说明「这个数字比平时低」就够了 */
+.excard .cost.cut{border-color:#37B87C;color:#1A8A55;background:#EDFBF4}
 /* 不标号位：同队禁止重名，名字本身就唯一，指令写 ex 星野 即可 */
 .excard .nm{position:absolute;left:0;right:0;bottom:-26px;text-align:center;font-size:15px;color:#41586E}
 .excard.empty{display:flex;align-items:center;justify-content:center;color:#8397AC;font-size:14px;
@@ -641,9 +681,8 @@ function summonBand(state, fx) {
       cells.push(`<div class="sm ${side === 1 ? "red" : "blue"}" style="grid-column:${sm.idx + 1}">
         <div class="smart">
           ${art ? `<img src="${art}" alt="">` : ""}
-          ${sm.taunt > 0 ? `<i class="prov">${ICON.taunt}</i>` : ""}
         </div>
-        <div class="smhp"><s style="width:${pct}%"></s></div>
+        <div class="hpbar smhp"><div class="hp" style="width:${pct}%;background:${ARMOR[t.defType] || "#8AA"}"></div>${SEGS}</div>
         <div class="smdur"><s style="width:${dur.toFixed(1)}%"></s></div>
         <b>${esc(t.name)}</b>
         ${fx.get(`${side}:${sm.idx}:s`) || ""}

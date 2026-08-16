@@ -32,6 +32,8 @@ const FORCE = process.argv.includes("--force")
  */
 const KIVO_ALIAS = {
   "陆八魔 爱露": "陆八魔 阿露",
+  // kivo 这条用的是日文汉字「瀬」，SchaleDB 的中文名是简体「濑」
+  "早濑 优香": "早瀬 优香",
 }
 
 const SOURCES = {

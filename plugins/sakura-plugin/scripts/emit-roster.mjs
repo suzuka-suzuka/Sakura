@@ -44,14 +44,19 @@ const AOE_T1 = 126000, AOE_T2 = 300000
  * 芹香排第 19 位，本来进不了前 16，但她已经在池里、且是唯一的 11 段角色，
  * 保留她挤掉了第 16 位的佳代子（辅助）。
  *
+ * `Special` 里做掉了 `FormChange` 之后，鹤城和瞬也进得来了（原先按「EX 含 Special」一刀切挡掉）。
+ * 纯子排第 21 位，接了不死 / EX 打折 / 自伤三样之后才上得来。
+ * 椿 / 优香 / 春香排 23~25 位，池里坦克只有星野和艾米，补三个不同装甲的坦克。
+ *
  * 代号取 SchaleDB 的 `PathName` 转大写，会成为 resources/ba/characters/ 的目录名。
  */
 const IDS = [
   [10000, "ARU"], [10001, "EIMI"], [10002, "HARUNA"], [10003, "HIFUMI"], [10004, "HINA"],
   [10005, "HOSHINO"], [10006, "IORI"], [10007, "MAKI"], [10009, "IZUMI"],
-  [10010, "SHIROKO"], [10012, "SUMIRE"], [10013, "TSURUGI"], [13000, "AKANE"],
+  [10010, "SHIROKO"], [10011, "SHUN"], [10012, "SUMIRE"], [10013, "TSURUGI"], [13000, "AKANE"],
   [13001, "CHISE"], [13002, "AKARI"], [13003, "HASUMI"], [13004, "NONOMI"],
-  [13005, "KAYOKO"], [13006, "MUTSUKI"], [13008, "SERIKA"],
+  [13005, "KAYOKO"], [13006, "MUTSUKI"], [13007, "JUNKO"], [13008, "SERIKA"],
+  [13009, "TSUBAKI"], [13010, "YUUKA"], [16000, "HARUKA"],
 ]
 
 const BULLET_CN = { Explosion: "爆发", Pierce: "贯通", Mystic: "神秘", Sonic: "振动", Chemical: "变化" }
@@ -124,10 +129,23 @@ const STAT_MAP = {
 }
 const DROP_STAT = /Range|MoveSpeed|IgnoreDelay|Oppression|BlockRate/
 
+/** 同一个槽位有时是数组有时是对象，统一取第一条 */
+const one = (x) => (Array.isArray(x) ? x[0] : x)
+
+/**
+ * 技能描述。`<?N>` 是按技能等级取值的占位符（第 N 个 `Parameters` 数组），
+ * 回填之后才能用正则抠数字 —— 瞬的「获得<?1>技能COST」不填就只剩一个尖括号。
+ */
+const descOf = (sk) =>
+  String(sk?.Desc || "").replace(/<\?(\d+)>/g, (m, n) => sk.Parameters?.[Number(n) - 1]?.[SKILL_LV] ?? m)
+
 /** 从中文描述里抠出触发规则（BA 数据没有结构化的触发字段）。 */
 function parseTrigger(desc) {
   if (!desc) return { type: "cooldown", turns: 5 }
   const once = /仅可触发\s*(\d+)\s*次/.exec(desc)
+  // 瞬：开局回费。这类技能在建局时就结算，不进 ③-a 技能阶段 ——
+  // 拖到那里的话 Cost 会晚于玩家首轮的 EX 窗口，开局那 2 点等于没给。
+  if (/战斗开始时/.test(desc)) return { type: "battle_start", maxUses: once ? Number(once[1]) : 1 }
   const hp = /生命值不高于\s*([\d.]+)%/.exec(desc)
   const sec = /每\s*([\d.]+)\s*秒/.exec(desc)
   const chance = /(\d+(?:\.\d+)?)\s*%\s*概率/.exec(desc)
@@ -154,6 +172,33 @@ function parseTrigger(desc) {
   if (hp) return { type: "hp_below", value: Number(hp[1]) / 100, maxUses: once ? Number(once[1]) : 1 }
   if (sec) return { type: "cooldown", turns: secToTurns(Number(sec[1])), ...(once ? { maxUses: Number(once[1]) } : {}) }
   return { type: "cooldown", turns: 5, ...(once ? { maxUses: Number(once[1]) } : {}) }
+}
+
+/**
+ * 时长也得按技能等级取 —— **`Effect.Duration` 存的是满级那一档**。
+ *
+ * 描述里写「持续<?2>」时，真正的时长在 `Parameters` 里是一张按级表
+ * （优香的护盾 15/15/20/20/25 秒），而 `Effect.Duration` 固定 25000。
+ * 本项目 `SKILL_LV = 0`，倍率和 Cost 都取第 1 档，时长没道理单独取满级。
+ * 全 272 人里 13 个技能踩这条（果穗、爱丽丝（女仆）、一花、御坂美琴、千明、光、优香）。
+ *
+ * **只在「Duration 正好等于按级表最后一档」时才改写** —— 一个技能可能挂着几个不同时长的
+ * 效果，不核对就会张冠李戴。
+ * @returns {number|null} 毫秒；不该改写时返回 null
+ */
+function levelDuration(sk, e) {
+  if (!e.Duration) return null
+  const sec = (x) => {
+    const m = /^\s*([\d.]+)\s*秒\s*$/.exec(String(x ?? ""))
+    return m ? Number(m[1]) : null
+  }
+  for (const m of String(sk.Desc || "").matchAll(/持续\s*<\?(\d+)>/g)) {
+    const tbl = sk.Parameters?.[Number(m[1]) - 1]
+    if (!tbl?.length || sec(tbl[tbl.length - 1]) !== e.Duration / 1000) continue
+    const own = sec(tbl[Math.min(SKILL_LV, tbl.length - 1)])
+    if (own != null) return own * 1000
+  }
+  return null
 }
 
 /** 一个 Damage 效果 → 分段倍率数组。每段独立判定命中/暴击，所以不能合并成一个总倍率。 */
@@ -267,16 +312,17 @@ function instanceCount(sk, dmg) {
 
 function buildSkill(sk, { isEx, student }) {
   if (!sk) return null
+  const desc = descOf(sk)
   const dmgs = (sk.Effects || []).filter((e) => e.Type === "Damage")
   const allTargets = (sk.Effects || []).flatMap((e) => (Array.isArray(e.Target) ? e.Target : e.Target ? [e.Target] : []))
   const tg = resolveTarget(sk, allTargets)
   const out = { name: sk.Name, ...tg, effects: [] }
   if (isEx) out.cost = sk.Cost[SKILL_LV]
-  else out.trigger = parseTrigger(sk.Desc)
+  else out.trigger = parseTrigger(desc)
 
   // 「发射 N 发子弹，每发子弹各对其锁定的敌方单位」—— 每发单独锁目标、逐发换人。
   // 全 272 人里只有伊织一个（日和（泳装）也是「发射5发子弹」，但明写了 5 发全打第 1 名）。
-  const chain = /发射\s*(\d+)\s*发子弹[^。]*?每发子弹各对其锁定的/.exec(String(sk.Desc || ""))
+  const chain = /发射\s*(\d+)\s*发子弹[^。]*?每发子弹各对其锁定的/.exec(desc)
   const zone = dmgs.length ? zoneDot(dmgs[0]) : null
   const inst = chain || zone ? 0 : instanceCount(sk, dmgs[0])
   if (zone) {
@@ -294,12 +340,12 @@ function buildSkill(sk, { isEx, student }) {
   } else if (dmgs.length) {
     out.hits = hitsOf(dmgs[0])
     // 扩散段只在 enemy_adjacent 上成立 —— 那是唯一能保证 targets[0] 就是主目标的分支
-    if (dmgs.length > 1 && out.target === "enemy_adjacent" && SPLASH_DESC(String(sk.Desc || ""))) {
+    if (dmgs.length > 1 && out.target === "enemy_adjacent" && SPLASH_DESC(desc)) {
       out.splashHits = dmgs.slice(1).flatMap(hitsOf)
       out.hits = out.hits.concat(out.splashHits)
     }
     // 只在 AoE 上成立：弹射（enemy_random）逐段抽目标，没有「第几个」的概念
-    const fo = parseFalloff(sk.Desc)
+    const fo = parseFalloff(desc)
     if (fo && /adjacent|all/.test(out.target)) out.falloff = fo
   }
 
@@ -310,7 +356,7 @@ function buildSkill(sk, { isEx, student }) {
     const dflt = RIDES_DAMAGE.has(e.Type) ? ["Enemy"] : ["Self"]
     const t = Array.isArray(e.Target) ? e.Target : e.Target ? [e.Target] : dflt
     const scope = t.every((x) => x === "Self") ? "self" : t.some((x) => /Ally/.test(x)) ? "ally_all" : "enemy"
-    const turns = msToTurns(e.Duration)
+    const turns = msToTurns(levelDuration(sk, e) ?? e.Duration)
     switch (e.Type) {
       case "Buff": {
         if (DROP_STAT.test(e.Stat || "")) { out.effects.push({ type: "dropped", raw: e.Stat, why: "回合制无对应物" }); break }
@@ -348,20 +394,50 @@ function buildSkill(sk, { isEx, student }) {
         break
       case "CrowdControl": {
         const sc = Array.isArray(e.Scale) ? e.Scale[SKILL_LV] : 0
+        // **Provoke 必须从 CrowdControl 里分出来**：其余控制在引擎里都写 `t.stun`（整回合不能动），
+        // 而嘲讽只是把敌人的刀拉过来。椿的 EX 不分流就变成「全场敌人晕 1 轮」，比原作强太多。
+        // 原数据把它写成「对敌方施加 Provoke」，但引擎的嘲讽标记挂在**施法者**身上
+        // （谁带标记谁挨打），所以 scope 固定 self —— 跟召唤物那条（buildSummon）同一套。
+        if (/Provoke/i.test(e.Icon || "")) {
+          out.effects.push({ type: "taunt", kind: "provoke", scope: "self", turns: sc ? msToTurns(sc) : 1 })
+          break
+        }
         out.effects.push({ type: "cc", scope, icon: e.Icon || "Stunned", chance: (e.Chance ?? 10000) / 1e4, turns: sc ? msToTurns(sc) : 0 })
         break
       }
-      // 鹤城的「换弹强化」：立即换弹，接下来一梭子的普攻倍率提高、打成扇形。
-      // 弹匣发数 = AmmoCount / AmmoCost（鹤城 4/2 = 2 发），倍率与扇形都只写在描述里。
+      /**
+       * 强化形态（`Key: "FormChange"`）：接下来一段时间的普攻换成另一套参数。
+       * 池内两个，存续口径不同 ——
+       *   鹤城「立即换弹…换弹1次后失效」：按**发数**，弹匣 = AmmoCount / AmmoCost（4/2 = 2 发）
+       *   瞬「持续30秒」：按**轮数**，30 ÷ 5 = 6 轮，在 endTurn 里跳
+       *
+       * 强化后的普攻本身是结构化的（`Skills.Normal.FormChange`），倍率和分段都照抄那里，
+       * 比拿描述里取整过的「倍率强化至138%」乘基础普攻准（鹤城实际是 138.71% 分 2 段，
+       * 而基础普攻是 6 段）。没有这一段数据时才退回描述里的倍率。
+       */
       case "Special": {
         if (e.Key !== "FormChange") { out.effects.push({ type: "unmapped", raw: `Special:${e.Key}` }); break }
-        const m = /倍率强化至\s*([\d.]+)\s*%/.exec(String(sk.Desc || ""))
-        out.effects.push({
+        const na = one(student?.Skills?.Normal)
+        const fc = na?.FormChange
+        const fcd = (fc?.Effects || []).find((x) => x.Type === "Damage")
+        const nd = (na?.Effects || []).find((x) => x.Type === "Damage")
+        const m = /倍率强化至\s*([\d.]+)\s*%/.exec(desc)
+        const mult = m ? Number(m[1]) / 100 : 1
+        const ch = {
           type: "charge",
-          shots: Math.max(1, Math.round((student?.AmmoCount || 2) / (student?.AmmoCost || 1))),
-          mult: m ? Number(m[1]) / 100 : 1,
-          count: tg.count || 1, // EX 自己的范围（扇形）决定强化普攻打几个
-        })
+          hits: fcd ? hitsOf(fcd)
+            : nd ? hitsOf(nd).map((h) => Number((h * mult).toFixed(4)))
+              : [100 * mult],
+          // 扇形也在强化普攻自己身上（EX 的 Radius 描述的就是它），取不到才退回 EX 的范围
+          count: (fc ? resolveTarget(fc, []).count : 0) || tg.count || 1,
+        }
+        const sec = /持续\s*([\d.]+)\s*秒/.exec(desc)
+        if (sec && !/换弹[^)）]*后失效/.test(desc)) ch.turns = secToTurns(Number(sec[1]))
+        else ch.shots = Math.max(1, Math.round((student?.AmmoCount || 2) / (student?.AmmoCost || 1)))
+        // 瞬：「索敌机制改为优先攻击攻击力最高的敌方单位」。跟触发条件一样没有结构化字段，
+        // 只能从描述里认。引擎侧 laneTarget 会因此绕开战场分割 / 坦克 / 挡刀，只有嘲讽拉得走。
+        if (/索敌[^。]*攻击力最高/.test(desc)) ch.targeting = "max_atk"
+        out.effects.push(ch)
         break
       }
       case "Summon": {
@@ -371,8 +447,29 @@ function buildSkill(sk, { isEx, student }) {
         break
       }
       case "Dispel": out.effects.push({ type: "cleanse", scope }); break
-      case "CostChange": out.effects.push({ type: "cost", scope, value: (e.Value?.[0]?.[SKILL_LV] ?? e.Scale?.[SKILL_LV] ?? 0) / 1e4 }); break
-      case "ConcentratedTarget": out.effects.push({ type: "taunt", scope, turns: turns ?? 1 }); break
+      /**
+       * `CostChange` **不是往 Cost 池里加点**，全 272 人的 16 个无一例外都是「EX 费用打折」：
+       *   `BaseAmount` + `Scale: -4` → 减 4 费（纯子 5 费变 1 费，描述里写「减少至1」）
+       *   `Coefficient` + `Scale: -5000` → 减 50%（忧、圣娅、柚子（武装）…）
+       *   `Uses` = 还能打几次折（纯子 2 次）
+       * 往 Cost 池加点的技能反而**没有**结构化效果，只写在描述里（见 buildSkill 末尾的兜底）。
+       * 曾经这里映射成 `{type:"cost", value: Scale/1e4}`，纯子会变成「Cost −0.0004」。
+       */
+      case "CostChange": {
+        const sc = e.Scale?.[SKILL_LV] ?? 0
+        const pct = e.ValueType === "Coefficient"
+        out.effects.push({
+          type: "ex_discount", scope,
+          mode: pct ? "pct" : "flat",
+          value: pct ? Number((-sc / 1e4).toFixed(4)) : -sc,
+          uses: e.Uses ?? 1,
+        })
+        break
+      }
+      // 集火：把某个敌人点成「我方都打它」。跟 Provoke 是**两个不同的机制**，
+      // 靠 kind 区分 —— 图标和底色都不一样（集火是蓝底减益，嘲讽是紫底），
+      // 而且集火的标记落在被点的那个人身上，嘲讽的落在被拉走的人身上。目前池里没有集火角色。
+      case "ConcentratedTarget": out.effects.push({ type: "taunt", kind: "focus", scope, turns: turns ?? 1 }); break
       // `DamageDebuff` **全都是持续伤害**（灼烧/中毒/冰冻/感电），不是「造成伤害降低」——
       // 全 272 人的 33 个无一例外都带 Icon 和 Period。当成 dmg_deal 减益的话，
       // 千世那条 54% 会变成 −54% 输出，方向都反了。
@@ -387,14 +484,43 @@ function buildSkill(sk, { isEx, student }) {
       default: out.effects.push({ type: "unmapped", raw: e.Type })
     }
   }
+  // 「获得 N 技能COST」（往 Cost 池加点，跟上面的 CostChange 打折是两回事）**没有结构化效果**
+  // —— 瞬的普通技能 `Effects` 是个空数组（全 272 人里这样的技能有 9 个），数值只在描述里。
+  if (!out.effects.some((e) => e.type === "cost")) {
+    const gain = /获得\s*([\d.]+)\s*技能COST/.exec(desc)
+    if (gain) out.effects.push({ type: "cost", scope: "self", value: Number(gain[1]) })
+  }
+
+  // 「不死」同样只在描述里（全 272 人 3 处：真里奈、纯子的 Public 与 GearPublic）。
+  // 持续时间在两种位置都出现过 —— 纯子的 Public 写在「对自身造成以下效果(持续12.8秒)」、
+  // GearPublic 写在「获得<s:Immortal>(持续12.8秒)」—— 所以整段找「持续 N 秒」。
+  if (/<s:Immortal>/.test(desc)) {
+    const d = /持续\s*([\d.]+)\s*秒/.exec(desc)
+    out.effects.push({ type: "immortal", scope: "self", turns: d ? secToTurns(Number(d[1])) : 2 })
+  }
+
+  // 纯子 EX 的「失去25.7%的当前生命值」。跟艾米的 ExtraStatSource 一样是**全数据唯一一处**，
+  // 没有结构化效果，也不会有第二个用例 —— 但漏了她就成了一个没有代价的 746% 直线 AoE。
+  const hpCost = /失去\s*([\d.]+)\s*%\s*的当前生命值/.exec(desc)
+  if (hpCost) out.effects.push({ type: "hp_cost", scope: "self", rate: Number(hpCost[1]) / 100 })
+
+  // 不打人、效果又全落在自己身上 = 目标就是自己。`Effects` 为空时 resolveTarget 无从判断
+  // （瞬的开局回费），会退成 enemy_single —— 那会让指令层按敌方去解析「打谁」。
+  const real = out.effects.filter((e) => e.type !== "dropped" && e.type !== "unmapped")
+  if (!out.hits?.length && real.length && real.every((e) => e.scope === "self")) {
+    out.target = "self"
+    out.count = 1
+  }
+
   const charge = out.effects.find((e) => e.type === "charge")
   // 「立即换弹」在回合制里唯一有意义的翻译：上完效果立刻普攻一次。
   // 换弹强化也走这条 —— 换完弹当场就能开枪，那一发已经是强化过的，
   // 由 autoAttack() 从 u.charge 里扣掉，所以第 1 发落在施放回合、第 2 发落在下个回合。
-  if (/立即换弹|马上换弹/.test(sk.Desc || "")) out.thenAutoAttack = true
+  if (/立即换弹|马上换弹/.test(desc)) out.thenAutoAttack = true
   // 「换弹后失效」的增益没有 Duration 字段，让它跟强化射击同寿。
-  // 进攻类 Buff 施放回合就算第 1 回合，而第 1 发也在施放回合，所以正好 = shots
-  if (charge) for (const e of out.effects) if (e.type === "buff") e.turns = charge.shots
+  // 进攻向 Buff 施放回合就算第 1 回合（那一回合他就要出手），而第 1 发也在施放回合，所以正好 = shots。
+  // 按轮数存续的强化形态（瞬）不走这条：它的 Buff 自带 Duration，本来就跟强化同寿。
+  if (charge?.shots) for (const e of out.effects) if (e.type === "buff") e.turns = charge.shots
   return out
 }
 
@@ -410,7 +536,6 @@ const unbuildable = (e) => UNBUILDABLE.test(e.Type) || (e.Type === "Special" && 
  * 强化版含 Special / Summon（妮露、莲华、歌原）时退回 Public —— 那几类要手写逻辑。
  */
 function pickPublicSkill(c) {
-  const one = (x) => (Array.isArray(x) ? x[0] : x)
   const base = one(c.Skills.Public)
   if (!USE_GEAR_SKILL) return { sk: base, gear: false }
   const g = one(c.Skills.GearPublic)
@@ -461,6 +586,9 @@ for (const u of units)
       if (e.type === "cc" && !e.turns) e.inactive = true
       if (e.type === "buff" && !e.value) e.inactive = true
     }
+    // 既不打人也不上效果 = 生成出了一个什么都不做的技能。多半是原数据的 `Effects` 是空数组
+    // （全 272 人里 9 个），数值只写在描述里，得单独抠 —— 不告警的话它会静默上线。
+    if (!sk.hits?.length && !sk.effects.length) warn.push(`${u.name} / ${sk.name}: 空技能（既无伤害也无效果）`)
   }
 
 const js = `/**

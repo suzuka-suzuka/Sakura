@@ -8,7 +8,7 @@
 import { CFG, ROSTER, combatRoleOf } from "./roster.js"
 import { ARMOR_LABEL } from "./htmlAssets.js"
 import {
-  tmplOf, nameOf, regenOf, aliveOf, exWaitOf, exRefreshPending,
+  tmplOf, nameOf, regenOf, aliveOf, exWaitOf, exRefreshPending, exCostOf, provokedBy,
   hitChance, critChance, defModOf, stabilityFloor, CC_TEXT,
 } from "./engine.js"
 
@@ -25,13 +25,18 @@ function hpBar(u) {
 }
 
 /** 状态图标：只显示会影响下一步决策的那几种 */
-function statusIcons(u) {
+function statusIcons(u, provoker) {
   if (!u.alive) return "💀"
   const s = []
   if (u.shield > 0) s.push(`🛡${Math.round(u.shield)}`)
   if (u.stun > 0) s.push(`💫晕${u.stun}`)
-  if (u.taunt > 0) s.push("🎯嘲讽")
+  // 嘲讽的状态挂在**被拉走的人**身上，写清是被谁拉的；集火才是挂在被点名的人自己头上
+  if (provoker) s.push(`❗被${nameOf(provoker)}嘲讽`)
+  if (u.taunt > 0 && u.tauntKind === "focus") s.push("🎯被集火")
   if (u.regens.length) s.push(`💚持续治疗${u.regens.length > 1 ? u.regens.length : ""}`)
+  if (u.immortal > 0) s.push(`❤️不死${u.immortal}`)
+  if (u.exDiscount?.uses) s.push(`⏬EX减费${u.exDiscount.uses}次`)
+  if (u.charge) s.push(`⏫强化${u.charge.turns ?? u.charge.shots}`)
 
   const summary = (stat) => {
     const bySource = new Map()
@@ -70,9 +75,9 @@ function sideBlock(state, side) {
   for (const u of s.units) {
     const t = tmplOf(u)
     const cd = u.alive ? `⚡${skillState(u, t)}` : ""
-    const st = statusIcons(u)
+    const st = statusIcons(u, provokedBy(state, u))
     lines.push(
-      `${t.name}(${t.atkType}/${t.defType}) ${t.ex.cost}费\n` +
+      `${t.name}(${t.atkType}/${t.defType}) ${exCostOf(u)}费\n` +
       `   ${hpBar(u)} ${Math.round(u.hp)}/${u.maxhp}${cd ? " " + cd : ""}` +
       (st ? `\n   ${st}` : "")
     )
@@ -86,7 +91,7 @@ export function renderExWindow(state, side) {
   const ready = [], cooling = []
   for (const u of s.units) {
     if (!u.alive) continue
-    const label = `${tmplOf(u).name}(${tmplOf(u).ex.cost}费)`
+    const label = `${tmplOf(u).name}(${exCostOf(u)}费)`
     const wait = exRefreshPending(state, s) ? 0 : exWaitOf(s, u)
     if (wait) cooling.push(`${label}还需${wait}`)
     else ready.push(label)
@@ -193,7 +198,7 @@ const TARGET_TEXT = {
   enemy_adjacent: "指定目标+相邻",
   enemy_all: "敌方全体",
   enemy_random: "随机敌人",
-  enemy_chain: "连发换目标",
+  enemy_chain: "连发逐枪重锁",
   ally_all: "己方全体",
   ally_adjacent: "指定友方+相邻",
   ally_lowest: "己方最残",
@@ -222,6 +227,8 @@ const TRIGGER_TEXT = (tr) => {
   if (tr.type === "on_kill") {
     return tr.turns ? `自己击杀时（冷却 ${tr.turns} 回合）${uses}` : `自己击杀时${uses}`
   }
+  // 开局就结算掉了，写「每场限 1 次」反而像是还能等它触发
+  if (tr.type === "battle_start") return "战斗开始时"
   return `每 ${tr.turns} 回合${uses}`
 }
 
@@ -240,7 +247,7 @@ export function describeEffect(sk) {
     const scope = sk.target === "enemy_adjacent" ? `${tg}共${sk.count}人` : tg
     // 连发是「N 枪各锁各的目标」，写成「合计 X% 分 N 段」会让人以为全砸在一个人身上
     if (sk.target === "enemy_chain") {
-      parts.push(`连发 ${sk.hits.length} 枪，每枪 ${(total / sk.hits.length).toFixed(0)}%攻击力，逐枪换目标（同战场没人可换才重复）`)
+      parts.push(`连发 ${sk.hits.length} 枪，每枪 ${(total / sk.hits.length).toFixed(0)}%攻击力；只有第一枪听指挥，之后按普攻规则重锁（人偶/坦克会吃掉后几枪）`)
     } else {
       parts.push(`${scope} ${total.toFixed(0)}%攻击力${sk.hits.length > 1 ? ` 分${sk.hits.length}段` : ""}`)
     }
@@ -279,12 +286,31 @@ export function describeEffect(sk) {
         if (e.inactive || !e.turns) break
         parts.push(`${who}${CC_TEXT[e.icon] || "控制"} ${e.turns} 回合${e.chance < 1 ? `（${pct(e.chance)}）` : ""}`)
         break
-      case "charge":
-        parts.push(`换弹强化：接下来 ${e.shots} 发普攻 ×${e.mult}` + (e.count > 1 ? `、打 ${e.count} 人` : ""))
+      case "charge": {
+        const total = (e.hits || []).reduce((a, b) => a + b, 0)
+        parts.push(
+          (e.shots ? `换弹强化：接下来 ${e.shots} 发` : `强化形态：${e.turns} 回合内`) +
+          `普攻 ${total.toFixed(0)}%攻击力` + (e.hits?.length > 1 ? ` 分${e.hits.length}段` : "") +
+          (e.count > 1 ? `、打 ${e.count} 人` : "") +
+          // 索敌变更是这个 EX 最贵的部分，别缩写成「改变索敌」四个字
+          (e.targeting === "max_atk" ? "，索敌改为攻击力最高的敌人（只有嘲讽拉得走）" : "")
+        )
         break
+      }
       case "cleanse": parts.push(`${who}清除减益`); break
-      case "taunt": parts.push(`${who}嘲讽 ${e.turns} 回合`); break
+      // 嘲讽和集火是两个机制，说法不能混：一个是把敌人拉过来，一个是把火力锁在某个敌人身上
+      case "taunt":
+        parts.push(e.kind === "focus"
+          ? `目标被集火 ${e.turns} 回合（己方攻击都锁它）`
+          : `嘲讽：${e.turns} 回合内敌方全体只打自己、且放不出 EX`)
+        break
       case "cost": parts.push(`Cost ${e.value > 0 ? "+" : ""}${e.value}`); break
+      case "immortal": parts.push(`${who}进入不死状态，生命掉不到 0（${e.turns}回合）`); break
+      case "ex_discount":
+        parts.push(`${who}EX 费用${e.mode === "pct" ? `减 ${pct(e.value)}` : `减 ${e.value} 点`}（接下来 ${e.uses} 次 EX）`)
+        break
+      // 自伤是这发 AoE 的代价，得写在效果里 —— 只写伤害会显得她凭空多出一个 746%
+      case "hp_cost": parts.push(`代价：自身失去当前生命的 ${pct(e.rate)}`); break
     }
   }
   if (sk.thenAutoAttack) parts.push("立即普攻一次")

@@ -836,6 +836,84 @@ export const ROSTER = [
     }
   },
   {
+    "id": "SHUN",
+    "sid": 10011,
+    "name": "瞬",
+    "star": 3,
+    "baseStar": 3,
+    "atkType": "爆发",
+    "defType": "轻装",
+    "role": "输出",
+    "bullet": "Explosion",
+    "armor": "LightArmor",
+    "hp": 2495,
+    "atk": 393,
+    "dfs": 19,
+    "healPower": 1661,
+    "acc": 908,
+    "dodge": 201,
+    "crit": 252,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1980,
+    "autoAttack": {
+      "hits": [
+        100
+      ]
+    },
+    "gearSkill": false,
+    "skill": {
+      "name": "请大家集中精神！",
+      "target": "self",
+      "count": 1,
+      "effects": [
+        {
+          "type": "cost",
+          "scope": "self",
+          "value": 2
+        }
+      ],
+      "trigger": {
+        "type": "battle_start",
+        "maxUses": 1
+      }
+    },
+    "ex": {
+      "name": "坏孩子在哪呢？",
+      "target": "self",
+      "count": 1,
+      "effects": [
+        {
+          "type": "charge",
+          "hits": [
+            153.12
+          ],
+          "count": 1,
+          "turns": 6,
+          "targeting": "max_atk"
+        },
+        {
+          "type": "buff",
+          "scope": "self",
+          "stat": "dmg_deal",
+          "value": -0.1882,
+          "turns": 6,
+          "channel": 524
+        },
+        {
+          "type": "buff",
+          "scope": "self",
+          "stat": "crit",
+          "value": 0.2635,
+          "turns": 6,
+          "channel": 9
+        }
+      ],
+      "cost": 3
+    }
+  },
+  {
     "id": "SUMIRE",
     "sid": 10012,
     "name": "堇",
@@ -975,9 +1053,12 @@ export const ROSTER = [
       "effects": [
         {
           "type": "charge",
-          "shots": 2,
-          "mult": 1.38,
-          "count": 2
+          "hits": [
+            69.355,
+            69.355
+          ],
+          "count": 2,
+          "shots": 2
         },
         {
           "type": "buff",
@@ -1434,6 +1515,81 @@ export const ROSTER = [
     }
   },
   {
+    "id": "JUNKO",
+    "sid": 13007,
+    "name": "纯子",
+    "star": 3,
+    "baseStar": 2,
+    "atkType": "贯通",
+    "defType": "轻装",
+    "role": "输出",
+    "bullet": "Pierce",
+    "armor": "LightArmor",
+    "hp": 2536,
+    "atk": 335,
+    "dfs": 20,
+    "healPower": 1635,
+    "acc": 695,
+    "dodge": 794,
+    "crit": 198,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1408,
+    "autoAttack": {
+      "hits": [
+        33.33,
+        33.33,
+        33.34
+      ]
+    },
+    "gearSkill": true,
+    "skill": {
+      "name": "别在我肚子饿的时候搭话！+",
+      "target": "self",
+      "count": 1,
+      "effects": [
+        {
+          "type": "ex_discount",
+          "scope": "self",
+          "mode": "flat",
+          "value": 4,
+          "uses": 2
+        },
+        {
+          "type": "immortal",
+          "scope": "self",
+          "turns": 3
+        }
+      ],
+      "trigger": {
+        "type": "hp_below",
+        "value": 0.2,
+        "maxUses": 1
+      }
+    },
+    "ex": {
+      "name": "空腹的愤怒",
+      "target": "enemy_adjacent",
+      "count": 3,
+      "area": 135000,
+      "effects": [
+        {
+          "type": "hp_cost",
+          "scope": "self",
+          "rate": 0.257
+        }
+      ],
+      "cost": 5,
+      "hits": [
+        186.5075,
+        186.5075,
+        186.5075,
+        186.5075
+      ]
+    }
+  },
+  {
     "id": "SERIKA",
     "sid": 13008,
     "name": "芹香",
@@ -1502,6 +1658,223 @@ export const ROSTER = [
       ],
       "cost": 2,
       "thenAutoAttack": true
+    }
+  },
+  {
+    "id": "TSUBAKI",
+    "sid": 13009,
+    "name": "椿",
+    "star": 3,
+    "baseStar": 2,
+    "atkType": "贯通",
+    "defType": "特殊",
+    "role": "坦克",
+    "bullet": "Pierce",
+    "armor": "Unarmed",
+    "hp": 3414,
+    "atk": 209,
+    "dfs": 30,
+    "healPower": 1618,
+    "acc": 98,
+    "dodge": 1416,
+    "crit": 196,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1420,
+    "autoAttack": {
+      "hits": [
+        33.33,
+        33.33,
+        33.34
+      ]
+    },
+    "gearSkill": false,
+    "skill": {
+      "name": "睡眠，大补",
+      "target": "self",
+      "count": 1,
+      "effects": [
+        {
+          "type": "heal",
+          "scope": "self",
+          "scale": 3.4928,
+          "source": "heal"
+        }
+      ],
+      "trigger": {
+        "type": "hp_below",
+        "value": 0.3,
+        "maxUses": 1
+      }
+    },
+    "ex": {
+      "name": "展开战术盾牌",
+      "target": "self",
+      "count": 1,
+      "area": 1539380,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "self",
+          "stat": "dfs",
+          "value": 0.2811,
+          "turns": 6,
+          "channel": 3
+        },
+        {
+          "type": "taunt",
+          "kind": "provoke",
+          "scope": "self",
+          "turns": 1
+        }
+      ],
+      "cost": 4
+    }
+  },
+  {
+    "id": "YUUKA",
+    "sid": 13010,
+    "name": "优香",
+    "star": 3,
+    "baseStar": 2,
+    "atkType": "爆发",
+    "defType": "重装",
+    "role": "坦克",
+    "bullet": "Explosion",
+    "armor": "HeavyArmor",
+    "hp": 3357,
+    "atk": 132,
+    "dfs": 29,
+    "healPower": 1645,
+    "acc": 100,
+    "dodge": 1440,
+    "crit": 200,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1396,
+    "autoAttack": {
+      "hits": [
+        33.33,
+        33.33,
+        33.34
+      ]
+    },
+    "gearSkill": true,
+    "skill": {
+      "name": "I.F.F+",
+      "target": "enemy_single",
+      "count": 1,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "self",
+          "stat": "dodge",
+          "value": 0.2602,
+          "turns": 2,
+          "channel": 7
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 3
+      },
+      "hits": [
+        36.6315,
+        36.5986,
+        36.5986,
+        36.5986,
+        36.5986,
+        36.5986,
+        36.5986,
+        36.5986,
+        36.5986
+      ]
+    },
+    "ex": {
+      "name": "Q.E.D",
+      "target": "self",
+      "count": 1,
+      "effects": [
+        {
+          "type": "shield",
+          "scope": "self",
+          "scale": 1.9054,
+          "source": "heal",
+          "turns": 3
+        }
+      ],
+      "cost": 3
+    }
+  },
+  {
+    "id": "HARUKA",
+    "sid": 16000,
+    "name": "春香",
+    "star": 3,
+    "baseStar": 1,
+    "atkType": "爆发",
+    "defType": "轻装",
+    "role": "坦克",
+    "bullet": "Explosion",
+    "armor": "LightArmor",
+    "hp": 3397,
+    "atk": 142,
+    "dfs": 182,
+    "healPower": 1627,
+    "acc": 593,
+    "dodge": 237,
+    "crit": 197,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 2020,
+    "autoAttack": {
+      "hits": [
+        33.34,
+        33.33,
+        33.33
+      ]
+    },
+    "gearSkill": false,
+    "skill": {
+      "name": "一触即发",
+      "target": "self",
+      "count": 1,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "self",
+          "stat": "dfs",
+          "value": 0.1898,
+          "turns": 4,
+          "channel": 3
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 4
+      }
+    },
+    "ex": {
+      "name": "混乱射击",
+      "target": "enemy_adjacent",
+      "count": 2,
+      "area": 79522,
+      "effects": [],
+      "cost": 4,
+      "hits": [
+        91.2398,
+        91.2398,
+        91.2398,
+        91.2398,
+        91.2398,
+        91.2398,
+        91.2398,
+        91.2398,
+        91.2398
+      ]
     }
   }
 ]

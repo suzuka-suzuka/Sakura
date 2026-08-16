@@ -15,7 +15,7 @@ import { getRedis } from "../../../src/utils/redis.js"
 import { logger } from "../../../src/utils/logger.js"
 
 import { CFG, BY_ID, ROSTER, findUnit } from "../lib/ba/roster.js"
-import { createBattle, playerTurn, validateAction } from "../lib/ba/engine.js"
+import { createBattle, playerTurn, validateAction, exSealedOf, exLockedOf } from "../lib/ba/engine.js"
 import { BattleStore } from "../lib/ba/store.js"
 import { parseDraft, parseAction } from "../lib/ba/parse.js"
 import { baBattleImageGenerator } from "../lib/ba/BaBattleImageGenerator.js"
@@ -62,7 +62,7 @@ function renderGuideFallback() {
     "",
     "【战场分割】1·2 号位是一个战场，3·4 号位是另一个，两边各打各的（原作机制）。",
     "本战场的敌人全灭了才会越界打另一边；所以坦克放 1 位只保护 1·2，站位是有讲究的。",
-    "同一战场里优先打坦克 —— 坦克相当于站前一格替队友挡刀。嘲讽优先级最高，直接无视分割。",
+    "同一战场里优先打坦克 —— 坦克相当于站前一格替队友挡刀。嘲讽优先级最高，直接无视分割，被嘲讽的那一轮也放不出 EX。",
     "",
     "【范围】原作的扇形/圆形按覆盖面积折算成打 2 / 3 / 全体，范围伤害不衰减，每个目标吃全额。",
     "多目标技能由你指定主目标，其余从主目标向外扩散，优先选百分比血量最低的。",
@@ -149,12 +149,25 @@ export class BaBattle extends plugin {
 
   /**
    * 一步之后 @ 当前该动手的人。图里已经有 Cost / EX / 血量，这里只喊一声。
+   * 全员被嘲讽 / 恐惧封住时还是要喊 —— 不能替他们把回合过掉，只把可选项收成「过」。
    */
   async pingTurn(bot, groupId, session) {
-    const player = session.players[session.state.activeSide]
+    const st = session.state
+    const player = session.players[st.activeSide]
+    let text = " 轮到你了，请行动"
+    if (exSealedOf(st, st.activeSide)) {
+      const reasons = new Set(
+        st.sides[st.activeSide].units
+          .filter((u) => u.alive)
+          .map((u) => exLockedOf(st, u))
+          .filter(Boolean)
+      )
+      const why = reasons.size === 1 ? [...reasons][0] : "控制"
+      text = ` 全员被${why}，只能发「过」`
+    }
     await this.sayToGroup(bot, groupId, [
       Segment.at(player.uid),
-      Segment.text(" 轮到你了，请行动"),
+      Segment.text(text),
     ])
   }
 
