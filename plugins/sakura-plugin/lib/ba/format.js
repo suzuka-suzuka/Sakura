@@ -5,10 +5,10 @@
  * 图鉴文字则仍是角色卡生成失败时的降级内容。
  */
 
-import { CFG, ROSTER, combatRoleOf } from "./roster.js"
+import { CFG, ROSTER, BY_ID, combatRoleOf } from "./roster.js"
 import { ARMOR_LABEL } from "./htmlAssets.js"
 import {
-  tmplOf, nameOf, regenOf, aliveOf, exWaitOf, exRefreshPending, exCostOf, provokedBy,
+  tmplOf, nameOf, regenOf, aliveOf, exWaitOf, exRefreshPending, exCostOf, provokedBy, focusedOf,
   hitChance, critChance, defModOf, stabilityFloor, CC_TEXT,
 } from "./engine.js"
 
@@ -32,7 +32,7 @@ function statusIcons(u, provoker) {
   if (u.stun > 0) s.push(`💫晕${u.stun}`)
   // 嘲讽的状态挂在**被拉走的人**身上，写清是被谁拉的；集火才是挂在被点名的人自己头上
   if (provoker) s.push(`❗被${nameOf(provoker)}嘲讽`)
-  if (u.taunt > 0 && u.tauntKind === "focus") s.push("🎯被集火")
+  if (focusedOf(u)) s.push("🎯被集火")
   if (u.regens.length) s.push(`💚持续治疗${u.regens.length > 1 ? u.regens.length : ""}`)
   if (u.immortal > 0) s.push(`❤️不死${u.immortal}`)
   if (u.exDiscount?.uses) s.push(`⏬EX减费${u.exDiscount.uses}次`)
@@ -62,6 +62,12 @@ function skillState(u, tmpl) {
   if (!tr) return "无技能"
   if (tr.maxUses && u.skillUses >= tr.maxUses) return "已用完"
   if (tr.type === "hp_below") return `待触发(≤${Math.round(tr.value * 100)}%)`
+  // 泉奈按枪数攒，冷却恒为 0，只报「已经打了几枪」才有信息量。
+  // 攻速会让一回合攒到不止一枪，所以带小数（见 tryAutoProc）
+  if (tr.type === "on_auto" && tr.every) {
+    const n = u.autoCount || 0
+    return `${Number.isInteger(n) ? n : n.toFixed(1)}/${tr.every} 枪`
+  }
   return u.skillCd <= 0 ? "就绪" : String(u.skillCd)
 }
 
@@ -199,9 +205,11 @@ const TARGET_TEXT = {
   enemy_all: "敌方全体",
   enemy_random: "随机敌人",
   enemy_chain: "连发逐枪重锁",
+  enemy_cycle: "从自己对位起按号位循环点名",
   ally_all: "己方全体",
   ally_adjacent: "指定友方+相邻",
   ally_lowest: "己方最残",
+  ally_hurt: "己方受伤的（就近）",
   self: "自身",
 }
 
@@ -211,7 +219,9 @@ const STAT_TEXT = {
   dmg_deal: "造成伤害", dmg_take: "受到伤害", heal_taken: "受治疗量",
   aa: "攻速", cost_regen: "Cost回复",
   atk_flat: "攻击力", dfs_flat: "防御力", heal_flat: "治疗力",
-  crit_res: "暴击抵抗", crit_dmg_res_flat: "暴伤抵抗",
+  crit_res: "暴击抵抗", crit_dmg_res_flat: "暴伤抵抗", crit_dmg_res: "暴伤抵抗",
+  // 属性增伤（爱用品）：按**攻击者自己的弹种**匹配，所以要写清是哪一种
+  enh_Explosion: "爆发增伤", enh_Pierce: "贯通增伤", enh_Mystic: "神秘增伤", enh_Sonic: "振动增伤", enh_Chemical: "变化增伤",
 }
 
 /** 暴击伤害系的「固定值」单位是万分比（10000 = 100%），直接印原始数字玩家读不懂 */
@@ -223,6 +233,8 @@ const TRIGGER_TEXT = (tr) => {
   const uses = tr.maxUses ? `，每场限 ${tr.maxUses} 次` : ""
   if (tr.type === "hp_below") return `生命≤${Math.round(tr.value * 100)}% 时触发${uses}`
   if (tr.type === "on_auto") {
+    // 泉奈是「每 N 枪」而不是「概率 + 冷却」，两种写法都走 on_auto
+    if (tr.every) return `每 ${tr.every} 次普攻${uses}`
     return `普攻时 ${Math.round((tr.chance ?? 1) * 100)}% 概率（冷却 ${tr.turns} 回合）${uses}`
   }
   if (tr.type === "on_kill") {
@@ -237,12 +249,18 @@ export function describeEffect(sk) {
   if (!sk) return "无"
   const parts = []
   if (sk.trigger?.type === "on_auto") {
-    parts.push(`普攻时 ${Math.round((sk.trigger.chance ?? 1) * 100)}% 概率`)
+    parts.push(sk.trigger.every
+      ? `每 ${sk.trigger.every} 次普攻`
+      : `普攻时 ${Math.round((sk.trigger.chance ?? 1) * 100)}% 概率`)
   }
   if (sk.trigger?.type === "on_kill") {
     parts.push(sk.trigger.turns ? `自己击杀时（冷却 ${sk.trigger.turns} 回合）` : "自己击杀时")
   }
   const tg = TARGET_TEXT[sk.target] || sk.target
+  // 柚子 / 切里诺：「攻击力最高」只写在描述里。有伤害时这条是索敌，没伤害时是集火的选人条件
+  if (sk.pick === "max_atk") {
+    parts.push("以攻击力最高的敌人为目标（无视战场分割、身位和挡刀）")
+  }
   if (sk.hits?.length) {
     const total = sk.hits.reduce((a, b) => a + b, 0)
     const scope = sk.target === "enemy_adjacent"
@@ -255,8 +273,18 @@ export function describeEffect(sk) {
     // 连发是「N 枪各锁各的目标」，写成「合计 X% 分 N 段」会让人以为全砸在一个人身上
     if (sk.target === "enemy_chain") {
       parts.push(`连发 ${sk.hits.length} 枪，每枪 ${(total / sk.hits.length).toFixed(0)}%攻击力；只有第一枪听指挥，之后按普攻规则重锁（人偶/前排会吃掉后几枪）`)
+    } else if (sk.target === "enemy_cycle") {
+      // 循环点名的落点由她自己的号位定死，玩家指不了 —— 这条比倍率更需要说清楚
+      parts.push(`点名 ${sk.hits.length} 次，每次 ${(total / sk.hits.length).toFixed(0)}%攻击力；` +
+        `从跟自己对位的号位起按号位循环（4 人时有一个吃两下，只剩 1 人就全落他身上），无法指定目标`)
     } else {
       parts.push(`${scope} ${total.toFixed(0)}%攻击力${sk.hits.length > 1 ? ` 分${sk.hits.length}段` : ""}`)
+    }
+    // 条件追伤：不写的话卡面上只有最低那一档，玩家看不出这个 EX 为什么值这个费
+    for (const a of sk.altHits || []) {
+      parts.push(a.state === "fury"
+        ? `Fury 状态下改为 ${a.total.toFixed(0)}%`
+        : `能量${a.min >= 2 ? "满充" : "半充"}时改为 ${a.total.toFixed(0)}%`)
     }
     if (sk.splashHits?.length) {
       parts.push(`扩散仅同战场同身位，只吃 ${sk.splashHits.reduce((a, b) => a + b, 0).toFixed(0)}%`)
@@ -268,7 +296,12 @@ export function describeEffect(sk) {
   for (const e of sk.effects || []) {
     // 技能 1 级时数值为 0 的效果根本不存在 —— 与其写「无效」不如不写
     if (e.inactive) continue
-    const who = e.scope === "self" ? "自身" : e.scope === "ally_all" ? "己方全体" : "目标"
+    const n0 = parts.length
+    const who = e.scope === "self" ? "自身"
+      : e.scope === "ally_all" ? "己方全体"
+        : e.scope === "ally_named" ? `${BY_ID[e.ally]?.name || e.ally}（不在场则不生效）`
+          : e.scope === "ally_mirror" ? "己方同号位"
+            : e.scope === "ally_target" ? "该队友" : "目标"
     switch (e.type) {
       case "buff":
         parts.push(`${who}${STAT_TEXT[e.stat] || e.stat} ${e.value > 0 ? "+" : ""}${/_flat$/.test(e.stat) ? flatText(e.stat, e.value) : pct(e.value)}（${e.turns}回合）`)
@@ -305,6 +338,17 @@ export function describeEffect(sk) {
         break
       }
       case "cleanse": parts.push(`${who}清除减益`); break
+      // 自身状态：本身不改面板，价值全在「它让 EX 换一组倍率」上，所以要连着后果一起说
+      case "state":
+        parts.push(e.key === "fury"
+          ? `进入 Fury（${e.turns}回合）`
+          : e.step ? `能量充能 +${e.step} 档（最高 ${e.max} 档）` : "能量充能清空")
+        break
+      // 位移换来的是战场分割与对位，不是一段距离 —— 说成「移动」玩家会以为有坐标
+      case "reposition":
+        parts.push(`与相邻${e.range > 1 ? `${e.range} 格内` : "一格"}的队友交换站位`
+          + `（指令写「ex换<队友名>」，不指定就不动；站在中间两格时这一跳能跨过战场分界）`)
+        break
       // 嘲讽和集火是两个机制，说法不能混：一个是把敌人拉过来，一个是把火力锁在某个敌人身上
       case "taunt":
         parts.push(e.kind === "focus"
@@ -318,6 +362,11 @@ export function describeEffect(sk) {
         break
       // 自伤是这发 AoE 的代价，得写在效果里 —— 只写伤害会显得她凭空多出一个 746%
       case "hp_cost": parts.push(`代价：自身失去当前生命的 ${pct(e.rate)}`); break
+    }
+    // 编队条件（绿 ⇄ 桃）：不写的话玩家会以为这条 DoT 是无条件的
+    if (e.ifAlly) {
+      const who2 = BY_ID[e.ifAlly]?.name || e.ifAlly
+      for (let i = n0; i < parts.length; i++) parts[i] += `（仅当${who2}同队时）`
     }
   }
   if (sk.thenAutoAttack) parts.push("换弹后本回合仍普攻")

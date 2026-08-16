@@ -34,8 +34,16 @@ const FORCE = process.argv.includes("--force")
  */
 const KIVO_ALIAS = {
   "陆八魔 爱露": "陆八魔 阿露",
-  // kivo 这条用的是日文汉字「瀬」，SchaleDB 的中文名是简体「濑」
+  // kivo 这两条用的是日文汉字「瀬」，SchaleDB 的中文名是简体「濑」
   "早濑 优香": "早瀬 优香",
+  "一之濑 明日奈": "一之瀬 明日奈",
+  // kivo 这几条干脆没有那个空格，跟译名无关，纯粹是它自己的目录名不统一
+  "白洲 梓": "白洲梓",
+  "才羽 绿": "才羽绿",
+  "才羽 桃": "才羽桃井",
+  // 名字整个不同：kivo 把 ネル 译成「尼禄」、コトリ 译成「小鸟」
+  "美甘 妮露": "美甘 尼禄",
+  "丰见 琴里": "丰见 小鸟",
 }
 
 const SOURCES = {
@@ -119,7 +127,11 @@ for (const [id, url] of Object.entries(SUMMON_ART)) {
  */
 const WIKI_API = "https://bluearchive.fandom.com/api.php"
 const WIKI_UA = { headers: { "User-Agent": "Mozilla/5.0 SakuraBot/1.0" } }
-const SPECIAL_KEEP = new Set(["Special_-_Form_Change.png", "Special_-_Immortal.png"])
+const SPECIAL_KEEP = new Set([
+  "Special_-_Form_Change.png", "Special_-_Immortal.png",
+  // 妮露的<s:Fury>、爱丽丝的能量充能三档（0 空 / 1 半 / 2 满）
+  "Special_-_Fury.png", "Special_-_Energy_0.png", "Special_-_Energy_1.png", "Special_-_Energy_2.png",
+])
 /** wiki 文件名 → 代码里 statusIconOf() 用的短名 */
 const STATUS_ALIAS = {
   "Buff_-_ATK.png": "atk",
@@ -149,6 +161,11 @@ const STATUS_ALIAS = {
   "Debuff_-_DMG_Increased.png": "dmg_take-down",
   "Special_-_Form_Change.png": "form",
   "Special_-_Immortal.png": "immortal",
+  "Special_-_Fury.png": "fury",
+  // 能量充能：0 空 / 1 半 / 2 满，三档各一张图（爱丽丝）
+  "Special_-_Energy_0.png": "energy-0",
+  "Special_-_Energy_1.png": "energy-1",
+  "Special_-_Energy_2.png": "energy-2",
   "Buff_-_Cost_Decrease.png": "ex-discount",
   "Buff_-_Cost_Regen.png": "cost-regen",
   "Debuff_-_Cost_Regen.png": "cost-regen-down",

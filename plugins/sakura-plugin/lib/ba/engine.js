@@ -105,12 +105,17 @@ function flatOf(u, stat) {
  * | 防御向（本表）| 承受者**挨打**时 | 承受者的敌方 `1 - u.side` |
  * | 进攻 / 治疗向 | 承受者**出手**时 | 承受者自己 `u.side` |
  *
- * 四种组合都自然对齐，**一个「跳过施放回合」的守卫都不需要**：
+ * 四种组合都自然对齐：
  *   - 自身防御增益（椿的 +28% 防御）在自己回合上，那一回合 ticking 是自己方，天然不扣
  *   - 给敌人的减防（茜的 −29%）承受者是敌人，`1 - u.side` 正是自己方，当场扣一格 ——
  *     而本方这一回合的普攻正好吃得到，对齐
  *   - 自身进攻增益（野宫的 +22% 攻击）施放回合就得算，因为 ③-b 她马上要打
  *   - 给敌人的减命中承受者是敌人，跟着敌人的回合跳
+ *
+ * **还有第三类：`startNext`（从下个己方回合才开始跳）。** 它跟本表无关，是另一个维度——
+ * 上面那条「③-b 她马上要打」只对**普通技能**成立；EX 给施放者自己上的进攻向增益，
+ * 施放那一轮他 ③-a / ③-b 都不出手（带「立即换弹」的除外），那一轮压根不是攻击窗口。
+ * 别把它理解成「跟椿对齐」——椿是防御向、跟敌方回合跳，本来就轮不到施放回合。
  *
  * 曾经这里叫 `CURRENT_TURN_STATS`（「进攻类」），却塞着 `dfs` / `dmg_take` 两个防御向属性，
  * 而且按**施加者**分side —— 对减防是对的，对自身防御增益就白扣一格（椿 6 回合只挡得住 5 次）。
@@ -118,6 +123,8 @@ function flatOf(u, stat) {
  */
 const DEFENSIVE_STATS = new Set([
   "dfs", "dfs_flat", "dmg_take", "dodge", "crit_res", "crit_dmg_res_flat",
+  // 切里诺普技减的是系数档，跟爱用品那档 `_flat` 同一把防御向尺子
+  "crit_dmg_res",
 ])
 
 /** 控制类效果的中文名。原数据只给英文 Icon，写死一张表比逐个判断可靠 */
@@ -125,6 +132,9 @@ const CC_TEXT = {
   Stunned: "眩晕", Fear: "恐惧", Provoke: "嘲讽", Slow: "减速",
   Confuse: "混乱", Sleep: "睡眠", Silence: "沉默", Bind: "束缚",
 }
+
+/** 爱丽丝的能量充能三档，日志里印中文才读得懂 */
+const ENERGY_TEXT = ["空", "半充", "满充"]
 
 /** 持续伤害的中文名。Zone 是「固定场地」，其余取自原数据的 Icon */
 const DOT_TEXT = {
@@ -138,7 +148,8 @@ const STAT_LABEL = {
   crit: "暴击值", crit_dmg: "暴击伤害", crit_dmg_flat: "暴击伤害",
   acc: "命中值", dodge: "闪避值", dmg_deal: "造成伤害", dmg_take: "受到伤害",
   heal_taken: "受治疗量", aa: "攻速", cost_regen: "Cost回复",
-  crit_res: "暴击抵抗", crit_dmg_res_flat: "暴伤抵抗",
+  crit_res: "暴击抵抗", crit_dmg_res_flat: "暴伤抵抗", crit_dmg_res: "暴伤抵抗",
+  enh_Explosion: "爆发增伤", enh_Pierce: "贯通增伤", enh_Mystic: "神秘增伤", enh_Sonic: "振动增伤", enh_Chemical: "变化增伤",
 }
 
 function makeStatus(eff, turnId, source, kind) {
@@ -175,8 +186,40 @@ function hitChance(src, tgt) {
 
 // 两项抵抗都要过 buff 层：爱用品强化后的普通技能会给它们上增益
 // （星野的急救治疗+ 加暴伤抵抗，绫音的加暴击抵抗），直接读模板常量就吃不到
+/**
+ * 「这一回合他开了几枪的份量」。攻速（`aa`）在本项目里的**唯一含义就是射速**，
+ * 而射速有**三个出口**，少接一个，给队友加攻速的角色就会被系统性低估：
+ *
+ * | 出口 | 在哪 |
+ * |---|---|
+ * | 普攻伤害 ×aa | `strike` 的 `dealF *= factorOf(src,"aa")` |
+ * | 射击计数攒得更快（泉奈的「每 6 枪」） | `tryAutoProc` 的 `autoCount += shotsOf(u)` |
+ * | 命中触发的概率更高（泉 / 明里的「普攻时 N%」） | `autoProcChance` |
+ *
+ * 所以**攻速比等值的「普攻增伤」更值钱**，这是原作里就成立的关系，不是本项目的加成。
+ * 真·「造成伤害增加」以后进池要用 `dmg_deal`，它只有第一个出口，别跟 `aa` 共用一层。
+ *
+ * 下限跟 `accOf` / `dodgeOf` 一个写法：再重的减速也不能让计数彻底停死。
+ */
+const shotsOf = (u) => Math.max(0.2, factorOf(u, "aa"))
+
+/**
+ * 「普攻时 N% 概率」在攻速加持下的实际触发率。
+ *
+ * 一回合开了 `shots` 枪的份量、每枪 `p` 概率，至少中一次 = `1 − (1−p)^shots`
+ * ——「k 次独立试验至少成功一次」推广到小数枪数。`shots = 1` 时正好还原成 `p`。
+ * 减攻速（爱理 −18.5% / 朱莉 −18.2%）走同一条式子，方向自然反过来。
+ */
+export function autoProcChance(u, chance) {
+  const p = chance ?? 1
+  if (p >= 1) return 1
+  return 1 - (1 - p) ** shotsOf(u)
+}
+
 const critResOf = (u) => Math.max(0, tmplOf(u).critRes * Math.max(0, factorOf(u, "crit_res")))
-const critDmgResOf = (u) => Math.max(0, tmplOf(u).critDmgRes + flatOf(u, "crit_dmg_res_flat"))
+// 暴伤抵抗有两档来源：爱用品给的是固定值（`_flat`），切里诺的普技减的是系数
+const critDmgResOf = (u) =>
+  Math.max(0, (tmplOf(u).critDmgRes + flatOf(u, "crit_dmg_res_flat")) * Math.max(0, factorOf(u, "crit_dmg_res")))
 
 /** 暴击率：1 − CRIT_BASE / ((暴击值 − 目标暴击抵抗) × CRIT_C + CRIT_BASE)，取不到 100% */
 function critChance(src, tgt) {
@@ -353,19 +396,29 @@ function makeUnit(tmpl, idx, side) {
     // 持续伤害（场地/灼烧）。跟施加者解绑：他阵亡、被控都照跳，所以只存算好的数值
     dots: [],
     stun: 0, stunSt: -1, stunIcon: null,
-    // taunt = 「这个单位吃掉对面的刀」；tauntKind 决定状态格画给谁看，见 setTaunt
+    // taunt = Provoke（椿 / 人偶）：这个单位吃掉对面的刀
+    // focus = ConcentratedTarget（切里诺）：被点名的人吃己方的刀。两套独立，见 setTaunt
     taunt: 0, tauntSt: -1, tauntKind: null,
+    focus: 0, focusSt: -1,
     // 普通技能：「每 X 秒」是周期，第一次落在 X 秒而不是开局，所以起始压满冷却；
     // 条件型（血量阈值）与战斗开始时都用 99 表示「不靠冷却解锁」；
     // 普攻触发（泉 / 明里）第一次就能 roll，起始 0
-    skillCd: tmpl.skill?.trigger?.type === "cooldown" ? tmpl.skill.trigger.turns
+    // 「每 X 秒」是周期，第一次落在 X 秒而不是开局，所以起始压满；
+    // 「(冷却 X 秒)」（`icd`）是**再次使用的间隔**，靠条件门控，起始给 0 才对，跟 on_auto 同理
+    skillCd: tmpl.skill?.trigger?.type === "cooldown" ? (tmpl.skill.trigger.icd ? 0 : tmpl.skill.trigger.turns)
       : (tmpl.skill?.trigger?.type === "on_auto" || tmpl.skill?.trigger?.type === "on_kill") ? 0 : 99,
     skillUses: 0,
+    // 「每进行 N 次普通攻击」（泉奈）已经打出去几枪。冷却型不用它，见 tryAutoProc
+    autoCount: 0,
     // 强化形态：{hits, count, shots?|turns?, targeting?}
     // 鹤城按发数（EX 之后的两发普攻），瞬按轮数并改索敌
     charge: null,
     // 不死：血量掉不到 0，按**敌方**回合跳（跟护盾同口径，挡的是敌人的攻击窗口）
     immortal: 0, immortalSt: -1,
+    // 自身状态，只供 altHits 换倍率，不改面板：
+    //   fury（妮露）有时长，跟自己回合跳；energy（爱丽丝）是 0~2 档，没有时长
+    fury: 0, furySt: -1,
+    energy: tmpl.skill?.stateStart?.key === "energy" ? tmpl.skill.stateStart.value : 0,
     // EX 费用打折：{mode:"flat"|"pct", value, uses}。按**次数**失效，没有时长
     exDiscount: null,
     // 本方第几个 EX 是这个人放的；0 表示还没放过，开局全员可放
@@ -433,6 +486,27 @@ const LINE_RANK = { 前: 0, 中: 1, 后: 2 }
 const lineOf = (u) => tmplOf(u).line || "后"
 const lineRank = (u) => LINE_RANK[lineOf(u)] ?? 2
 
+/**
+ * 交换两个己方单位的站位（泉奈的位移）。
+ *
+ * **必须同时换数组位置和 `idx`**，保持 `units[i].idx === i` 这条不变量 ——
+ * `resolveCasts` / `resolveTargets` / `validateAction` 都直接拿号位当下标索引，
+ * 战场图也是按数组顺序铺 grid 列的。两个一起换之后：
+ *   - 图上小人直接走到新的一列，四格仍然一格一人，不会叠人
+ *   - 战场分割、对位锁定、AoE 相邻窗口全部自动跟着走
+ *   - 冷却 / 增益 / 血量都挂在单位对象上，跟着对象走，不用搬
+ */
+function swapPos(state, side, a, b) {
+  const i = a.idx, j = b.idx
+  side.units[i] = b
+  side.units[j] = a
+  a.idx = j
+  b.idx = i
+  // 本回合「谁已经放过 EX」是按号位记的，不跟着换的话 ③-a / ③-b 会把两个人搞反：
+  // 换完位的泉奈会被当成没放过 EX 而多打一次普攻
+  state.turnEx = (state.turnEx || []).map((p) => (p === i ? j : p === j ? i : p))
+}
+
 /** 同一层里：对位 → |位置差| 最小 → 编号小 */
 function pickInLayer(cands, fromIdx) {
   if (!cands.length) return null
@@ -457,31 +531,59 @@ function sameLineHits(cands, primary, count) {
 }
 
 /**
- * 上嘲讽。**同一方同时只留一个嘲讽目标，后放的覆盖先放的** —— 两个人一起吸引火力
- * 只会让「刀落在谁头上」没法预测，也没法在图上表达。跟 Channel 分槽同一条思路：
- * 同槽只留一层，不比大小、不比剩余回合。
+ * 上嘲讽 / 集火。原作是两套机制，必须分槽：
  *
- * 单位和召唤物**共用这一个位置**：日富美的人偶入场 Provoke 和椿的 EX 会互相顶掉，
- * 谁后放谁生效。跨方的互不干扰 —— 拉的是各自敌人的刀。
+ *   - `provoke`（椿、人偶）挂在 `u.taunt`：减益落在**被拉走的敌人**身上（紫底感叹号）
+ *   - `focus`（集火 / `ConcentratedTarget`，切里诺）挂在 `u.focus`：减益落在**被点名的那个人**身上（蓝底靶心）
  *
- * 引擎里只存一个「这个单位吃掉对面的攻击」的标记，但**原作是两种不同的机制**，
- * 靠 `kind` 分开（决定状态格画在谁头上、什么颜色，见 battleHtml 的 statusMarks）：
- *
- *   - `provoke`（椿、人偶）：减益落在**被拉走的敌人**身上（紫底感叹号），施法者自己不带标
- *   - `focus`（集火 / `ConcentratedTarget`，池外）：减益落在**被点名的那个人**身上（蓝底靶心）
+ * **同 kind 只留一层**（后放的覆盖先放的），两种之间互不覆盖。
+ * 开火时嘲讽优先于集火，见 `tauntTargetOf`。单位和召唤物共用各自那个槽：
+ * 人偶入场 Provoke 和椿的 EX 会互相顶掉，但切里诺的集火不会把椿的嘲讽清掉。
  */
-function setTaunt(side, target, turns, turnId, kind = "provoke") {
-  for (const u of side.units) { u.taunt = 0; u.tauntSt = -1; u.tauntKind = null }
-  for (const s of side.summons || []) { s.taunt = 0; s.tauntKind = null }
-  target.taunt = turns
-  target.tauntSt = turnId
-  target.tauntKind = kind
+function setFocus(side, target, turns, turnId) {
+  for (const u of side.units) {
+    u.focus = 0
+    u.focusSt = -1
+    // 旧数据曾把集火写在 taunt + kind=focus 上，换槽时清掉以免双计
+    if (u.tauntKind === "focus") { u.taunt = 0; u.tauntSt = -1; u.tauntKind = null }
+  }
+  for (const s of side.summons || []) {
+    s.focus = 0
+    if (s.tauntKind === "focus") { s.taunt = 0; s.tauntKind = null }
+  }
+  target.focus = turns
+  target.focusSt = turnId
 }
 
-/** 这一方当前的嘲讽目标（至多一个，见 setTaunt）；召唤物也算 */
-const tauntTargetOf = (side) =>
-  (side.summons || []).find((s) => s.alive && s.taunt > 0) ||
-  side.units.find((u) => u.alive && u.taunt > 0) || null
+function setTaunt(side, target, turns, turnId, kind = "provoke") {
+  if (kind === "focus") { setFocus(side, target, turns, turnId); return }
+  for (const u of side.units) {
+    if (u.tauntKind === "focus") continue
+    u.taunt = 0; u.tauntSt = -1; u.tauntKind = null
+  }
+  for (const s of side.summons || []) {
+    if (s.tauntKind === "focus") continue
+    s.taunt = 0; s.tauntKind = null
+  }
+  target.taunt = turns
+  target.tauntSt = turnId
+  target.tauntKind = "provoke"
+}
+
+const isProvoke = (u) => u.alive && u.taunt > 0 && (u.tauntKind || "provoke") === "provoke"
+const isFocus = (u) => u.alive && (u.focus > 0 || (u.taunt > 0 && u.tauntKind === "focus"))
+
+/** 这一方当前把对面刀吸过来的目标。嘲讽优先于集火；召唤物也算 */
+const tauntTargetOf = (side) => {
+  const sm = side.summons || []
+  return sm.find(isProvoke) || side.units.find(isProvoke)
+    || side.units.find(isFocus) || sm.find(isFocus) || null
+}
+
+/** 这个单位现在是不是被集火（蓝底靶心画在他自己头上） */
+export function focusedOf(u) {
+  return Boolean(isFocus(u))
+}
 
 /**
  * 这个单位是不是正被对面 Provoke 住（刀只能往那边扔）。
@@ -491,8 +593,9 @@ const tauntTargetOf = (side) =>
  */
 export function provokedBy(state, u) {
   if (!u?.alive) return null
-  const t = tauntTargetOf(state.sides[1 - u.side])
-  return t && (t.tauntKind || "provoke") === "provoke" ? t : null
+  const foe = state.sides[1 - u.side]
+  // 只认 Provoke。tauntTargetOf 还会返回集火目标，集火不封 EX
+  return (foe.summons || []).find(isProvoke) || foe.units.find(isProvoke) || null
 }
 
 /**
@@ -515,41 +618,45 @@ export function exSealedOf(state, sideIndex) {
 }
 
 /**
- * 瞬的强化形态：「索敌机制改为优先攻击攻击力最高的敌方单位」。
+ * 「优先攻击攻击力最高的敌方单位」。两个来源，同一套规则：
+ *   - 瞬的强化形态改写索敌（`u.charge.targeting`），管她接下来 6 轮的普攻
+ *   - 柚子那种技能自带的「以 1 名攻击力最高的敌方单位为中心」（`skill.pick`）
  *
  * **这套索敌只有嘲讽拉得走**，别的一概不管 —— 战场分割、前/中/后排、人偶挡刀全部绕开，
- * 她站 4 号位照样一枪打到对面 1 号位的主 C 头上。那正是这个 EX 花 3 费买的东西：
+ * 瞬站 4 号位照样一枪打到对面 1 号位的主 C 头上。那正是这个 EX 花 3 费买的东西：
  * 把「站位决定打谁」这条规则在 6 轮里关掉。
  *
  * 嘲讽在 laneTarget 更前面就返回了，所以这里不用再判一次。
  * 敌方活人打光时返回 null，落回通用逻辑去拆墙（人偶）。
  */
-function maxAtkTarget(u, alive) {
-  if (u.charge?.targeting !== "max_atk" || !alive.length) return null
+function maxAtkTarget(u, alive, forced = false) {
+  if ((!forced && u.charge?.targeting !== "max_atk") || !alive.length) return null
   // 攻击力相同就取号位小的：reduce 只在严格大于时换人
   return alive.reduce((m, f) => (atkOf(f) > atkOf(m) ? f : m))
 }
 
 /**
  * 普攻 / 普通技能的对线锁定，按优先级：
- *   1. 嘲讽 —— 最高，直接无视战场分割
- *   2. 强化形态改过索敌的（瞬）—— 打攻击力最高的，见 maxAtkTarget
- *   3. **同战场的佩洛洛**：挡在那半边最前面，嘲讽过期了也一样。本战场打空要越界时也先拆墙
- *   4. 同战场的前排 → 中排 → 后排。不是职业，是角色自己的 Front/Middle/Back
- *   5. 本战场空了才越界，跨过去还是前 → 中 → 后
- *   6. 同一层里：对位 → |位置差| 最小 → 编号小
+ *   1. 嘲讽（Provoke）—— 最高，直接无视战场分割
+ *   2. 集火（ConcentratedTarget，切里诺）—— 己方攻击锁在被点名的那个人
+ *   3. 索敌改成「打攻击力最高的」（瞬的强化形态 / 柚子的技能自带），见 maxAtkTarget
+ *   4. **同战场的佩洛洛**：挡在那半边最前面，嘲讽过期了也一样。本战场打空要越界时也先拆墙
+ *   5. 同战场的前排 → 中排 → 后排。不是职业，是角色自己的 Front/Middle/Back
+ *   6. 本战场空了才越界，跨过去还是前 → 中 → 后
+ *   7. 同一层里：对位 → |位置差| 最小 → 编号小
+ * @param {boolean} maxAtk 技能自带的「攻击力最高」索敌（skill.pick），与瞬的形态索敌同档
+ * @param {{ignoreTaunt?: boolean}} [opts] 切里诺普技的集火是**选人条件**，嘲讽改不了落点
  */
-function laneTarget(u, foes) {
-  // 嘲讽最高，无视一切 —— 战场分割、前排、挡刀、瞬的强化索敌统统让路。
-  // 同一方至多一个嘲讽目标（后放的覆盖先放的，见 setTaunt），单位和召唤物共用这个位置：
-  // 人偶入场那一轮的 Provoke 和椿的 EX 会互相顶掉。
+function laneTarget(u, foes, maxAtk = false, opts = {}) {
+  // 嘲讽 > 集火，无视一切 —— 战场分割、前排、挡刀、瞬的强化索敌统统让路。
+  // 嘲讽同槽只留一个（人偶入场 Provoke 和椿的 EX 会互相顶掉）；集火另开一槽，见 setTaunt。
   const taunting = tauntTargetOf(foes)
-  if (taunting) return taunting
+  if (taunting && !opts.ignoreTaunt) return taunting
 
   const sm = summonsOf(foes)
   const alive = aliveOf(foes)
-  const maxAtk = maxAtkTarget(u, alive)
-  if (maxAtk) return maxAtk
+  const topAtk = maxAtkTarget(u, alive, maxAtk)
+  if (topAtk) return topAtk
   const zoneAlive = alive.filter((f) => zoneOf(f.idx) === zoneOf(u.idx))
   // 召唤物**按战场拦**，不是按号位：它挡在那半边最前面，比前排还靠前一格。
   // 所以「日富美ex打<某人>」选的其实是**把墙扔进哪个战场**，那一整边的刀都归它接。
@@ -630,16 +737,26 @@ function upsertField(side, next) {
 }
 
 /**
+ * 己方就近：**同战场优先 → |号位差| 最小 → 编号小**。跟 laneTarget 的分层口径对称，
+ * 但不含「自己」那一档 —— 由调用方决定要不要把自己放进 pool。
+ */
+function nearestAlly(u, pool) {
+  const same = pool.filter((a) => zoneOf(a.idx) === zoneOf(u.idx))
+  const list = same.length ? same : pool
+  return list.reduce((best, a) => {
+    const da = Math.abs(a.idx - u.idx), db = Math.abs(best.idx - u.idx)
+    return da < db || (da === db && a.idx < best.idx) ? a : best
+  })
+}
+
+/**
  * 己方目标未指定时的默认选择，规则与 laneTarget 对称：
  * 对位（对自己而言就是自己）→ 同战场最近 → 全场最近。
  */
 function allyLaneTarget(u, allies) {
   if (u.alive) return u
   const alive = aliveOf(allies)
-  if (!alive.length) return null
-  const sameZone = alive.filter((a) => zoneOf(a.idx) === zoneOf(u.idx))
-  const pool = sameZone.length ? sameZone : alive
-  return pool.reduce((best, a) => (Math.abs(a.idx - u.idx) < Math.abs(best.idx - u.idx) ? a : best))
+  return alive.length ? nearestAlly(u, alive) : null
 }
 
 /**
@@ -652,11 +769,28 @@ function resolveTargets(state, u, skill, foes, allies, pick, actionKind) {
 
   if (tg === "self") return [u]
   if (tg === "ally_all") return aliveOf(allies)
-  if (tg === "ally_lowest") {
-    const al = aliveOf(allies)
-    return al.length ? [al.reduce((m, a) => (a.hp / a.maxhp < m.hp / m.maxhp ? a : m))] : []
+  /**
+   * 单体奶（绿 / 小春）：「对 1 名**除自身外**生命值（百分比最低 / 不高于 N%）的我方单位」。
+   * 两个限定都只写在描述里，漏掉的话小春会自己奶自己、绿会奶满血的人。
+   *
+   * **两种选人规则分开**：
+   *   `ally_lowest`（绿）原文写「生命值百分比**最低**」→ 按血量挑，并列时再按站位就近
+   *   `ally_hurt`（小春）原文只写「不高于 50%」，**没说最低** → 够格的人里按站位就近喂
+   *
+   * 没人够格就返回空，`execute` 会当作没放 —— 既不进冷却，也不占掉她这一轮的普攻。
+   */
+  if (tg === "ally_lowest" || tg === "ally_hurt") {
+    let al = aliveOf(allies)
+    if (skill.exceptSelf) al = al.filter((a) => a !== u)
+    if (skill.hpMax != null) al = al.filter((a) => a.hp / a.maxhp <= skill.hpMax)
+    if (!al.length) return []
+    if (tg === "ally_hurt") return [nearestAlly(u, al)]
+    const min = Math.min(...al.map((a) => a.hp / a.maxhp))
+    return [nearestAlly(u, al.filter((a) => a.hp / a.maxhp - min < 1e-9))]
   }
   if (tg === "enemy_all") return aliveOf(foes)
+  // 循环点名（绿）：落点由**她自己的号位**定死，玩家指不了 —— 逐发在 execute 里算
+  if (tg === "enemy_cycle") return aliveOf(foes)
 
   // 玩家指定主目标；EX 是唯一能打破对线格局的手段
   const pool = tg.startsWith("ally") ? allies : foes
@@ -680,7 +814,16 @@ function resolveTargets(state, u, skill, foes, allies, pick, actionKind) {
 
   // 不指定目标就一律走对线锁定：对位 → 同战场 → 最近。
   // EX 也一样 —— 「挑全场最肥的」那种启发式看着聪明，实际让玩家猜不到刀会落在谁头上。
-  if (!primary) primary = tg.startsWith("ally") ? allyLaneTarget(u, allies) : laneTarget(u, foes)
+  // `skill.pick === "max_atk"`（柚子）只在这里生效：玩家指了目标就以玩家为准。
+  if (!primary) {
+    // 切里诺普技的「攻击力最高」是选人条件，不是开火：嘲讽拉得走柚子那种带伤害的最高攻索敌，
+    // 但改不了集火标记落在谁头上。过期之后火力还得锁回那个最高攻的人。
+    const markFocus = skill.pick === "max_atk"
+      && (skill.effects || []).some((e) => e.type === "taunt" && e.kind === "focus")
+    primary = tg.startsWith("ally")
+      ? allyLaneTarget(u, allies)
+      : laneTarget(u, foes, skill.pick === "max_atk", { ignoreTaunt: markFocus })
+  }
   if (!primary) return []
   // 召唤物不在 pool.units 里，扩散算不出邻居；打到它就只打它
   if (primary.summon) return [primary]
@@ -749,6 +892,7 @@ function applyDamage(ctx, src, tgt, dmg, meta = {}) {
     tgt.hp = 0
     tgt.alive = false
     tgt.taunt = 0
+    tgt.focus = 0
     tgt.regens.length = 0
     tgt.dots.length = 0
     ctx.log(`  ✝ ${nameOf(tgt)} ${tgt.summon ? "被打碎" : "倒下"}`)
@@ -775,6 +919,9 @@ function strike(ctx, src, tgt, hits, actionKind) {
   // 鹤城 / 芹香 ③-b 的普攻、强化普攻都是 actionKind === "normal"，会吃到。
   let dealF = factorOf(src, "dmg_deal")
   if (actionKind === "normal") dealF *= factorOf(src, "aa")
+  // 属性增伤（爱用品，桃给绿的 +13.2% 贯通）。按**攻击者自己的弹种**匹配，
+  // 所以同一层给不同弹种的队友，效果不一样 —— 原作就是这么设计的
+  dealF *= factorOf(src, `enh_${tmplOf(src).bullet}`)
   dealF = Math.max(0.1, dealF)
   const takeF = Math.max(0.1, factorOf(tgt, "dmg_take"))
 
@@ -817,21 +964,68 @@ function heal(ctx, src, tgt, amount) {
 
 // ---------------- 效果执行 ----------------
 
-/** 非伤害效果的作用域：self / ally_all / enemy（跟随伤害目标） */
-function scopeTargets(scope, u, allies, dmgTargets) {
+/**
+ * 非伤害效果的作用域。默认（`enemy`）跟随伤害目标。
+ *
+ * - `ally_target` 单体奶选中的那一个人（绿 / 小春的普技）。跟默认分支同义，
+ *   但名字不同才读得出「这是我方那一个」而不是「打到的敌人」
+ * - `ally_named`  指名给某个队友，人不在场就整条不生效（绿 ⇄ 桃 的联动）
+ * - `ally_mirror` 同一个圈盖住敌我两边的**同号位**：伤害落在敌方那两路，
+ *   治疗就落在己方那两路（小春的神圣手榴弹）
+ */
+function scopeTargets(scope, u, allies, dmgTargets, eff) {
   if (scope === "self") return [u]
   if (scope === "ally_all") return aliveOf(allies)
+  if (scope === "ally_named") {
+    const t = allies.units.find((a) => a.id === eff?.ally && a.alive)
+    return t ? [t] : []
+  }
+  if (scope === "ally_mirror") {
+    return dmgTargets
+      .filter((t) => !t.summon)
+      .map((t) => allies.units[t.idx])
+      .filter((a) => a?.alive)
+  }
   return dmgTargets.filter((t) => t.alive)
 }
 
-function applyEffects(ctx, u, skill, dmgTargets, allies) {
+/**
+ * 条件追伤：状态到了哪一档就换哪一组倍率。`altHits` 按档位从高到低排好，取第一个满足的。
+ * 妮露的 `fury` 是「有没有」（0/1），爱丽丝的 `energy` 是 0/1/2 三档。
+ */
+function altHitsOf(u, skill) {
+  for (const a of skill.altHits || []) {
+    const cur = a.state === "fury" ? (u.fury > 0 ? 1 : 0) : (u.energy || 0)
+    if (cur >= a.min) return a.hits
+  }
+  return null
+}
+
+/**
+ * @param {object} [pick] 玩家指定的目标，位移要用它决定换到哪一格
+ * @param {"ex"|"skill"|"normal"} [actionKind] 决定自身进攻向增益是不是「从下个己方回合才跳」
+ */
+function applyEffects(ctx, u, skill, dmgTargets, allies, pick, actionKind) {
   const { state } = ctx
   const T = state.turnId
   const me = state.sides[u.side]
 
+  /**
+   * 第三类时长口径：**EX 给施放者自己上的进攻向增益，从下个己方回合才开始跳**。
+   *
+   * 「施放回合就算第 1 轮」那条只对**普通技能**成立 —— ③-a 上完 ③-b 她马上就要打。
+   * EX 不一样：放过 EX 的人 ③-a 一律跳过、③-b 默认也跳过，那一轮他**根本不出手**，
+   * 不是这层增益的攻击窗口。带「立即换弹」的（菲娜 / 鹤城 / 芹香）那一轮真的普攻了，照扣。
+   *
+   * 只认「自己给自己」：EX 给**队友**的增益，队友那一轮照常在 ③-b 出手，扣得对。
+   */
+  const startNext = actionKind === "ex" && !skill.thenAutoAttack
+
   for (const eff of skill.effects || []) {
     if (eff.inactive) continue // 技能 1 级时数值为 0，别占一层 buff
-    const targets = scopeTargets(eff.scope, u, allies, dmgTargets)
+    // 编队条件（绿 ⇄ 桃）：那位队友没同时上场，这条效果整条不生效
+    if (eff.ifAlly && !me.units.some((a) => a.id === eff.ifAlly)) continue
+    const targets = scopeTargets(eff.scope, u, allies, dmgTargets, eff)
     switch (eff.type) {
       case "buff": {
         // 暴击伤害系的固定值单位是万分比，印原始数字玩家读不懂
@@ -839,7 +1033,10 @@ function applyEffects(ctx, u, skill, dmgTargets, allies) {
         const shown = bp ? `${Math.round(eff.value / 100)}%`
           : /_flat$/.test(eff.stat) ? eff.value : `${Math.round(eff.value * 100)}%`
         for (const t of targets) {
-          upsertStatusLayer(t.buffs, makeStatus(eff, T, u, eff.value < 0 ? "debuff" : "buff"))
+          const st = makeStatus(eff, T, u, eff.value < 0 ? "debuff" : "buff")
+          // 进攻向的层才有「攻击窗口」可言；防御向本来就跟敌方回合跳，轮不到施放回合
+          if (startNext && t === u && !DEFENSIVE_STATS.has(eff.stat)) st.startNext = true
+          upsertStatusLayer(t.buffs, st)
           ctx.log(`  ${nameOf(t)} ${STAT_LABEL[eff.stat] || eff.stat} ${eff.value > 0 ? "+" : ""}${shown}（${eff.turns ?? 2}回合）`)
         }
         if (targets.length) emitEvent(ctx, {
@@ -927,7 +1124,10 @@ function applyEffects(ctx, u, skill, dmgTargets, allies) {
         u.charge = {
           hits: eff.hits, count: eff.count,
           ...(eff.shots != null ? { shots: eff.shots } : {}),
-          ...(eff.turns != null ? { turns: eff.turns } : {}),
+          // 按轮数存续的（瞬）跟自身进攻增益同一把尺子：施放那一轮她不普攻，
+          // 从下个己方回合才开始跳，30 秒换来的就是 6 发强化普攻而不是 5 发。
+          // 按发数的（鹤城）本来就是打一发扣一发，与回合无关。
+          ...(eff.turns != null ? { turns: eff.turns, st: startNext ? T : -1 } : {}),
           ...(eff.targeting ? { targeting: eff.targeting } : {}),
         }
         const total = eff.hits.reduce((a, b) => a + b, 0)
@@ -952,7 +1152,7 @@ function applyEffects(ctx, u, skill, dmgTargets, allies) {
           hp, maxhp: hp, shield: 0, shieldMax: 0, shieldTurns: 0,
           // dots 不能漏：场地技打到人偶时会往这里 push，缺了直接崩
           buffs: [], regens: [], dots: [], stun: 0,
-          taunt: 0, tauntKind: null, turns: eff.turns, turnsMax: eff.turns, st: T,
+          taunt: 0, tauntKind: null, focus: 0, turns: eff.turns, turnsMax: eff.turns, st: T,
           sourceKey: key, alive: true,
         }
         me.summons.push(doll)
@@ -985,21 +1185,47 @@ function applyEffects(ctx, u, skill, dmgTargets, allies) {
         break
 
       /**
+       * 位移（泉奈的「位移至指定位置」）：**与相邻号位的队友交换站位**。
+       *
+       * 回合制没有连续坐标，但**有站位** —— 战场分割（1·2 / 3·4）和对位锁定都由号位定，
+       * 所以换一格是真正的博弈：站在 2 / 3 号位时那一跳才跨得过战场分界线，
+       * 站在 1 / 4 号位只能在自己这半边挪，换的是对位不是战场。
+       *
+       * 换位而不是「挪过去」——四个格子仍然一格一人，战场图不会叠人（见 swapPos）。
+       * **不指定就不动**：位移是玩家花 Cost 买的选择权，替他猜一个反而更难预测。
+       * 位置永久生效，直到她再换一次（原作的位移也没有时长）。
+       */
+      case "reposition": {
+        const dest = pick?.scope === "ally" && pick.idx != null && !pick.summon ? me.units[pick.idx] : null
+        if (!dest || dest === u) { ctx.log(`  ${nameOf(u)} 没指定换到哪一格，留在原位`); break }
+        if (Math.abs(dest.idx - u.idx) > (eff.range ?? 1)) {
+          ctx.log(`  ${nameOf(dest)} 不在隔壁，${nameOf(u)} 留在原位`)
+          break
+        }
+        const crossed = zoneOf(u.idx) !== zoneOf(dest.idx)
+        swapPos(state, me, u, dest)
+        ctx.log(`  ${nameOf(u)} 与 ${nameOf(dest)} 交换站位${crossed ? "（跨过战场分界）" : ""}`)
+        break
+      }
+
+      /**
        * 嘲讽 / 集火。scope 决定谁来吃刀，kind 决定状态格画给谁看（见 setTaunt）：
        *   self  + provoke —— 椿：她把敌方全体拉过来打自己，紫色减益落在敌人头上
-       *   enemy + focus   —— 集火（池外）：被点名的敌人吃我方的火力，蓝色减益落在它自己头上
-       * 同一方只留最后放的那个。
+       *   enemy + focus   —— 切里诺：被点名的敌人吃我方的火力，蓝色减益落在它自己头上
+       * 同 kind 只留最后放的那个；两种互不覆盖，开火时嘲讽优先。
        * Provoke 另封对面的 EX（exLockedOf），但不进 stun，普通技能和普攻照跑。
+       * 集火不封 EX。
        */
       case "taunt":
         for (const t of targets) {
           if (!t.alive) continue
+          const focus = (eff.kind || "provoke") === "focus"
           setTaunt(state.sides[t.side], t, eff.turns ?? 1, T, eff.kind || "provoke")
-          ctx.log(t.tauntKind === "provoke"
-            ? `  ${nameOf(t)} 嘲讽 ${t.taunt} 回合（敌方全体被拉过来）`
-            : `  ${nameOf(t)} 被集火 ${t.taunt} 回合`)
+          ctx.log(focus
+            ? `  ${nameOf(t)} 被集火 ${t.focus} 回合`
+            : `  ${nameOf(t)} 嘲讽 ${t.taunt} 回合（敌方全体被拉过来）`)
           // Provoke 是加在敌人身上的减益，事件的目标写被拉走的那一方
-          const marked = t.tauntKind === "provoke" ? state.sides[1 - t.side].units.filter((x) => x.alive) : [t]
+          const marked = focus ? [t] : state.sides[1 - t.side].units.filter((x) => x.alive)
           for (const m of marked) {
             emitEvent(ctx, { type: "debuff", source: unitRef(t), target: unitRef(m), effects: ["taunt"] })
           }
@@ -1027,6 +1253,33 @@ function applyEffects(ctx, u, skill, dmgTargets, allies) {
           t.exDiscount = { mode: eff.mode, value: eff.value, uses: eff.uses }
           ctx.log(`  ${nameOf(t)} EX 费用 ${tmplOf(t).ex.cost} → ${exCostOf(t)}（接下来 ${eff.uses} 次 EX）`)
           emitEvent(ctx, { type: "buff", source: unitRef(u), target: unitRef(t), effects: ["ex_discount"] })
+        }
+        break
+
+      /**
+       * 自身状态：本身不改任何面板，只是「有没有 / 到第几档」，供 `altHits` 换倍率。
+       *
+       *   `fury`（妮露）  —— 有时长，跟自己回合跳，在期间 EX 倍率 ×2
+       *   `energy`（爱丽丝）—— **没有时长**，一档一档攒，放完 EX 清零
+       *
+       * 两个都只对施放者自己有意义，所以不做叠层，直接写在单位上。
+       */
+      case "state":
+        for (const t of targets) {
+          if (!t.alive || t.summon) continue
+          if (eff.key === "energy") {
+            const before = t.energy || 0
+            t.energy = eff.step != null
+              ? Math.min(eff.max ?? 2, before + eff.step)
+              : (eff.value ?? 0)
+            if (t.energy === before) continue
+            ctx.log(`  ${nameOf(t)} 能量充能 ${ENERGY_TEXT[before]} → ${ENERGY_TEXT[t.energy]}`)
+          } else {
+            t.fury = eff.turns ?? 4
+            t.furySt = T
+            ctx.log(`  ${nameOf(t)} 进入 Fury（${t.fury}回合，EX 威力翻倍）`)
+          }
+          emitEvent(ctx, { type: "buff", source: unitRef(u), target: unitRef(t), effects: [eff.key] })
         }
         break
 
@@ -1077,7 +1330,9 @@ function execute(ctx, u, skill, label, actionKind, pick) {
   const me = state.sides[u.side]
   const foes = state.sides[1 - u.side]
   const targets = resolveTargets(state, u, skill, foes, me, pick, actionKind)
-  if (!targets.length && skill.target !== "self") return
+  // 一个合法目标都没有 = 这一发根本没出去。返回 false 让调用方决定要不要算「出手过」——
+  // 小春的「我来治疗！」要求队友血量 ≤50%，全队满血时她不该白白扣掉冷却和普攻
+  if (!targets.length && skill.target !== "self") return false
 
   ctx.log(`[${u.side === 0 ? "蓝" : "红"}] ${nameOf(u)} ${label}`)
   // 集火时第一个 EX 已经把指定目标打死，这一发按施法者对线重锁
@@ -1101,14 +1356,35 @@ function execute(ctx, u, skill, label, actionKind, pick) {
   emitEvent(ctx, actionEv)
 
   const hit = []
-  if (skill.hits?.length) {
-    if (skill.target === "enemy_chain") {
+  // 条件追伤：状态到了哪一档就换哪一组倍率（妮露的 Fury、爱丽丝的能量充能）
+  const hits = altHitsOf(u, skill) || skill.hits
+  if (hits?.length) {
+    if (skill.target === "enemy_cycle") {
+      /**
+       * 绿：「对最多 5 名敌方单位**按顺序**造成…共计 5 次」——
+       * 从**跟自己对位的号位**起，按号位在存活敌人里循环，一发一个。
+       * 她站 1 号位就是 1→2→3→4→1，站 2 号位就是 2→3→4→1→2；
+       * 只剩 1 个人时 5 发全落他身上。不随机、也不重新对线，玩家指不了目标。
+       *
+       * 每发结算完重新取存活名单，所以打死人会自动跳过他。
+       */
+      for (let i = 0; i < hits.length; i++) {
+        const al = aliveOf(foes)
+        if (!al.length) break
+        // 从自己号位开始排一圈：idx 大于等于自己的排前面，小的接在后面
+        const ring = [...al].sort((a, b) =>
+          ((a.idx - u.idx + 4) % 4) - ((b.idx - u.idx + 4) % 4))
+        const t = ring[i % ring.length]
+        strike(ctx, u, t, [hits[i]], actionKind)
+        if (!hit.includes(t)) hit.push(t)
+      }
+    } else if (skill.target === "enemy_chain") {
       // 连发：**只有第一发听玩家的**，后面每一发都照普攻的规则重锁一次
       //（人偶 → 前排 → 中排 → 后排），不再有「不能和上一发相同」那条 ——
       // 有前排就后两发全打前排，有人偶就全打人偶，这才是「视作普攻索敌」。
       // 每发都在结算之后重算，所以打死人会自动换目标（本战场清空就越界）。
       const first = targets[0]
-      for (const [i, pct] of skill.hits.entries()) {
+      for (const [i, pct] of hits.entries()) {
         const t = i === 0 && first?.alive ? first : laneTarget(u, foes)
         if (!t) break
         strike(ctx, u, t, [pct], actionKind)
@@ -1116,7 +1392,7 @@ function execute(ctx, u, skill, label, actionKind, pick) {
       }
     } else if (skill.target === "enemy_random") {
       // 弹射：每一段单独抽目标
-      for (const pct of skill.hits) {
+      for (const pct of hits) {
         const al = aliveOf(foes)
         if (!al.length) break
         const t = randPick(state, al)
@@ -1129,7 +1405,7 @@ function execute(ctx, u, skill, label, actionKind, pick) {
       //   splashHits —— 「单体 + 以其为中心的范围」，主目标吃直击＋爆风，扩散只吃爆风（爱露）
       //   falloff    —— 贯穿逐个递减，第 i 个目标 ×(1 − min(rate×i, max))（晴奈）
       for (const [i, t] of targets.entries()) {
-        const base = i > 0 && skill.splashHits ? skill.splashHits : skill.hits
+        const base = i > 0 && skill.splashHits ? skill.splashHits : hits
         const cut = skill.falloff ? Math.min(skill.falloff.rate * i, skill.falloff.max) : 0
         strike(ctx, u, t, cut ? base.map((h) => h * (1 - cut)) : base, actionKind)
         hit.push(t)
@@ -1138,7 +1414,8 @@ function execute(ctx, u, skill, label, actionKind, pick) {
   }
   if (hit.length) actionEv.targets = hit.map(unitRef)
 
-  applyEffects(ctx, u, skill, hit.length ? hit : targets, me)
+  applyEffects(ctx, u, skill, hit.length ? hit : targets, me, pick, actionKind)
+  return true
 }
 
 /**
@@ -1207,14 +1484,33 @@ function tryKillProc(ctx, u) {
   if (sk.thenAutoAttack && u.alive && !checkEnd(ctx.state)) autoAttack(ctx, u)
 }
 
-/** 泉 / 明里：普攻出手后按概率触发普通技能，只有触发成功才进冷却。 */
+/**
+ * 泉 / 明里：普攻出手后按概率触发普通技能，只有触发成功才进冷却。
+ *
+ * 泉奈是另一种写法：「自身**每进行 6 次普通攻击**」——数的是枪数不是回合数，走 `trigger.every`。
+ * 折成回合冷却会白送她一次：放 EX 的那个回合她不普攻，而回合冷却照跳。
+ *
+ * **计数按攻速走，不是一回合加 1。** 这是泉奈整套 kit 的联动：EX 加攻速 → 更快攒够 6 枪 →
+ * 手里剑来得更勤。`aa` 的语义本来就是「这一回合她开了几枪的份量」——伤害那一头已经这么折了
+ * （`strike` 里 `dealF *= factorOf(src,"aa")`），数枪的这一头认同一个数才自洽；
+ * 两头不是重复计算，是同一个「射速」的两个后果（每秒伤害↑、每秒枪数↑）。
+ *
+ * 攒过头的零头留到下个循环，别清零。触发失败也不扣
+ *（目前 `every` 与 `chance<1` 没有同时出现的角色）。
+ */
 function tryAutoProc(ctx, u) {
   const sk = tmplOf(u).skill
   const tr = sk?.trigger
   if (tr?.type !== "on_auto" || !u.alive) return
   if (tr.maxUses && u.skillUses >= tr.maxUses) return
   if (u.skillCd > 0) return
-  if (nextRandom(ctx.state) >= (tr.chance ?? 1)) return
+  const shots = shotsOf(u)
+  if (tr.every) {
+    u.autoCount = (u.autoCount || 0) + shots
+    if (u.autoCount < tr.every) return
+  }
+  if (nextRandom(ctx.state) >= autoProcChance(u, tr.chance)) return
+  if (tr.every) u.autoCount -= tr.every
   consumeSkill(u)
   execute(ctx, u, sk, `普通技能「${sk.name}」`, "skill")
 }
@@ -1239,6 +1535,8 @@ function endTurn(ctx, side) {
         // 四种组合（自身/给敌人 × 进攻/防御）靠这一条就都对齐了。判据见 DEFENSIVE_STATS
         const tickSide = DEFENSIVE_STATS.has(b.stat) ? 1 - u.side : u.side
         if (tickSide !== ticking || b.turns >= 9999) continue
+        // 第三类：EX 给自己上的进攻向增益，施放那一轮他不出手，从下个己方回合才开始跳
+        if (b.startNext && b.st === T) continue
         b.turns -= 1
         if (b.turns <= 0) u.buffs.splice(u.buffs.indexOf(b), 1)
       }
@@ -1253,6 +1551,8 @@ function endTurn(ctx, side) {
       // 嘲讽也是防御向：它换来的是敌人的一次出手。跟人偶的入场 Provoke 同一把尺子 ——
       // 两者共用一个嘲讽位（见 setTaunt），计时口径当然也得一样
       if (u.taunt > 0 && 1 - u.side === ticking && u.tauntSt !== T) u.taunt -= 1
+      // 集火跟嘲讽同一把防御向尺子：换来的是敌人（其实是己方）的一次出手
+      if (u.focus > 0 && 1 - u.side === ticking && u.focusSt !== T) u.focus -= 1
     }
   }
 
@@ -1297,7 +1597,7 @@ function endTurn(ctx, side) {
           crit: false, critHits: 0, affinity: "none", attackType: d.attackType || "持续",
         })
         if (u.hp <= 0) {
-          u.hp = 0; u.alive = false; u.taunt = 0
+          u.hp = 0; u.alive = false; u.taunt = 0; u.focus = 0
           u.regens.length = 0; u.dots.length = 0
           ctx.log(`  ✝ ${nameOf(u)} ${u.summon ? "被烧毁" : "倒下"}`)
           break
@@ -1338,12 +1638,15 @@ function endTurn(ctx, side) {
 
     // 眩晕吃掉的是**自己**的一次出手，所以跟自己方的回合跳（嘲讽已经挪到上面的敌方回合了）
     if (u.stun > 0 && u.stunSt !== T) u.stun -= 1
+    // Fury 是进攻向的自身状态，跟自己回合跳。它来自普通技能（③-a 上完 ③-b 就打），
+    // 所以施放回合照算，不走 startNext；`furySt` 只是给日后可能出现的 EX 版兜底
+    if (u.fury > 0 && u.furySt !== T) u.fury -= 1
     if (u.skillCd > 0 && u.skillCd < 99) u.skillCd -= 1
 
-    // 按轮数存续的强化形态（瞬的 30 秒 = 6 轮）在自己的回合跳，**施放回合就算第 1 轮** ——
-    // 跟随行的进攻向 Buff（暴击 +26%）同一把尺子 —— 都在她出手时生效，两者同轮到期。
-    // 施放那一轮她忙着放 EX 没有普攻，所以 6 轮里实际打出 5 发强化普攻。
-    if (u.charge?.turns > 0 && --u.charge.turns <= 0) u.charge = null
+    // 按轮数存续的强化形态（瞬的 30 秒 = 6 轮）在自己的回合跳，跟随行的进攻向 Buff
+    // （暴击 +26%）同一把尺子 —— 都是「从下个己方回合开始」的第三类，两者同轮到期。
+    // 施放那一轮她忙着放 EX 没有普攻，所以那一轮不扣，6 轮换来 6 发强化普攻。
+    if (u.charge?.turns > 0 && u.charge.st !== T && --u.charge.turns <= 0) u.charge = null
   }
 }
 
@@ -1455,6 +1758,18 @@ export function validateAction(state, action) {
   if (lock) return `${nameOf(u)} 被${lock}，放不出 EX`
   const cost = exCostOf(u)
   if (budget < cost) return `Cost 不够：${nameOf(u)} 要 ${cost} 点，你还剩 ${budget} 点`
+  // 位移（泉奈）：只能跟隔壁那一格的队友换。指错了在这儿就说清楚，
+  // 别等 Cost 扣完、图也发出去了，才发现她压根没动
+  const rep = tmplOf(u).ex?.effects?.find((e) => e.type === "reposition")
+  if (rep && cast.target?.idx != null && !cast.target.summon) {
+    if (cast.target.scope !== "ally") return `${nameOf(u)} 的 EX 是换站位，要写己方角色名，例：${nameOf(u)}ex换椿`
+    const dest = side.units[cast.target.idx]
+    if (!dest) return "没有那个号位"
+    if (dest === u) return `${nameOf(u)} 不能跟自己换站位`
+    if (Math.abs(dest.idx - u.idx) > (rep.range ?? 1)) {
+      return `${nameOf(dest)} 不在 ${nameOf(u)} 隔壁，位移只能跟相邻的一格换`
+    }
+  }
   return null
 }
 
@@ -1592,9 +1907,11 @@ export function playerTurn(prev, action) {
     }
     if (!skillReady(u)) continue
     const sk = tmplOf(u).skill
+    // 先打出去再记账：没有合法目标（小春全队满血）就当这一轮没放 ——
+    // 不进冷却、也不占掉 ③-b 的普攻
+    if (!execute(ctx, u, sk, `普通技能「${sk.name}」`, "skill")) continue
     consumeSkill(u)
     acted.add(u.idx)
-    execute(ctx, u, sk, `普通技能「${sk.name}」`, "skill")
     if (checkEnd(state)) {
       state.turnOpen = false
       state.turnEx = []

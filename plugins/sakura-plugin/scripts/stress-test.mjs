@@ -74,6 +74,12 @@ for (let seed = 1; seed <= GAMES; seed++) {
 
     for (const s of r.state.sides) {
       if (s.cost < 0 || s.cost > CFG.COST_MAX) fail(`seed ${seed} Cost 越界 ${s.cost}`)
+      // 号位不变量：`units[i].idx === i`。resolveCasts / resolveTargets / validateAction
+      // 全都拿号位当下标索引，泉奈的位移换位要是只换了一半，这里就该炸
+      for (const [i, u] of s.units.entries()) {
+        if (u.idx !== i) fail(`seed ${seed} 号位错位：units[${i}].idx = ${u.idx}`)
+        if (u.side !== s.side) fail(`seed ${seed} 阵营错位：units[${i}].side = ${u.side}`)
+      }
       for (const u of s.units) {
         if (u.hp < 0 || u.hp > u.maxhp) fail(`seed ${seed} HP 越界 ${u.hp}/${u.maxhp}`)
         if (u.alive && u.hp <= 0) fail(`seed ${seed} 血空但存活`)
@@ -108,6 +114,8 @@ console.log(`\n=== ${games} 局压测 ===`)
 console.log(`错误 / 不变量违例：${errors}`)
 console.log(`平均 ${(turnsTotal / games).toFixed(1)} 回合 / ${(endRound.reduce((a, b) => a + b, 0) / games).toFixed(1)} 轮`)
 console.log(`结束轮数：最短 ${endRound[0]}　中位 ${endRound[Math.floor(games / 2)]}　最长 ${endRound[games - 1]}`)
+// 白热化不是「异常路径」，但它该是少数 —— 摸到的比例明显上去了，说明伤害口径出问题了
+console.log(`摸到白热化（第 ${CFG.FEVER_ROUND} 轮起）：${endRound.filter((r) => r >= CFG.FEVER_ROUND).length} 局`)
 console.log(`打满 ${CFG.MAX_ROUND} 轮：${endRound.filter((r) => r >= CFG.MAX_ROUND).length} 局`)
 console.log(`先手胜 ${winner[0]}　后手胜 ${winner[1]}　平局 ${winner["-1"]}`)
 process.exit(errors ? 1 : 0)

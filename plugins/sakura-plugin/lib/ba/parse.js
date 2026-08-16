@@ -38,7 +38,8 @@ const PASS_RE = /^(过|pass|p)$/i
 const EX_MARK = /ex|EX|Ex|技|大/
 /** 中间那个字：打人还是帮人。写法可以随意，认的是意思 */
 const FOE_VERB = "打攻揍轰砸捶秒锤"
-const ALLY_VERB = "给帮为治奶助"
+// 换 / 跳是给泉奈的位移用的（跟队友交换站位），归到己方那一档 —— 没人会去跟敌人换位
+const ALLY_VERB = "给帮为治奶助换跳"
 const CAST_RE = new RegExp(
   `^(.+?)(?:ex|EX|Ex|技|大)(?:\\s*([${FOE_VERB}${ALLY_VERB}])?\\s*(.+))?$`
 )

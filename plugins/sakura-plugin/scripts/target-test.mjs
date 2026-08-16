@@ -6,7 +6,7 @@
  *
  *   node scripts/target-test.mjs
  */
-import { createBattle, playerTurn, validateAction, exCastableOf, exWaitOf, exCostOf, tmplOf, provokedBy, exLockedOf, exSealedOf } from "../lib/ba/engine.js"
+import { createBattle, playerTurn, validateAction, exCastableOf, exWaitOf, exCostOf, tmplOf, provokedBy, focusedOf, exLockedOf, exSealedOf, autoProcChance } from "../lib/ba/engine.js"
 import { ROSTER } from "../lib/ba/roster.js"
 import { describeEffect } from "../lib/ba/format.js"
 
@@ -575,18 +575,19 @@ console.log("\n=== 18. 瞬的强化存续 6 轮 / 开局回费在建局时就落
   for (let i = 0; i < 6; i++) cur = playerTurn(cur, { type: "pass" }).state
   check("跑满 3 轮后仍然只用过 1 次", cur.sides[0].units[0].skillUses, 1)
 
-  // 6 轮存续，施放那轮她忙着放 EX 没普攻 → 实际打出 5 发强化普攻
+  // 6 轮存续。施放那轮她忙着放 EX 没普攻，所以那一轮**不扣**（startNext，第三类时长口径）——
+  // 30 秒换来的是 6 发强化普攻，不是 5 发
   let r = run(setup(["瞬", "野宫", "野宫", "野宫"], SHUN_FOE), { type: "ex", casts: [{ pos: 0 }] })
   check("施放回合她不普攻",
     r.events.some((e) => e.type === "action" && e.action === "normal" && e.source.pos === 0), false)
-  check("施放回合末已跳掉 1 轮", r.state.sides[0].units[0].charge.turns, 5)
+  check("施放回合不扣：从下个己方回合才开始跳", r.state.sides[0].units[0].charge.turns, 6)
   let boosted = 0
   for (let i = 0; i < 8; i++) {
     r = run(r.state, { type: "pass" })
     r = run(r.state, { type: "pass" })
     boosted += r.log.filter((l) => /瞬 强化普攻/.test(l)).length
   }
-  check("累计打出 5 发强化普攻", boosted, 5)
+  check("累计打出 6 发强化普攻", boosted, 6)
   check("到期后 charge 清干净", r.state.sides[0].units[0].charge, null)
 }
 
@@ -814,8 +815,8 @@ function redThenBlue(order, red = ["椿", "日富美", "野宫", "野宫"], blue
       cur.sides[0].units.map((u) => Boolean(provokedBy(cur, u))), [true, true, true, true])
     check("椿自己不带被嘲讽的标", Boolean(provokedBy(cur, cur.sides[1].units[0])), false)
     check("椿身上的 kind 是 provoke，不是集火", cur.sides[1].units[0].tauntKind, "provoke")
-    check("集火那个标现在没人亮（池里还没有集火角色）",
-      [...cur.sides[0].units, ...cur.sides[1].units].some((u) => u.tauntKind === "focus"), false)
+    check("只放椿时没人挂集火标",
+      [...cur.sides[0].units, ...cur.sides[1].units].some((u) => focusedOf(u)), false)
   }
 
   // 瞬的强化索敌也让路 —— 第 17 组测的是同一条规则，这里换成椿的真嘲讽再钉一次
@@ -975,6 +976,490 @@ console.log("\n=== 28. 攻速只乘普攻，不乘 EX / 普通技能 ===")
   }
   const [t0, t1] = pairRun(["鹤城", "野宫", "野宫", "野宫"], { type: "ex", casts: [{ pos: 0 }] })
   check("鹤城 ③-b 的强化普攻吃攻速层", Math.abs(t1 - t0 * 2) <= 2, true)
+}
+
+console.log("\n=== 29. 柚子：技能自带的「攻击力最高」索敌 ===")
+{
+  // 红方把全场最高攻放在**另一个战场的后排**（晴奈 457 / 后），对线锁定永远选不到它；
+  // 同战场是两个茜（120 / 中）。选中晴奈就说明 skill.pick 生效了。
+  const skillTargets = (st) => {
+    st.sides[0].units[0].skillCd = 0
+    const r = run(st, { type: "pass" })
+    const ev = r.events.find((e) =>
+      e.type === "action" && e.action === "skill" && e.source?.side === 0 && e.source?.pos === 0)
+    return (ev?.targets || []).map((t) => t.pos + 1)
+  }
+  check("不带 pick 的技能仍走对线（同战场的 1 位）",
+    skillTargets(setup(["梓", "茜", "茜", "茜"], ["茜", "茜", "茜", "晴奈"])), [1])
+  check("柚子的普技越过战场分割，打全场攻击力最高的 4 位",
+    skillTargets(setup(["柚子", "茜", "茜", "茜"], ["茜", "茜", "茜", "晴奈"])), [4])
+  // 圆形锁同层：晴奈是后排、3 位的茜是中排，所以只打到一个人
+  check("嘲讽仍然拉得走这套索敌", skillTargets((() => {
+    const st = setup(["柚子", "茜", "茜", "茜"], ["茜", "茜", "茜", "晴奈"])
+    st.sides[1].units[1].taunt = 2
+    st.sides[1].units[1].tauntKind = "provoke"
+    return st
+  })()), [2])
+}
+
+console.log("\n=== 30. 泉奈：「每 6 次普通攻击」数的是枪，不是回合 ===")
+{
+  // 全场血量拉满，谁都死不掉，只看技能在第几个己方回合被打出来
+  const izunaRun = (exOnTurn) => {
+    const st = setup(["泉奈", "椿", "椿", "椿"], ["椿", "椿", "椿", "椿"])
+    for (const s of st.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+    st.sides[0].units[0].skillCd = 0
+    let cur = st
+    const fired = []
+    for (let t = 1; t <= 8; t++) {
+      cur.sides[0].cost = 10
+      const r = run(cur, t === exOnTurn ? { type: "ex", casts: [{ pos: 0 }] } : { type: "pass" })
+      if (r.events.some((e) =>
+        e.type === "action" && e.action === "skill" && e.source?.side === 0 && e.source?.pos === 0)) fired.push(t)
+      cur = run(r.state, { type: "pass" }).state
+    }
+    return fired
+  }
+  check("第 6 枪才打出「秘技！爆炸手里剑！」", izunaRun(0), [6])
+  // 攒够的那一枪打完**当场**就放，不等下回合 —— tryAutoProc 挂在 autoAttack 末尾
+  check("攒够当回合立刻释放，顺序是先普攻后技能", (() => {
+    const st = setup(["泉奈", "椿", "椿", "椿"], ["椿", "椿", "椿", "椿"])
+    for (const s of st.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+    st.sides[0].units[0].skillCd = 0
+    let cur = st
+    for (let t = 1; t <= 5; t++) cur = run(run(cur, { type: "pass" }).state, { type: "pass" }).state
+    const r = run(cur, { type: "pass" })   // 第 6 轮
+    return r.events
+      .filter((e) => e.type === "action" && e.source?.side === 0 && e.source?.pos === 0)
+      .map((e) => e.action)
+  })(), ["normal", "skill"])
+  // 这条正是不折成回合冷却的理由：放 EX 的回合她不普攻，计数就不该前进
+  check("第 3 轮放 EX（那轮不普攻）→ 推迟到第 7 轮", izunaRun(3), [7])
+
+  // ---- EX 与普通技能的联动：攻速要能催动计数 ----
+  // 直接注入攻速层（不放 EX），隔离出「攻速 → 攒枪更快」这一条因果
+  const withAa = (value, turns = 99) => {
+    const st = setup(["泉奈", "椿", "椿", "椿"], ["椿", "椿", "椿", "椿"])
+    for (const s of st.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+    st.sides[0].units[0].skillCd = 0
+    if (value) {
+      st.sides[0].units[0].buffs.push({
+        stat: "aa", value, turns, st: -1, effectKind: "buff", sourceKey: "test:aa", srcSide: 0, srcPos: 0,
+      })
+    }
+    let cur = st
+    const fired = []
+    for (let t = 1; t <= 8; t++) {
+      const r = run(cur, { type: "pass" })
+      if (r.events.some((e) =>
+        e.type === "action" && e.action === "skill" && e.source?.side === 0 && e.source?.pos === 0)) fired.push(t)
+      cur = run(r.state, { type: "pass" }).state
+    }
+    return fired
+  }
+  check("攻速 ×2：3 轮就攒够 6 枪", withAa(1), [3, 6])
+  check("她自己 EX 那档 +27.4%：提前一轮", withAa(0.2744), [5])
+  check("没有攻速层：老老实实 6 轮", withAa(0), [6])
+  // ---- 攻速的第三个出口：命中触发的概率（泉 / 明里）----
+  // 少接这一条，「给队友加攻速」的角色就会被系统性低估成一个普通的增伤
+  const aaUnit = (value) => ({ buffs: value ? [{ stat: "aa", value }] : [] })
+  const r2 = (x) => Number(x.toFixed(4))
+  check("无攻速层：就是原始概率", r2(autoProcChance(aaUnit(0), 0.2)), 0.2)
+  check("攻速 ×2 = 开两枪：1−0.8²", r2(autoProcChance(aaUnit(1), 0.2)), 0.36)
+  check("泉奈那档 +27.4%：1−0.8^1.2744", r2(autoProcChance(aaUnit(0.2744), 0.2)), 0.2475)
+  check("爱理的减攻速 −18.5%：概率跟着往下走", r2(autoProcChance(aaUnit(-0.1848), 0.2)), 0.1663)
+  check("chance 为 1 的（泉奈）不受影响", autoProcChance(aaUnit(1), 1), 1)
+
+  // 零头留到下个循环，不清零：+27.4% 第 5 轮攒到 6.37，多出来的 0.37 带走
+  check("攒过头的零头带进下个循环", (() => {
+    const st = setup(["泉奈", "椿", "椿", "椿"], ["椿", "椿", "椿", "椿"])
+    for (const s of st.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+    const iz = st.sides[0].units[0]
+    iz.skillCd = 0
+    iz.buffs.push({ stat: "aa", value: 0.2744, turns: 99, st: -1, effectKind: "buff", sourceKey: "t", srcSide: 0, srcPos: 0 })
+    let cur = st
+    for (let t = 1; t <= 5; t++) cur = run(run(cur, { type: "pass" }).state, { type: "pass" }).state
+    return Number(cur.sides[0].units[0].autoCount.toFixed(2))
+  })(), 0.37)
+}
+
+console.log("\n=== 31. 菲娜：无视开火间隔折成普攻增伤，与攻击力增益分槽共存 ===")
+{
+  const pina = ROSTER.find((t) => t.name === "菲娜")
+  const aa = pina.ex.effects.find((e) => e.stat === "aa")
+  const atk = pina.ex.effects.find((e) => e.stat === "atk")
+  // (a+d)/(a+d/N)−1，a=21+19+32=72、d=42、N=3 → 114/86−1
+  check("折算值 = 由她自己的射击帧数算出来的 +32.56%", aa?.value, 0.3256)
+  check("跟攻击力增益不同槽，会共存", [aa?.channel, atk?.channel], [17, 2])
+  check("走的是普攻增伤，不是造成伤害", /攻速|普攻/.test(describeEffect(pina.ex)), true)
+}
+
+console.log("\n=== 32. 泉奈的位移：与相邻一格的队友交换站位 ===")
+{
+  // 号位不变量：units[i].idx === i。换位必须同时换数组槽和 idx，否则下标索引全乱
+  const order = (st) => st.sides[0].units.map((u) => tmplOf(u).name)
+  const idxOk = (st) => st.sides[0].units.every((u, i) => u.idx === i)
+  const cast = (st, to) => run(st, { type: "ex", casts: [{ pos: st.sides[0].units.findIndex((u) => u.id === id("泉奈")), ...(to ? { target: { scope: "ally", idx: to } } : {}) }] })
+
+  const base = () => setup(["泉奈", "椿", "野宫", "茜"], ["茜", "茜", "茜", "茜"])
+
+  const a = cast(base(), 1)
+  check("跟 2 号位换：站位互调", order(a.state), ["椿", "泉奈", "野宫", "茜"])
+  check("units[i].idx === i 仍成立", idxOk(a.state), true)
+  check("同战场内换，两人都还在 1 战场", [a.state.sides[0].units[0].idx, a.state.sides[0].units[1].idx], [0, 1])
+
+  // 2 号位 → 3 号位是唯一跨得过战场分界的那一跳
+  const st2 = setup(["椿", "泉奈", "野宫", "茜"], ["茜", "茜", "茜", "茜"])
+  const b = cast(st2, 2)
+  check("站 2 号位跳 3 号位：跨过战场分界", order(b.state), ["椿", "野宫", "泉奈", "茜"])
+  check("日志写明跨了战场", b.log.some((l) => /跨过战场分界/.test(l)), true)
+
+  // 不相邻的要在校验层就拦下来，别扣了 Cost 才发现没动
+  const st3 = base()
+  check("换到不相邻的一格：直接报错，不扣 Cost",
+    validateAction(st3, { type: "ex", casts: [{ pos: 0, target: { scope: "ally", idx: 3 } }] }),
+    "茜 不在 泉奈 隔壁，位移只能跟相邻的一格换")
+  check("不指定就不动", order(cast(base(), null).state), ["泉奈", "椿", "野宫", "茜"])
+
+  // turnEx 是按号位记的：不跟着换的话，换完位的泉奈会被当成没放过 EX 而多打一枪
+  const c = playerTurn(base(), { type: "ex", casts: [{ pos: 0, target: { scope: "ally", idx: 1 } }] })
+  const izunaIdx = c.state.sides[0].units.findIndex((u) => u.id === id("泉奈"))
+  check("turnEx 跟着换位一起改号位", [izunaIdx, c.state.turnEx], [1, [1]])
+  const done = run(c.state, { type: "pass" })
+  check("换完位的泉奈本回合不再普攻",
+    done.events.some((e) => e.type === "action" && e.action === "normal"
+      && e.source.side === 0 && e.source.pos === izunaIdx), false)
+}
+
+/**
+ * 让这个人必中。椿 / 优香的闪避是 1400+，而全池命中中位数只有 ~700 ——
+ * 拿她们当靶子时半数刀会变成 miss 事件，落点断言就会随机少几发。
+ * 命中公式在命中 ≥ 闪避时必中，所以灌一层夸张的命中层最省事。
+ */
+const noMiss = (u) => {
+  u.buffs.push({ stat: "acc", value: 50, turns: 999, st: -1, effectKind: "buff", sourceKey: "t:acc", srcSide: u.side, srcPos: u.idx })
+  return u
+}
+
+console.log("\n=== 33. 绿：按号位循环点名 5 次，玩家指不了目标 ===")
+{
+  const cyclePairs = (bluePicks, redPicks, kills = [], target) => {
+    const st = setup(bluePicks, redPicks, kills)
+    for (const s of st.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+    const pos = st.sides[0].units.findIndex((u) => u.id === id("绿"))
+    noMiss(st.sides[0].units[pos])
+    const r = playerTurn(st, { type: "ex", casts: [{ pos, ...(target ? { target } : {}) }] })
+    return r.events
+      .filter((e) => e.type === "damage" && e.source?.side === 0 && !e.dot)
+      .map((e) => e.target.pos + 1)
+  }
+  const FOUR = ["椿", "椿", "椿", "椿"]
+  check("绿站 1 号位：1→2→3→4→1", cyclePairs(["绿", "椿", "椿", "椿"], FOUR), [1, 2, 3, 4, 1])
+  check("绿站 2 号位：2→3→4→1→2", cyclePairs(["椿", "绿", "椿", "椿"], FOUR), [2, 3, 4, 1, 2])
+  check("只剩 1 个敌人：5 发全落他身上",
+    cyclePairs(["绿", "椿", "椿", "椿"], FOUR, [[1, 1], [1, 2], [1, 3]]), [1, 1, 1, 1, 1])
+  check("剩 3 个：1→2→3→1→2",
+    cyclePairs(["绿", "椿", "椿", "椿"], FOUR, [[1, 3]]), [1, 2, 3, 1, 2])
+  check("指定目标无效，落点仍由自己的号位定",
+    cyclePairs(["椿", "绿", "椿", "椿"], FOUR, [], { scope: "foe", idx: 3 }), [2, 3, 4, 1, 2])
+}
+
+console.log("\n=== 34. 绿 ⇄ 桃：编队条件，同时上场才有 DoT ===")
+{
+  const dots = (picks) => {
+    const st = setup(picks, ["椿", "椿", "椿", "椿"])
+    for (const s of st.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+    const pos = st.sides[0].units.findIndex((u) => u.id === id("绿"))
+    const r = playerTurn(st, { type: "ex", casts: [{ pos }] })
+    return r.state.sides[1].units.reduce((n, u) => n + (u.dots || []).length, 0)
+  }
+  check("绿单独上场：不挂中毒", dots(["绿", "椿", "椿", "椿"]), 0)
+  check("绿 + 桃 同时上场：中毒挂上", dots(["绿", "桃", "椿", "椿"]) > 0, true)
+  // 桃的爱用品把增伤和加攻只给绿，绿不在场则整条不生效
+  const momoiBuffs = (picks) => {
+    const st = setup(picks, ["椿", "椿", "椿", "椿"])
+    const m = st.sides[0].units.find((u) => u.id === id("桃"))
+    m.skillCd = 0
+    const r = run(st, { type: "pass" })
+    const g = r.state.sides[0].units.find((u) => u.id === id("绿"))
+    return g ? g.buffs.map((b) => b.stat).sort() : []
+  }
+  check("桃的爱用品增益只给绿", momoiBuffs(["桃", "绿", "椿", "椿"]), ["atk", "enh_Pierce"])
+  /**
+   * 弹种增伤跟**克制无关**：它看的是攻击者自己的弹种，不是「这一刀是不是打在克制上」。
+   * 原作把「只有打克制才生效」单列成另一个 Stat（`EnhanceWeakDamageRate`），
+   * 而全数据 67 处 `EnhanceXXXRate` 的弹种**无一例外**等于施加者自己的弹种。
+   * 三种克制关系下增幅必须完全一样，差一个就说明被写成条件增伤了。
+   */
+  const enhRatio = (foe) => {
+    const st = setup(["绿", "椿", "椿", "椿"], [foe, foe, foe, foe])
+    for (const s of st.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+    const dmg = (on) => {
+      const s = structuredClone(st)
+      s.sides[0].units[0].buffs = on ? [{ stat: "enh_Pierce", value: 1 }] : []
+      noMiss(s.sides[0].units[0])
+      return playerTurn(s, { type: "pass" }).events
+        .filter((e) => e.type === "damage" && e.source?.side === 0 && e.source.pos === 0)
+        .reduce((x, e) => x + (e.totalAmount ?? e.amount), 0)
+    }
+    const a = dmg(false)
+    return a ? Number((dmg(true) / a).toFixed(2)) : 0
+  }
+  // 绿是贯通：打重装是克制 ×2、打特殊是普通 ×1、打轻装是被抵抗 ×0.5
+  check("被克制的目标（轻装）：增幅仍是 ×2", enhRatio("野宫"), 2)
+  check("普通的目标（特殊）：增幅仍是 ×2", enhRatio("椿"), 2)
+  check("克制的目标（重装）：增幅仍是 ×2", enhRatio("日奈"), 2)
+
+  check("绿的贯通增伤真的乘进伤害", (() => {
+    const st = setup(["绿", "椿", "椿", "椿"], ["椿", "椿", "椿", "椿"])
+    const g = st.sides[0].units[0]
+    const dmg = (u) => {
+      const s = structuredClone(st)
+      s.sides[0].units[0].buffs = u ? [{ stat: "enh_Pierce", value: 1 }] : []
+      noMiss(s.sides[0].units[0])
+      return playerTurn(s, { type: "pass" }).events
+        .filter((e) => e.type === "damage" && e.source?.side === 0 && e.source.pos === 0)
+        .reduce((x, e) => x + (e.totalAmount ?? e.amount), 0)
+    }
+    void g
+    const a = dmg(false), b = dmg(true)
+    return Math.abs(b - a * 2) <= 2
+  })(), true)
+}
+
+console.log("\n=== 35. 妮露的 Fury / 爱丽丝的能量充能：条件追伤 ===")
+{
+  const neru = ROSTER.find((t) => t.name === "妮露")
+  const aris = ROSTER.find((t) => t.name === "爱丽丝")
+  const sum = (h) => h.reduce((a, b) => a + b, 0)
+  check("妮露爱用品版是 ×2，不是原技能的 ×1.5",
+    Math.round(neru.ex.altHits[0].total / sum(neru.ex.hits) * 100) / 100, 2)
+  check("爱丽丝三档：311 / 467 / 622",
+    [sum(aris.ex.hits), aris.ex.altHits[1].total, aris.ex.altHits[0].total].map((x) => Math.round(x)),
+    [311, 467, 622])
+  check("爱用品版开局自带半充", ROSTER.find((t) => t.name === "爱丽丝").skill.stateStart, { key: "energy", value: 1 })
+
+  // 状态真的换了倍率：手动把状态点满，同一发 EX 的伤害应该翻倍
+  const exDmg = (name, patch) => {
+    const st = setup([name, "椿", "椿", "椿"], ["椿", "椿", "椿", "椿"])
+    for (const s of st.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+    Object.assign(st.sides[0].units[0], patch)
+    noMiss(st.sides[0].units[0])
+    st.sides[0].cost = 10
+    return playerTurn(st, { type: "ex", casts: [{ pos: 0 }] }).events
+      .filter((e) => e.type === "damage" && e.source?.side === 0)
+      .reduce((x, e) => x + (e.totalAmount ?? e.amount), 0)
+  }
+  const n0 = exDmg("妮露", {}), n1 = exDmg("妮露", { fury: 4 })
+  check("Fury 期间妮露的 EX 翻倍", Math.abs(n1 / n0 - 2) < 0.06, true)
+  const a0 = exDmg("爱丽丝", { energy: 0 }), a2 = exDmg("爱丽丝", { energy: 2 })
+  check("满充时爱丽丝的 EX 翻倍", Math.abs(a2 / a0 - 2) < 0.06, true)
+  check("放完 EX 能量清零", (() => {
+    const st = setup(["爱丽丝", "椿", "椿", "椿"], ["椿", "椿", "椿", "椿"])
+    st.sides[0].units[0].energy = 2
+    st.sides[0].cost = 10
+    return playerTurn(st, { type: "ex", casts: [{ pos: 0 }] }).state.sides[0].units[0].energy
+  })(), 0)
+}
+
+console.log("\n=== 36. 小春：一个圈，敌方那两路挨打、己方那两路回血 ===")
+{
+  const st = setup(["小春", "野宫", "野宫", "野宫"], ["椿", "椿", "椿", "椿"])
+  for (const u of st.sides[0].units) { u.hp = Math.round(u.maxhp / 2) }
+  noMiss(st.sides[0].units[0])
+  st.sides[0].cost = 10
+  const r = playerTurn(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 2 } }] })
+  const hurt = r.events.filter((e) => e.type === "damage" && e.target.side === 1).map((e) => e.target.pos + 1)
+  const healed = r.events.filter((e) => e.type === "heal" && e.target.side === 0).map((e) => e.target.pos + 1)
+  check("伤害落在指定的敌方 3·4 路", hurt, [3, 4])
+  check("治疗落在**己方**同两路，不是敌方", healed, [3, 4])
+  check("治疗的 scope 是 ally_mirror",
+    ROSTER.find((t) => t.name === "小春").ex.effects[0].scope, "ally_mirror")
+  // 她的单奶：排除自己、且只挑血量 ≤50% 的
+  const koharu = ROSTER.find((t) => t.name === "小春")
+  // 原文只写「不高于 50%」没说「最低」，所以是 ally_hurt（按站位就近）而不是 ally_lowest
+  check("普技是单体奶、按站位就近，不是群奶", [koharu.skill.target, koharu.skill.exceptSelf, koharu.skill.hpMax],
+    ["ally_hurt", true, 0.5])
+  check("冷却 10 秒 = 2 回合，不是默认的 5", koharu.skill.trigger, { type: "cooldown", turns: 2, icd: true })
+}
+
+console.log("\n=== 37. 单体奶的选人：小春按站位就近，绿按血量最低 ===")
+{
+  // 站位：小春=1 号（战场 0）、椿=2 号（战场 0）、优香=3 号（战场 1）、春香=4 号（战场 1）
+  const heal = (hp, picks = ["小春", "椿", "优香", "春香"]) => {
+    const st = setup(picks, ["椿", "椿", "椿", "椿"])
+    for (const s of st.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+    st.sides[0].units[0].skillCd = 0
+    hp(st.sides[0].units)
+    const r = run(st, { type: "pass" })
+    return r.events
+      .filter((e) => e.type === "heal" && e.target.side === 0)
+      .map((e) => tmplOf(r.state.sides[0].units[e.target.pos]).name)
+  }
+  check("同战场的够格 → 喂同战场，不看谁更残",
+    heal((us) => { us[1].hp *= 0.5; us[2].hp *= 0.1 }), ["椿"])
+  check("同战场没人够格 → 越界喂另一战场",
+    heal((us) => { us[3].hp *= 0.4 }), ["春香"])
+  check("都在另一战场 → 号位差小的优先，不是更残的那个",
+    heal((us) => { us[2].hp *= 0.2; us[3].hp *= 0.4 }), ["优香"])
+  check("永远只奶一个人，不是群奶",
+    heal((us) => { us[1].hp *= 0.4; us[3].hp *= 0.4 }), ["椿"])
+  check("排除自身：只有自己残血就不放", heal((us) => { us[0].hp *= 0.1 }), [])
+
+  // 绿原文写的是「生命值百分比最低」，所以她按血量挑，跨战场也挑最残的
+  check("绿按血量最低挑，跨战场也认",
+    heal((us) => { us[1].hp *= 0.5; us[2].hp *= 0.1 }, ["绿", "椿", "优香", "春香"]), ["优香"])
+}
+
+console.log("\n=== 38. 没有合法目标时不算出手：不进冷却、也不吞掉普攻 ===")
+{
+  const st = setup(["小春", "椿", "优香", "春香"], ["椿", "椿", "椿", "椿"])
+  for (const s of st.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+  // setup 会把所有人的 skillCd 压成 99 来测对线，这一组要测的正是冷却本身
+  st.sides[0].units[0].skillCd = 0
+  let cur = st
+  const seen = []
+  for (let t = 1; t <= 3; t++) {
+    const r = run(cur, { type: "pass" })
+    const k = r.state.sides[0].units[0]
+    seen.push([k.skillCd, k.skillUses,
+      r.events.some((e) => e.type === "action" && e.action === "normal" && e.source?.side === 0 && e.source.pos === 0)])
+    cur = run(r.state, { type: "pass" }).state
+  }
+  check("全队满血：冷却不动、次数不涨、普攻照常", seen, [[0, 0, true], [0, 0, true], [0, 0, true]])
+  // 「(冷却N秒)」是再次使用的间隔，靠条件门控，所以开局就是就绪的
+  check("条件+冷却型开局不压满冷却", ROSTER.find((t) => t.name === "小春").skill.trigger.icd, true)
+  check("「每N秒」的周期型仍然压满", ROSTER.find((t) => t.name === "绿").skill.trigger.icd, undefined)
+
+  // 放出去那一轮**算**一次冷却跳动：10 秒 = 2 轮，所以第 1、3、5 轮各放一次
+  const rounds = (() => {
+    const s2 = setup(["小春", "椿", "优香", "春香"], ["椿", "椿", "椿", "椿"])
+    for (const s of s2.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+    for (const i of [1, 2, 3]) s2.sides[0].units[i].hp = Math.round(s2.sides[0].units[i].maxhp * 0.4)
+    s2.sides[0].units[0].skillCd = 0
+    let c = s2
+    const out = []
+    for (let t = 1; t <= 6; t++) {
+      const r = run(c, { type: "pass" })
+      if (r.log.some((l) => /我来治疗/.test(l))) out.push(t)
+      c = run(r.state, { type: "pass" }).state
+    }
+    return out
+  })()
+  check("施放回合算一次冷却跳动 → 每 2 轮一次，正好是 10 秒", rounds, [1, 3, 5])
+}
+
+console.log("\n=== 39. 切里诺：EX 全体、集火选最高攻、嘲讽优先于集火 ===")
+{
+  const cherino = ROSTER.find((t) => t.name === "切里诺")
+  check("EX 是自身为圆心的大圆 → 全体 4 人，不是场地",
+    [cherino.ex.target, cherino.ex.count, Boolean(cherino.ex.hits), cherino.ex.effects.some((e) => e.type === "dot")],
+    ["enemy_all", 4, true, false])
+  check("EX 515% 摊成 4 段",
+    [cherino.ex.hits.length, Number(cherino.ex.hits.reduce((a, b) => a + b, 0).toFixed(2))],
+    [4, 515.83])
+  check("普技：每 40 秒 = 8 回合，点攻击力最高的，集火 15 秒 = 3 回合，暴伤抵抗 −18.75%",
+    [cherino.skill.target, cherino.skill.pick, cherino.skill.trigger.turns,
+      cherino.skill.effects.find((e) => e.kind === "focus"),
+      cherino.skill.effects.find((e) => e.stat === "crit_dmg_res")],
+    ["enemy_single", "max_atk", 8,
+      { type: "taunt", kind: "focus", scope: "enemy", turns: 3 },
+      { type: "buff", scope: "enemy", stat: "crit_dmg_res", value: -0.1875, turns: 3, channel: 623 }])
+  check("卡面写清是打攻击力最高的、全体、集火", [
+    /攻击力最高/.test(describeEffect(cherino.skill)),
+    /被集火/.test(describeEffect(cherino.skill)),
+    /暴伤抵抗/.test(describeEffect(cherino.skill)),
+    /敌方全体/.test(describeEffect(cherino.ex)),
+  ], [true, true, true, true])
+
+  const skillTargets = (st) => {
+    st.sides[0].units[0].skillCd = 0
+    const r = run(st, { type: "pass" })
+    const ev = r.events.find((e) =>
+      e.type === "action" && e.action === "skill" && e.source?.side === 0 && e.source?.pos === 0)
+    return { r, to: (ev?.targets || []).map((t) => t.pos + 1) }
+  }
+  // 晴奈 457 / 后排 / 另一战场；同战场两个茜 120。点到 4 才说明 pick 生效
+  check("普技越过战场分割，点全场攻击力最高的 4 位",
+    skillTargets(setup(["切里诺", "茜", "茜", "茜"], ["茜", "茜", "茜", "晴奈"])).to, [4])
+
+  {
+    const stMark = setup(["切里诺", "野宫", "野宫", "野宫"], ["茜", "茜", "茜", "晴奈"])
+    for (const s of stMark.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+    const { r } = skillTargets(stMark)
+    const marked = r.state.sides[1].units[3]
+    check("集火标落在被点名的那个人自己头上", focusedOf(marked), true)
+    check("减暴伤抵抗也只挂在她身上",
+      r.state.sides[1].units.map((u) => u.buffs.some((b) => b.stat === "crit_dmg_res")),
+      [false, false, false, true])
+    check("集火不封对面 EX", r.state.sides[1].units.map((u) => exLockedOf(r.state, u)),
+      [null, null, null, null])
+    const autos = r.events
+      .filter((e) => e.type === "action" && e.action === "normal" && e.source.side === 0)
+      .map((e) => (e.targets || []).map((t) => t.pos + 1).join(""))
+    // 切里诺自己在 ③-a 放过技能，③-b 不再普攻，所以是三个队友
+    check("集火后队友普攻全锁 4 位", autos, ["4", "4", "4"])
+  }
+
+  // EX 是全体，嘲讽封的是「放不出 EX」本身，所以测全体不被吸成单体要用集火（不封 EX）
+  {
+    const st = setup(["野宫", "切里诺", "野宫", "野宫"], ["茜", "茜", "茜", "晴奈"])
+    for (const s of st.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+    st.sides[1].units[3].focus = 3
+    st.sides[1].units[3].focusSt = -1
+    const r = run(st, { type: "ex", casts: [{ pos: 0 }] })
+    if (r.error) throw new Error(`野宫 EX 放不出：${r.error}`)
+    check("集火锁着时，全体 EX 仍打 4 人（不被吸成单体）",
+      r.events.find((e) => e.type === "action" && e.action === "ex")?.targets.length, 4)
+  }
+
+  // 先集火再嘲讽：两套共存，开火嘲讽优先；嘲讽过期后锁回被集火的人
+  {
+    const st = setup(["切里诺", "野宫", "野宫", "野宫"], ["椿", "茜", "茜", "晴奈"])
+    for (const s of st.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+    st.sides[0].units[0].skillCd = 0
+    let cur = run(st, { type: "pass" }).state
+    check("集火先挂上时晴奈有标、椿没有嘲讽",
+      [focusedOf(cur.sides[1].units[3]), cur.sides[1].units[0].taunt], [true, 0])
+    cur.sides[1].cost = 10
+    cur = playerTurn(cur, { type: "ex", casts: [{ pos: 0 }] }).state // 椿
+    check("嘲讽后集火还在（不是被覆盖清掉）",
+      [focusedOf(cur.sides[1].units[3]), cur.sides[1].units[0].taunt > 0, cur.sides[1].units[0].tauntKind],
+      [true, true, "provoke"])
+    while (cur.turnOpen) cur = playerTurn(cur, { type: "pass" }).state
+    const first = playerTurn(cur, { type: "pass" })
+    const hit1 = first.events
+      .filter((e) => e.type === "action" && e.action === "normal" && e.source.side === 0)
+      .map((e) => (e.targets || []).map((t) => t.pos + 1).join(""))
+    check("嘲讽优先：蓝方普攻全打椿", hit1, ["1", "1", "1", "1"])
+    check("这一轮打完嘲讽到期，集火还在",
+      [first.state.sides[1].units[0].taunt, focusedOf(first.state.sides[1].units[3])], [0, true])
+    const second = run(first.state, { type: "pass" }) // 红过
+    const third = playerTurn(second.state, { type: "pass" })
+    const hit2 = third.events
+      .filter((e) => e.type === "action" && e.action === "normal" && e.source.side === 0)
+      .map((e) => (e.targets || []).map((t) => t.pos + 1).join(""))
+    check("嘲讽过期后火力锁回被集火的晴奈", hit2, ["4", "4", "4", "4"])
+  }
+
+  // 嘲讽拉得住开火，但改不了集火标记的落点
+  {
+    const st = setup(["切里诺", "野宫", "野宫", "野宫"], ["椿", "茜", "茜", "晴奈"])
+    for (const s of st.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+    let cur = run(st, { type: "pass" }).state
+    cur.sides[1].cost = 10
+    cur = playerTurn(cur, { type: "ex", casts: [{ pos: 0 }] }).state
+    while (cur.turnOpen) cur = playerTurn(cur, { type: "pass" }).state
+    cur.sides[0].units[0].skillCd = 0
+    const { r, to } = skillTargets(cur)
+    check("对面嘲讽着，普技仍点攻击力最高的晴奈，不是椿", to, [4])
+    check("标记落在晴奈（嘲讽改不了选人）", focusedOf(r.state.sides[1].units[3]), true)
+    const autos = r.events
+      .filter((e) => e.type === "action" && e.action === "normal" && e.source.side === 0)
+      .map((e) => (e.targets || []).map((t) => t.pos + 1).join(""))
+    // 切里诺放过技能，三个队友的刀仍被嘲讽吸走。回合结束嘲讽才到期，所以这里不能去读剩余回合
+    check("同一回合开火仍被嘲讽拉去打椿", autos, ["1", "1", "1"])
+  }
 }
 
 console.log(bad ? `\n✗ ${bad} 条不符` : "\n全部符合")

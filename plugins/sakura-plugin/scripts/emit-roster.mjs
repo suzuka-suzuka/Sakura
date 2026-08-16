@@ -48,6 +48,10 @@ const AOE_T1 = 126000, AOE_T2 = 300000
  * 纯子排第 21 位，接了不死 / EX 打折 / 自伤三样之后才上得来。
  * 椿 / 优香 / 春香排 23~25 位，池里坦克只有星野和艾米，补三个不同装甲的坦克。
  *
+ * **目标是补齐到小春（`DefaultOrder 56`）的全部 57 人**，分批上。第一批是 26~54 位里
+ * 「改 IDS 就能进」的六个主力：明日奈、铃美、菲娜、泉奈、柚子、梓。
+ * 顺手补了三条描述规则（位移 / 无视开火间隔 / 每 N 次普攻），见各自的注释。
+ *
  * 代号取 SchaleDB 的 `PathName` 转大写，会成为 resources/ba/characters/ 的目录名。
  */
 const IDS = [
@@ -57,7 +61,19 @@ const IDS = [
   [13001, "CHISE"], [13002, "AKARI"], [13003, "HASUMI"], [13004, "NONOMI"],
   [13005, "KAYOKO"], [13006, "MUTSUKI"], [13007, "JUNKO"], [13008, "SERIKA"],
   [13009, "TSUBAKI"], [13010, "YUUKA"], [16000, "HARUKA"],
+  [16001, "ASUNA"], [16003, "SUZUMI"], [16004, "PINA"],
+  [10014, "IZUNA"], [10018, "YUZU"], [10019, "AZUSA"],
+  // 第二批：要补生成器规则的六个主力 + 妮露
+  [10008, "NERU"], [16002, "KOTORI"], [10015, "ARIS"],
+  [10016, "MIDORI"], [13011, "MOMOI"], [10017, "CHERINO"], [10020, "KOHARU"],
 ]
+
+/**
+ * 「编队内已编入 X 时」「对 X(如在场)」里的 X → SchaleDB 的角色名。
+ * 原数据这里的写法不统一：桃的技能里写「绿」（跟 `Name` 一致），
+ * 绿的技能里却写「桃井」（日文姓，`Name` 是「桃」），只能手工对一行。
+ */
+const ALLY_NAME_ALIAS = { 桃井: "桃" }
 
 const BULLET_CN = { Explosion: "爆发", Pierce: "贯通", Mystic: "神秘", Sonic: "振动", Chemical: "变化" }
 // 短名与 BaBattleImageGenerator 的 ARMOR_VISUAL 键一致（该表的 label 里存全称）
@@ -128,8 +144,43 @@ const STAT_MAP = {
   // EX / 普通技能不吃。鹤城 EX 后的 thenAutoAttack 走普攻，所以会吃到。
   AttackSpeed_Coefficient: "aa",
   DamagedRatio2_Coefficient: "dmg_take", HealEffectivenessRate_Coefficient: "heal_taken",
+  // 切里诺的普技减暴伤抵抗。原来只映了 `_Base` 那档（爱用品用的），系数档是另一个字段
+  CriticalDamageResistRate_Coefficient: "crit_dmg_res",
+  // 属性增伤（爱用品，5 件）。引擎按**攻击者的弹种**匹配，见 strike 的 enhOf
+  EnhancePierceRate_Base: "enh_Pierce",
+  EnhanceMysticRate_Base: "enh_Mystic",
+  EnhanceExplosionRate_Base: "enh_Explosion",
+  EnhanceSonicRate_Base: "enh_Sonic",
+  EnhanceChemicalRate_Base: "enh_Chemical",
 }
-const DROP_STAT = /Range|MoveSpeed|IgnoreDelay|Oppression|BlockRate/
+/**
+ * 名字带 `_Base` 但**值是万分比**的那几个。属性增伤原文写「加算13.2%」，
+ * `Value` 是 1320 —— 照 `_Base` 当定值读会变成「+1320」。
+ */
+const BP_BASE_STAT = /^Enhance\w+Rate_Base$/
+const DROP_STAT = /Range|MoveSpeed|Oppression|BlockRate/
+
+/**
+ * 「无视每 N 次普通攻击间的开火间隔」（`IgnoreDelayCount_Base`，全 272 人 4 处，池内只有菲娜）。
+ *
+ * 它跟 `AttackSpeed_Coefficient` 是**同一个物理量**——射速——只是一个用百分比写、
+ * 一个用帧数写，所以走同一条口径折成普攻增伤 `aa`，别当成没有对应物丢掉。
+ *
+ * 一发普攻的周期 = 抬手 + 射击 + 收手 + **开火间隔**（`Frames.AttackBurstRoundOverDelay`）。
+ * N 发连打时中间那 N−1 个间隔被吃掉：`N(a+d)` → `N·a+d`，提速 = `(a+d)/(a+d/N)`。
+ * 菲娜 a=21+19+32=72、d=42、N=3 → 114/86 = **+32.6%**。
+ *
+ * `Value` 超过 20 的不是「次数」（惠 8492、桃（女仆）100 是另一种量纲），认不了就丢。
+ * @returns {number|null} 折成 aa 的增幅；取不到帧数时返回 null
+ */
+function ignoreDelayToAa(student, n) {
+  const f = one(student?.Skills?.Normal)?.Frames
+  if (!f || !n || n > 20) return null
+  const a = (f.AttackStartDuration || 0) + (f.AttackIngDuration || 0) + (f.AttackEndDuration || 0)
+  const d = f.AttackBurstRoundOverDelay || 0
+  if (!a || !d) return null
+  return Number(((a + d) / (a + d / n) - 1).toFixed(4))
+}
 
 /** 同一个槽位有时是数组有时是对象，统一取第一条 */
 const one = (x) => (Array.isArray(x) ? x[0] : x)
@@ -148,7 +199,10 @@ function parseTrigger(desc) {
   // 瞬：开局回费。这类技能在建局时就结算，不进 ③-a 技能阶段 ——
   // 拖到那里的话 Cost 会晚于玩家首轮的 EX 窗口，开局那 2 点等于没给。
   if (/战斗开始时/.test(desc)) return { type: "battle_start", maxUses: once ? Number(once[1]) : 1 }
-  const hp = /生命值不高于\s*([\d.]+)%/.exec(desc)
+  // **必须带「时」**：「自身生命值不高于30%<b>时</b>：」才是触发条件（全数据 10 处），
+  // 而「对1名…生命值不高于50%的我方<b>单位</b>」是**选人条件**（2 处，池内是小春）——
+  // 不加这个字，小春的单奶会变成「自己残血才放」，而且凭空多出一个「每场限 1 次」。
+  const hp = /生命值不高于\s*([\d.]+)\s*%\s*时/.exec(desc)
   const sec = /每\s*([\d.]+)\s*秒/.exec(desc)
   const chance = /(\d+(?:\.\d+)?)\s*%\s*概率/.exec(desc)
   const icd = /冷却\s*([\d.]+)\s*秒/.exec(desc)
@@ -158,6 +212,16 @@ function parseTrigger(desc) {
     return {
       type: "on_kill",
       turns: icd ? secToTurns(Number(icd[1])) : 0,
+      ...(once ? { maxUses: Number(once[1]) } : {}),
+    }
+  }
+  // 泉奈：「自身每进行 6 次普通攻击」—— 数的是**普攻次数**，不是秒数。
+  // 回合制里一回合最多一次普攻，但放 EX 的回合她不普攻，折成回合冷却会白送一次，
+  // 所以走 on_auto 的计数分支（`every`），在 tryAutoProc 里一枪一枪数。
+  const perAuto = /每进行\s*(\d+)\s*次普通攻击/.exec(desc)
+  if (perAuto) {
+    return {
+      type: "on_auto", chance: 1, every: Number(perAuto[1]), turns: 0,
       ...(once ? { maxUses: Number(once[1]) } : {}),
     }
   }
@@ -173,6 +237,13 @@ function parseTrigger(desc) {
   }
   if (hp) return { type: "hp_below", value: Number(hp[1]) / 100, maxUses: once ? Number(once[1]) : 1 }
   if (sec) return { type: "cooldown", turns: secToTurns(Number(sec[1])), ...(once ? { maxUses: Number(once[1]) } : {}) }
+  // 没有「每 N 秒」时，「(冷却 N 秒)」是**再次使用的间隔**，不是周期（小春的「我来治疗！」）。
+  // 不认的话会退成默认的 5 轮，比原作慢一倍半。
+  // 标 `icd`：这类技能开局**不压满冷却**（跟 on_auto 同理）——它靠条件门控（要有人 ≤50%），
+  // 不是「每 N 秒必放」，开局给满等于让第一次救援白白晚两轮。
+  if (icd) {
+    return { type: "cooldown", turns: secToTurns(Number(icd[1])), icd: true, ...(once ? { maxUses: Number(once[1]) } : {}) }
+  }
   return { type: "cooldown", turns: 5, ...(once ? { maxUses: Number(once[1]) } : {}) }
 }
 
@@ -211,7 +282,7 @@ function hitsOf(dmg) {
 }
 
 /**
- * 「固定场地」类技能（全 272 人里 5 个：惠、千世、纱绫×2、切里诺）：
+ * 「固定场地」类技能（全 272 人里 5 个：惠、千世、纱绫×2、切里诺（温泉））：
  * 在地上留一片区域，站在里面的人**持续挨打**，施放者死了场地也还在。
  *
  * `Hits` 只写一段，真正的跳数在 `HitFrames` 里（帧号，30fps）。**最后一帧就是场地存续时间**
@@ -251,6 +322,58 @@ function parseFalloff(desc) {
   if (!step) return null
   const cap = /最多衰减\s*([\d.]+)\s*%/.exec(d)
   return { rate: Number(step[1]) / 100, max: cap ? Number(cap[1]) / 100 : 1 }
+}
+
+/**
+ * 编队条件（池内是绿 ⇄ 桃 那一对）。两种写法：
+ *   「编队内已编入桃井时：…」   条件成立才生效，目标不变（绿 EX 的中毒）
+ *   「对绿(如在场)造成以下效果」 效果只给那一个队友（桃爱用品的增伤 + 加攻）
+ *
+ * 原数据的 `Target` 是笼统的 `Ally` / `AllyMain`，条件全在描述里。
+ * **不能按顺序切块** —— 桃的爱用品描述是「增伤、攻击」，`Effects` 数组却是
+ * 「命中、攻击、增伤」，顺序对不上。所以**按数值认**：条件那一段里出现的百分比，
+ * 对上哪条效果就是哪条。描述里的数字是截断的（39.87% 印成 39.8%），留 0.1 容差。
+ *
+ * @returns {{name:string, named:boolean, nums:number[]}|null}
+ */
+function condClause(desc) {
+  const m = /编队内已编入([^\s时]+)时|对([^\s（(]+)\(如在场\)/.exec(desc)
+  if (!m) return null
+  // 条件段从这里开始，到下一个「对…造成以下效果」或下一条「※」注释为止
+  const from = desc.slice(m.index)
+  const end = from.slice(1).search(/\n对[^\n]*造成以下效果|\n\s*※/)
+  const body = end >= 0 ? from.slice(0, end + 1) : from
+  return {
+    name: ALLY_NAME_ALIAS[m[1] || m[2]] || (m[1] || m[2]),
+    named: Boolean(m[2]),
+    nums: [...body.matchAll(/([\d.]+)\s*%/g)].map((x) => Number(x[1])),
+  }
+}
+
+/** 一条效果自己的百分比数值，用来跟条件段里的数字对号（Buff 看 Value，其余看 Scale） */
+function pctOfEffect(e) {
+  const raw = e.Type === "Buff" ? e.Value?.[0]?.[SKILL_LV] : e.Scale?.[SKILL_LV]
+  return raw == null ? null : Math.abs(raw) / 100
+}
+
+/**
+ * 「对 1 名（除自身外）生命值（百分比最低 / 不高于 N%）的我方单位」——
+ * 单体治疗的选人规则，同样只在描述里。不接的话 `resolveTarget` 会退成 `ally_all`：
+ * 绿和小春的单奶会变成全队群奶。
+ */
+function allyLowestOf(desc) {
+  if (!/对\s*1\s*名[^。]*的我方单位/.test(desc)) return null
+  const cap = /生命值不高于\s*([\d.]+)\s*%/.exec(desc)
+  const lowest = /生命值百分比最低/.test(desc)
+  if (!cap && !lowest) return null
+  return {
+    // **两种写法要分开**：绿写的是「生命值百分比**最低**」，按血量挑；
+    // 小春写的是「生命值**不高于 50%**」，原文压根没说最低 —— 够格的人不止一个时
+    // 按**站位**就近喂（同战场 → 最近），跟对线锁定同一套规则。
+    target: lowest ? "ally_lowest" : "ally_hurt", count: 1,
+    ...(/除自身外/.test(desc) ? { exceptSelf: true } : {}),
+    ...(cap ? { hpMax: Number(cap[1]) / 100 } : {}),
+  }
 }
 
 /** summons.json 的 Name 是日文，中文名手工补 */
@@ -312,15 +435,22 @@ function instanceCount(sk, dmg) {
   return declared === n ? n : 0
 }
 
-function buildSkill(sk, { isEx, student }) {
+function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
   if (!sk) return null
   const desc = descOf(sk)
   const dmgs = (sk.Effects || []).filter((e) => e.Type === "Damage")
   const allTargets = (sk.Effects || []).flatMap((e) => (Array.isArray(e.Target) ? e.Target : e.Target ? [e.Target] : []))
-  const tg = resolveTarget(sk, allTargets)
+  // 「对 1 名（除自身外）生命值最低 / 不高于 N% 的我方单位」优先于几何判定 ——
+  // 没有 Radius 的己方技能会被 resolveTarget 一律判成 ally_all，单奶就变成了群奶
+  const tg = allyLowestOf(desc) || resolveTarget(sk, allTargets)
   const out = { name: sk.Name, ...tg, effects: [] }
   if (isEx) out.cost = sk.Cost[SKILL_LV]
   else out.trigger = parseTrigger(desc)
+
+  // 「对最多 N 名敌方单位**按顺序**造成…共计 N 次」（绿）——从自己对位的号位起，
+  // 按号位在存活敌人里**循环**打 N 次。不是弹射（不随机）、也不是连发（不重新对线）。
+  // 4 人时有一个人吃两下，只剩 1 人时 5 发全落他身上。玩家指不了目标。
+  const cyc = /对最多\s*(\d+)\s*名敌方单位按顺序/.exec(desc)
 
   // 「发射 N 发子弹，每发子弹各对其锁定的敌方单位」—— 每发单独锁目标、逐发换人。
   // 伊织原文就这么写；堇的扇形 3 段在回合制里按同一套拆成连发（用户口径）。
@@ -328,10 +458,14 @@ function buildSkill(sk, { isEx, student }) {
     || (isEx && student?.Id === 10012 && (dmgs[0]?.Hits?.length || 0) >= 2
       ? ["", String(hitsOf(dmgs[0]).length)] : null)
   const zone = dmgs.length ? zoneDot(dmgs[0]) : null
-  const inst = chain || zone ? 0 : instanceCount(sk, dmgs[0])
+  const inst = chain || cyc || zone ? 0 : instanceCount(sk, dmgs[0])
   if (zone) {
     // 场地技没有直接伤害，全部化成持续伤害挂在目标身上
     out.effects.push(zone)
+  } else if (cyc && dmgs.length) {
+    out.hits = hitsOf(dmgs[0])
+    out.target = "enemy_cycle"
+    out.count = Number(cyc[1])
   } else if (chain && dmgs.length) {
     out.hits = hitsOf(dmgs[0])
     out.target = "enemy_chain"
@@ -352,26 +486,82 @@ function buildSkill(sk, { isEx, student }) {
     const fo = parseFalloff(desc)
     if (fo && /adjacent|all/.test(out.target)) out.falloff = fo
     // 直线贯穿（晴奈、纯子）不问前中后，圈到谁打谁。横向圆/扇才锁同层。
-    if (/对直线范围内/.test(desc)) out.depth = "through"
+    // 桃的 EX 原文是扇形，但那是个 850 长 / 45° 的窄锥，几何上就是一条线，
+    // 按纯子那套走贯穿（用户口径，跟堇「原文是扇、口径按伊织」同类）。
+    if (/对直线范围内/.test(desc) || student?.Id === 13011) out.depth = "through"
   }
 
   // 附带在伤害上的效果（控制/减益/击退）原数据不写 Target，隐含跟随伤害目标
   const RIDES_DAMAGE = new Set(["CrowdControl", "DamageDebuff", "Knockback", "ConcentratedTarget"])
+  // 编队条件（绿 ⇄ 桃）。哪几条效果落在条件段里，按数值认，见 condClause
+  const cond = condClause(desc)
+  const condCode = cond && codeOf ? codeOf(cond.name) : null
   for (const e of sk.Effects || []) {
     if (e.Type === "Damage") continue
     const dflt = RIDES_DAMAGE.has(e.Type) ? ["Enemy"] : ["Self"]
     const t = Array.isArray(e.Target) ? e.Target : e.Target ? [e.Target] : dflt
-    const scope = t.every((x) => x === "Self") ? "self" : t.some((x) => /Ally/.test(x)) ? "ally_all" : "enemy"
+    let scope = t.every((x) => x === "Self") ? "self" : t.some((x) => /Ally/.test(x)) ? "ally_all" : "enemy"
+    /**
+     * `Any` = 「上述范围内」的双方单位（全 272 人 6 处，池内只有小春）。
+     * 非伤害效果落在**我方**那一半 —— 原文写得很清楚「对圆形范围内的**我方**单位…回复」。
+     * 照原来「不含 Ally ⇒ 敌方」的判定，小春炸完还会给对面回血。
+     *
+     * 技能同时打伤害时用 `ally_mirror`：同一个圈盖住敌我两边的**同号位**，
+     * 伤害落在敌方那两路，治疗就落在己方那两路。没有伤害时退回 ally_all。
+     */
+    if (t.includes("Any")) scope = dmgs.length ? "ally_mirror" : "ally_all"
+    // 这条效果在不在编队条件那一段里
+    const pct = pctOfEffect(e)
+    const inCond = Boolean(cond && condCode && pct != null
+      && cond.nums.some((n) => Math.abs(n - pct) < 0.1))
+    const condFields = !inCond ? {}
+      : cond.named ? { scope: "ally_named", ally: condCode } : { ifAlly: condCode }
+    if (inCond && cond.named) scope = "ally_named"
+    // 单体奶（`ally_lowest` / `ally_hurt`）里的 `Ally` 指的是**技能选中的那一个人**，不是全队。
+    // 不收窄的话绿和小春的单奶会变成群奶，还会顺手奶到明确排除的自己。
+    if (scope === "ally_all" && /^ally_(lowest|hurt)$/.test(tg.target)) scope = "ally_target"
     const turns = msToTurns(levelDuration(sk, e) ?? e.Duration)
+    /**
+     * 「位移至指定位置」（`Reposition`，全 272 人 19 处，Self/Ally/Enemy 三种）。
+     * 它是挂在 Buff 效果上的**附加字段**，不是独立效果，所以这里额外补一条，
+     * 效果本体照常生成（泉奈的攻速、明日奈的闪避都还在）。
+     *
+     * **`Self` 折成「与相邻号位的队友交换站位」**（`range: 1`，池内只有泉奈）。
+     * 回合制没有连续坐标，但**有站位** —— 战场分割（1·2 / 3·4）和对位锁定都由号位定，
+     * 所以「换一格」是有意义的博弈：只有站在 2 / 3 号位时那一跳才跨得过战场分界线。
+     * 换位而不是「挪过去」，四个格子仍然一格一人，战场图不会叠人。
+     *
+     * `Ally` / `Enemy`（把队友拉过来 / 把敌人扯过来）**仍然丢掉**：那是「谁被搬动」而不是
+     * 「我站哪」，牵扯到多人重排，等真有角色进池再单独设计。
+     */
+    const before = out.effects.length
+    if (e.Reposition) {
+      const kinds = [].concat(e.Reposition)
+      if (kinds.includes("Self")) out.effects.push({ type: "reposition", scope: "self", range: 1 })
+      const rest = kinds.filter((k) => k !== "Self")
+      if (rest.length) {
+        out.effects.push({ type: "dropped", raw: `Reposition:${rest.join("/")}`, why: "搬动他人，待设计" })
+      }
+    }
     switch (e.Type) {
       case "Buff": {
         if (DROP_STAT.test(e.Stat || "")) { out.effects.push({ type: "dropped", raw: e.Stat, why: "回合制无对应物" }); break }
+        // 射速的另一种写法，折成同一个 aa。详见 ignoreDelayToAa
+        if (e.Stat === "IgnoreDelayCount_Base") {
+          const v = ignoreDelayToAa(student, e.Value?.[0]?.[SKILL_LV])
+          if (v == null) { out.effects.push({ type: "dropped", raw: e.Stat, why: "取不到射击帧数" }); break }
+          out.effects.push({
+            type: "buff", scope, stat: "aa", value: v, turns: turns ?? 2,
+            ...(e.Channel != null ? { channel: e.Channel } : {}),
+          })
+          break
+        }
         const stat = STAT_MAP[e.Stat]
         if (!stat) { out.effects.push({ type: "unmapped", raw: e.Stat }); break }
         const v = e.Value?.[0]?.[SKILL_LV] ?? 0
         out.effects.push({
           type: "buff", scope, stat,
-          value: /_Base$/.test(e.Stat) ? v : Number((v / 1e4).toFixed(4)),
+          value: /_Base$/.test(e.Stat) && !BP_BASE_STAT.test(e.Stat) ? v : Number((v / 1e4).toFixed(4)),
           turns: turns ?? 2,
           // Channel 是原作的**槽位号**：同槽后来的顶掉先来的，不同槽才共存。
           // 一个 Channel 只装一种属性、且正负不混（全 272 人零例外），所以它本身就够唯一。
@@ -422,6 +612,17 @@ function buildSkill(sk, { isEx, student }) {
        * 而基础普攻是 6 段）。没有这一段数据时才退回描述里的倍率。
        */
       case "Special": {
+        /**
+         * `Fury`（全 272 人只有妮露，Public 与 GearPublic 各一次）：一个纯粹的自身状态，
+         * 本身不改任何面板，唯一作用是让她的 EX 倍率翻上去（见 buildSkill 末尾的 altHits）。
+         * 她**没有** `Normal.FormChange`，所以不是形态转换，别往 charge 上套。
+         * 时长跟同一技能里的闪避增益一样写在「持续20秒」里。
+         */
+        if (e.Key === "Fury") {
+          const d = /持续\s*([\d.]+)\s*秒/.exec(desc)
+          out.effects.push({ type: "state", key: "fury", scope: "self", turns: d ? secToTurns(Number(d[1])) : 4 })
+          break
+        }
         if (e.Key !== "FormChange") { out.effects.push({ type: "unmapped", raw: `Special:${e.Key}` }); break }
         const na = one(student?.Skills?.Normal)
         const fc = na?.FormChange
@@ -474,8 +675,15 @@ function buildSkill(sk, { isEx, student }) {
       }
       // 集火：把某个敌人点成「我方都打它」。跟 Provoke 是**两个不同的机制**，
       // 靠 kind 区分 —— 图标和底色都不一样（集火是蓝底减益，嘲讽是紫底），
-      // 而且集火的标记落在被点的那个人身上，嘲讽的落在被拉走的人身上。目前池里没有集火角色。
-      case "ConcentratedTarget": out.effects.push({ type: "taunt", kind: "focus", scope, turns: turns ?? 1 }); break
+      // 而且集火的标记落在被点的那个人身上，嘲讽的落在被拉走的人身上。池内是切里诺。
+      // 集火的时长跟 CrowdControl 一样写在 `Scale`（毫秒）里，不是 `Duration` ——
+      // 读 Duration 会拿到 undefined，切里诺 15 秒的集火就缩成 1 回合
+      case "ConcentratedTarget":
+        out.effects.push({
+          type: "taunt", kind: "focus", scope,
+          turns: msToTurns(Array.isArray(e.Scale) ? e.Scale[SKILL_LV] : 0) ?? turns ?? 1,
+        })
+        break
       // `DamageDebuff` **全都是持续伤害**（灼烧/中毒/冰冻/感电），不是「造成伤害降低」——
       // 全 272 人的 33 个无一例外都带 Icon 和 Period。当成 dmg_deal 减益的话，
       // 千世那条 54% 会变成 −54% 输出，方向都反了。
@@ -489,6 +697,8 @@ function buildSkill(sk, { isEx, student }) {
       case "Knockback": out.effects.push({ type: "dropped", raw: "Knockback", why: "回合制无位置" }); break
       default: out.effects.push({ type: "unmapped", raw: e.Type })
     }
+    // 编队条件盖在这一轮刚 push 进去的效果上（一个 Effect 可能 push 出不止一条）
+    if (inCond) for (let i = before; i < out.effects.length; i++) Object.assign(out.effects[i], condFields)
   }
   // 「获得 N 技能COST」（往 Cost 池加点，跟上面的 CostChange 打折是两回事）**没有结构化效果**
   // —— 瞬的普通技能 `Effects` 是个空数组（全 272 人里这样的技能有 9 个），数值只在描述里。
@@ -504,6 +714,59 @@ function buildSkill(sk, { isEx, student }) {
     const d = /持续\s*([\d.]+)\s*秒/.exec(desc)
     out.effects.push({ type: "immortal", scope: "self", turns: d ? secToTurns(Number(d[1])) : 2 })
   }
+
+  /**
+   * 能量充能（爱丽丝，全 272 人只有她）：三档 `EnergyBatteryEmpty/Half/Full`，
+   * **一个结构化字段都没有**，全在描述里。
+   *   普通技能：「能量充能状态提升至…」→ 每次施放 +1 档（封顶 2）
+   *   爱用品版另加「战术入场时：提升至 Half」→ 开局就带 1 档，写成技能上的 `stateStart`
+   *   EX：按档位取倍率（见下面的 altHits），放完「重置为 Empty」
+   */
+  if (/能量充能状态提升至/.test(desc)) {
+    out.effects.push({ type: "state", key: "energy", scope: "self", step: 1, max: 2 })
+    if (/战术入场时/.test(desc)) out.stateStart = { key: "energy", value: 1 }
+  }
+  if (/重置自身能量充能状态/.test(desc)) out.effects.push({ type: "state", key: "energy", scope: "self", value: 0 })
+
+  /**
+   * 条件追伤：同一发技能的第 2 / 第 3 段 `Damage` 不是「多段」，而是「某个状态下换一套倍率」。
+   * 三个人同一个形状，收成 `altHits`：引擎结算前查状态，命中哪一档就用哪一组倍率。
+   *
+   *   妮露   有 `Fury` 时 ×1.5（爱用品版描述改口为 ×2，倍率不在数据里，只能从描述抠）
+   *   爱丽丝 半充 ×1.5 / 满充 ×2
+   *
+   * 不接的话三个人都是「能跑但残了」：妮露和爱丽丝会永远停在最低档。
+   */
+  if (dmgs.length > 1 && out.hits?.length && !out.splashHits) {
+    const base = out.hits.reduce((a, b) => a + b, 0)
+    const alts = []
+    if (/<s:Fury>/.test(desc)) {
+      // 爱用品把「提升至1.5倍」改口成「变为2倍」，而 ×2 这一档**原数据里没有**，
+      // 只写在普通技能的描述里 —— 只有这种情况才靠乘，其余一律抄原数据那一段
+      const up = publicDesc && /EX技能效果提升变为\s*([\d.]+)\s*倍/.exec(publicDesc)
+      alts.push(up ? { state: "fury", min: 1, mult: Number(up[1]) } : { state: "fury", min: 1, src: dmgs[1] })
+    }
+    for (const [i, key] of [[1, "EnergyBatteryHalf"], [2, "EnergyBatteryFull"]]) {
+      if (!new RegExp(`为<s:${key}>时`).test(desc) || !dmgs[i]) continue
+      alts.push({ state: "energy", min: i, src: dmgs[i] })
+    }
+    // 高档排前面：引擎取第一个满足的
+    // 倍率有原数据那一段就直接抄它的分段（精确），只有描述覆写（妮露爱用品 ×2）才乘出来
+    if (alts.length) out.altHits = alts.sort((a, b) => b.min - a.min).map((a) => {
+      const hits = a.src ? hitsOf(a.src) : out.hits.map((h) => Number((h * a.mult).toFixed(4)))
+      return {
+        state: a.state, min: a.min, hits,
+        total: Number(hits.reduce((x, y) => x + y, 0).toFixed(2)),
+      }
+    })
+  }
+
+  // 「对 1 名攻击力最高的敌方单位」/「以 1 名攻击力最高的敌方单位为中心」——
+  // 跟瞬的索敌改写一样，**只写在描述里**，没有结构化字段。引擎侧走 laneTarget 的 max_atk 分支：
+  // 嘲讽仍然拉得走，其余（战场分割 / 前中后排 / 挡刀）一概绕开。
+  // 池内是柚子的普通技能（带伤害，嘲讽拉得走）和切里诺的集火（选人条件，嘲讽改不了落点）。
+  // 玩家指定目标时以玩家为准，所以只在没指定时生效。
+  if (/攻击力最高的敌方单位/.test(desc) && String(out.target || "").startsWith("enemy")) out.pick = "max_atk"
 
   // 纯子 EX 的「失去25.7%的当前生命值」。跟艾米的 ExtraStatSource 一样是**全数据唯一一处**，
   // 没有结构化效果，也不会有第二个用例 —— 但漏了她就成了一个没有代价的 746% 直线 AoE。
@@ -535,7 +798,8 @@ function buildSkill(sk, { isEx, student }) {
  * `Special` 里只有 `FormChange` 一种做了（鹤城的换弹强化），其余 Key 仍然不认。
  */
 const UNBUILDABLE = /^(Summon|Accumulation)$/
-const unbuildable = (e) => UNBUILDABLE.test(e.Type) || (e.Type === "Special" && e.Key !== "FormChange")
+const SPECIAL_OK = new Set(["FormChange", "Fury"])
+const unbuildable = (e) => UNBUILDABLE.test(e.Type) || (e.Type === "Special" && !SPECIAL_OK.has(e.Key))
 
 /**
  * 普通技能取哪一条。`GearPublic` 与 `Public` 同结构，buildSkill 不用改。
@@ -547,6 +811,12 @@ function pickPublicSkill(c) {
   const g = one(c.Skills.GearPublic)
   if (!g || (g.Effects || []).some(unbuildable)) return { sk: base, gear: false }
   return { sk: g, gear: true }
+}
+
+/** 角色名 → 内部代号。编队条件（绿 ⇄ 桃）要用它把描述里的名字换算成 id */
+const codeOf = (name) => {
+  const hit = IDS.find(([sid]) => arr.find((x) => x.Id === sid)?.Name === name)
+  return hit ? hit[1] : null
 }
 
 const units = IDS.map(([sid, code]) => {
@@ -573,8 +843,9 @@ const units = IDS.map(([sid, code]) => {
       ...(na?.Radius ? (({ target, count }) => ({ target, count }))(resolveTarget(na, [])) : {}),
     },
     gearSkill: pub.gear,
-    skill: buildSkill(pub.sk, { isEx: false, student: c }),
-    ex: buildSkill(Array.isArray(c.Skills.Ex) ? c.Skills.Ex[0] : c.Skills.Ex, { isEx: true, student: c }),
+    skill: buildSkill(pub.sk, { isEx: false, student: c, codeOf }),
+    // EX 的条件倍率有时写在**普通技能**的描述里（妮露爱用品的「变为2倍」），所以要把它传进去
+    ex: buildSkill(one(c.Skills.Ex), { isEx: true, student: c, codeOf, publicDesc: descOf(pub.sk) }),
   }
 })
 

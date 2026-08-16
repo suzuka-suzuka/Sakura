@@ -11,7 +11,7 @@
  * 转换结果按角色缓存，同一局只算一次。
  */
 import { CFG } from "./roster.js"
-import { tmplOf, exWaitOf, turnCostOf, exRefreshPending, exCostOf, provokedBy, exLockedOf } from "./engine.js"
+import { tmplOf, exWaitOf, turnCostOf, exRefreshPending, exCostOf, provokedBy, focusedOf, exLockedOf } from "./engine.js"
 import { artOf, summonArtOf, statusIconOf, fontFace, FONT_STACK, ATTACK, ARMOR, inkOf, esc } from "./htmlAssets.js"
 
 export const MAP_WIDTH = 1200
@@ -94,7 +94,7 @@ const ICON = {
   dfs: SVG(`<path d="M12 2.2 20 5.4V12c0 4.9-3.4 8.3-8 9.8-4.6-1.5-8-4.9-8-9.8V5.4Z"/>`),
   heal: SVG(`<path d="M9.8 3.4h4.4v6.4h6.4v4.4h-6.4v6.4H9.8v-6.4H3.4V9.8h6.4Z"/>`),
   // 集火：同心圆靶。**这不是嘲讽的图标** —— 集火是「我方都打这个人」，
-  // 标记落在被点名的那个人身上、蓝底减益。目前池里没有集火角色，这个图标先留着
+  // 标记落在被点名的那个人身上、蓝底减益。池内是切里诺的普技。
   focus: SVG(`<path d="M12 2.4a9.6 9.6 0 1 0 0 19.2 9.6 9.6 0 0 0 0-19.2Zm0 2.6a7 7 0 1 1 0 14 7 7 0 0 1 0-14Z"/>
     <circle cx="12" cy="12" r="3.4"/>`),
   // 眩晕：六角爆星
@@ -134,7 +134,7 @@ const ICON_OF_STAT = {
   heal: "heal", heal_taken: "heal", dodge: "dodge", acc: "acc",
   crit: "crit", crit_dmg: "crit", crit_dmg_flat: "crit",
   // 暴击/暴伤抵抗是挨打时才生效的，跟防御同一个盾图标
-  crit_res: "dfs", crit_dmg_res_flat: "dfs",
+  crit_res: "dfs", crit_dmg_res_flat: "dfs", crit_dmg_res: "dfs",
 }
 
 /**
@@ -153,7 +153,7 @@ const OFFICIAL_STAT = {
   heal_taken: "rec",
   cost_regen: "cost-regen",
   crit: "crit", crit_dmg: "crit_dmg", crit_dmg_flat: "crit_dmg",
-  crit_res: "crit_res", crit_dmg_res_flat: "crit_dmg_res",
+  crit_res: "crit_res", crit_dmg_res_flat: "crit_dmg_res", crit_dmg_res: "crit_dmg_res",
   dmg_deal: "dmg_deal",
 }
 
@@ -217,7 +217,7 @@ function statusMarks(u, provoked) {
   // **嘲讽的减益标记落在被拉走的人身上，不是放嘲讽的那个人身上**（原作就是这么画的）：
   // 中了嘲讽的顶一个紫底感叹号，椿自己什么都不多。集火是另一回事，蓝底靶心画在被点名的人头上。
   if (provoked) marks.push(markOrSvg("provoke", "warn", "provoke"))
-  if (u.taunt > 0 && u.tauntKind === "focus") marks.push(markOrSvg("focus", "focus", "debuff"))
+  if (focusedOf(u)) marks.push(markOrSvg("focus", "focus", "debuff"))
   if (u.stun > 0) {
     const cc = u.stunIcon === "Fear" ? "fear" : "stun"
     marks.push(markOrSvg(cc, "stun", "debuff"))
@@ -230,6 +230,11 @@ function statusMarks(u, provoked) {
   }
   // 不死：残血 1 点却打不死，不出格的话对手会以为是自己算错了伤害
   if (u.immortal > 0) marks.push(markOrSvg("immortal", "immortal", "buff", u.immortal <= 1 ? "fading" : ""))
+  // Fury（妮露）：期间她的 EX 威力翻倍，对手看得见才能决定要不要抢先手
+  if (u.fury > 0) marks.push(markOrSvg("fury", "charge", "special", u.fury <= 1 ? "fading" : ""))
+  // 能量充能（爱丽丝）：三档各一张官方图，**攒到满充她的 EX 就是两倍伤害**，
+  // 这是她唯一的强度来源，不出格对手根本没法判断该不该在这一轮拆她
+  if (u.energy > 0) marks.push(markOrSvg(`energy-${u.energy}`, "charge", "special"))
   // EX 打折：卡上的费用数字已经变了，这一格是给对手看的 —— 血条在谁头上就是谁便宜
   if (u.exDiscount?.uses) {
     const official = officialMark("ex-discount")
@@ -331,6 +336,26 @@ function arrowLayer(state, events) {
 }
 
 /** 暴击只换外框形状，不换字号也不加 CRIT 字样；尖刺长度按暴击段占比走 */
+/** 短横排到多少段就改印数字。12 段是琴里 40 段 / 妮露 60 段之前池内的最大值（芹香 11 段） */
+const SEG_BARS_MAX = 12
+
+/**
+ * 多段的表达：**12 段以下画短横，亮的是命中段；12 段及以上直接印「20hits」**。
+ *
+ * 琴里的爱用品普技是 40 段、妮露的 EX 是 60 段 —— 一段一个 `<s>` 会把整个数字标签撑爆，
+ * 而且四十个小格子本来也数不清。改成数字之后信息一点没少：全中就印总数，
+ * 有闪避就印「命中/总数」，跟短横那一行传达的是同一件事。
+ */
+function segsHtml(segs) {
+  if (!segs) return ""
+  if (segs.total >= SEG_BARS_MAX) {
+    const txt = segs.landed >= segs.total ? `${segs.total}hits` : `${segs.landed}/${segs.total}hits`
+    return `<u class="segn">${txt}</u>`
+  }
+  return `<div class="segs">${Array.from({ length: segs.total }, (_, i) =>
+    `<s class="${i < segs.landed ? "on" : ""}"></s>`).join("")}</div>`
+}
+
 function fxLabel(ev, wide) {
   const segs = Number(ev.hits) > 1
     ? { total: Number(ev.hits), landed: Math.max(0, Math.min(Number(ev.hits), Number(ev.landed ?? ev.hits))) }
@@ -350,8 +375,7 @@ function fxLabel(ev, wide) {
       ${ev.crit ? `<span class="burst" style="--burst:polygon(${burstPolygon(critQ)})"></span>` : ""}
       <b>${esc(text)}</b>
       ${qual ? `<i class="${ev.affinity}">${qual}</i>` : ""}
-      ${segs ? `<div class="segs">${Array.from({ length: segs.total }, (_, i) =>
-      `<s class="${i < segs.landed ? "on" : ""}"></s>`).join("")}</div>` : ""}
+      ${segsHtml(segs)}
     </div>`
 }
 
@@ -619,12 +643,15 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 .fxlabel .segs{display:flex;gap:1.5px;margin-top:4px;justify-content:center}
 .fxlabel .segs s{flex:1;max-width:9px;height:3.5px;border-radius:2px;background:rgba(40,80,125,.22)}
 .fxlabel .segs s.on{background:currentColor}
+/* 12 段起改印数字（见 segsHtml）。跟短横占同一条基线、同一个色，别做成第二个数字 */
+.fxlabel .segn{display:block;margin-top:2px;font-size:11px;line-height:1.1;font-weight:700;
+  letter-spacing:.02em;opacity:.78;text-decoration:none;font-variant-numeric:tabular-nums}
 
 /* 暴击：数字不放大、不加字，只把外框换成炸开的形状。尖刺会吃掉四周，留白比矩形框大一圈。
    margin 是给尖刺让位的 —— .burst 的 19px 负 inset 不占布局，同一目标连吃几发时
    相邻的爆裂框会咬在一起糊成一条 */
 .fxlabel.crit{background:none;border:none;box-shadow:none;min-width:70px;padding:10px 16px 11px;margin:16px 15px}
-.fxlabel.crit>b,.fxlabel.crit>i,.fxlabel.crit>.segs{position:relative}
+.fxlabel.crit>b,.fxlabel.crit>i,.fxlabel.crit>.segs,.fxlabel.crit>.segn{position:relative}
 /* 轮廓由行内 --burst 下发（按暴击段占比缩放）；::after 是 .burst 的伪元素，自动继承到 */
 .fxlabel .burst{position:absolute;inset:-19px -22px;
   clip-path:var(--burst,polygon(${burstPolygon(1)}));background:linear-gradient(155deg,#FFC53D,#F26D2B);
