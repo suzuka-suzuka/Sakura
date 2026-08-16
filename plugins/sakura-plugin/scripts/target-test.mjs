@@ -940,6 +940,29 @@ console.log("\n=== 27. 嘲讽 / 恐惧封 EX：全员被封也要等人发「过
 
 console.log("\n=== 28. 攻速只乘普攻，不乘 EX / 普通技能 ===")
 {
+  const asuna = ROSTER.find((t) => t.name === "明日奈")
+  check("明日奈 EX 闪避留 1 回合",
+    asuna.ex.effects.find((e) => e.stat === "dodge"),
+    { type: "buff", scope: "self", stat: "dodge", value: 0.4341, turns: 1, channel: 7 })
+  check("明日奈 EX 攻速 30 秒 = 6 回合（官方写了秒数）",
+    asuna.ex.effects.find((e) => e.stat === "aa"), { type: "buff", scope: "self", stat: "aa", value: 0.302, turns: 6, channel: 24 })
+  check("明日奈普技按目标血量改倍率：满血 ×1、空血 ×1.5",
+    asuna.skill.hpRate, { lo: 0, hi: 1, atLo: 1.5, atHi: 1 })
+  const asunaDmg = (hpFrac) => {
+    const st = setup(["明日奈", "野宫", "野宫", "野宫"], ["野宫", "野宫", "野宫", "野宫"])
+    st.sides[0].units[0].skillCd = 0
+    const t = st.sides[1].units[0]
+    t.maxhp = 9e6
+    t.hp = Math.max(1, Math.round(t.maxhp * hpFrac))
+    return run(st, { type: "pass" }).events
+      .filter((e) => e.type === "damage" && !e.dot && e.source?.side === 0 && e.source?.pos === 0)
+      .reduce((s, e) => s + (e.totalAmount ?? e.amount), 0)
+  }
+  const full = asunaDmg(1)
+  const empty = asunaDmg(0)
+  check("满血吃基础倍率", full > 0, true)
+  check("空血约 1.5 倍满血", Math.round((empty / full) * 100) / 100, 1.5)
+  check("卡面写清越残越高", /越残/.test(describeEffect(asuna.skill)), true)
   const shun = ROSTER.find((t) => t.name === "瞬")
   const tsurugi = ROSTER.find((t) => t.name === "鹤城")
   check("瞬的攻速减益是 aa，不是 dmg_deal",
@@ -1460,6 +1483,156 @@ console.log("\n=== 39. 切里诺：EX 全体、集火选最高攻、嘲讽优先
     // 切里诺放过技能，三个队友的刀仍被嘲讽吸走。回合结束嘲讽才到期，所以这里不能去读剩余回合
     check("同一回合开火仍被嘲讽拉去打椿", autos, ["1", "1", "1"])
   }
+}
+
+console.log("\n=== 40. ③-a 同时锁定：打死不换目标，奶也按开场血量锁人 ===")
+{
+  // 两个茜都是单体伤害普技。红 1 是前排星野，同战场两个人都会锁她。
+  // 她只剩 1 血，第一个人足够打死。同时锁定则两发都锁星野，第二发伤害照记。
+  const dmg = setup(["茜", "茜", "野宫", "野宫"], ["星野", "野宫", "野宫", "野宫"])
+  for (const s of dmg.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+  // 命中拉满：闪避有 0.2 下限，星野底闪 1416，得给茜加命中才必中
+  for (const u of dmg.sides[0].units) u.buffs.push({ stat: "acc", value: 20, turns: 99, st: -1 })
+  dmg.sides[1].units[0].hp = 1
+  dmg.sides[0].units[0].skillCd = 0
+  dmg.sides[0].units[1].skillCd = 0
+  const dmgR = run(dmg, { type: "pass" })
+  const skillHits = dmgR.events
+    .filter((e) => e.type === "action" && e.action === "skill" && e.source.side === 0)
+    .map((e) => (e.targets || []).map((t) => t.pos + 1))
+  check("两个单体普技都锁开场那个残血前排，第二发不换人", skillHits, [[1], [1]])
+  check("第二发伤害仍记在同一个人头上（同时命中，不丢）",
+    dmgR.events.some((e) => e.type === "damage" && !e.dot && e.source?.side === 0
+      && e.source?.pos === 1 && e.target?.pos === 0 && (e.totalAmount ?? e.amount) > 0), true)
+  check("倒下只报一次", dmgR.log.filter((l) => /倒下/.test(l)).length, 1)
+
+  // 椿 20% 会自奶，小春 / 绿同一回合都就绪。同时锁定则三个人都认椿；
+  // 若顺序结算，椿先奶满，小春就找不到 ≤50% 的人、绿改奶别人。
+  const healSt = setup(["椿", "小春", "绿", "野宫"], ["椿", "椿", "椿", "椿"])
+  for (const s of healSt.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+  healSt.sides[0].units[0].hp = Math.round(healSt.sides[0].units[0].maxhp * 0.2)
+  healSt.sides[0].units[1].skillCd = 0
+  healSt.sides[0].units[2].skillCd = 0
+  const healR = run(healSt, { type: "pass" })
+  const heals = healR.events
+    .filter((e) => e.type === "heal" && e.source.side === 0)
+    .map((e) => [tmplOf(healR.state.sides[0].units[e.source.pos]).name, e.target.pos + 1])
+  check("椿 / 小春 / 绿三发治疗都锁开场最残的椿", heals, [["椿", 1], ["小春", 1], ["绿", 1]])
+  check("小春这一轮算出手了（不是椿奶满后找不到人）",
+    healR.state.sides[0].units[1].skillUses, 1)
+}
+
+console.log("\n=== 41. ③-b 普攻同时锁定；普攻触发的技能仍会换人 ===")
+{
+  // 同战场两个后排都锁红 1 前排。红 1 只剩 1 血，第一枪足够打死。
+  const st = setup(["野宫", "野宫", "野宫", "野宫"], ["星野", "野宫", "野宫", "野宫"])
+  for (const s of st.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+  for (const u of st.sides[0].units) u.buffs.push({ stat: "acc", value: 20, turns: 99, st: -1 })
+  st.sides[1].units[0].hp = 1
+  const r = run(st, { type: "pass" })
+  const autos = r.events
+    .filter((e) => e.type === "action" && e.action === "normal" && e.source.side === 0)
+    .map((e) => (e.targets || []).map((t) => t.pos + 1))
+  // 1·2 号位同战场，都会锁红 1；3·4 是另一战场，本来就打自己那边
+  check("同战场两个普攻都锁开场那个残血前排，不换人", autos.slice(0, 2), [[1], [1]])
+  check("另一战场不受影响", autos.slice(2), [[3], [4]])
+  check("后手普攻伤害仍记在红 1 头上",
+    r.events.some((e) => e.type === "damage" && !e.dot && e.source?.side === 0
+      && e.source?.pos === 1 && e.target?.pos === 0 && (e.totalAmount ?? e.amount) > 0), true)
+  check("普攻阶段倒下只报一次", r.log.filter((l) => /倒下/.test(l)).length, 1)
+
+  // 泉奈第 6 枪触发手里剑：普攻仍打尸体，手里剑按当时场上重锁到红 2
+  const iz = setup(["泉奈", "野宫", "野宫", "野宫"], ["星野", "野宫", "野宫", "野宫"])
+  for (const s of iz.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+  for (const u of iz.sides[0].units) u.buffs.push({ stat: "acc", value: 20, turns: 99, st: -1 })
+  iz.sides[1].units[0].hp = 1
+  iz.sides[0].units[0].autoCount = 5
+  iz.sides[0].units[0].skillCd = 0
+  const izR = run(iz, { type: "pass" })
+  const izAuto = izR.events.find((e) =>
+    e.type === "action" && e.action === "normal" && e.source.side === 0 && e.source.pos === 0)
+  const izSkill = izR.events.find((e) =>
+    e.type === "action" && e.action === "skill" && e.source.side === 0 && e.source.pos === 0)
+  const allyAuto = izR.events.find((e) =>
+    e.type === "action" && e.action === "normal" && e.source.side === 0 && e.source.pos === 1)
+  check("泉奈普攻仍锁开场的残血前排", (izAuto?.targets || []).map((t) => t.pos + 1), [1])
+  check("队友普攻也锁那具尸体，不换人", (allyAuto?.targets || []).map((t) => t.pos + 1), [1])
+  check("手里剑是普攻触发，目标死了会换到红 2", (izSkill?.targets || []).map((t) => t.pos + 1), [2])
+
+  // 击杀触发只认内部谁先把血打到 0
+  const killSt = setup(["鹤城", "野宫", "野宫", "野宫"], ["星野", "野宫", "野宫", "野宫"])
+  for (const s of killSt.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+  for (const u of killSt.sides[0].units) u.buffs.push({ stat: "acc", value: 20, turns: 99, st: -1 })
+  killSt.sides[1].units[0].hp = 1
+  killSt.sides[0].units[0].skillCd = 0
+  const killR = run(killSt, { type: "pass" })
+  check("只有先把血打到 0 的鹤城触发击杀技", killR.state.sides[0].units[0].skillUses, 1)
+  check("后手野宫打在已倒下的人身上，不再触发击杀", killR.state.sides[0].units[1].skillUses, 0)
+}
+
+console.log("\n=== 42. 被控：条件技不吞，周期技照吞 ===")
+{
+  const fat = (st) => {
+    for (const s of st.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
+  }
+  const cc = (u, icon) => { u.stun = 1; u.stunIcon = icon; u.stunSt = -1 }
+
+  // 小春：有人 ≤50%、CD 好了，但她被恐惧。放不出，也不进冷却。
+  const koharuSt = setup(["小春", "椿", "野宫", "野宫"], ["野宫", "野宫", "野宫", "野宫"])
+  fat(koharuSt)
+  koharuSt.sides[0].units[1].hp = Math.round(koharuSt.sides[0].units[1].maxhp * 0.4)
+  koharuSt.sides[0].units[0].skillCd = 0
+  cc(koharuSt.sides[0].units[0], "Fear")
+  const koharuR = run(koharuSt, { type: "pass" })
+  const kAfter = koharuR.state.sides[0].units[0]
+  check("小春被恐惧：条件够了也不放",
+    koharuR.events.some((e) => e.type === "heal" && e.source?.side === 0 && e.source?.pos === 0), false)
+  check("小春这次不进冷却、不记次数", [kAfter.skillCd, kAfter.skillUses], [0, 0])
+  check("小春战报是无法行动，不是被打断",
+    koharuR.log.some((l) => /小春 恐惧，无法行动/.test(l)), true)
+  check("小春这一轮也不普攻",
+    koharuR.events.some((e) => e.type === "action" && e.action === "normal" && e.source.side === 0 && e.source.pos === 0), false)
+
+  let kNext = run(koharuR.state, { type: "pass" }).state
+  kNext.sides[0].units[1].hp = Math.round(kNext.sides[0].units[1].maxhp * 0.4)
+  const koharu2 = run(kNext, { type: "pass" })
+  check("解控后小春还能放", koharu2.state.sides[0].units[0].skillUses, 1)
+  check("解控后小春才进冷却", koharu2.state.sides[0].units[0].skillCd > 0, true)
+
+  const cond = (name) => {
+    const st = setup([name, "野宫", "野宫", "野宫"], ["野宫", "野宫", "野宫", "野宫"])
+    fat(st)
+    const u = st.sides[0].units[0]
+    u.hp = Math.round(u.maxhp * 0.15)
+    cc(u, "Stunned")
+    return run(st, { type: "pass" })
+  }
+  const tb = cond("椿")
+  check("椿被眩晕：残血也不自奶",
+    tb.events.some((e) => e.type === "heal" && e.source?.side === 0 && e.source?.pos === 0), false)
+  check("椿的每场 1 次没被烧掉", tb.state.sides[0].units[0].skillUses, 0)
+
+  const hs = cond("星野")
+  check("星野被眩晕：急救治疗不触发",
+    hs.events.some((e) => e.type === "heal" && e.source?.side === 0 && e.source?.pos === 0), false)
+  check("星野的次数没被烧掉", hs.state.sides[0].units[0].skillUses, 0)
+
+  let tbNext = run(tb.state, { type: "pass" }).state
+  tbNext.sides[0].units[0].hp = Math.round(tbNext.sides[0].units[0].maxhp * 0.15)
+  const tb2 = run(tbNext, { type: "pass" })
+  check("解控后椿还能自奶", tb2.state.sides[0].units[0].skillUses, 1)
+
+  // 野宫：按回合数转的周期技，就绪时被控就吞
+  const n = setup(["野宫", "野宫", "野宫", "野宫"], ["野宫", "野宫", "野宫", "野宫"])
+  n.sides[0].units[0].skillCd = 0
+  cc(n.sides[0].units[0], "Stunned")
+  const nR = run(n, { type: "pass" })
+  const nu = nR.state.sides[0].units[0]
+  check("周期技就绪被控：当场被打断进冷却", [nu.skillUses, nu.skillCd > 0], [1, true])
+  check("周期技战报是被打断",
+    nR.log.some((l) => /野宫 眩晕，「.+」被打断/.test(l)), true)
+  check("周期技没真正放出去",
+    nR.events.some((e) => e.type === "action" && e.action === "skill" && e.source.side === 0 && e.source.pos === 0), false)
 }
 
 console.log(bad ? `\n✗ ${bad} 条不符` : "\n全部符合")

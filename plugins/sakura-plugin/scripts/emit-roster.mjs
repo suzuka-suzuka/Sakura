@@ -275,6 +275,24 @@ function levelDuration(sk, e) {
 }
 
 /** 一个 Damage 效果 → 分段倍率数组。每段独立判定命中/暴击，所以不能合并成一个总倍率。 */
+/**
+ * `TargetHpRateModifier`：按目标当前血量百分比线性改伤害/治疗倍率。
+ * 全数据 8 个技能有（池内只有明日奈的爱用品普技）。
+ *   MinHpRate / MaxHpRate 是万分比；MultiplierMin 对应最低血、MultiplierMax 对应最高血。
+ *   明日奈：0% → ×1.5，100% → ×1（越残越高）
+ *   未花：  0% → ×1，  100% → ×2（越满越高）
+ */
+function hpRateOf(e) {
+  const m = e?.TargetHpRateModifier
+  if (!m) return null
+  return {
+    lo: (m.MinHpRate ?? 0) / 1e4,
+    hi: (m.MaxHpRate ?? 10000) / 1e4,
+    atLo: m.MultiplierMin,
+    atHi: m.MultiplierMax,
+  }
+}
+
 function hitsOf(dmg) {
   const total = dmg.Scale[SKILL_LV]
   const split = dmg.Hits || [10000]
@@ -489,6 +507,12 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
     // 桃的 EX 原文是扇形，但那是个 850 长 / 45° 的窄锥，几何上就是一条线，
     // 按纯子那套走贯穿（用户口径，跟堇「原文是扇、口径按伊织」同类）。
     if (/对直线范围内/.test(desc) || student?.Id === 13011) out.depth = "through"
+  }
+  // 「目标生命值百分比越低/越高，取值越高」——结构化字段，不是描述抠的。
+  // 明日奈爱用品普技：满血 ×1、空血 ×1.5，Scale 是 100% 那一档。
+  if (out.hits && dmgs[0]) {
+    const hr = hpRateOf(dmgs[0])
+    if (hr) out.hpRate = hr
   }
 
   // 附带在伤害上的效果（控制/减益/击退）原数据不写 Target，隐含跟随伤害目标

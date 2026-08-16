@@ -859,6 +859,7 @@ function resolveTargets(state, u, skill, foes, allies, pick, actionKind) {
 
 function applyDamage(ctx, src, tgt, dmg, meta = {}) {
   const total = dmg
+  const wasAlive = tgt.alive
   let absorbed = 0
   if (tgt.shield > 0) {
     absorbed = Math.min(tgt.shield, dmg)
@@ -868,7 +869,7 @@ function applyDamage(ctx, src, tgt, dmg, meta = {}) {
   }
   tgt.hp -= dmg
   // 不死：伤害照吃、血条照掉，只是**掉不到 0**。护盾先扣完再轮到它兜底，两者不冲突
-  const saved = tgt.hp <= 0 && tgt.immortal > 0
+  const saved = tgt.hp <= 0 && tgt.immortal > 0 && wasAlive
   if (saved) tgt.hp = 1
 
   emitEvent(ctx, {
@@ -890,13 +891,16 @@ function applyDamage(ctx, src, tgt, dmg, meta = {}) {
 
   if (tgt.hp <= 0) {
     tgt.hp = 0
-    tgt.alive = false
-    tgt.taunt = 0
-    tgt.focus = 0
-    tgt.regens.length = 0
-    tgt.dots.length = 0
-    ctx.log(`  ✝ ${nameOf(tgt)} ${tgt.summon ? "被打碎" : "倒下"}`)
-    if (src && src !== tgt && src.alive) tryKillProc(ctx, src)
+    // 同时锁定的后手仍会打到这个人（伤害照记、图也照画），但击杀只认第一次掉到 0 的那个人
+    if (wasAlive) {
+      tgt.alive = false
+      tgt.taunt = 0
+      tgt.focus = 0
+      tgt.regens.length = 0
+      tgt.dots.length = 0
+      ctx.log(`  ✝ ${nameOf(tgt)} ${tgt.summon ? "被打碎" : "倒下"}`)
+      if (src && src !== tgt && src.alive) tryKillProc(ctx, src)
+    }
   }
 }
 
@@ -904,9 +908,23 @@ function applyDamage(ctx, src, tgt, dmg, meta = {}) {
  * 对单个目标打出一组分段攻击。每段独立判定命中与暴击（与原作一致），
  * 因此段数越多伤害方差越小；结算后合并成一条伤害事件，避免刷屏。
  */
-function strike(ctx, src, tgt, hits, actionKind) {
+/**
+ * 按目标当前血量改这一发的倍率（`TargetHpRateModifier`）。
+ * lo/hi 是血量百分比，atLo 对应最低血、atHi 对应最高血，中间线性。
+ */
+function hpRateMult(mod, tgt) {
+  if (!mod || !tgt?.maxhp) return 1
+  const hp = Math.max(0, Math.min(1, tgt.hp / tgt.maxhp))
+  const span = (mod.hi ?? 1) - (mod.lo ?? 0)
+  const t = span === 0 ? 0 : Math.max(0, Math.min(1, (hp - (mod.lo ?? 0)) / span))
+  return mod.atLo + t * (mod.atHi - mod.atLo)
+}
+
+function strike(ctx, src, tgt, hits, actionKind, skill) {
   const { state } = ctx
-  if (!tgt.alive || !src.alive) return 0
+  // 同时锁定的后手可以打在已经倒下的人身上（原作同一拍，伤害不丢）。
+  // 击杀触发只在 applyDamage 里认「第一次掉到 0」。
+  if (!src.alive || !tgt) return 0
 
   const aff = affinity(tmplOf(src).atkType, tmplOf(tgt).defType)
   const hr = hitChance(src, tgt)
@@ -922,6 +940,7 @@ function strike(ctx, src, tgt, hits, actionKind) {
   // 属性增伤（爱用品，桃给绿的 +13.2% 贯通）。按**攻击者自己的弹种**匹配，
   // 所以同一层给不同弹种的队友，效果不一样 —— 原作就是这么设计的
   dealF *= factorOf(src, `enh_${tmplOf(src).bullet}`)
+  dealF *= hpRateMult(skill?.hpRate, tgt)
   dealF = Math.max(0.1, dealF)
   const takeF = Math.max(0.1, factorOf(tgt, "dmg_take"))
 
@@ -1324,12 +1343,14 @@ function applyEffects(ctx, u, skill, dmgTargets, allies, pick, actionKind) {
  * 执行一个技能（EX / 普通技能 / 普攻）。
  * @param {string} label 日志抬头，含技能名
  * @param {"ex"|"skill"|"normal"} actionKind 供渲染层区分动作类型
+ * @param {Array<object>} [lockedTargets] ③-a 同时锁定的目标，传入后不再重算、打死也不换人
  */
-function execute(ctx, u, skill, label, actionKind, pick) {
+function execute(ctx, u, skill, label, actionKind, pick, lockedTargets) {
   const { state } = ctx
   const me = state.sides[u.side]
   const foes = state.sides[1 - u.side]
-  const targets = resolveTargets(state, u, skill, foes, me, pick, actionKind)
+  const locked = Boolean(lockedTargets)
+  const targets = lockedTargets || resolveTargets(state, u, skill, foes, me, pick, actionKind)
   // 一个合法目标都没有 = 这一发根本没出去。返回 false 让调用方决定要不要算「出手过」——
   // 小春的「我来治疗！」要求队友血量 ≤50%，全队满血时她不该白白扣掉冷却和普攻
   if (!targets.length && skill.target !== "self") return false
@@ -1359,7 +1380,8 @@ function execute(ctx, u, skill, label, actionKind, pick) {
   // 条件追伤：状态到了哪一档就换哪一组倍率（妮露的 Fury、爱丽丝的能量充能）
   const hits = altHitsOf(u, skill) || skill.hits
   if (hits?.length) {
-    if (skill.target === "enemy_cycle") {
+    // ③-a 同时锁定后不再走连发/弹射的「打死换人」——那是单发技能内部的逐段重锁
+    if (!locked && skill.target === "enemy_cycle") {
       /**
        * 绿：「对最多 5 名敌方单位**按顺序**造成…共计 5 次」——
        * 从**跟自己对位的号位**起，按号位在存活敌人里循环，一发一个。
@@ -1375,10 +1397,10 @@ function execute(ctx, u, skill, label, actionKind, pick) {
         const ring = [...al].sort((a, b) =>
           ((a.idx - u.idx + 4) % 4) - ((b.idx - u.idx + 4) % 4))
         const t = ring[i % ring.length]
-        strike(ctx, u, t, [hits[i]], actionKind)
+        strike(ctx, u, t, [hits[i]], actionKind, skill)
         if (!hit.includes(t)) hit.push(t)
       }
-    } else if (skill.target === "enemy_chain") {
+    } else if (!locked && skill.target === "enemy_chain") {
       // 连发：**只有第一发听玩家的**，后面每一发都照普攻的规则重锁一次
       //（人偶 → 前排 → 中排 → 后排），不再有「不能和上一发相同」那条 ——
       // 有前排就后两发全打前排，有人偶就全打人偶，这才是「视作普攻索敌」。
@@ -1387,16 +1409,16 @@ function execute(ctx, u, skill, label, actionKind, pick) {
       for (const [i, pct] of hits.entries()) {
         const t = i === 0 && first?.alive ? first : laneTarget(u, foes)
         if (!t) break
-        strike(ctx, u, t, [pct], actionKind)
+        strike(ctx, u, t, [pct], actionKind, skill)
         if (!hit.includes(t)) hit.push(t)
       }
-    } else if (skill.target === "enemy_random") {
+    } else if (!locked && skill.target === "enemy_random") {
       // 弹射：每一段单独抽目标
       for (const pct of hits) {
         const al = aliveOf(foes)
         if (!al.length) break
         const t = randPick(state, al)
-        strike(ctx, u, t, [pct], actionKind)
+        strike(ctx, u, t, [pct], actionKind, skill)
         if (!hit.includes(t)) hit.push(t)
       }
     } else {
@@ -1407,7 +1429,7 @@ function execute(ctx, u, skill, label, actionKind, pick) {
       for (const [i, t] of targets.entries()) {
         const base = i > 0 && skill.splashHits ? skill.splashHits : hits
         const cut = skill.falloff ? Math.min(skill.falloff.rate * i, skill.falloff.max) : 0
-        strike(ctx, u, t, cut ? base.map((h) => h * (1 - cut)) : base, actionKind)
+        strike(ctx, u, t, cut ? base.map((h) => h * (1 - cut)) : base, actionKind, skill)
         hit.push(t)
       }
     }
@@ -1419,6 +1441,27 @@ function execute(ctx, u, skill, label, actionKind, pick) {
 }
 
 /**
+ * 这一发普攻用哪套参数。强化形态抄 `u.charge`（鹤城扇形 / 瞬改索敌），否则抄模板。
+ * ③-b 同时锁定时先拿这个去 resolveTargets，再交给 autoAttack 结算。
+ */
+function autoSkillOf(u) {
+  const tmpl = tmplOf(u)
+  const c = u.charge
+  if (c && (c.shots > 0 || c.turns > 0)) {
+    return {
+      target: c.count > 1 ? "enemy_adjacent" : "enemy_single",
+      count: c.count, hits: c.hits, effects: [],
+      charged: true,
+    }
+  }
+  return {
+    target: tmpl.autoAttack.target || "enemy_single",
+    count: tmpl.autoAttack.count || 1,
+    hits: tmpl.autoAttack.hits, effects: [],
+  }
+}
+
+/**
  * 普攻：对线锁定，分段独立判定。
  *
  * 处于强化形态时改用 `u.charge.hits`（原作的 `Skills.Normal.FormChange`），可能还打成扇形。
@@ -1426,27 +1469,19 @@ function execute(ctx, u, skill, label, actionKind, pick) {
  *
  * 主目标仍然走 `laneTarget` —— 强化的是威力和覆盖面。**索敌是不是也变了由 charge.targeting 决定**，
  * 那是瞬独有的，鹤城不带这个字段。
+ *
+ * `lockedTargets` 由 ③-b 同时锁定传入。不换人，伤害照算；普攻触发的技能（泉奈手里剑）
+ * 在 tryAutoProc 里另走 execute，不带锁，目标死了会重锁。
  */
-function autoAttack(ctx, u) {
-  const tmpl = tmplOf(u)
+function autoAttack(ctx, u, lockedTargets) {
   const c = u.charge
-  if (c && (c.shots > 0 || c.turns > 0)) {
-    if (c.shots > 0) c.shots -= 1
-    execute(ctx, u, {
-      target: c.count > 1 ? "enemy_adjacent" : "enemy_single", count: c.count,
-      hits: c.hits, effects: [],
-    }, "强化普攻", "normal")
-    // 打完最后一发才清：清早了这一发就读不到 charge.targeting，瞬的最后一枪会打回对位
-    if (c.shots != null && c.shots <= 0) u.charge = null
-    tryAutoProc(ctx, u)
-    return
-  }
-  // 普攻本身也可能是范围的（千世的圆形普攻），照模板里的 target/count 走
+  const sk = autoSkillOf(u)
+  if (c && c.shots > 0) c.shots -= 1
   execute(ctx, u, {
-    target: tmpl.autoAttack.target || "enemy_single",
-    count: tmpl.autoAttack.count || 1,
-    hits: tmpl.autoAttack.hits, effects: [],
-  }, "普攻", "normal")
+    target: sk.target, count: sk.count, hits: sk.hits, effects: [],
+  }, sk.charged ? "强化普攻" : "普攻", "normal", null, lockedTargets)
+  // 打完最后一发才清：清早了这一发就读不到 charge.targeting，瞬的最后一枪会打回对位
+  if (c && c.shots != null && c.shots <= 0) u.charge = null
   tryAutoProc(ctx, u)
 }
 
@@ -1470,6 +1505,15 @@ function consumeSkill(u) {
   u.skillUses += 1
   if (tr.type === "on_kill") u.skillCd = tr.turns || 0
   else u.skillCd = (tr.type === "cooldown" || tr.type === "on_auto") ? tr.turns : 99
+}
+
+/**
+ * 被控时：按回合数转的周期技（「每 N 秒」）就绪就吞这一发。
+ * 条件门控的不吞 —— 血量触发（椿 / 星野 / 纯子）和小春那种 ICD（冷却只是再用间隔）。
+ */
+function swallowOnCc(u) {
+  const tr = tmplOf(u).skill?.trigger
+  return tr?.type === "cooldown" && !tr.icd
 }
 
 /** 鹤城 / 莲见：自己击杀掉才触发。鹤城有 10 秒 CD，莲见每刀都能换弹补枪。 */
@@ -1887,15 +1931,17 @@ export function playerTurn(prev, action) {
   const acted = new Set()
   const foes = () => state.sides[1 - state.activeSide]
 
-  // ③-a 普通技能。控制在这一阶段结算，被控的人后面也不普攻
+  // ③-a 普通技能。原作同一拍触发：先按此刻的血量/站位把目标锁死，再一起结算。
+  // 按人顺序打的话，第一个人把残血打死，第二个人会换目标；小春把椿奶满，绿就改奶别人。
+  // 控制在这一阶段结算，被控的人后面也不普攻。
+  const skillQueue = []
   for (const u of side.units) {
-    if (sideDead(foes())) break
     if (!u.alive || usedEx.has(u.idx)) continue
     if (u.stun > 0) {
       const cc = CC_TEXT[u.stunIcon] || "控制"
-      // 被控时已经就绪的普通技能**当场被吞**，不是留到下回合：抬手被打断，照样进冷却。
-      // 冷却型重新压满，条件型（星野）会消耗一次 maxUses —— 这是被控的真实代价。
-      if (skillReady(u)) {
+      // 周期技就绪 = 这一拍本来就要放，被控等于抬手被打断，照样进冷却。
+      // 条件技（hp_below / 小春 icd）只是放不出：没真正出手就不记账。
+      if (skillReady(u) && swallowOnCc(u)) {
         const sk = tmplOf(u).skill
         consumeSkill(u)
         lines.push(`[${tag}] ${nameOf(u)} ${cc}，「${sk.name}」被打断`)
@@ -1909,29 +1955,44 @@ export function playerTurn(prev, action) {
     const sk = tmplOf(u).skill
     // 先打出去再记账：没有合法目标（小春全队满血）就当这一轮没放 ——
     // 不进冷却、也不占掉 ③-b 的普攻
-    if (!execute(ctx, u, sk, `普通技能「${sk.name}」`, "skill")) continue
+    const locked = resolveTargets(state, u, sk, foes(), side, null, "skill")
+    if (!locked.length && sk.target !== "self") continue
+    skillQueue.push({ u, sk, locked })
+  }
+  for (const { u, sk, locked } of skillQueue) {
+    if (!u.alive) continue
+    if (!execute(ctx, u, sk, `普通技能「${sk.name}」`, "skill", null, locked)) continue
     consumeSkill(u)
     acted.add(u.idx)
-    if (checkEnd(state)) {
-      state.turnOpen = false
-      state.turnEx = []
-      settle(state)
-      return done()
-    }
+  }
+  if (checkEnd(state)) {
+    state.turnOpen = false
+    state.turnEx = []
+    settle(state)
+    return done()
   }
 
-  // ③-b 普攻。放过 EX 的人默认不打；立即换弹的（鹤城 / 芹香）在这里补，不跟 EX 画在同一张图里。
+  // ③-b 普攻。跟 ③-a 一样先锁目标再结算（原作同一拍），打死不换人。
+  // 放过 EX 的人默认不打；立即换弹的（鹤城 / 芹香）在这里补，不跟 EX 画在同一张图里。
+  // 普攻触发的技能（泉奈手里剑 / 泉 20%）在 tryAutoProc 里另算，不带这把锁，死了会换人。
+  const autoQueue = []
   for (const u of side.units) {
-    if (sideDead(foes())) break
     if (!u.alive || acted.has(u.idx)) continue
     if (usedEx.has(u.idx) && !tmplOf(u).ex?.thenAutoAttack) continue
-    autoAttack(ctx, u)
-    if (checkEnd(state)) {
-      state.turnOpen = false
-      state.turnEx = []
-      settle(state)
-      return done()
-    }
+    autoQueue.push({
+      u,
+      locked: resolveTargets(state, u, autoSkillOf(u), foes(), side, null, "normal"),
+    })
+  }
+  for (const { u, locked } of autoQueue) {
+    if (!u.alive) continue
+    autoAttack(ctx, u, locked)
+  }
+  if (checkEnd(state)) {
+    state.turnOpen = false
+    state.turnEx = []
+    settle(state)
+    return done()
   }
 
   // ④ 回合结束：先结算状态时长，再回复 Cost（所以首轮双方都不回）

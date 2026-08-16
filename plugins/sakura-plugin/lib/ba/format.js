@@ -292,6 +292,12 @@ export function describeEffect(sk) {
     if (sk.falloff) {
       parts.push(`每多打 1 人衰减 ${Math.round(sk.falloff.rate * 100)}%（最多 ${Math.round(sk.falloff.max * 100)}%）`)
     }
+    if (sk.hpRate) {
+      const a = sk.hpRate
+      parts.push(a.atLo > a.atHi
+        ? `目标越残伤害越高（满血 ×${a.atHi}，空血 ×${a.atLo}）`
+        : `目标血越满伤害越高（空血 ×${a.atLo}，满血 ×${a.atHi}）`)
+    }
   }
   for (const e of sk.effects || []) {
     // 技能 1 级时数值为 0 的效果根本不存在 —— 与其写「无效」不如不写
