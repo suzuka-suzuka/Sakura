@@ -36,7 +36,7 @@ function statusIcons(u, provoker) {
   if (u.regens.length) s.push(`💚持续治疗${u.regens.length > 1 ? u.regens.length : ""}`)
   if (u.immortal > 0) s.push(`❤️不死${u.immortal}`)
   if (u.exDiscount?.uses) s.push(`⏬EX减费${u.exDiscount.uses}次`)
-  if (u.charge) s.push(`⏫强化${u.charge.turns ?? u.charge.shots}`)
+  if (u.charge) s.push(`⚡形态转换${u.charge.turns ?? u.charge.shots}`)
 
   const summary = (stat) => {
     const bySource = new Map()
@@ -47,7 +47,7 @@ function statusIcons(u, provoker) {
     const layers = [...bySource.values()]
     return { value: layers.reduce((v, st) => v * (1 + st.value), 1) - 1, layers: layers.length }
   }
-  const LABEL = { atk: "攻", dfs: "防", dmg_deal: "增伤", dmg_take: "受伤", crit: "暴击", crit_dmg: "暴伤", acc: "命中", dodge: "闪避", heal: "治疗" }
+  const LABEL = { atk: "攻", dfs: "防", dmg_deal: "增伤", aa: "速", dmg_take: "受伤", crit: "暴击", crit_dmg: "暴伤", acc: "命中", dodge: "闪避", heal: "治疗" }
   for (const [stat, label] of Object.entries(LABEL)) {
     const m = summary(stat)
     if (!m.layers) continue
@@ -209,6 +209,7 @@ const STAT_TEXT = {
   atk: "攻击力", dfs: "防御力", heal: "治疗力", maxhp: "生命上限",
   crit: "暴击值", crit_dmg: "暴击伤害", acc: "命中值", dodge: "闪避值",
   dmg_deal: "造成伤害", dmg_take: "受到伤害", heal_taken: "受治疗量",
+  aa: "攻速", cost_regen: "Cost回复",
   atk_flat: "攻击力", dfs_flat: "防御力", heal_flat: "治疗力",
   crit_res: "暴击抵抗", crit_dmg_res_flat: "暴伤抵抗",
 }
@@ -244,15 +245,21 @@ export function describeEffect(sk) {
   const tg = TARGET_TEXT[sk.target] || sk.target
   if (sk.hits?.length) {
     const total = sk.hits.reduce((a, b) => a + b, 0)
-    const scope = sk.target === "enemy_adjacent" ? `${tg}共${sk.count}人` : tg
+    const scope = sk.target === "enemy_adjacent"
+      ? (sk.depth === "through"
+        ? (sk.count >= 3 ? `中间扩散共${sk.count}人（直线贯穿，不问身位）` : `同战场共${sk.count}人（直线贯穿，不问身位）`)
+        : sk.count >= 3 ? `横向共${sk.count}人（同身位）`
+          : sk.count > 1 ? `同战场共${sk.count}人（须同身位）`
+            : tg)
+      : tg
     // 连发是「N 枪各锁各的目标」，写成「合计 X% 分 N 段」会让人以为全砸在一个人身上
     if (sk.target === "enemy_chain") {
-      parts.push(`连发 ${sk.hits.length} 枪，每枪 ${(total / sk.hits.length).toFixed(0)}%攻击力；只有第一枪听指挥，之后按普攻规则重锁（人偶/坦克会吃掉后几枪）`)
+      parts.push(`连发 ${sk.hits.length} 枪，每枪 ${(total / sk.hits.length).toFixed(0)}%攻击力；只有第一枪听指挥，之后按普攻规则重锁（人偶/前排会吃掉后几枪）`)
     } else {
       parts.push(`${scope} ${total.toFixed(0)}%攻击力${sk.hits.length > 1 ? ` 分${sk.hits.length}段` : ""}`)
     }
     if (sk.splashHits?.length) {
-      parts.push(`扩散目标只吃 ${sk.splashHits.reduce((a, b) => a + b, 0).toFixed(0)}%`)
+      parts.push(`扩散仅同战场同身位，只吃 ${sk.splashHits.reduce((a, b) => a + b, 0).toFixed(0)}%`)
     }
     if (sk.falloff) {
       parts.push(`每多打 1 人衰减 ${Math.round(sk.falloff.rate * 100)}%（最多 ${Math.round(sk.falloff.max * 100)}%）`)
@@ -276,7 +283,7 @@ export function describeEffect(sk) {
       case "dot":
         // 场地是地上的圈，不是贴在人身上的减益，别写成「灼烧 / 减益」
         if (e.icon === "Zone") {
-          parts.push(`场地持续伤害 ${pct(e.scale)}攻击力（${e.turns}回合）`)
+          parts.push(`场地持续伤害 ${pct(e.scale)}攻击力（${e.turns}回合，盖住同战场两路，不问身位）`)
         } else {
           parts.push(`${who}持续伤害 ${pct(e.scale)}攻击力（${e.turns}回合）`)
         }
@@ -291,7 +298,7 @@ export function describeEffect(sk) {
         parts.push(
           (e.shots ? `换弹强化：接下来 ${e.shots} 发` : `强化形态：${e.turns} 回合内`) +
           `普攻 ${total.toFixed(0)}%攻击力` + (e.hits?.length > 1 ? ` 分${e.hits.length}段` : "") +
-          (e.count > 1 ? `、打 ${e.count} 人` : "") +
+          (e.count > 1 ? `、打 ${e.count} 人（须同战场同身位）` : "") +
           // 索敌变更是这个 EX 最贵的部分，别缩写成「改变索敌」四个字
           (e.targeting === "max_atk" ? "，索敌改为攻击力最高的敌人（只有嘲讽拉得走）" : "")
         )
@@ -313,7 +320,7 @@ export function describeEffect(sk) {
       case "hp_cost": parts.push(`代价：自身失去当前生命的 ${pct(e.rate)}`); break
     }
   }
-  if (sk.thenAutoAttack) parts.push("立即普攻一次")
+  if (sk.thenAutoAttack) parts.push("换弹后本回合仍普攻")
   return parts.join("，") || "无效果"
 }
 

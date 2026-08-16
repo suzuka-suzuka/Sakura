@@ -61,3 +61,5 @@ test/
 # 写成两层通配而不是逐个列目录：加新素材类别（当初加 summons/ 就漏过一次）时
 # 自动覆盖，不会因为忘了补一行就把官方图推上去。
 plugins/sakura-plugin/resources/ba/*/*/
+# 原作战斗状态图标（红/蓝/紫/黄那套），同样是官方美术
+plugins/sakura-plugin/resources/ba/status/

@@ -63,6 +63,7 @@ const BULLET_CN = { Explosion: "爆发", Pierce: "贯通", Mystic: "神秘", Son
 // 短名与 BaBattleImageGenerator 的 ARMOR_VISUAL 键一致（该表的 label 里存全称）
 const ARMOR_CN = { LightArmor: "轻装", HeavyArmor: "重装", Unarmed: "特殊", ElasticArmor: "弹力", CompositeArmor: "复合" }
 const ROLE_CN = { Tanker: "坦克", DamageDealer: "输出", Healer: "治疗", Supporter: "辅助", Vehicle: "载具" }
+const LINE_CN = { Front: "前", Middle: "中", Back: "后" }
 
 const interp = (s1, s100, lv, tr = 1) => {
   const ls = Number(((lv - 1) / 99).toFixed(4))
@@ -123,8 +124,9 @@ const STAT_MAP = {
   // 爱用品强化技能会给这两项抵抗上增益，引擎侧 critResOf / critDmgResOf 有对应的层
   CriticalDamageResistRate_Base: "crit_dmg_res_flat",
   CriticalChanceResistPoint_Coefficient: "crit_res",
-  // 攻速在回合制里等价于 DPS 提升，折成增伤
-  AttackSpeed_Coefficient: "dmg_deal",
+  // 攻速在回合制里没有第二枪，折成普攻增伤（aa）。只乘在普攻上，
+  // EX / 普通技能不吃。鹤城 EX 后的 thenAutoAttack 走普攻，所以会吃到。
+  AttackSpeed_Coefficient: "aa",
   DamagedRatio2_Coefficient: "dmg_take", HealEffectivenessRate_Coefficient: "heal_taken",
 }
 const DROP_STAT = /Range|MoveSpeed|IgnoreDelay|Oppression|BlockRate/
@@ -321,8 +323,10 @@ function buildSkill(sk, { isEx, student }) {
   else out.trigger = parseTrigger(desc)
 
   // 「发射 N 发子弹，每发子弹各对其锁定的敌方单位」—— 每发单独锁目标、逐发换人。
-  // 全 272 人里只有伊织一个（日和（泳装）也是「发射5发子弹」，但明写了 5 发全打第 1 名）。
+  // 伊织原文就这么写；堇的扇形 3 段在回合制里按同一套拆成连发（用户口径）。
   const chain = /发射\s*(\d+)\s*发子弹[^。]*?每发子弹各对其锁定的/.exec(desc)
+    || (isEx && student?.Id === 10012 && (dmgs[0]?.Hits?.length || 0) >= 2
+      ? ["", String(hitsOf(dmgs[0]).length)] : null)
   const zone = dmgs.length ? zoneDot(dmgs[0]) : null
   const inst = chain || zone ? 0 : instanceCount(sk, dmgs[0])
   if (zone) {
@@ -347,6 +351,8 @@ function buildSkill(sk, { isEx, student }) {
     // 只在 AoE 上成立：弹射（enemy_random）逐段抽目标，没有「第几个」的概念
     const fo = parseFalloff(desc)
     if (fo && /adjacent|all/.test(out.target)) out.falloff = fo
+    // 直线贯穿（晴奈、纯子）不问前中后，圈到谁打谁。横向圆/扇才锁同层。
+    if (/对直线范围内/.test(desc)) out.depth = "through"
   }
 
   // 附带在伤害上的效果（控制/减益/击退）原数据不写 Target，隐含跟随伤害目标
@@ -513,9 +519,9 @@ function buildSkill(sk, { isEx, student }) {
   }
 
   const charge = out.effects.find((e) => e.type === "charge")
-  // 「立即换弹」在回合制里唯一有意义的翻译：上完效果立刻普攻一次。
-  // 换弹强化也走这条 —— 换完弹当场就能开枪，那一发已经是强化过的，
-  // 由 autoAttack() 从 u.charge 里扣掉，所以第 1 发落在施放回合、第 2 发落在下个回合。
+  // 「立即换弹」：EX 只上形态 / 增益，普攻留到 ③-b 跟别人一起打。
+  // 鹤城、芹香都是这种。别把普攻塞进 EX 结算 —— 那会让转换技看起来像伤害技。
+  // 换弹强化的第 1 发因此落在施放回合的普攻阶段，第 2 发落在下个己方回合。
   if (/立即换弹|马上换弹/.test(desc)) out.thenAutoAttack = true
   // 「换弹后失效」的增益没有 Duration 字段，让它跟强化射击同寿。
   // 进攻向 Buff 施放回合就算第 1 回合（那一回合他就要出手），而第 1 发也在施放回合，所以正好 = shots。
@@ -551,7 +557,8 @@ const units = IDS.map(([sid, code]) => {
   const pub = pickPublicSkill(c)
   return {
     id: code, sid, name: c.Name, star: FORCE_STAR, baseStar: c.StarGrade,
-    atkType: BULLET_CN[c.BulletType], defType: ARMOR_CN[c.ArmorType], role: ROLE_CN[c.TacticRole],
+    atkType: BULLET_CN[c.BulletType], defType: ARMOR_CN[c.ArmorType],
+    role: ROLE_CN[c.TacticRole], line: LINE_CN[c.Position],
     bullet: c.BulletType, armor: c.ArmorType,
     hp: interp(c.MaxHP1, c.MaxHP100, LEVEL, m.hp),
     atk: interp(c.AttackPower1, c.AttackPower100, LEVEL, m.atk),
@@ -687,7 +694,7 @@ console.log("\n=== 转换告警 ===")
 console.log(warn.length ? warn.join("\n") : "无")
 console.log("\n=== 技能结构预览 ===")
 for (const u of units) {
-  console.log(`\n${u.name} ${u.atkType}/${u.defType} ${u.role}`)
+  console.log(`\n${u.name} ${u.atkType}/${u.defType} ${u.line}排/${u.role}`)
   console.log("  EX  ", JSON.stringify(u.ex))
   console.log("  普技", JSON.stringify(u.skill))
   console.log("  普攻", JSON.stringify(u.autoAttack))

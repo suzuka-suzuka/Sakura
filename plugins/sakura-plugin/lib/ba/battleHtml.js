@@ -12,12 +12,14 @@
  */
 import { CFG } from "./roster.js"
 import { tmplOf, exWaitOf, turnCostOf, exRefreshPending, exCostOf, provokedBy, exLockedOf } from "./engine.js"
-import { artOf, summonArtOf, fontFace, FONT_STACK, ATTACK, ARMOR, inkOf, esc } from "./htmlAssets.js"
+import { artOf, summonArtOf, statusIconOf, fontFace, FONT_STACK, ATTACK, ARMOR, inkOf, esc } from "./htmlAssets.js"
 
 export const MAP_WIDTH = 1200
 const HUD_HEIGHT = 288
-// 顶栏 130（含上下外边距）+ 阵列 940 + HUD；HUD 贴底绝对定位，三段正好接上
-export const MAP_HEIGHT = 130 + 940 + HUD_HEIGHT
+/** 阵列加高：前/中/后三层 + 抛出召唤物在敌方前排前面那一格 */
+const ARENA_H = 1200
+// 顶栏 130（含上下外边距）+ 阵列 + HUD；HUD 贴底绝对定位，三段正好接上
+export const MAP_HEIGHT = 130 + ARENA_H + HUD_HEIGHT
 
 const pctOf = (u) => Math.max(0, Math.min(100, (u.hp / u.maxhp) * 100))
 
@@ -27,11 +29,24 @@ const SEGS = [25, 50, 75].map((p) => `<b class="seg" style="left:${p}%"></b>`).j
 /** 特效层坐标系 = arena 内部坐标（arena 左右各留 34px 边距），不是整图坐标 */
 const ARENA_MARGIN = 34
 const ARENA_W = MAP_WIDTH - ARENA_MARGIN * 2
-const ARENA_H = 940
 /** 四个号位是等分的 grid 列，中心落在 1/8、3/8、5/8、7/8 */
 const LANE_X = [0, 1, 2, 3].map((i) => (ARENA_W * (i * 2 + 1)) / 8)
-const RED_Y = 175
-const BLUE_Y = ARENA_H - 175
+const RED_Y = 200
+const BLUE_Y = ARENA_H - 200
+/** 前排往交战线迈一个身位，中排半步，后排不动。深度是角色属性，不是格子。 */
+const LINE_SHIFT = { 前: 96, 中: 48, 后: 0 }
+/** 抛出型召唤物站在敌方前排再往前一个身位 */
+const SUMMON_AHEAD = 200
+function lineShiftOf(side, u) {
+  const step = LINE_SHIFT[tmplOf(u).line] ?? 0
+  return side === 1 ? step : -step
+}
+/** 佩洛洛扔在敌方半场，挡在对方前排前面 */
+function summonStandY(sm) {
+  const foe = 1 - sm.side
+  const front = foe === 1 ? RED_Y + LINE_SHIFT.前 : BLUE_Y - LINE_SHIFT.前
+  return front + (foe === 1 ? SUMMON_AHEAD : -SUMMON_AHEAD)
+}
 
 /**
  * 暴击框的爆炸轮廓。
@@ -88,6 +103,8 @@ const ICON = {
   dodge: SVG(`<path d="M11.4 3.2 20.4 12l-9 8.8-3-2.9L15.3 12 8.4 6.1Z"/>
     <rect x="2.6" y="7.4" width="4.6" height="2.5" rx="1.25"/>
     <rect x="2.6" y="14.1" width="4.6" height="2.5" rx="1.25"/>`),
+  // 攻速：双折线快进。跟强化形态的上扬双层、闪避的单箭头都分得开
+  aa: SVG(`<path d="M3.4 4.4 11.8 12 3.4 19.6Z"/><path d="M12.6 4.4 21 12 12.6 19.6Z"/>`),
   // 命中：准星
   acc: SVG(`<path d="M12 2.2a1.4 1.4 0 0 1 1.4 1.4v1.6a7 7 0 0 1 5.4 5.4h1.6a1.4 1.4 0 0 1 0 2.8h-1.6a7 7 0 0 1-5.4 5.4v1.6a1.4 1.4 0 0 1-2.8 0v-1.6a7 7 0 0 1-5.4-5.4H3.6a1.4 1.4 0 0 1 0-2.8h1.6a7 7 0 0 1 5.4-5.4V3.6A1.4 1.4 0 0 1 12 2.2Zm0 5.6a4.2 4.2 0 1 0 0 8.4 4.2 4.2 0 0 0 0-8.4Z"/>
     <circle cx="12" cy="12" r="2"/>`),
@@ -97,9 +114,9 @@ const ICON = {
   // 暴击：大小两枚星芒（凹边四角星，跟眩晕的六角爆星、兜底的实心菱形都分得开）
   crit: SVG(`<path d="M10 2.2c.9 4.4 2.5 6 6.9 6.9-4.4.9-6 2.5-6.9 6.9-.9-4.4-2.5-6-6.9-6.9 4.4-.9 6-2.5 6.9-6.9Z"/>
     <path d="M17.4 13.6c.5 2.4 1.4 3.3 3.8 3.8-2.4.5-3.3 1.4-3.8 3.8-.5-2.4-1.4-3.3-3.8-3.8 2.4-.5 3.3-1.4 3.8-3.8Z"/>`),
-  // 强化形态：上扬的双折线（鹤城的换弹强化、瞬的强化索敌）
-  charge: SVG(`<path d="M12 2.4 21 11.4l-2.7 2.7L12 7.8l-6.3 6.3L3 11.4Z"/>
-    <path d="M12 10.5 21 19.5l-2.7 2.7L12 15.9l-6.3 6.3L3 19.5Z"/>`),
+  // 形态转换：四角闪光。原作是黄底特殊状态，跟红底加攻不是一类 ——
+  // 鹤城 / 瞬有 `u.charge` 才出这一格，芹香只有攻击力增益，不要给她挂这个。
+  charge: SVG(`<path d="M12 2.2 13.8 8.8 21 10.2l-5.4 3.2L17.4 21 12 16.6 6.6 21l1.8-7.6L3 10.2l7.2-1.4Z"/>`),
   // 不死：心形（治疗用的是十字，两者形状差得远，不会串）
   immortal: SVG(`<path d="M12 21.1 4.3 13.3a5.3 5.3 0 1 1 7.7-7.3 5.3 5.3 0 1 1 7.7 7.3Z"/>`),
   // EX 打折：落到底线上的下箭头。跟强化形态那个上扬双折线反着来，一眼分得开
@@ -111,13 +128,44 @@ const ICON = {
   // 兜底：没画过的属性用中性菱形，总比拿剑冒充强
   other: SVG(`<path d="M12 2.6 21.4 12 12 21.4 2.6 12Z"/>`),
 }
-/** 属性 → 图标。治疗力和受治疗量共用十字，靠底色分增减 */
+/** SVG 兜底：缺原作图时才用。治疗力和受治疗量原作是两套图，别再合成一个十字 */
 const ICON_OF_STAT = {
-  atk: "atk", dmg_deal: "atk", dfs: "dfs", dmg_take: "dfs",
+  atk: "atk", dmg_deal: "atk", aa: "aa", dfs: "dfs", dmg_take: "dfs",
   heal: "heal", heal_taken: "heal", dodge: "dodge", acc: "acc",
   crit: "crit", crit_dmg: "crit", crit_dmg_flat: "crit",
   // 暴击/暴伤抵抗是挨打时才生效的，跟防御同一个盾图标
   crit_res: "dfs", crit_dmg_res_flat: "dfs",
+}
+
+/**
+ * 属性 → 原作状态图文件名（不带正负）。减益用 `${name}-down`。
+ *
+ * HEAL 是治疗力（施术者奶多少），REC 是受治疗量。白热化的 −50% 减疗走 rec-down，
+ * 不能去查 heal-down —— 那是另一张图，而且上一轮根本没拉下来。
+ * 受伤增减也有自己的图（Buff DMG Reduced / Debuff DMG Increased），别再拿防御盾顶。
+ */
+const OFFICIAL_STAT = {
+  atk: "atk", atk_flat: "atk",
+  dfs: "dfs", dfs_flat: "dfs",
+  dmg_take: "dmg_take",
+  aa: "aa", acc: "acc", dodge: "dodge",
+  heal: "heal",
+  heal_taken: "rec",
+  cost_regen: "cost-regen",
+  crit: "crit", crit_dmg: "crit_dmg", crit_dmg_flat: "crit_dmg",
+  crit_res: "crit_res", crit_dmg_res_flat: "crit_dmg_res",
+  dmg_deal: "dmg_deal",
+}
+
+/** 原作图标自带底色，缺图才退回我们画的 SVG */
+function officialMark(name, extra = "") {
+  const uri = statusIconOf(name)
+  if (uri) return `<i class="mk official ${extra}"><img src="${uri}" alt=""></i>`
+  return ""
+}
+function markOrSvg(name, svgKey, css, extra = "") {
+  return officialMark(name, extra) ||
+    `<i class="mk ${css} ${extra}">${ICON[svgKey] || ICON.other}</i>`
 }
 
 /**
@@ -140,15 +188,24 @@ function statusMarks(u, provoked) {
     cur.turns = Math.min(cur.turns, b.turns ?? Infinity)
     agg.set(b.stat, cur)
   }
-  const order = [...agg.keys()].sort((a, b) => (a === "atk" ? -1 : b === "atk" ? 1 : 0))
+  const rank = (s) => (s === "atk" ? 0 : s === "cost_regen" ? 1 : 2)
+  const order = [...agg.keys()].sort((a, b) => rank(a) - rank(b))
   for (const stat of order) {
     const { v, n, turns } = agg.get(stat)
     const d = Math.round((v - 1) * 100)
     if (!d) continue
-    marks.push(`<i class="mk ${d > 0 ? "buff" : "debuff"} ${turns <= 1 ? "fading" : ""}">
-      ${ICON[ICON_OF_STAT[stat]] || ICON.other}${n > 1 ? `<s>×${n}</s>` : ""}</i>`)
+    const extra = `${turns <= 1 ? "fading" : ""}${n > 1 ? "" : ""}`
+    const down = stat === "dmg_take" ? d > 0 : d < 0
+    const file = OFFICIAL_STAT[stat]
+    const tag = n > 1 ? `<s>×${n}</s>` : ""
+    const official = file && officialMark(down ? `${file}-down` : file, extra)
+    if (official) marks.push(official.replace("</i>", `${tag}</i>`))
+    else {
+      marks.push(`<i class="mk ${d > 0 ? "buff" : "debuff"} ${extra}">
+      ${ICON[ICON_OF_STAT[stat]] || ICON.other}${tag}</i>`)
+    }
   }
-  if (u.regens?.length) marks.push(`<i class="mk buff">${ICON.heal}</i>`)
+  if (u.regens?.length) marks.push(markOrSvg("regen", "heal", "buff"))
   // 灼烧/中毒这类**挂在身上的 debuff** 才出状态格。
   // 千世的 EX 是固定场地，不是 debuff，状态格不出图标 —— 地上的蓝圈已经表达了。
   // 她的 ExtraPassive 灼烧现在也没接（被动先不上），所以这条目前不会亮。
@@ -159,20 +216,27 @@ function statusMarks(u, provoked) {
   }
   // **嘲讽的减益标记落在被拉走的人身上，不是放嘲讽的那个人身上**（原作就是这么画的）：
   // 中了嘲讽的顶一个紫底感叹号，椿自己什么都不多。集火是另一回事，蓝底靶心画在被点名的人头上。
-  if (provoked) marks.push(`<i class="mk provoke">${ICON.warn}</i>`)
-  if (u.taunt > 0 && u.tauntKind === "focus") marks.push(`<i class="mk debuff">${ICON.focus}</i>`)
-  if (u.stun > 0) marks.push(`<i class="mk debuff">${ICON.stun}</i>`)
-  // 强化形态：普攻的威力、覆盖面和索敌都变了。瞬在这个状态下会越过战场分割去点主 C，
-  // 不出格的话对手只能看见一串莫名其妙的连线
+  if (provoked) marks.push(markOrSvg("provoke", "warn", "provoke"))
+  if (u.taunt > 0 && u.tauntKind === "focus") marks.push(markOrSvg("focus", "focus", "debuff"))
+  if (u.stun > 0) {
+    const cc = u.stunIcon === "Fear" ? "fear" : "stun"
+    marks.push(markOrSvg(cc, "stun", "debuff"))
+  }
+  // 形态转换（`u.charge`）：鹤城换弹强化、瞬的强化索敌。原作是黄底特殊状态，
+  // 不是红底增益 —— 芹香的加攻不要走这里。
   if (u.charge) {
     const left = u.charge.turns ?? u.charge.shots
-    marks.push(`<i class="mk buff ${left <= 1 ? "fading" : ""}">${ICON.charge}</i>`)
+    marks.push(markOrSvg("form", "charge", "special", left <= 1 ? "fading" : ""))
   }
   // 不死：残血 1 点却打不死，不出格的话对手会以为是自己算错了伤害
-  if (u.immortal > 0) marks.push(`<i class="mk buff ${u.immortal <= 1 ? "fading" : ""}">${ICON.immortal}</i>`)
+  if (u.immortal > 0) marks.push(markOrSvg("immortal", "immortal", "buff", u.immortal <= 1 ? "fading" : ""))
   // EX 打折：卡上的费用数字已经变了，这一格是给对手看的 —— 血条在谁头上就是谁便宜
   if (u.exDiscount?.uses) {
-    marks.push(`<i class="mk buff">${ICON.exDiscount}${u.exDiscount.uses > 1 ? `<s>×${u.exDiscount.uses}</s>` : ""}</i>`)
+    const official = officialMark("ex-discount")
+    const tag = u.exDiscount.uses > 1 ? `<s>×${u.exDiscount.uses}</s>` : ""
+    marks.push(official
+      ? official.replace("</i>", `${tag}</i>`)
+      : `<i class="mk buff">${ICON.exDiscount}${tag}</i>`)
   }
 
   // 普通技能就绪 = 下个己方回合就会放，属于「预警」而不是状态
@@ -192,8 +256,9 @@ function unitCell(state, side, u, fx) {
   const shieldPct = u.shield > 0 ? Math.min(100, (u.shield / (u.shieldMax || u.shield)) * 100) : 0
   const chibi = artOf(t.id, "chibi")
   const marks = statusMarks(u, Boolean(provokedBy(state, u)))
+  const dy = lineShiftOf(side, u)
   return `
-  <div class="unit ${u.alive ? "" : "dead"}">
+  <div class="unit ${u.alive ? "" : "dead"}"${dy ? ` style="transform:translateY(${dy}px)"` : ""}>
     <div class="bars">
       ${marks ? `<div class="marks">${marks}</div>` : ""}
       ${shieldPct > 0 ? `<div class="shieldbar"><s style="width:${shieldPct}%"></s>${SEGS}</div>` : ""}
@@ -226,9 +291,13 @@ function pullBack(from, to, d) {
 function arrowLayer(state, events) {
   const posOf = (ref) => {
     if (!ref) return null
-    // 召唤物在中线附近那条带上，纵向偏移与 css 的 .sm.blue/.sm.red 保持一致
-    if (ref.summon) return { x: LANE_X[ref.pos], y: ARENA_H / 2 + (ref.side === 1 ? -64 : 64) }
-    return { x: LANE_X[ref.pos], y: ref.side === 1 ? RED_Y : BLUE_Y }
+    if (ref.summon) {
+      const sm = (state.sides[ref.side]?.summons || []).find((s) => s.alive && s.idx === ref.pos)
+      return { x: LANE_X[ref.pos], y: sm ? summonStandY(sm) : ARENA_H / 2 }
+    }
+    const u = state.sides[ref.side]?.units[ref.pos]
+    const base = ref.side === 1 ? RED_Y : BLUE_Y
+    return { x: LANE_X[ref.pos], y: base + (u ? lineShiftOf(ref.side, u) : 0) }
   }
   const arrows = []
   const markers = new Map()
@@ -424,7 +493,7 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 .head .vs{align-self:center;margin-top:-4px;font-size:22px;letter-spacing:2px;color:#8397AC}
 
 /* 阵列：上下各染一层阵营色，交战线居中 */
-.arena{position:relative;height:940px;margin:0 34px;border-radius:24px;
+.arena{position:relative;height:${ARENA_H}px;margin:0 34px;border-radius:24px;
   border:1px solid rgba(70,120,175,.16);
   background:linear-gradient(180deg,rgba(217,72,92,.08) 0%,rgba(255,255,255,.52) 27%,
     rgba(255,255,255,.52) 73%,rgba(46,127,212,.13) 100%)}
@@ -444,6 +513,11 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 .mk.buff{background:#E0463F}
 .mk.debuff{background:#2F6FD0}
 .mk.warn{background:#F5B915;color:#4A3100}
+/* 形态转换：原作「普通攻击/形态转换」是黄底特殊状态，跟红底增益、黄底技能就绪分开 */
+.mk.special{background:#E8A40A;color:#fff}
+/* 原作状态图自带圆角色底，别再垫一层，否则黄格套黄格 */
+.mk.official{background:none;box-shadow:none;overflow:visible;width:22px;height:25px}
+.mk.official img{width:22px;height:25px;display:block}
 /* 被嘲讽：紫底感叹号，跟原作一致。它既不是增益也不是减益那两种底色，单独一档 */
 .mk.provoke{background:#8B4FD6}
 .mk.provoke svg{width:13px;height:13px}
@@ -483,21 +557,16 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
   paint-order:stroke;stroke:#fff;stroke-width:4.5px}
 .zones .fading{opacity:.45}
 
-/* 召唤物带：占中线附近的竖向空隙，不进 .laneRow 的 4 格 */
+/* 召唤物：抛出型站在敌方半场、对方前排再往前一格。列仍是挡住的号位 */
 .smRow{position:absolute;left:0;right:0;top:0;bottom:0;z-index:2;
   display:grid;grid-template-columns:repeat(4,1fr);align-items:center;pointer-events:none}
-/* .sm 必须 position:relative —— .fxstack 是绝对定位的，不给锚点它会挂到 .smRow 上，
-   数字就飘到整条带的正中间去了 */
+/* .sm 必须 position:relative —— .fxstack 是绝对定位的，不给锚点它会挂到 .smRow 上 */
 .sm{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px}
-/* 贴着自己那一边，一眼看出是谁的墙。用 transform 不用 margin：
-   margin 会把整行撑高，align-items:center 再一居中，偏移就只剩一半 */
-.sm.blue{transform:translateY(64px)}
-.sm.red{transform:translateY(-64px)}
-/* 伤害数字往「中间那片空地」甩，别压住自己的血条，也别撞到本方那排 */
-.sm.blue .fxstack{top:auto;bottom:104px}
-.sm.red .fxstack{top:104px;bottom:auto}
-.smart{position:relative;width:86px;height:86px;display:flex;align-items:center;justify-content:center}
-.smart img{width:86px;height:86px;object-fit:contain;
+/* 站在红半场（挡红方）时数字往交战线甩；站在蓝半场同理 */
+.sm.foe-red .fxstack{top:auto;bottom:118px}
+.sm.foe-blue .fxstack{top:118px;bottom:auto}
+.smart{position:relative;width:104px;height:104px;display:flex;align-items:center;justify-content:center}
+.smart img{width:104px;height:104px;object-fit:contain;
   filter:drop-shadow(0 4px 8px rgba(40,80,125,.28))}
 /* 召唤物的血条**直接复用 .hpbar**，只改宽度：一样的高度、圆角、装甲色填充、四段白线。
    它照吃属性克制，凭什么用一条自成一派的细紫条 —— 玩家得能一眼看出拆墙该带什么属性。
@@ -635,7 +704,9 @@ function zoneLayer(state) {
       const rx = Math.max(92, lanes * laneW * 0.40)
       const ry = Math.max(40, rx * 0.29)
       // 红方脚在 unit 底；蓝方脚贴 arena 底，圆心往中线收，避免下沿被裁
-      const cy = side === 1 ? 308 : ARENA_H - ry - 18
+      const cy = side === 1
+        ? RED_Y + LINE_SHIFT.前 + 36
+        : BLUE_Y - LINE_SHIFT.前 - 36
       const ty = cy + (side === 1 ? 10 : -10)
       const left = (cx - rx).toFixed(1)
       const right = (cx + rx).toFixed(1)
@@ -663,11 +734,8 @@ function zoneLayer(state) {
 }
 
 /**
- * 召唤物画在两排中间那条空带里 —— 用竖向空间，不占号位格，
- * 所以 4 格布局、`LANE_X`、EX 卡一行都不用动。
- *
- * 列＝它挡的号位，纵向贴着**自己这一边**（蓝方的在中线下方、红方的在上方），
- * 一眼看得出是谁的墙、挡的是哪一路。
+ * 抛出型召唤物画在敌方半场、对方前排再往前一个身位。
+ * 列＝挡住的号位。归属仍是召唤者那一边（sides[caster]），只是人站在对面。
  */
 function summonBand(state, fx) {
   const cells = []
@@ -678,7 +746,9 @@ function summonBand(state, fx) {
       const pct = Math.max(0, Math.min(100, (sm.hp / sm.maxhp) * 100))
       const dur = Math.max(0, Math.min(100, (sm.turns / (sm.turnsMax || sm.turns || 6)) * 100))
       const art = summonArtOf(sm.id)
-      cells.push(`<div class="sm ${side === 1 ? "red" : "blue"}" style="grid-column:${sm.idx + 1}">
+      const foe = 1 - sm.side
+      const dy = summonStandY(sm) - ARENA_H / 2
+      cells.push(`<div class="sm foe-${foe === 1 ? "red" : "blue"}" style="grid-column:${sm.idx + 1};transform:translateY(${dy}px)">
         <div class="smart">
           ${art ? `<img src="${art}" alt="">` : ""}
         </div>

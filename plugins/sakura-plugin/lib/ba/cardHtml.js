@@ -84,6 +84,7 @@ body{width:${CARD_WIDTH}px;height:${CARD_HEIGHT}px;font-family:${FONT_STACK};-we
   <div class="artfade"></div>
   <div class="name">${esc(tmpl.name)}</div>
   <div class="tags">
+    <span class="role">${esc({ 前: "前排", 中: "中排", 后: "后排" }[tmpl.line] || "")}</span>
     <span class="role">${esc(combatRoleOf(tmpl))}</span>
     <span class="atk">${esc(tmpl.atkType)}攻击</span>
     <span class="arm">${esc(ARMOR_LABEL[tmpl.defType] || tmpl.defType)}</span>
@@ -102,7 +103,7 @@ body{width:${CARD_WIDTH}px;height:${CARD_HEIGHT}px;font-family:${FONT_STACK};-we
   <div class="panel" id="ex">
     <h3>EX 技能 · ${esc(tmpl.ex.name)} · ${tmpl.ex.cost} Cost</h3>
     <p>${esc(describeEffect(tmpl.ex))}</p>
-    <p style="margin-top:8px;color:#8397AC;font-size:16px">普攻 ${autoPct.toFixed(0)}% 分 ${tmpl.autoAttack.hits.length} 段</p>
+    <p style="margin-top:8px;color:#8397AC;font-size:16px">普攻 ${autoPct.toFixed(0)}% 分 ${tmpl.autoAttack.hits.length} 段${tmpl.autoAttack.count > 1 ? ` · ${tmpl.autoAttack.depth === "through" ? "直线贯穿" : "同战场同身位"} ${tmpl.autoAttack.count} 人` : ""}</p>
   </div>
   <div class="inner"></div>
 </div>

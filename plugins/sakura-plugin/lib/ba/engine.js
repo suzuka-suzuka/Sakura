@@ -137,7 +137,7 @@ const STAT_LABEL = {
   heal: "治疗力", heal_flat: "治疗力", maxhp: "生命上限", maxhp_flat: "生命上限",
   crit: "暴击值", crit_dmg: "暴击伤害", crit_dmg_flat: "暴击伤害",
   acc: "命中值", dodge: "闪避值", dmg_deal: "造成伤害", dmg_take: "受到伤害",
-  heal_taken: "受治疗量",
+  heal_taken: "受治疗量", aa: "攻速", cost_regen: "Cost回复",
   crit_res: "暴击抵抗", crit_dmg_res_flat: "暴伤抵抗",
 }
 
@@ -302,23 +302,33 @@ export function exRefreshPending(state, side) {
  * 白热化从第 36 轮起。冷却与状态时长走的也是这把尺子（只在自己方回合跳，一轮正好
  * 跳一次），两边口径必须一致，改成 turnId 就又差了 2 倍。
  *
- * 原作的**基础效果只有一条**：EX Cost 攒得明显更快。
+ * 原作的**基础效果只有一条**：EX Cost 攒得明显更快（Cost Regen Up）。
  * 防御 / 闪避 / 受治疗下降是赛季附加规则（S10、S11 都带），一并抄了，
  * 不想要把 CFG.FEVER_DEBUFF 设成 0 即可。
+ *
+ * 数字仍走 `regenOf` 的 `FEVER_COST_MULT`（Cost 是按边回的，不是按人）；
+ * 往每个人身上挂一层 `cost_regen` 只是让状态格画出那张红底 COST↑。
  */
 const feverOn = (state) => state.round >= CFG.FEVER_ROUND
 
 /**
- * 进入白热化时给全场挂一次永久减益。
+ * 进入白热化时给全场挂一次永久状态。
  * 走 buff 系统而不是在伤害公式里加系数：状态格会自动画出来，玩家能看见发生了什么。
  */
 function enterFever(ctx) {
   const { state } = ctx
   if (state.fever || !feverOn(state)) return
   state.fever = true
-  if (CFG.FEVER_DEBUFF > 0) {
-    for (const s of state.sides) {
-      for (const u of s.units) {
+  const costUp = CFG.FEVER_COST_MULT - 1
+  for (const s of state.sides) {
+    for (const u of s.units) {
+      if (costUp) {
+        u.buffs.push({
+          stat: "cost_regen", value: costUp, turns: 9999, st: -1,
+          srcSide: u.side, effectKind: "fever", sourceKey: "fever-cost",
+        })
+      }
+      if (CFG.FEVER_DEBUFF > 0) {
         for (const stat of ["dfs", "dodge", "heal_taken"]) {
           u.buffs.push({
             stat, value: -CFG.FEVER_DEBUFF, turns: 9999, st: -1,
@@ -416,10 +426,35 @@ function applyBattleStart(state) {
 
 /**
  * 战场分割：1·2 号位是一个战场，3·4 号位是另一个，两边各打各的。
- * 这是原作的机制，直接决定了站位是有讲究的 —— 把坦克放 1 位只保护得了 1·2。
+ * 挡刀看的是角色自己的前/中/后排，不是职业，也不是 1~4 号位。
  */
 const zoneOf = (idx) => (idx < 2 ? 0 : 1)
-const isTank = (u) => tmplOf(u).role === "坦克"
+const LINE_RANK = { 前: 0, 中: 1, 后: 2 }
+const lineOf = (u) => tmplOf(u).line || "后"
+const lineRank = (u) => LINE_RANK[lineOf(u)] ?? 2
+
+/** 同一层里：对位 → |位置差| 最小 → 编号小 */
+function pickInLayer(cands, fromIdx) {
+  if (!cands.length) return null
+  const direct = cands.find((f) => f.idx === fromIdx)
+  if (direct) return direct
+  return cands.reduce((best, f) => {
+    const d = Math.abs(f.idx - fromIdx), bd = Math.abs(best.idx - fromIdx)
+    if (d < bd) return f
+    if (d === bd && f.idx < best.idx) return f
+    return best
+  })
+}
+
+/**
+ * 多目标只在主目标那一层横着铺。一层里凑不够人数就退化成单体。
+ * 不指定时主目标已经是最前那层；指定 EX 落在被点名的那一层，可以越过前排打后排。
+ */
+function sameLineHits(cands, primary, count) {
+  const layer = cands.filter((u) => lineOf(u) === lineOf(primary))
+  if (!layer.includes(primary)) return layer.slice(0, count)
+  return [primary, ...layer.filter((u) => u !== primary)].slice(0, count)
+}
 
 /**
  * 上嘲讽。**同一方同时只留一个嘲讽目标，后放的覆盖先放的** —— 两个人一起吸引火力
@@ -482,7 +517,7 @@ export function exSealedOf(state, sideIndex) {
 /**
  * 瞬的强化形态：「索敌机制改为优先攻击攻击力最高的敌方单位」。
  *
- * **这套索敌只有嘲讽拉得走**，别的一概不管 —— 战场分割、坦克优先、人偶挡刀全部绕开，
+ * **这套索敌只有嘲讽拉得走**，别的一概不管 —— 战场分割、前/中/后排、人偶挡刀全部绕开，
  * 她站 4 号位照样一枪打到对面 1 号位的主 C 头上。那正是这个 EX 花 3 费买的东西：
  * 把「站位决定打谁」这条规则在 6 轮里关掉。
  *
@@ -499,14 +534,13 @@ function maxAtkTarget(u, alive) {
  * 普攻 / 普通技能的对线锁定，按优先级：
  *   1. 嘲讽 —— 最高，直接无视战场分割
  *   2. 强化形态改过索敌的（瞬）—— 打攻击力最高的，见 maxAtkTarget
- *   3. **召唤物**：它就是那个战场的坦克，而且排在真坦克前面 —— 只要它落在这一路对着的
- *      战场里，刀就先砸它，嘲讽过期了也一样。本战场活人打光要越界时，也先拆墙
- *   4. 同战场：只打 1·2 或只打 3·4；本战场敌人全灭了才越界
- *   5. 战场内优先坦克 —— 坦克相当于站前一格，替同战场的队友挡刀
- *   6. 同号位 → |位置差| 最小 → 编号小
+ *   3. **同战场的佩洛洛**：挡在那半边最前面，嘲讽过期了也一样。本战场打空要越界时也先拆墙
+ *   4. 同战场的前排 → 中排 → 后排。不是职业，是角色自己的 Front/Middle/Back
+ *   5. 本战场空了才越界，跨过去还是前 → 中 → 后
+ *   6. 同一层里：对位 → |位置差| 最小 → 编号小
  */
 function laneTarget(u, foes) {
-  // 嘲讽最高，无视一切 —— 战场分割、坦克优先、挡刀、瞬的强化索敌统统让路。
+  // 嘲讽最高，无视一切 —— 战场分割、前排、挡刀、瞬的强化索敌统统让路。
   // 同一方至多一个嘲讽目标（后放的覆盖先放的，见 setTaunt），单位和召唤物共用这个位置：
   // 人偶入场那一轮的 Provoke 和椿的 EX 会互相顶掉。
   const taunting = tauntTargetOf(foes)
@@ -517,7 +551,7 @@ function laneTarget(u, foes) {
   const maxAtk = maxAtkTarget(u, alive)
   if (maxAtk) return maxAtk
   const zoneAlive = alive.filter((f) => zoneOf(f.idx) === zoneOf(u.idx))
-  // 召唤物**按战场拦**，不是按号位：它是那个战场的坦克，而且比真坦克还靠前一格。
+  // 召唤物**按战场拦**，不是按号位：它挡在那半边最前面，比前排还靠前一格。
   // 所以「日富美ex打<某人>」选的其实是**把墙扔进哪个战场**，那一整边的刀都归它接。
   const blocking = sm.find((s) => zoneOf(s.blockIdx) === zoneOf(u.idx))
     // 本战场的活人打光了，**任何**召唤物都比越界打人优先 —— 越界之前先拆墙
@@ -526,17 +560,8 @@ function laneTarget(u, foes) {
 
   if (!alive.length) return null
   const pool = zoneAlive.length ? zoneAlive : alive
-  const tanks = pool.filter(isTank)
-  const cands = tanks.length ? tanks : pool
-
-  const direct = cands.find((f) => f.idx === u.idx)
-  if (direct) return direct
-  return cands.reduce((best, f) => {
-    const d = Math.abs(f.idx - u.idx), bd = Math.abs(best.idx - u.idx)
-    if (d < bd) return f
-    if (d === bd && f.idx < best.idx) return f
-    return best
-  })
+  const best = Math.min(...pool.map(lineRank))
+  return pickInLayer(pool.filter((f) => lineRank(f) === best), u.idx)
 }
 
 /**
@@ -672,7 +697,18 @@ function resolveTargets(state, u, skill, foes, allies, pick, actionKind) {
       [0, 1, 2, 3].some((i) => i >= lanes[0] && i <= lanes[1] && zoneOf(i) === zoneOf(s.blockIdx)))
     if (wall) return [wall]
   }
-  if (tg.endsWith("adjacent")) return expandAdjacent(pool.units, primary, count)
+  // 嘲讽把整发吸走，不往后排溅。跟人偶同一档。
+  if (tg.startsWith("enemy") && count > 1 && primary === tauntTargetOf(foes) && !primary.summon) {
+    return [primary]
+  }
+  if (tg.endsWith("adjacent")) {
+    const hits = expandAdjacent(pool.units, primary, count)
+    // 横向圆/扇锁同层（睦月、白子、千世普攻…）。直线贯穿（晴奈、纯子）圈到谁打谁。
+    if (tg.startsWith("enemy") && count > 1 && skill.depth !== "through") {
+      return sameLineHits(hits, primary, count)
+    }
+    return hits
+  }
   return [primary]
 }
 
@@ -724,7 +760,7 @@ function applyDamage(ctx, src, tgt, dmg, meta = {}) {
  * 对单个目标打出一组分段攻击。每段独立判定命中与暴击（与原作一致），
  * 因此段数越多伤害方差越小；结算后合并成一条伤害事件，避免刷屏。
  */
-function strike(ctx, src, tgt, hits) {
+function strike(ctx, src, tgt, hits, actionKind) {
   const { state } = ctx
   if (!tgt.alive || !src.alive) return 0
 
@@ -735,7 +771,11 @@ function strike(ctx, src, tgt, hits) {
   const dm = defModOf(tgt)
   const floor = stabilityFloor(src)
   const atk = atkOf(src)
-  const dealF = Math.max(0.1, factorOf(src, "dmg_deal"))
+  // 攻速折成的 aa 只乘普攻。EX / 普通技能走 dmg_deal，别把射速加成套到技能倍率上。
+  // 鹤城 / 芹香 ③-b 的普攻、强化普攻都是 actionKind === "normal"，会吃到。
+  let dealF = factorOf(src, "dmg_deal")
+  if (actionKind === "normal") dealF *= factorOf(src, "aa")
+  dealF = Math.max(0.1, dealF)
   const takeF = Math.max(0.1, factorOf(tgt, "dmg_take"))
 
   let total = 0, landed = 0, critHits = 0
@@ -849,9 +889,27 @@ function applyEffects(ctx, u, skill, dmgTargets, allies) {
           const ground = (aimed[0] || targets[0])
             ? state.sides[(aimed[0] || targets[0]).side]
             : null
+          const inField = []
           if (lanes && ground) {
             upsertField(ground, { lo: lanes.lo, hi: lanes.hi, turns: eff.turns, st: T })
+            // 场地盖住同战场两路，不问前中后 —— 圈里站着谁就烧谁
+            for (const x of ground.units || []) {
+              if (x.alive && x.idx >= lanes.lo && x.idx <= lanes.hi) inField.push(x)
+            }
+            for (const s of summonsOf(ground)) {
+              if (s.blockIdx >= lanes.lo && s.blockIdx <= lanes.hi) inField.push(s)
+            }
           }
+          for (const t of inField.length ? inField : targets) {
+            if (!t.alive) continue
+            t.dots.push({
+              icon: "Zone", amount: atkOf(u) * eff.scale,
+              turns: eff.turns, period: eff.period || 1, tick: 0,
+              attackType: tmplOf(u).atkType, st: T,
+            })
+            ctx.log(`  ${nameOf(t)} 陷入${DOT_TEXT.Zone}（${eff.turns}回合，每${eff.period || 1}回合跳）`)
+          }
+          break
         }
         for (const t of targets) {
           if (!t.alive) continue
@@ -861,10 +919,7 @@ function applyEffects(ctx, u, skill, dmgTargets, allies) {
             attackType: tmplOf(u).atkType, st: T,
           })
           ctx.log(`  ${nameOf(t)} 陷入${DOT_TEXT[eff.icon] || "持续伤害"}（${eff.turns}回合，每${eff.period || 1}回合跳）`)
-          // 场地不是 debuff：它是留在地上的区域，状态格也不出图标。灼烧类才发 debuff 事件。
-          if (eff.icon !== "Zone") {
-            emitEvent(ctx, { type: "debuff", source: unitRef(u), target: unitRef(t), effects: ["dot"] })
-          }
+          emitEvent(ctx, { type: "debuff", source: unitRef(u), target: unitRef(t), effects: ["dot"] })
         }
         break
 
@@ -903,7 +958,7 @@ function applyEffects(ctx, u, skill, dmgTargets, allies) {
         me.summons.push(doll)
         // 入场 Provoke 走跟椿同一个位置：同一方只留最后放的那个嘲讽目标
         if (eff.taunt) setTaunt(me, doll, eff.taunt, T, "provoke")
-        ctx.log(`  ${nameOf(u)} 召唤${tpl.name}（${hp} 生命，挡住 ${blockIdx + 1} 号位` +
+        ctx.log(`  ${nameOf(u)} 召唤${tpl.name}（${hp} 生命，扔到敌方 ${blockIdx + 1} 号位前` +
           (eff.taunt ? `，嘲讽 ${eff.taunt} 回合` : "") + `，${eff.turns}回合）`)
         emitEvent(ctx, {
           type: "summon", source: unitRef(u), target: { side: u.side, pos: blockIdx, summon: true },
@@ -1049,14 +1104,14 @@ function execute(ctx, u, skill, label, actionKind, pick) {
   if (skill.hits?.length) {
     if (skill.target === "enemy_chain") {
       // 连发：**只有第一发听玩家的**，后面每一发都照普攻的规则重锁一次
-      //（人偶 → 坦克 → 对位 → 最近），不再有「不能和上一发相同」那条 ——
-      // 有坦克就后两发全打坦克，有人偶就全打人偶，这才是「视作普攻索敌」。
+      //（人偶 → 前排 → 中排 → 后排），不再有「不能和上一发相同」那条 ——
+      // 有前排就后两发全打前排，有人偶就全打人偶，这才是「视作普攻索敌」。
       // 每发都在结算之后重算，所以打死人会自动换目标（本战场清空就越界）。
       const first = targets[0]
       for (const [i, pct] of skill.hits.entries()) {
         const t = i === 0 && first?.alive ? first : laneTarget(u, foes)
         if (!t) break
-        strike(ctx, u, t, [pct])
+        strike(ctx, u, t, [pct], actionKind)
         if (!hit.includes(t)) hit.push(t)
       }
     } else if (skill.target === "enemy_random") {
@@ -1065,7 +1120,7 @@ function execute(ctx, u, skill, label, actionKind, pick) {
         const al = aliveOf(foes)
         if (!al.length) break
         const t = randPick(state, al)
-        strike(ctx, u, t, [pct])
+        strike(ctx, u, t, [pct], actionKind)
         if (!hit.includes(t)) hit.push(t)
       }
     } else {
@@ -1076,7 +1131,7 @@ function execute(ctx, u, skill, label, actionKind, pick) {
       for (const [i, t] of targets.entries()) {
         const base = i > 0 && skill.splashHits ? skill.splashHits : skill.hits
         const cut = skill.falloff ? Math.min(skill.falloff.rate * i, skill.falloff.max) : 0
-        strike(ctx, u, t, cut ? base.map((h) => h * (1 - cut)) : base)
+        strike(ctx, u, t, cut ? base.map((h) => h * (1 - cut)) : base, actionKind)
         hit.push(t)
       }
     }
@@ -1489,7 +1544,8 @@ export function playerTurn(prev, action) {
         markExCast(side, u)
         state.turnEx = [...(state.turnEx || []), u.idx]
         execute(ctx, u, ex, `EX「${ex.name}」(-${cost})`, "ex", cast.target)
-        if (ex.thenAutoAttack && u.alive && !checkEnd(state)) autoAttack(ctx, u)
+        // 「立即换弹」不是把普攻塞进 EX 里：EX 只上形态 / 增益，普攻留到 ③-b。
+        // 鹤城、芹香都是这种。瞬没有这条，施放回合就不普攻。
         if (checkEnd(state)) {
           state.turnOpen = false
           state.turnEx = []
@@ -1509,13 +1565,17 @@ export function playerTurn(prev, action) {
   // 不能按站位 1→4 逐个挑「技能或普攻」——那样真纪的减防放在 4 号位时，
   // 三个队友已经打完了，那一回合等于白放，站位反而成了隐藏的强度开关。
   // 加上 EX 就是攻略页承诺的 EX → 普通技能 → 普攻。
-  const acted = new Set(state.turnEx || [])
+  // usedEx：放过 EX 的人。③-a 一律跳过（小技能留到下回合）。
+  // ③-b 默认也跳，但 thenAutoAttack（立即换弹）的人本回合仍普攻，跟没放 EX 的人一起结算。
+  // 立即换弹 ≠ 形态转换：芹香只有加攻，鹤城 / 瞬才有 u.charge。
+  const usedEx = new Set(state.turnEx || [])
+  const acted = new Set()
   const foes = () => state.sides[1 - state.activeSide]
 
   // ③-a 普通技能。控制在这一阶段结算，被控的人后面也不普攻
   for (const u of side.units) {
     if (sideDead(foes())) break
-    if (!u.alive || acted.has(u.idx)) continue
+    if (!u.alive || usedEx.has(u.idx)) continue
     if (u.stun > 0) {
       const cc = CC_TEXT[u.stunIcon] || "控制"
       // 被控时已经就绪的普通技能**当场被吞**，不是留到下回合：抬手被打断，照样进冷却。
@@ -1543,10 +1603,11 @@ export function playerTurn(prev, action) {
     }
   }
 
-  // ③-b 普攻
+  // ③-b 普攻。放过 EX 的人默认不打；立即换弹的（鹤城 / 芹香）在这里补，不跟 EX 画在同一张图里。
   for (const u of side.units) {
     if (sideDead(foes())) break
     if (!u.alive || acted.has(u.idx)) continue
+    if (usedEx.has(u.idx) && !tmplOf(u).ex?.thenAutoAttack) continue
     autoAttack(ctx, u)
     if (checkEnd(state)) {
       state.turnOpen = false

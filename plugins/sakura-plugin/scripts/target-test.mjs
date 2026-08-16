@@ -60,8 +60,8 @@ const check = (label, got, want) => {
   console.log(`${ok ? "✓" : "✗"} ${label}\n    实际 ${JSON.stringify(got)}${ok ? "" : `\n    期望 ${JSON.stringify(want)}`}`)
 }
 
-const OUT = ["野宫", "野宫", "野宫", "野宫"]        // 全输出，排除坦克干扰
-const TANK1 = ["星野", "野宫", "野宫", "野宫"]      // 1 位坦克
+const OUT = ["野宫", "野宫", "野宫", "野宫"]        // 全后排，测对位/铺开时不被前排削层
+const TANK1 = ["星野", "野宫", "野宫", "野宫"]      // 1 位前排（星野）+ 后排
 
 console.log("=== 1. 默认对位：各打各的战场 ===")
 check("蓝方四人普攻的目标", autoPairs(setup(OUT, OUT)).map((p) => `${p.from}→${p.to}`),
@@ -78,12 +78,28 @@ check("蓝1 越界打 3", cross.find((p) => p.from === 1).to, [3])
 check("蓝2 越界打 3", cross.find((p) => p.from === 2).to, [3])
 check("蓝3 不受影响", cross.find((p) => p.from === 3).to, [3])
 
-console.log("\n=== 4. 坦克领先一个站位：红1 是坦克 ===")
+console.log("\n=== 4. 前排挡中后排：红1 是前排（星野）===")
 const tank = autoPairs(setup(OUT, TANK1))
-check("蓝1 打坦克", tank.find((p) => p.from === 1).to, [1])
-check("蓝2 也打坦克（同战场）", tank.find((p) => p.from === 2).to, [1])
-check("蓝3 不受坦克影响", tank.find((p) => p.from === 3).to, [3])
-check("蓝4 不受坦克影响", tank.find((p) => p.from === 4).to, [4])
+check("蓝1 打前排", tank.find((p) => p.from === 1).to, [1])
+check("蓝2 也打前排（同战场）", tank.find((p) => p.from === 2).to, [1])
+check("蓝3 不受另一战场前排影响", tank.find((p) => p.from === 3).to, [3])
+check("蓝4 不受另一战场前排影响", tank.find((p) => p.from === 4).to, [4])
+
+console.log("\n=== 4b. 前 / 中 / 后：按层打，不是按坦克职业 ===")
+{
+  // 堇前排输出 + 芹香中排：没有坦克，刀仍打前排
+  const mix = autoPairs(setup(OUT, ["堇", "芹香", "野宫", "野宫"]))
+  check("前+中 → 蓝1 打前排堇", mix.find((p) => p.from === 1).to, [1])
+  check("前+中 → 蓝2 也打前排堇", mix.find((p) => p.from === 2).to, [1])
+  // 两个前排：还是 2 打 2，对位还在
+  const twoF = autoPairs(setup(OUT, ["星野", "鹤城", "野宫", "野宫"]))
+  check("两个前排 → 蓝1 对位星野", twoF.find((p) => p.from === 1).to, [1])
+  check("两个前排 → 蓝2 对位鹤城", twoF.find((p) => p.from === 2).to, [2])
+  // 中+后：没有前排，打中排
+  const mb = autoPairs(setup(OUT, ["白子", "野宫", "野宫", "野宫"]))
+  check("中+后 → 蓝1 打中排白子", mb.find((p) => p.from === 1).to, [1])
+  check("中+后 → 蓝2 也打中排白子", mb.find((p) => p.from === 2).to, [1])
+}
 
 console.log("\n=== 5. 星野 EX（2 目标范围）不跨战场 ===")
 const pickIdx = (st, idx) => {
@@ -114,6 +130,84 @@ check("指定 4 号位 → 只炸 2 个", mutsuki(3), [3, 4])
 // 2 目标技能的战场分割限制不受影响，第 5 组已经断言过，这里再钉一次边界
 check("2 目标技能仍然不跨战场（星野指定 2 位）", pickIdx(setup(TANK1, OUT), 1).sort(), [1, 2])
 
+console.log("\n=== 5b. 多目标只打最前那一层（白子普技 / 千世普攻 / 睦月）===")
+/** who 站 1 位放普通技能，红方 picks；返回命中号位 */
+function skillHits(who, redPicks) {
+  const st = setup([who, "野宫", "野宫", "野宫"], redPicks)
+  st.sides[0].units[0].skillCd = 0
+  const r = playerTurn(st, { type: "pass" })
+  const ev = r.events.find((e) => e.type === "action" && e.action === "skill" && e.source.pos === 0)
+  return (ev?.targets || []).map((t) => t.pos + 1).sort()
+}
+function chiseAA(redPicks) {
+  const st = setup(["千世", "野宫", "野宫", "野宫"], redPicks)
+  const r = playerTurn(st, { type: "pass" })
+  const ev = r.events.find((e) => e.type === "action" && e.action === "normal" && e.source.pos === 0)
+  return (ev?.targets || []).map((t) => t.pos + 1).sort()
+}
+check("白子 2 目标 · 两个后排 → 两个都打", skillHits("白子", OUT), [1, 2])
+check("白子 2 目标 · 前+中 → 只打前排", skillHits("白子", ["星野", "白子", "野宫", "野宫"]), [1])
+check("白子 2 目标 · 中+后 → 只打中排", skillHits("白子", ["白子", "野宫", "野宫", "野宫"]), [1])
+check("白子 2 目标 · 两个前排 → 两个都打", skillHits("白子", ["星野", "鹤城", "野宫", "野宫"]), [1, 2])
+check("星野 EX 指中排 · 前+中 → 越过去只打中排", pickIdx(setup(["星野", "野宫", "野宫", "野宫"], ["星野", "白子", "野宫", "野宫"]), 1), [2])
+check("千世普攻 · 两个后排 → 两个都打", chiseAA(OUT), [1, 2])
+check("千世普攻 · 前+中 → 只打前排", chiseAA(["星野", "白子", "野宫", "野宫"]), [1])
+check("千世普攻 · 中+后 → 只打中排", chiseAA(["白子", "野宫", "野宫", "野宫"]), [1])
+{
+  const mutsukiMix = (red, idx) => {
+    const st = setup(["睦月", "野宫", "野宫", "野宫"], red)
+    const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx } }] })
+    return r.events.find((e) => e.type === "action" && e.action === "ex").targets
+      .map((t) => t.pos + 1).sort()
+  }
+  // 指定中排 2 位，窗口 {1,2,3}：前 / 中 / 前 → 只打被点的那一层中排
+  check("睦月 3 目标 · 指定中排 → 越过前排只打中排",
+    mutsukiMix(["星野", "白子", "鹤城", "野宫"], 1), [2])
+  // 指定前排 2 位，窗口里两个前排夹一个中排
+  check("睦月 3 目标 · 指定前排 · 窗口两个前排 → 打两个前排",
+    mutsukiMix(["星野", "鹤城", "春香", "野宫"], 1), [1, 2, 3])
+  // 指定前排，窗口里只有她一个前排
+  check("睦月 3 目标 · 指定前排 · 旁边都是中后 → 退化成单体",
+    mutsukiMix(["星野", "白子", "芹香", "野宫"], 0), [1])
+}
+
+console.log("\n=== 5c. 直线贯穿 / 场地盖战场 / 堇连发 ===")
+function exHits(who, red, idx) {
+  const st = setup([who, "野宫", "野宫", "野宫"], red)
+  st.sides[0].cost = 10
+  const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx } }] })
+  return (r.events.find((e) => e.type === "action" && e.action === "ex")?.targets || [])
+    .map((t) => (t.summon ? "偶" : t.pos + 1))
+}
+check("晴奈直线 · 前+中 指定前 → 两个都打",
+  exHits("晴奈", ["星野", "白子", "野宫", "野宫"], 0).sort(), [1, 2])
+check("纯子直线 · 窗口前/中/前 → 三个都打",
+  exHits("纯子", ["星野", "白子", "鹤城", "野宫"], 1).sort(), [1, 2, 3])
+check("爱露二段 · 前+中 指定前 → 不同层吃不到溅射",
+  exHits("爱露", ["星野", "白子", "野宫", "野宫"], 0).sort(), [1])
+check("爱露二段 · 两个前排 → 第二人吃溅射",
+  exHits("爱露", ["星野", "鹤城", "野宫", "野宫"], 0).sort(), [1, 2])
+check("日富美 EX · 指定中排 · 前中前 → 横向只打中排",
+  exHits("日富美", ["星野", "白子", "鹤城", "野宫"], 1).sort(), [2])
+{
+  const st = setup(["千世", "野宫", "野宫", "野宫"], ["星野", "白子", "野宫", "野宫"])
+  st.sides[0].cost = 10
+  const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] })
+  const burned = r.state.sides[1].units
+    .map((u, i) => (u.dots.some((d) => d.icon === "Zone") ? i + 1 : null))
+    .filter(Boolean)
+  check("千世场地 · 前+中 同战场两路都烧", burned, [1, 2])
+}
+function sumireShots(pickIdx) {
+  const st = setup(["堇", "野宫", "野宫", "野宫"], OUT)
+  st.sides[0].cost = 10
+  const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: pickIdx } }] })
+  return r.events.filter((e) => e.type === "damage" && e.source?.side === 0 && e.source.pos === 0)
+    .map((e) => e.target.pos + 1)
+}
+check("堇 EX 连发 · 指定 1 位 → 三发全在 1", sumireShots(0), [1, 1, 1])
+check("堇 EX 连发 · 指定另一战场 → 后两发回本战场对位", sumireShots(2), [3, 1, 1])
+
 console.log("\n=== 8. 召唤物挡刀（日富美的佩洛洛人偶）===")
 /** 蓝1 = 日富美，EX 把人偶扔向红方 blockIdx 号位，返回随后红方普攻的 源→目标 */
 function withDoll(blockIdx, skipTaunt) {
@@ -130,10 +224,11 @@ function withDoll(blockIdx, skipTaunt) {
     .map((e) => `${e.source.pos + 1}→${(e.targets || []).map((t) => (t.summon ? "偶" : t.pos + 1)).join("")}`)
 }
 check("嘲讽那一轮：红方全员都被拉去打人偶", withDoll(0, false), ["1→偶", "2→偶", "3→偶", "4→偶"])
-// 嘲讽过期之后它仍然是**那半边战场的坦克**：扔进 1·2 就把 1·2 两路的刀全接了
+// 嘲讽过期之后它仍然挡在那半边最前面：扔进 1·2 就把 1·2 两路的刀全接了
 check("嘲讽过后扔进 1·2 战场：红1 红2 都打人偶", withDoll(0, true), ["1→偶", "2→偶", "3→3", "4→4"])
-check("嘲讽过后扔进 3·4 战场：红3 红4 都打人偶", withDoll(2, true), ["1→1", "2→2", "3→偶", "4→偶"])
-// 「视为坦克，且排在真坦克前面」：同战场有星野也照样先打人偶
+// 蓝 1 日富美是中排、蓝 2 野宫是后排：红 1·2 都打最前的日富美，不是对位
+check("嘲讽过后扔进 3·4 战场：红3 红4 都打人偶", withDoll(2, true), ["1→1", "2→1", "3→偶", "4→偶"])
+// 人偶比前排还靠前：同战场有星野也照样先打人偶
 {
   const st = setup(["日富美", "野宫", "野宫", "野宫"], TANK1)
   st.sides[0].cost = 10
@@ -141,14 +236,14 @@ check("嘲讽过后扔进 3·4 战场：红3 红4 都打人偶", withDoll(2, tru
   cur = run(cur, { type: "pass" }).state // 红方（嘲讽期）
   cur = run(cur, { type: "pass" }).state // 蓝方
   const r = run(cur, { type: "pass" })
-  check("人偶优先于本战场的真坦克",
+  check("人偶优先于本战场的前排",
     r.events.filter((e) => e.type === "action" && e.action === "normal")
       .map((e) => `${e.source.pos + 1}→${(e.targets || []).map((t) => (t.summon ? "偶" : t.pos + 1)).join("")}`),
     ["1→偶", "2→偶", "3→3", "4→4"])
 }
 
 console.log("\n=== 9. 范围技撞上人偶：整发被接走，覆盖面按各自的规则算 ===")
-const FOE = ["白子", "野宫", "芹香", "睦月"] // 全输出，避免坦克优先把主目标拉偏
+const FOE = ["爱露", "伊织", "日奈", "真纪"] // 全后排，测范围铺开时不被前/中排削层
 /** who 站 pos 位放普通技能，敌方在 doll 号位有人偶；返回命中列表 */
 function skillVsDoll(who, pos, doll) {
   const picks = ["伊织", "伊织", "伊织", "伊织"]
@@ -201,8 +296,8 @@ check("人偶挡另一路（同战场）→ 一样接走后两发", iori(0, [], 
 check("人偶在另一战场 → 本战场还有人时不接", iori(0, [], 2), [1, 1, 1])
 check("本战场打空 + 人偶在本战场 → 后两发全打人偶", iori(2, [0, 1], 0), [3, "偶", "偶"])
 check("本战场打空 + 人偶在另一战场 → 越界前先拆墙，后两发都在墙上", iori(2, [0, 1], 2), [3, "偶", "偶"])
-// 有坦克就后两发都落坦克身上（敌 1 位放星野，伊织在 1 位）
-check("同战场有坦克 → 后两发都打坦克", (() => {
+// 有前排就后两发都落前排身上（敌 1 位放星野，伊织在 1 位）
+check("同战场有前排 → 后两发都打前排", (() => {
   const st = setup(["伊织", "日富美", "野宫", "芹香"], TANK1)
   st.sides[0].cost = 10
   const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 1 } }] })
@@ -419,8 +514,8 @@ function leftover(n, cost = 10) {
 
 console.log("\n=== 17. 瞬的强化形态：索敌改成「攻击力最高」，只有嘲讽拉得走 ===")
 /**
- * 瞬站蓝 1 位，敌方 [茜(120) 星野(213坦克) 鹤城(471) 野宫(321)]：
- * 常规对线会打同战场的坦克（红2），强化后要越过战场分割去点全场最高攻的红3。
+ * 瞬站蓝 1 位，敌方 [茜(中) 星野(前) 鹤城(471) 野宫(321)]：
+ * 常规对线会打同战场的前排（红2），强化后要越过战场分割去点全场最高攻的红3。
  */
 const SHUN_FOE = ["茜", "星野", "鹤城", "野宫"]
 /** 放完 EX 再空转到下一个蓝方回合，返回瞬那一发普攻打到谁 */
@@ -442,9 +537,9 @@ const doll = (idx, taunt = 0) => (st) => {
 {
   const plain = playerTurn(setup(["瞬", "野宫", "野宫", "野宫"], SHUN_FOE), { type: "pass" })
   const ev = plain.events.find((e) => e.type === "action" && e.action === "normal" && e.source.pos === 0)
-  check("未强化 → 照常打同战场的坦克（红2）", (ev?.targets || []).map((t) => t.pos + 1), [2])
+  check("未强化 → 照常打同战场的前排（红2）", (ev?.targets || []).map((t) => t.pos + 1), [2])
 }
-check("强化后 → 越过战场分割和坦克，打全场最高攻的红3", shunShot(), [3])
+check("强化后 → 越过战场分割和前排，打全场最高攻的红3", shunShot(), [3])
 check("红3 被削到最低攻 → 改打新的最高攻（红4）", shunShot((st) => {
   st.sides[1].units[2].buffs.push({ stat: "atk", value: -0.9, turns: 9, effectKind: "debuff", channel: 603 })
 }), [4])
@@ -455,7 +550,7 @@ check("敌方嘲讽 → 拉回最低攻的红1（嘲讽是唯一能改索敌的�
 check("人偶挡她那一路 → 拦不住，仍打红3", shunShot(doll(0)), [3])
 check("人偶还在嘲讽期 → 接得住（Provoke 优先级更高）", shunShot(doll(0, 2)), ["偶"])
 // 强化只在自己身上，别把索敌规则漏给队友
-check("队友不受影响，照常打同战场的坦克", (() => {
+check("队友不受影响，照常打同战场的前排", (() => {
   const st = setup(["瞬", "野宫", "野宫", "野宫"], SHUN_FOE)
   const cast = run(st, { type: "ex", casts: [{ pos: 0 }] }).state
   const mine = run(run(cast, { type: "pass" }).state, { type: "pass" })
@@ -497,10 +592,17 @@ console.log("\n=== 18. 瞬的强化存续 6 轮 / 开局回费在建局时就落
 
 console.log("\n=== 19. 鹤城的换弹强化仍然按发数走 ===")
 {
-  let r = run(setup(["鹤城", "野宫", "野宫", "野宫"], SHUN_FOE), { type: "ex", casts: [{ pos: 0 }] })
-  check("施放回合立即换弹并打出第 1 发",
-    r.log.filter((l) => /鹤城 强化普攻/.test(l)).length, 1)
-  check("按发数存续，不带 turns", r.state.sides[0].units[0].charge, { hits: [69.355, 69.355], count: 2, shots: 1 })
+  const opened = setup(["鹤城", "野宫", "野宫", "野宫"], SHUN_FOE)
+  opened.sides[0].cost = 10
+  const justEx = playerTurn(opened, { type: "ex", casts: [{ pos: 0 }] })
+  check("EX 只上形态，不带普攻", justEx.log.filter((l) => /鹤城 强化普攻/.test(l)).length, 0)
+  check("回合还开着，等「过」再普攻", justEx.state.turnOpen, true)
+  check("EX 之后 charge 还是 2 发", justEx.state.sides[0].units[0].charge?.shots, 2)
+  const afterPass = playerTurn(justEx.state, { type: "pass" })
+  check("过了之后才打出第 1 发强化普攻",
+    afterPass.log.filter((l) => /鹤城 强化普攻/.test(l)).length, 1)
+  check("按发数存续，不带 turns", afterPass.state.sides[0].units[0].charge, { hits: [69.355, 69.355], count: 2, shots: 1 })
+  let r = afterPass
   r = run(run(r.state, { type: "pass" }).state, { type: "pass" })
   check("下个己方回合打出第 2 发", r.log.filter((l) => /鹤城 强化普攻/.test(l)).length, 1)
   check("两发打完就没了", r.state.sides[0].units[0].charge, null)
@@ -508,6 +610,13 @@ console.log("\n=== 19. 鹤城的换弹强化仍然按发数走 ===")
   const ex = ROSTER.find((t) => t.name === "鹤城").ex.effects.find((e) => e.type === "charge")
   check("鹤城强化普攻合计 138.71% 分 2 段", [ex.hits.reduce((a, b) => a + b, 0).toFixed(2), ex.hits.length], ["138.71", 2])
   check("鹤城不带索敌变更", ex.targeting ?? null, null)
+
+  const serika = setup(["芹香", "野宫", "野宫", "野宫"], SHUN_FOE)
+  serika.sides[0].cost = 10
+  const sEx = playerTurn(serika, { type: "ex", casts: [{ pos: 0 }] })
+  check("芹香 EX 也不带普攻", sEx.events.some((e) => e.type === "action" && e.action === "normal" && e.source.pos === 0), false)
+  const sPass = playerTurn(sEx.state, { type: "pass" })
+  check("芹香过了之后才普攻", sPass.events.some((e) => e.type === "action" && e.action === "normal" && e.source.pos === 0), true)
 }
 
 console.log("\n=== 20. 纯子：残血触发不死 + EX 减费 ===")
@@ -609,7 +718,7 @@ console.log("\n=== 22. EX 减费：折后价要一路贯穿到校验和扣费 ==
 
 console.log("\n=== 23. EX 自伤：失去当前生命的 25.7%，但打不死自己 ===")
 {
-  const st = setup(["纯子", "野宫", "野宫", "野宫"], SHUN_FOE)
+  const st = setup(["纯子", "野宫", "野宫", "野宫"], OUT)
   const before = J(st).hp
   const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 1 } }] })
   check("按当前生命扣 25.7%", Math.round(before - J(r.state).hp), Math.round(before * 0.257))
@@ -826,6 +935,46 @@ console.log("\n=== 27. 嘲讽 / 恐惧封 EX：全员被封也要等人发「过
   const fearedPass = playerTurn(feared, { type: "pass" })
   check("恐惧那一轮普攻被跳过",
     fearedPass.events.some((e) => e.type === "action" && e.action === "normal" && e.source.side === 0), false)
+}
+
+console.log("\n=== 28. 攻速只乘普攻，不乘 EX / 普通技能 ===")
+{
+  const shun = ROSTER.find((t) => t.name === "瞬")
+  const tsurugi = ROSTER.find((t) => t.name === "鹤城")
+  check("瞬的攻速减益是 aa，不是 dmg_deal",
+    shun.ex.effects.find((e) => e.type === "buff" && e.stat === "aa")?.value, -0.1882)
+  check("鹤城击杀攻速是 aa",
+    tsurugi.skill.effects.find((e) => e.type === "buff" && e.stat === "aa")?.value, 0.2559)
+  check("描述写攻速，不写成造成伤害", /攻速/.test(describeEffect(shun.ex)), true)
+
+  const dmgOf = (events) => events
+    .filter((e) => e.type === "damage" && !e.dot && e.source?.side === 0 && e.source?.pos === 0)
+    .reduce((s, e) => s + (e.totalAmount ?? e.amount), 0)
+  const inject = (st, value) => {
+    st.sides[0].units[0].buffs.push({
+      stat: "aa", value, turns: 9, st: -1,
+      effectKind: "buff", sourceKey: "test:aa", srcSide: 0, srcPos: 0,
+    })
+    return st
+  }
+  const pair = (picks, action) => {
+    const a = setup(picks, OUT)
+    const b = inject(setup(picks, OUT), 1)
+    return [dmgOf(playerTurn(a, action).events, action.type), dmgOf(playerTurn(b, action).events, action.type)]
+  }
+  const [ex0, ex1] = pair(["茜", "野宫", "野宫", "野宫"], { type: "ex", casts: [{ pos: 0 }] })
+  check("茜的 EX 不吃攻速层（伤害不变）", [ex0, ex1], [ex0, ex0])
+  const [aa0, aa1] = pair(["野宫", "野宫", "野宫", "野宫"], { type: "pass" })
+  check("普攻吃攻速层（+100% 正好翻倍）", [aa0, aa1], [aa0, aa0 * 2])
+
+  // 鹤城 EX 本身没伤害，普攻在过了之后的 ③-b，必须吃攻速
+  const pairRun = (picks, action) => {
+    const a = setup(picks, OUT)
+    const b = inject(setup(picks, OUT), 1)
+    return [dmgOf(run(a, action).events), dmgOf(run(b, action).events)]
+  }
+  const [t0, t1] = pairRun(["鹤城", "野宫", "野宫", "野宫"], { type: "ex", casts: [{ pos: 0 }] })
+  check("鹤城 ③-b 的强化普攻吃攻速层", Math.abs(t1 - t0 * 2) <= 2, true)
 }
 
 console.log(bad ? `\n✗ ${bad} 条不符` : "\n全部符合")
