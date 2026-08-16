@@ -373,6 +373,26 @@ export function describeEffect(sk) {
   return parts.join("，") || "无效果"
 }
 
+/** 攻击属性的展示顺序，照原作（爆発 → 貫通 → 神秘 → 振動 → 変化），不按 ROSTER 里的遇见顺序 */
+const ATK_ORDER = ["爆发", "贯通", "神秘", "振动", "变化"]
+
+/**
+ * 图鉴的分组口径：按攻击属性排原作顺序，组内保持 ROSTER 顺序。
+ *
+ * 总览图和文字节点**必须共用这一个函数** —— 图是后面几条文字的索引，
+ * 两边的属性顺序对不上，玩家从图里挑中的人就得翻着找。
+ * @returns {[string, object[]][]}
+ */
+export function rosterByAtkType() {
+  const groups = new Map()
+  for (const t of ROSTER) {
+    if (!groups.has(t.atkType)) groups.set(t.atkType, [])
+    groups.get(t.atkType).push(t)
+  }
+  const rank = (a) => (ATK_ORDER.indexOf(a) + 1 || ATK_ORDER.length + 1)
+  return [...groups].sort(([a], [b]) => rank(a) - rank(b))
+}
+
 /**
  * 精简图鉴：按攻击属性分组，一个属性一段文本（调用方一段发一条消息）。
  *
@@ -380,12 +400,7 @@ export function describeEffect(sk) {
  * 要看完整数值就单独查 `档案图鉴 星野`，那才发角色卡图。
  */
 export function renderRosterByType() {
-  const groups = new Map()
-  for (const t of ROSTER) {
-    if (!groups.has(t.atkType)) groups.set(t.atkType, [])
-    groups.get(t.atkType).push(t)
-  }
-  return [...groups].map(([atk, list]) => {
+  return rosterByAtkType().map(([atk, list]) => {
     const body = list.map((t) => [
       `${t.name}　${combatRoleOf(t)}　${atk}攻击 / ${ARMOR_LABEL[t.defType] || t.defType}`,
       `　普技「${t.skill?.name || "无"}」${describeEffect(t.skill)}`,

@@ -189,19 +189,30 @@ export class BaBattle extends plugin {
     }
   }
 
+  /** 图鉴总览图。渲染失败就少发这一条，后面的文字节点才是配队的必要信息 */
+  async rosterGridSegment() {
+    try {
+      return Segment.image(await baBattleImageGenerator.generateRosterGrid())
+    } catch (error) {
+      logger.warn(`[档案对战] 图鉴总览渲染失败：${error.message}`)
+      return null
+    }
+  }
+
   /**
-   * 图鉴的合并转发节点：按攻击属性一个属性一个节点 —— 配队时要比的就是属性对位。
+   * 图鉴的合并转发节点：**首条是全员总览图**，之后按攻击属性一个属性一个节点 ——
+   * 配队时要比的就是属性对位，图给「有谁、什么属性装甲、几费」，文字给技能详情。
    * **一律走合并转发**，不管发给谁：拆成一个属性一条普通消息会刷三屏，
    * 而且配队时还得往回翻聊天记录。
-   * @param {string|null} hint 首节点的用法说明，私聊配队时才给
+   * @param {string|null} hint 总览图之后的用法说明，私聊配队时才给
    */
-  rosterNodes(hint = null) {
-    return [hint, ...renderRosterByType()].filter(Boolean)
+  async rosterNodes(hint = null) {
+    return [await this.rosterGridSegment(), hint, ...renderRosterByType()].filter(Boolean)
   }
 
   /** 私聊发不出去时的兜底：图鉴照样以合并转发发在群里 */
   async sendRosterByType(bot, groupId) {
-    return this.forwardToGroup(bot, groupId, this.rosterNodes())
+    return this.forwardToGroup(bot, groupId, await this.rosterNodes())
   }
 
   /**
@@ -209,7 +220,7 @@ export class BaBattle extends plugin {
    * @returns {Promise<boolean>} 没加好友 / 被风控时返回 false，调用方兜回群里
    */
   async sendRosterToUser(bot, uid) {
-    const nodes = toNodes(this.rosterNodes(
+    const nodes = toNodes(await this.rosterNodes(
       "📖 角色图鉴　直接回复 4 个角色名完成配队\n" +
       "例：星野 白子 野宫 芹香\n" +
       "写的顺序就是左起站位，决定普攻对位"
@@ -530,9 +541,9 @@ export class BaBattle extends plugin {
   guide = Command(/^#?档案图鉴\s*(.*)$/, { event: "message.group" }, async function (e) {
     const key = (e.match?.[1] || "").trim()
     if (!key) {
-      await this.sendForward(e, this.rosterNodes(), {
+      await this.sendForward(e, await this.rosterNodes(), {
         source: "档案对战 · 角色图鉴",
-        summary: `${ROSTER.length} 名角色，按攻击属性分组`,
+        summary: `${ROSTER.length} 名角色，总览图 + 按攻击属性分组`,
       })
       return true
     }

@@ -1,5 +1,5 @@
 /**
- * 四类图渲染冒烟：改 HTML/CSS 模板或改动 CFG 文案之后跑一遍。
+ * 五类图渲染冒烟：改 HTML/CSS 模板或改动 CFG 文案之后跑一遍。
  * 只验证「渲染不报错、出得来字节数」，不比对像素。
  *
  * 用法：node scripts/render-smoke.mjs
@@ -32,6 +32,7 @@ try {
   await step("战场图", () => G.generateBattleMap(st, { events: r.events }))
   await step("角色卡", () => G.generateCharacterCard(ROSTER[0]))
   await step("攻略页", () => G.generateGuidePages())
+  await step("图鉴总览", () => G.generateRosterGrid())
   await step("图鉴卡", () => G.generateRosterCards())
   console.log(`\n全部渲染成功（${((Date.now() - t0) / 1000).toFixed(1)}s）`)
 } catch (e) {
