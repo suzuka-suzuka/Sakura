@@ -1153,13 +1153,23 @@ export const CFG = {
    * 遮蔽成功值（\`BlockRate_Base\`）全 272 人只有优香的武器被动带，生成器不读那个槽，暂时接不到。
    */
   COVER_BLOCK_RATE: 0.3,
-  SECOND_BONUS: 2,                   // 后手方开局补偿
+  SECOND_BONUS: 2,                   // 后手方开局补偿；2000 局压测先手胜率约 51.4%
+  /**
+   * 支援把自己的基础面板按比例转给每个主力（官方编成加成，不是 buff）。
+   * PvP 4+2：生命/攻击 10%，防御/治疗力 5%。两个支援叠加。
+   * 只看支援自己的模板面板（技能 / 被动 / 爱用品属性都不算）；支援和召唤物自己拿不到。
+   * 怒炎歼灭战那种 4 支援全 5% 不在本项目。
+   */
+  SUPPORT_GIFT_HP: 0.1,
+  SUPPORT_GIFT_ATK: 0.1,
+  SUPPORT_GIFT_DFS: 0.05,
+  SUPPORT_GIFT_HEAL: 0.05,
 
   // ---- 白热化 / FEVER TIME（照搬原作，按 1 轮 = ${ROUND_SEC} 秒折算）----
   // 原作 PvP：总时长 ${BATTLE_SEC} 秒，剩余不足 ${FEVER_LEFT_SEC} 秒进入白热化，
   // 时间耗尽则比双方「当前血量 / 最大血量」的比值定胜负。
   FEVER_ROUND: ${(BATTLE_SEC - FEVER_LEFT_SEC) / ROUND_SEC},  // 第几轮进入白热化 = ${BATTLE_SEC - FEVER_LEFT_SEC} 秒
-  FEVER_COST_MULT: 2,                // 白热化唯一的基础效果：Cost 攒得更快
+  FEVER_COST_MULT: 2,                // 白热化：存活的场上主力 Cost 回复 ×2（支援仍各回 0.5）
   FEVER_DEBUFF: 0.5,                 // 赛季附加规则：防御 / 闪避 / 受治疗下降，设 0 可关掉
   MAX_ROUND: ${BATTLE_SEC / ROUND_SEC},                   // 时间耗尽 = ${BATTLE_SEC} 秒 = ${BATTLE_SEC / ROUND_SEC} 轮
 }

@@ -6,7 +6,7 @@
  *
  *   node scripts/target-test.mjs
  */
-import { createBattle, playerTurn, validateAction, exCastableOf, exWaitOf, exCostOf, exLockLenOf, regenOf, tmplOf, provokedBy, focusedOf, exLockedOf, exSealedOf, autoProcChance } from "../lib/ba/engine.js"
+import { createBattle, playerTurn, validateAction, exCastableOf, exWaitOf, exCostOf, exLockLenOf, regenOf, tmplOf, atkOf, dfsOf, healOf, provokedBy, focusedOf, exLockedOf, exSealedOf, autoProcChance } from "../lib/ba/engine.js"
 import { ROSTER, CFG } from "../lib/ba/roster.js"
 import { describeEffect } from "../lib/ba/format.js"
 import { parseAction } from "../lib/ba/parse.js"
@@ -595,8 +595,9 @@ console.log("\n=== 18. 瞬的强化存续 6 轮 / 开局回费在建局时就落
     { uid: "a", name: "蓝", picks: ["瞬", "野宫", "野宫", "野宫"].map(id) },
     { uid: "b", name: "红", picks: SHUN_FOE.map(id) }, { seed: 11, first: 0 }
   )
+  check("后手开局补偿固定为 2 Cost", CFG.SECOND_BONUS, 2)
   check("先手带瞬 → 开局 Cost 0+2", st.sides[0].cost, 2)
-  check("对面没瞬 → 只有后手补偿 2", st.sides[1].cost, 2)
+  check("对面没瞬 → 只有后手补偿", st.sides[1].cost, CFG.SECOND_BONUS)
   check("开局就算用掉一次，不会在技能阶段再放", st.sides[0].units[0].skillUses, 1)
   let cur = st
   for (let i = 0; i < 6; i++) cur = playerTurn(cur, { type: "pass" }).state
@@ -1024,7 +1025,8 @@ console.log("\n=== 28. 攻速只乘普攻，不乘 EX / 普通技能 ===")
   const [ex0, ex1] = pair(["茜", "野宫", "野宫", "野宫"], { type: "ex", casts: [{ pos: 0 }] })
   check("茜的 EX 不吃攻速层（伤害不变）", [ex0, ex1], [ex0, ex0])
   const [aa0, aa1] = pair(["野宫", "野宫", "野宫", "野宫"], { type: "pass" })
-  check("普攻吃攻速层（+100% 正好翻倍）", [aa0, aa1], [aa0, aa0 * 2])
+  // 分段各自四舍五入，翻倍后可能差 1；鹤城那条已经按 ≤2 量
+  check("普攻吃攻速层（+100% 正好翻倍）", Math.abs(aa1 - aa0 * 2) <= 2, true)
 
   // 鹤城 EX 本身没伤害，普攻在过了之后的 ③-b，必须吃攻速
   const pairRun = (picks, action) => {
@@ -1775,6 +1777,21 @@ console.log("\n=== 36. 支援位：不站在场上、5/6 只是结算编号 ==="
   fresh.sides[0].units[3].alive = false
   check("死一个主力后 = 2.5/回合", regenOf(fresh.sides[0], fresh), 2.5)
 
+  // 白热化把 4 个场上主力的 0.5 都翻倍成 1.0；两个支援仍各贡献 0.5。
+  const fever = setup(["星野", "白子", "野宫", "伊织"], OUT)
+  fever.round = CFG.FEVER_ROUND
+  check("白热化：4 个场上主力 ×1 + 2 个支援 ×0.5 = 5/回合", regenOf(fever.sides[0], fever), 5)
+  check("白热化：场上主力全是后排也仍为 5/回合", regenOf(fever.sides[1], fever), 5)
+  const entered = playerTurn(structuredClone(fever), { type: "pass" }).state
+  check("白热化 Cost 回复 Buff 挂给全部场上主力",
+    entered.sides[0].units.map((u) => u.buffs.some((b) => b.sourceKey === "fever-cost")),
+    [true, true, true, true])
+  check("白热化 Cost 回复 Buff 不挂给支援",
+    entered.sides[0].supports.map((u) => u.buffs.some((b) => b.sourceKey === "fever-cost")),
+    [false, false])
+  fever.sides[0].units[3].alive = false
+  check("白热化：阵亡一个场上主力后 = 4/回合", regenOf(fever.sides[0], fever), 4)
+
   // 冷却长度按**存活总人数**逐级退，剩 3 人（1 主力 + 2 支援）就完全没冷却了。
   // 支援不死，所以 3 是下限 —— 这也是反死锁不变量「可放的人永远 ≥3」的来源。
   const lens = [[], [3], [2, 3], [1, 2, 3]].map((kills) => {
@@ -2004,6 +2021,76 @@ console.log("\n=== 39. 支援位治疗：人数以描述为准，不是有圈就
   const rAgain = playerTurn(again, { type: "pass" })
   check("再放一次：消耗过的人不会再拿到急救",
     rAgain.state.sides[0].units.map((u) => Boolean(u.ward)), [true, false, true, true])
+}
+
+console.log("\n=== 40. 支援把基础面板按比例转给每个主力 ===")
+{
+  const of = (n) => ROSTER.find((t) => t.name === n)
+  const giftOf = (names) => names.reduce((g, n) => {
+    const t = of(n)
+    g.hp += t.hp * CFG.SUPPORT_GIFT_HP
+    g.atk += t.atk * CFG.SUPPORT_GIFT_ATK
+    g.dfs += t.dfs * CFG.SUPPORT_GIFT_DFS
+    g.heal += t.healPower * CFG.SUPPORT_GIFT_HEAL
+    return g
+  }, { hp: 0, atk: 0, dfs: 0, heal: 0 })
+
+  check("PvP 4+2 的官方比例：生命/攻击 10%，防御/治疗 5%",
+    [CFG.SUPPORT_GIFT_HP, CFG.SUPPORT_GIFT_ATK, CFG.SUPPORT_GIFT_DFS, CFG.SUPPORT_GIFT_HEAL],
+    [0.1, 0.1, 0.05, 0.05])
+
+  const two = setup(["星野", "椿", "优香", "春香", "绫音", "芹娜"], ["伊织", "伊织", "伊织", "伊织", "真白", "花子"])
+  const g = giftOf(["绫音", "芹娜"])
+  const hoshino = of("星野")
+  const u0 = two.sides[0].units[0]
+  check("两个支援叠加，生命写进上限", u0.maxhp, hoshino.hp + Math.round(g.hp))
+  check("当前生命一起加上去", u0.hp, hoshino.hp + Math.round(g.hp))
+  check("四个主力拿到同一份", two.sides[0].units.map((u) => u.gift), [u0.gift, u0.gift, u0.gift, u0.gift])
+  check("攻击走 gift，不是主力面板的 10%", atkOf(u0), hoshino.atk + g.atk)
+  check("防御 / 治疗力同样按支援自己的基础值转",
+    [dfsOf(u0), healOf(u0)], [hoshino.dfs + g.dfs, hoshino.healPower + g.heal])
+
+  check("支援自己拿不到",
+    two.sides[0].supports.map((s) => [s.hp, s.maxhp, s.gift, atkOf(s)]),
+    two.sides[0].supports.map((s) => {
+      const t = tmplOf(s)
+      return [t.hp, t.hp, undefined, t.atk]
+    }))
+
+  const one = createBattle(
+    { uid: "a", name: "蓝", picks: ["星野", "椿", "优香", "春香", "绫音"].map(id) },
+    { uid: "b", name: "红", picks: ["伊织", "伊织", "伊织", "伊织"].map(id) },
+    { seed: 11, first: 0 }
+  )
+  const g1 = giftOf(["绫音"])
+  check("一个支援就是一份，不会凭空按两个算",
+    one.sides[0].units[0].maxhp, hoshino.hp + Math.round(g1.hp))
+  check("两份比一份多（叠加成立）",
+    two.sides[0].units[0].maxhp > one.sides[0].units[0].maxhp, true)
+
+  const none = createBattle(
+    { uid: "a", name: "蓝", picks: ["星野", "椿", "优香", "春香"].map(id) },
+    { uid: "b", name: "红", picks: ["伊织", "伊织", "伊织", "伊织"].map(id) },
+    { seed: 11, first: 0 }
+  )
+  check("没有支援就不加",
+    [none.sides[0].units[0].maxhp, none.sides[0].units[0].gift, atkOf(none.sides[0].units[0])],
+    [hoshino.hp, undefined, hoshino.atk])
+
+  const buffed = setup(["星野", "椿", "优香", "春香", "绫音", "芹娜"], ["伊织", "伊织", "伊织", "伊织"])
+  const before = atkOf(buffed.sides[0].units[0])
+  buffed.sides[0].units[0].buffs.push({ stat: "atk", value: 1 })
+  check("百分比加攻乘在（自身 + 支援转来）上", atkOf(buffed.sides[0].units[0]), before * 2)
+
+  const doll = setup(["日富美", "野宫", "野宫", "野宫", "绫音", "芹娜"], ["伊织", "伊织", "伊织", "伊织"])
+  doll.sides[0].cost = 10
+  const summoned = playerTurn(doll, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] })
+  const sm = summoned.state.sides[0].summons[0]
+  const hifumi = of("日富美")
+  const hpRate = hifumi.ex.effects.find((e) => e.type === "summon")?.hpRate || 0
+  check("召唤物自己拿不到这份加成", Boolean(sm.gift), false)
+  check("人偶生命按日富美模板算，不含编成加成",
+    sm.maxhp, Math.round(10 + hifumi.hp * hpRate))
 }
 
 console.log(bad ? `\n✗ ${bad} 条不符` : "\n全部符合")

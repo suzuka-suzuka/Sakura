@@ -46,9 +46,10 @@ function feverState() {
   for (const s of st.sides) {
     for (const u of s.units) {
       u.skillCd = 99
-      if (CFG.FEVER_COST_MULT > 1) {
+      const costUp = Math.max(1, CFG.FEVER_COST_MULT || 1) - 1
+      if (costUp > 0) {
         u.buffs.push({
-          stat: "cost_regen", value: CFG.FEVER_COST_MULT - 1, turns: 9999, st: -1,
+          stat: "cost_regen", value: costUp, turns: 9999, st: -1,
           srcSide: u.side, effectKind: "fever", sourceKey: "fever-cost",
         })
       }

@@ -114,7 +114,7 @@ export function renderField(state) {
     sideBlock(state, 1),
     "　",
     `第 ${state.round} 轮` +
-      (state.fever ? `　🔥白热化（Cost 回复 ×${CFG.FEVER_COST_MULT}，防御/闪避/受治疗 −${Math.round(CFG.FEVER_DEBUFF * 100)}%）` : ""),
+      (state.fever ? `　🔥白热化（场上主力 Cost 回复 ×${CFG.FEVER_COST_MULT}，支援仍为 0.5，防御/闪避/受治疗 −${Math.round(CFG.FEVER_DEBUFF * 100)}%）` : ""),
   ].join("\n")
 }
 
@@ -438,7 +438,7 @@ export function renderRosterByType() {
       `　EX「${t.ex.name}」${t.ex.cost}费　${describeEffect(t.ex)}`,
     ].join("\n"))
     // 支援那几段加一句提要：它们不站在场上，配队时是完全不同的一格
-    const note = sq === "支援" ? "\n（支援位不站在场上、打不到，只放普通技能和 EX）" : ""
+    const note = sq === "支援" ? "\n（支援位不站在场上、打不到，只放普通技能和 EX；基础生命/攻击的 10%、防御/治疗力的 5% 分给主力）" : ""
     return `◤ ${sq} · ${atk}攻击 ◢　${list.length} 人${note}\n\n${body.join("\n\n")}`
   }))
 }
@@ -461,7 +461,7 @@ export function renderRoster() {
       // 支援位原数据里就没有 `Skills.Normal`，`autoAttack` 是 null —— 它们压根没有普攻这回事
       (t.autoAttack
         ? `   [普攻] ${t.autoAttack.hits.reduce((a, b) => a + b, 0).toFixed(0)}% 分${t.autoAttack.hits.length}段\n`
-        : "   [支援] 不站在场上、打不到，也没有普攻\n") +
+        : "   [支援] 不站在场上、打不到，也没有普攻；基础生命/攻击的 10%、防御/治疗力的 5% 分给主力\n") +
       `   [普通技能 ${TRIGGER_TEXT(t.skill?.trigger)}] ${t.skill?.name || "无"}\n` +
       `      ${describeEffect(t.skill)}\n` +
       `   [EX ${t.ex.cost}费] ${t.ex.name}\n` +

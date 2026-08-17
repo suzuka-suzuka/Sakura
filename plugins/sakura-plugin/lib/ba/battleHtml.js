@@ -494,7 +494,7 @@ function hud(state) {
   const cards = s.units.filter((u) => u.alive).map(card).join("")
   const supCards = (s.supports || []).map(card).join("")
 
-  // 条按小数填：side.cost 永远是整数，攒了一半的那点在 regenAcc 里，
+  // 条按小数填：side.cost 可以带小数（后手开局 1.5），没凑整的回复在 regenAcc 里，
   // 加起来才是真实进度 —— 4.5 就画成 4 格满 + 第 5 格半格
   const filled = Math.max(0, Math.min(CFG.COST_MAX, s.cost + (s.regenAcc || 0)))
   const cells = Array.from({ length: CFG.COST_MAX }, (_, i) => {

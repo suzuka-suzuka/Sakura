@@ -46,6 +46,8 @@ const sideDead = (side) => side.units.every((u) => !u.alive)
  * 支援**打不到**：普攻 / 普通技能 / EX / `enemy_all` / 场地都够不到它们，
  * 所以 `alive` 恒为 true，5、6 号只是 ③-a 的**结算编号**，不是站位。
  * 要「谁能放 EX、谁在 ③-a 出手、Cost 按几个人回」的地方才走下面这几个。
+ *
+ * 另外它们把自己的基础生命/攻击 10%、防御/治疗力 5% 转给每个主力，见 applySupportGift。
  */
 const supportsOf = (side) => side.supports || []
 const castersOf = (side) => [...side.units, ...supportsOf(side)]
@@ -193,9 +195,9 @@ function makeStatus(eff, turnId, source, kind) {
 
 // ---------------- 面板（基础值 × 各来源修正层）----------------
 
-export const atkOf = (u) => tmplOf(u).atk * Math.max(0.2, factorOf(u, "atk")) + flatOf(u, "atk_flat")
-export const dfsOf = (u) => Math.max(0, tmplOf(u).dfs * Math.max(0.2, factorOf(u, "dfs")) + flatOf(u, "dfs_flat"))
-export const healOf = (u) => tmplOf(u).healPower * Math.max(0.2, factorOf(u, "heal")) + flatOf(u, "heal_flat")
+export const atkOf = (u) => ((tmplOf(u).atk || 0) + (u.gift?.atk || 0)) * Math.max(0.2, factorOf(u, "atk")) + flatOf(u, "atk_flat")
+export const dfsOf = (u) => Math.max(0, ((tmplOf(u).dfs || 0) + (u.gift?.dfs || 0)) * Math.max(0.2, factorOf(u, "dfs")) + flatOf(u, "dfs_flat"))
+export const healOf = (u) => ((tmplOf(u).healPower || 0) + (u.gift?.heal || 0)) * Math.max(0.2, factorOf(u, "heal")) + flatOf(u, "heal_flat")
 const accOf = (u) => tmplOf(u).acc * Math.max(0.2, factorOf(u, "acc"))
 const dodgeOf = (u) => tmplOf(u).dodge * Math.max(0.2, factorOf(u, "dodge"))
 const critOf = (u) => tmplOf(u).crit * Math.max(0, factorOf(u, "crit"))
@@ -375,13 +377,15 @@ export function exRefreshPending(state, side) {
  * 白热化从第 36 轮起。冷却与状态时长走的也是这把尺子（只在自己方回合跳，一轮正好
  * 跳一次），两边口径必须一致，改成 turnId 就又差了 2 倍。
  *
- * 原作的**基础效果只有一条**：EX Cost 攒得明显更快（Cost Regen Up）。
+ * 原作的**基础效果只有一条**：EX Cost 攒得更快（Cost Regen Up）。
+ * 那张红底 COST↑ 会出现在全部场上主力头上，所以每个还活着的场上主力都将自身回复
+ * 乘以 `FEVER_COST_MULT`（默认 2）；不在场上的支援仍按每人 `COST_REGEN_PER_UNIT` 回复。
  * 防御 / 闪避 / 受治疗下降是赛季附加规则（S10、S11 都带），一并抄了，
  * 不想要把 CFG.FEVER_DEBUFF 设成 0 即可。
  *
- * 数字仍走 `regenOf` 的 `FEVER_COST_MULT`（Cost 是按边回的，不是按人）；
- * 往每个人身上挂一层 `cost_regen` 只是让状态格画出那张红底 COST↑。
+ * 数字走 `regenOf`（按边回）；`cost_regen` 层挂给所有场上主力，让状态格画对。
  */
+const feverFieldUnitOf = (u) => Boolean(u?.alive && !u.support && !u.summon)
 const feverOn = (state) => state.round >= CFG.FEVER_ROUND
 
 /**
@@ -392,10 +396,11 @@ function enterFever(ctx) {
   const { state } = ctx
   if (state.fever || !feverOn(state)) return
   state.fever = true
-  const costUp = CFG.FEVER_COST_MULT - 1
+  const costMult = Math.max(1, CFG.FEVER_COST_MULT || 1)
+  const costUp = costMult - 1
   for (const s of state.sides) {
     for (const u of s.units) {
-      if (costUp) {
+      if (costUp && feverFieldUnitOf(u)) {
         u.buffs.push({
           stat: "cost_regen", value: costUp, turns: 9999, st: -1,
           srcSide: u.side, effectKind: "fever", sourceKey: "fever-cost",
@@ -411,7 +416,7 @@ function enterFever(ctx) {
       }
     }
   }
-  ctx.log(`🔥 白热化：Cost 回复 ×${CFG.FEVER_COST_MULT}` +
+  ctx.log(`🔥 白热化：场上主力 Cost 回复 ×${costMult}，支援仍为 ${CFG.COST_REGEN_PER_UNIT}` +
     (CFG.FEVER_DEBUFF > 0 ? `，全场防御 / 闪避 / 受治疗 −${Math.round(CFG.FEVER_DEBUFF * 100)}%` : ""))
 }
 
@@ -464,7 +469,31 @@ function makeUnit(tmpl, idx, side) {
 }
 
 /**
- * @param {{uid, name, picks: string[]}} a 蓝方（picks 是 4 个角色 id，顺序即 1~4 号位）
+ * 官方编成加成：每个支援把自己**基础**面板按比例交给每个主力。
+ * 生命直接写进 hp / maxhp；攻防治挂在 `u.gift` 上，进 atkOf / dfsOf / healOf 当基础值。
+ * 不是 buff —— 头上不出状态格。支援和召唤物自己拿不到。
+ */
+function applySupportGift(side) {
+  const g = { hp: 0, atk: 0, dfs: 0, heal: 0 }
+  for (const s of supportsOf(side)) {
+    const t = tmplOf(s)
+    g.hp += t.hp * CFG.SUPPORT_GIFT_HP
+    g.atk += t.atk * CFG.SUPPORT_GIFT_ATK
+    g.dfs += t.dfs * CFG.SUPPORT_GIFT_DFS
+    g.heal += (t.healPower || 0) * CFG.SUPPORT_GIFT_HEAL
+  }
+  if (!g.hp && !g.atk && !g.dfs && !g.heal) return
+  // 生命取整：0.1 在二进制里除不尽，不收的话治疗一加就会 hp > maxhp
+  const hp = Math.round(g.hp)
+  for (const u of side.units) {
+    u.maxhp += hp
+    u.hp += hp
+    u.gift = { atk: g.atk, dfs: g.dfs, heal: g.heal }
+  }
+}
+
+/**
+ * @param {{uid, name, picks: string[]}} a 蓝方（picks 前 4 个是主力，后 2 个是支援）
  * @param {{uid, name, picks: string[]}} b 红方
  * @param {{first?: 0|1, seed?: number}} opts
  */
@@ -490,6 +519,7 @@ export function createBattle(a, b, opts = {}) {
       supports: s.picks.slice(4).map((id, i) => makeUnit(BY_ID[id], 4 + i, side)),
     })),
   }
+  for (const side of state.sides) applySupportGift(side)
   state.sides[1 - state.first].cost += CFG.SECOND_BONUS
   applyBattleStart(state)
   return state
@@ -1163,7 +1193,7 @@ function heal(ctx, src, tgt, amount) {
   amount *= Math.max(0.1, factorOf(tgt, "heal_taken"))
   const h = Math.min(amount, tgt.maxhp - tgt.hp)
   if (h <= 0) return
-  tgt.hp += h
+  tgt.hp = Math.min(tgt.maxhp, tgt.hp + h)
   ctx.log(`  ${nameOf(src)} 治疗 ${tgt === src ? "自身" : nameOf(tgt)} +${Math.round(h)}`)
   emitEvent(ctx, { type: "heal", source: unitRef(src), target: unitRef(tgt), amount: Math.round(h) })
 }
@@ -1932,7 +1962,7 @@ function endTurn(ctx, side) {
       if (r.tick % r.period === 0) {
         const h = Math.min(r.amount, u.maxhp - u.hp)
         if (h > 0) {
-          u.hp += h
+          u.hp = Math.min(u.maxhp, u.hp + h)
           ctx.log(`  ${nameOf(u)} 持续治疗 +${Math.round(h)}`)
           emitEvent(ctx, { type: "heal", source: unitRef(u), target: unitRef(u), amount: Math.round(h) })
         }
@@ -1976,10 +2006,15 @@ function settle(state) {
 /**
  * Cost 回复只取决于存活人数，**支援也算**：满编 6 人 = 3/回合。
  * 支援不会死，所以每方恒定有 1.0 打底，主力全灭之前在 2.0~3.0 之间。
- * 白热化期间翻倍（原作 FEVER 的核心效果就是这条）。
+ * 白热化时每个存活的场上主力回复乘以 `FEVER_COST_MULT`；支援仍各回 0.5。
  */
-export const regenOf = (side, state) =>
-  CFG.COST_REGEN_PER_UNIT * aliveCastersOf(side).length * (state && feverOn(state) ? CFG.FEVER_COST_MULT : 1)
+export const regenOf = (side, state) => {
+  const base = CFG.COST_REGEN_PER_UNIT * aliveCastersOf(side).length
+  if (!state || !feverOn(state)) return base
+  const fieldCount = side.units.filter(feverFieldUnitOf).length
+  const extraPerFieldUnit = CFG.COST_REGEN_PER_UNIT * (Math.max(1, CFG.FEVER_COST_MULT || 1) - 1)
+  return base + fieldCount * extraPerFieldUnit
+}
 
 /**
  * 当前行动方本回合实际可用的 Cost。

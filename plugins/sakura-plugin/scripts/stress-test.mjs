@@ -34,7 +34,7 @@ const supIds = ROSTER.filter((t) => t.squad === "支援").map((t) => t.id)
 const rnd = (seed) => { let x = seed; return () => ((x = (x * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) }
 
 let games = 0, errors = 0, turnsTotal = 0
-const winner = { 0: 0, 1: 0, "-1": 0 }
+const winner = { first: 0, second: 0, draw: 0 }
 const endRound = []
 const fail = (msg) => { errors++; console.log("  ✗ " + msg) }
 
@@ -120,7 +120,9 @@ for (let seed = 1; seed <= GAMES; seed++) {
   games++
   turnsTotal += guard
   endRound.push(st.round)
-  winner[String(st.winner)]++
+  if (st.winner === -1) winner.draw++
+  else if (st.winner === st.first) winner.first++
+  else winner.second++
 }
 
 endRound.sort((a, b) => a - b)
@@ -131,5 +133,5 @@ console.log(`结束轮数：最短 ${endRound[0]}　中位 ${endRound[Math.floor
 // 白热化不是「异常路径」，但它该是少数 —— 摸到的比例明显上去了，说明伤害口径出问题了
 console.log(`摸到白热化（第 ${CFG.FEVER_ROUND} 轮起）：${endRound.filter((r) => r >= CFG.FEVER_ROUND).length} 局`)
 console.log(`打满 ${CFG.MAX_ROUND} 轮：${endRound.filter((r) => r >= CFG.MAX_ROUND).length} 局`)
-console.log(`先手胜 ${winner[0]}　后手胜 ${winner[1]}　平局 ${winner["-1"]}`)
+console.log(`先手胜 ${winner.first}　后手胜 ${winner.second}　平局 ${winner.draw}`)
 process.exit(errors ? 1 : 0)

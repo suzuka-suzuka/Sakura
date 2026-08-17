@@ -94,7 +94,7 @@ function renderGuideFallback() {
     "",
     `【时限】原作一局 4 分钟 = ${CFG.MAX_ROUND} 轮；打满则比双方「当前血量 ÷ 最大血量」定胜负。`,
     `【白热化】剩余不足 1 分钟时进入，即第 ${CFG.FEVER_ROUND} 轮。`,
-    `Cost 回复 ×${CFG.FEVER_COST_MULT}（原作 FEVER 的核心效果），并全场防御 / 闪避 / 受治疗 −${Math.round(CFG.FEVER_DEBUFF * 100)}%，持续到结束。`,
+    `场上主力 Cost 回复 ×${CFG.FEVER_COST_MULT}（每人 1.0），不在场上的支援仍各回 0.5；并全场防御 / 闪避 / 受治疗 −${Math.round(CFG.FEVER_DEBUFF * 100)}%，持续到结束。`,
     "",
     "【目标】不指定目标时一律走对位：对位 → 同战场最近 → 全场最近。EX 想打谁就写谁。",
     "",

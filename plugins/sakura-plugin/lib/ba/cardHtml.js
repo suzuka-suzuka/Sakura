@@ -111,7 +111,7 @@ body{width:${CARD_WIDTH}px;height:${CARD_HEIGHT}px;font-family:${FONT_STACK};-we
     <p>${esc(describeEffect(tmpl.ex))}</p>
     <p style="margin-top:8px;color:#8397AC;font-size:16px">${auto
       ? `普攻 ${autoPct.toFixed(0)}% 分 ${auto.hits.length} 段${auto.count > 1 ? ` · ${auto.depth === "through" ? "直线贯穿" : "同战场同身位"} ${auto.count} 人` : ""}`
-      : "支援位 · 不站在场上，打不到；没有普攻，索敌打最前面的"}</p>
+      : "支援位 · 不站在场上，打不到；没有普攻，索敌打最前面的。基础生命/攻击的 10%、防御/治疗力的 5% 分给主力"}</p>
   </div>
   <div class="inner"></div>
 </div>
