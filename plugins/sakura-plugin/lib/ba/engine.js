@@ -642,11 +642,18 @@ function setTaunt(side, target, turns, turnId, kind = "provoke") {
 const isProvoke = (u) => u.alive && u.taunt > 0 && (u.tauntKind || "provoke") === "provoke"
 const isFocus = (u) => u.alive && (u.focus > 0 || (u.taunt > 0 && u.tauntKind === "focus"))
 
-/** 这一方当前把对面刀吸过来的目标。嘲讽优先于集火；召唤物也算 */
-const tauntTargetOf = (side) => {
+/**
+ * 这一方当前把对面刀吸过来的目标。嘲讽优先于集火；召唤物也算。
+ *
+ * `noProvoke` = **开火的是支援位**，这时只认集火。两套机制在这一点上正好相反：
+ *   - Provoke 是**场地性的**，拉的是站在场上的人 —— 支援不在场上，拉不动（跟 `provokedBy` 同一条理由）
+ *   - 集火是**给己方下的索敌指令**，标在敌人头上、由自己这边全员执行 —— 支援照样跟着打
+ */
+const tauntTargetOf = (side, noProvoke = false) => {
   const sm = side.summons || []
-  return sm.find(isProvoke) || side.units.find(isProvoke)
-    || side.units.find(isFocus) || sm.find(isFocus) || null
+  const focused = side.units.find(isFocus) || sm.find(isFocus) || null
+  if (noProvoke) return focused
+  return sm.find(isProvoke) || side.units.find(isProvoke) || focused
 }
 
 /** 这个单位现在是不是被集火（蓝底靶心画在他自己头上） */
@@ -712,8 +719,8 @@ function maxAtkTarget(u, alive, forced = false) {
 
 /**
  * 普攻 / 普通技能的对线锁定，按优先级：
- *   1. 嘲讽（Provoke）—— 最高，直接无视战场分割
- *   2. 集火（ConcentratedTarget，切里诺）—— 己方攻击锁在被点名的那个人
+ *   1. 嘲讽（Provoke）—— 最高，直接无视战场分割。**开火的是支援位时这一档整个跳过**
+ *   2. 集火（ConcentratedTarget，切里诺）—— 己方攻击锁在被点名的那个人，支援也照锁
  *   3. 索敌改成「打攻击力最高的」（瞬的强化形态 / 柚子的技能自带），见 maxAtkTarget
  *   4. **同战场的佩洛洛**：挡在那半边最前面，嘲讽过期了也一样。本战场打空要越界时也先拆墙
  *   5. 同战场的前排 → 中排 → 后排。不是职业，是角色自己的 Front/Middle/Back
@@ -725,7 +732,8 @@ function maxAtkTarget(u, alive, forced = false) {
 function laneTarget(u, foes, maxAtk = false, opts = {}) {
   // 嘲讽 > 集火，无视一切 —— 战场分割、前排、挡刀、瞬的强化索敌统统让路。
   // 嘲讽同槽只留一个（人偶入场 Provoke 和椿的 EX 会互相顶掉）；集火另开一槽，见 setTaunt。
-  const taunting = tauntTargetOf(foes)
+  // **支援位的刀不被嘲讽拉走**：椿把场上四个人全拽过去的那一轮，5、6 号该打谁还打谁。
+  const taunting = tauntTargetOf(foes, Boolean(u.support))
   if (taunting && !opts.ignoreTaunt) return taunting
 
   const sm = summonsOf(foes)
@@ -996,7 +1004,9 @@ function resolveTargets(state, u, skill, foes, allies, pick, actionKind) {
     }
   }
   // 嘲讽把整发吸走，不往后排溅。跟人偶同一档。
-  if (tg.startsWith("enemy") && count > 1 && primary === tauntTargetOf(foes) && !primary.summon) {
+  // 支援不吃嘲讽，所以它的范围技照常铺开 —— 吸走整发的前提是这一发本来就被拉过来了。
+  if (tg.startsWith("enemy") && count > 1
+    && primary === tauntTargetOf(foes, Boolean(u.support)) && !primary.summon) {
     return [primary]
   }
   /**

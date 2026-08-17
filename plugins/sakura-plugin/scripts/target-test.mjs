@@ -2093,5 +2093,84 @@ console.log("\n=== 40. 支援把基础面板按比例转给每个主力 ===")
     sm.maxhp, Math.round(10 + hifumi.hp * hpRate))
 }
 
+console.log("\n=== 43. 支援的刀不被嘲讽拉走，但照吃集火 ===")
+{
+  /**
+   * 两套机制在支援这里正好分道扬镳，跟原作一致：
+   *   - **Provoke 是场地性的**：拉的是站在场上的人，支援不在场上 → 该打谁还打谁
+   *   - **集火是给己方下的索敌指令**：标在敌人头上、由自己这边全员执行 → 支援照样跟着打
+   *
+   * 第 37 组管的是「放不放得出 EX」（`exLockedOf`），这一组管的是**落点**（`laneTarget`）。
+   * 两条都缺一不可：只免了 EX 锁的话，椿一放嘲讽，支援的普通技能仍会被拽去打椿。
+   */
+
+  /** 蓝方这一轮谁打了谁：键是「号位 + 普/技」，值是落点号位串 */
+  const shotsOf = (r) => {
+    const out = {}
+    for (const e of r.events) {
+      if (e.type !== "action" || e.source.side !== 0) continue
+      out[`${e.source.pos + 1}${e.action === "normal" ? "普" : "技"}`] =
+        (e.targets || []).map((t) => (t.summon ? "偶" : t.pos + 1)).join("")
+    }
+    return out
+  }
+
+  /**
+   * 蓝方四后排 + 爱理（单体）/ 真白（2 目标）。首轮把支援压住不放，
+   * 红方按 exPos 放个 EX（null 就干过），再回到蓝方那一轮量支援的落点。
+   */
+  const blueShots = (red, exPos = null) => {
+    const st = setup(["野宫", "野宫", "野宫", "野宫", "爱理", "真白"], red)
+    // 支援的普技冷却起始 = trigger.turns（爱理 5 / 真白 4），首轮先压住
+    for (const u of st.sides[0].supports) u.skillCd = 9999
+    let cur = run(st, { type: "pass" }).state // 蓝方先手，先过
+    cur.sides[1].cost = 10
+    if (exPos !== null) {
+      const r = playerTurn(cur, { type: "ex", casts: [{ pos: exPos }] })
+      if (r.error) throw new Error(`红 ${exPos + 1} 位放不出 EX：${r.error}`)
+      cur = r.state
+    }
+    // 红方收尾交回合（没放 EX 时这一口「过」就是他整个回合）
+    while (cur.activeSide === 1 && cur.phase === "command") cur = playerTurn(cur, { type: "pass" }).state
+    for (const u of cur.sides[0].supports) u.skillCd = 0 // 这一轮两个支援都出手
+    return shotsOf(playerTurn(cur, { type: "pass" }))
+  }
+
+  // 红方：星野(前) 1 位、椿(前) 2 位、两个野宫(后) 3·4 位。
+  // 支援没有对位，默认打最前那层里号位最小的 → 星野；椿放了嘲讽也还是星野。
+  const RED = ["星野", "椿", "野宫", "野宫"]
+  const calm = blueShots(RED)
+  check("对照组·无嘲讽：主力各打各的战场", [calm["1普"], calm["2普"], calm["3普"], calm["4普"]],
+    ["1", "2", "3", "4"])
+  check("对照组·无嘲讽：爱理打最前面的星野", calm["5技"], "1")
+  check("对照组·无嘲讽：真白铺开打星野 + 椿", calm["6技"], "12")
+
+  const taunt = blueShots(RED, 1)
+  check("四个主力被椿全拉走（说明这一轮嘲讽确实生效）",
+    [taunt["1普"], taunt["2普"], taunt["3普"], taunt["4普"]], ["2", "2", "2", "2"])
+  check("爱理（单体）不被拉走，照打星野", taunt["5技"], "1")
+  // 「嘲讽把整发吸走」的前提是这一发本来就被拉过来了 —— 支援没被拉，范围技当然照常铺开
+  check("真白（2 目标）也不被吸成单体，星野 + 椿 两个都吃到", taunt["6技"], "12")
+
+  /**
+   * 集火：切里诺的普技把标记打在**攻击力最高**的红方身上（星野 213 < 野宫 321 → 2 位），
+   * 而支援默认打的是最前面的星野 —— 两者岔开，才量得出支援到底跟不跟标记。
+   * ③-a 是先锁目标再一起结算，所以标记要在**上一轮**打出去。
+   */
+  {
+    const st = setup(["切里诺", "野宫", "野宫", "野宫", "爱理", "真白"], ["星野", "野宫", "野宫", "野宫"])
+    for (const u of st.sides[0].supports) u.skillCd = 9999
+    st.sides[0].units[0].skillCd = 0 // 切里诺首轮就标出去（她的普技只标记，不带伤害）
+    let cur = run(st, { type: "pass" }).state
+    cur = run(cur, { type: "pass" }).state // 红方过
+    check("切里诺的标记落在攻击力最高的 2 位身上（不是最前面的星野）",
+      cur.sides[1].units.map((u) => focusedOf(u)), [false, true, false, false])
+    for (const u of cur.sides[0].supports) u.skillCd = 0
+    const out = shotsOf(playerTurn(cur, { type: "pass" }))
+    check("支援吃集火：爱理改打被点名的 2 位", out["5技"], "2")
+    check("真白也锁在被点名的人身上", out["6技"], "2")
+  }
+}
+
 console.log(bad ? `\n✗ ${bad} 条不符` : "\n全部符合")
 process.exit(bad ? 1 : 0)
