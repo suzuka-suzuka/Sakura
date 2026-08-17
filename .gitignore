@@ -63,3 +63,17 @@ test/
 plugins/sakura-plugin/resources/ba/*/*/
 # 原作战斗状态图标（红/蓝/紫/黄那套），同样是官方美术
 plugins/sakura-plugin/resources/ba/status/
+
+# 例外：这两张 fetch-art.mjs **拉不到**，任何公开来源都没有，只能从游戏里自己提取
+#   99999/chibi   静子的掩体（百夜堂小推车）—— SchaleDB 的召唤物路径全是 1543 字节占位图
+#   KOTAMA/chibi  音濑 小玉的 Q 版 —— kivo 目录在，但 sd_model.png 连同一圈文件名全 404
+# 不跟进仓库的话，换机器跑完 fetch-art 会独独缺这两个，只能手工传。
+#
+# **先放行目录再放行文件**：上面那条排的是「目录」，被排除的目录 git 根本不会往里看，
+# 只写文件那一行是不生效的。KOTAMA 目录里另外两张（icon/portrait）拉得到，重新排掉。
+!plugins/sakura-plugin/resources/ba/summons/99999/
+plugins/sakura-plugin/resources/ba/summons/99999/*
+!plugins/sakura-plugin/resources/ba/summons/99999/chibi.png
+!plugins/sakura-plugin/resources/ba/characters/KOTAMA/
+plugins/sakura-plugin/resources/ba/characters/KOTAMA/*
+!plugins/sakura-plugin/resources/ba/characters/KOTAMA/chibi.png
