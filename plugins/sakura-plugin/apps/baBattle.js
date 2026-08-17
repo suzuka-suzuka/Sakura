@@ -57,7 +57,7 @@ function renderGuideFallback() {
     "指令都可以不加 #。",
     "档案对战 @某人　发起（不 @ 则公开邀战）",
     "应战　　　　　　接受",
-    "应战后角色图鉴以合并转发私聊发给双方；直接在私聊回 4 个角色名完成暗配队，例如：星野 白子 野宫 芹香",
+    "应战后角色图鉴以合并转发私聊发给双方；直接在私聊回 6 个角色名完成暗配队（前 4 主力 + 后 2 支援），例如：星野 白子 野宫 芹香 静子 芹娜",
     "配队顺序就是左起站位，决定普攻对位。",
     "",
     "出招：星野ex　/　星野ex打白子　/　星野ex给芹香　/　小春ex奶桃　/　泉奈ex换野宫（位移）　/　过",
@@ -264,7 +264,7 @@ export class BaBattle extends plugin {
    */
   async sendRosterToUser(bot, uid) {
     const nodes = toNodes(await this.rosterNodes(
-      "📖 角色图鉴　直接回复 4 个角色名完成配队\n" +
+      "📖 角色图鉴　直接回复 6 个角色名完成配队（前 4 主力 + 后 2 支援）\n" +
       "例：星野 白子 野宫 芹香\n" +
       "写的顺序就是左起站位，决定普攻对位"
     ), bot.self_id, bot.nickname)
@@ -364,7 +364,7 @@ export class BaBattle extends plugin {
 
     await e.reply(
       `⚔️ ${session.players[0].name}（${SIDE_MARK[0]}蓝方） vs ${session.players[1].name}（${SIDE_MARK[1]}红方）\n` +
-      "角色图鉴已私聊发给双方，直接回私聊 4 个角色名完成配队。\n" +
+      "角色图鉴已私聊发给双方，直接回私聊 6 个角色名完成配队（前 4 主力 + 后 2 支援）。\n" +
       "配队是暗的，两边都提交后才揭晓。要看某人的完整数值：档案图鉴 星野"
     )
 
@@ -399,7 +399,7 @@ export class BaBattle extends plugin {
 
     const parsed = parseDraft(e.msg || "")
     if (!parsed.ok) {
-      await e.reply(`${parsed.error}\n格式：4 个角色名，例「星野 白子 野宫 芹香」`)
+      await e.reply(`${parsed.error}\n格式：6 个角色名，前 4 主力 + 后 2 支援，例「星野 白子 野宫 芹香 静子 芹娜」`)
       return true
     }
 

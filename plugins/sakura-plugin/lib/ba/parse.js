@@ -19,16 +19,32 @@ import { findUnit, findSummon } from "./roster.js"
  * 解析配队。
  * @returns {{ok:true, picks:string[]}|{ok:false, error:string}}
  */
+const DRAFT_EG = "星野 白子 野宫 芹香 静子 芹娜"
+
+/**
+ * 解析配队：**前 4 个是主力（顺序即左起 1~4 号位），后 2 个是支援**。
+ *
+ * 支援不站在场上、打不到，也不占号位 —— 它们只在普通技能阶段跟主力一起出手，外加自己的 EX。
+ * 位置写错（把支援排在前四位）直接打回，不替玩家重排：号位决定对位和战场分割，
+ * 猜错了整局的刀都落在别处。
+ */
 export function parseDraft(text) {
   const tokens = String(text).trim().split(/[\s,，、/]+/).filter(Boolean)
-  if (tokens.length !== 4) {
-    return { ok: false, error: `要正好 4 个角色，你给了 ${tokens.length} 个` }
+  if (tokens.length !== 6) {
+    return { ok: false, error: `要正好 6 个角色（4 主力 + 2 支援），你给了 ${tokens.length} 个\n例：${DRAFT_EG}` }
   }
   const picks = []
-  for (const tk of tokens) {
+  for (const [i, tk] of tokens.entries()) {
     const t = findUnit(tk)
-    if (!t) return { ok: false, error: `找不到角色「${tk}」，写角色名，例：星野 白子 野宫 芹香` }
-    if (picks.includes(t.id)) return { ok: false, error: `${t.name} 重复了，四个位置要选不同角色` }
+    if (!t) return { ok: false, error: `找不到角色「${tk}」，写角色名，例：${DRAFT_EG}` }
+    if (picks.includes(t.id)) return { ok: false, error: `${t.name} 重复了，六个位置要选不同角色` }
+    const want = i < 4 ? "主力" : "支援"
+    if ((t.squad || "主力") !== want) {
+      return {
+        ok: false,
+        error: `${t.name}是${t.squad || "主力"}，不能放在第 ${i + 1} 位（前 4 位是主力，后 2 位是支援）\n例：${DRAFT_EG}`,
+      }
+    }
     picks.push(t.id)
   }
   return { ok: true, picks }

@@ -9,7 +9,7 @@
  * 攻击属性由分组本身表达 —— 一条信息只占一个视觉通道。
  */
 import { ROSTER, affinity } from "./roster.js"
-import { rosterByAtkType } from "./format.js"
+import { rosterByAtkType, SQUADS } from "./format.js"
 import { artOf, fontFace, FONT_STACK, ATTACK, ARMOR, ARMOR_LABEL, inkOf, esc } from "./htmlAssets.js"
 
 export const GRID_WIDTH = 1280
@@ -77,7 +77,9 @@ function section(atk, list) {
 }
 
 export function buildRosterGridHtml() {
-  const groups = rosterByAtkType()
+  // 先分主力 / 支援两段，段内再按属性 —— 跟文字节点共用 SQUADS + rosterByAtkType，
+  // 两边顺序对不上的话，玩家在图里挑中的人就得翻着找
+  const bands = SQUADS.map((sq) => [sq, rosterByAtkType(sq)]).filter(([, g]) => g.length)
 
   return `<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"><style>
 ${fontFace()}
@@ -102,6 +104,11 @@ header .legend i{font-style:normal;display:inline-flex;align-items:center;justif
 header .legend i.round{width:22px;padding:0;border-radius:50%;background:#22384F;font-size:14px}
 
 main{position:relative;margin-top:24px;display:flex;flex-direction:column;gap:22px}
+/* 主力 / 支援的分段带：比属性段头更重一级，一眼看出图分成两半 */
+.band{display:flex;align-items:baseline;gap:14px;margin-top:10px;padding:10px 0 8px;
+  border-bottom:3px solid rgba(70,120,175,.34)}
+.band h2{font-size:30px;line-height:1;color:#1E3348;letter-spacing:.06em}
+.band em{font-style:normal;font-size:15px;color:#5D7996}
 .head{display:flex;align-items:center;gap:12px;padding:0 0 12px 14px;border-left:8px solid;border-radius:4px}
 .head h2{font-size:26px;line-height:1}
 .head em{font-style:normal;font-size:15px;color:#8397AC}
@@ -138,9 +145,11 @@ footer{position:relative;margin-top:22px;display:flex;justify-content:space-betw
       <span><i class="round">4</i>EX 技能 Cost</span>
     </div>
   </header>
-  <main>${groups.map(([atk, list]) => section(atk, list)).join("")}</main>
+  <main>${bands.map(([sq, groups]) => `
+    <div class="band"><h2>${sq}</h2><em>${sq === "支援" ? "不站在场上、打不到，只放普通技能和 EX" : "站 1~4 号位，顺序即左起站位"}</em></div>
+    ${groups.map(([atk, list]) => section(atk, list)).join("")}`).join("")}</main>
   <footer>
-    <span>配队回 4 个角色名，写的顺序就是左起站位</span>
+    <span>配队回 6 个角色名：前 4 个主力（顺序即左起站位）＋ 后 2 个支援</span>
     <span>技能详情见后面几条 · 完整数值发「档案图鉴 星野」</span>
   </footer>
 </div>

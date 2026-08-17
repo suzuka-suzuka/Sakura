@@ -66,6 +66,19 @@ const IDS = [
   // 第二批：要补生成器规则的六个主力 + 妮露
   [10008, "NERU"], [16002, "KOTORI"], [10015, "ARIS"],
   [10016, "MIDORI"], [13011, "MOMOI"], [10017, "CHERINO"], [10020, "KOHARU"],
+  /**
+   * 第三批：**支援位**（`SquadType: "Support"`），小春之前的 19 人减去歌原。
+   *
+   * 歌原不加 —— 她的 EX 和普通技能都是会打人的炮台（雷ちゃん / 雷ちゃんMK-II），
+   * 召唤物还没有自己的行动位，接进来只会是两堵不会动的墙。
+   * 志美子的掩体在技能 1 级血量是 0（原文那句「掩体额外拥有…」在 1/2 级根本不出现），
+   * 按现有「1 级数值为 0 就标 inactive」的口径她不部署掩体，EX 只剩全队 +16.4% 防御。
+   */
+  [20000, "HIBIKI"], [20001, "KARIN"], [20002, "SAYA"], [20003, "MASHIRO"],
+  [23000, "AIRI"], [23001, "FUUKA"], [23002, "HANAE"], [23003, "HARE"],
+  [23005, "AYANE"], [23006, "SHIZUKO"], [23007, "HANAKO"],
+  [26000, "CHINATSU"], [26001, "KOTAMA"], [26002, "JURI"], [26003, "SERINA"],
+  [26004, "SHIMIKO"], [26005, "YOSHIMI"], [26006, "NODOKA"],
 ]
 
 /**
@@ -77,7 +90,10 @@ const ALLY_NAME_ALIAS = { 桃井: "桃" }
 
 const BULLET_CN = { Explosion: "爆发", Pierce: "贯通", Mystic: "神秘", Sonic: "振动", Chemical: "变化" }
 // 短名与 BaBattleImageGenerator 的 ARMOR_VISUAL 键一致（该表的 label 里存全称）
-const ARMOR_CN = { LightArmor: "轻装", HeavyArmor: "重装", Unarmed: "特殊", ElasticArmor: "弹力", CompositeArmor: "复合" }
+// 构造物是召唤物专用的第六种装甲（掩体），官方克制表里对**所有**攻击属性都是 ×0.5。
+// 不补这一条的话下面 summonTmpl 的 `|| "轻装"` 会静默把它退成轻装 —— 一堵「谁打都减半」的墙
+// 变成「爆发打它翻倍」，方向正好反了，而且压测查不出来。
+const ARMOR_CN = { LightArmor: "轻装", HeavyArmor: "重装", Unarmed: "特殊", ElasticArmor: "弹力", CompositeArmor: "复合", Structure: "构造物" }
 const ROLE_CN = { Tanker: "坦克", DamageDealer: "输出", Healer: "治疗", Supporter: "辅助", Vehicle: "载具" }
 const LINE_CN = { Front: "前", Middle: "中", Back: "后" }
 
@@ -118,7 +134,9 @@ function resolveTarget(sk, effTargets) {
   const selfOnly = !hasDamage && effTargets.length > 0 && effTargets.every((t) => t === "Self")
   if (!sk.Radius) {
     if (selfOnly) return { target: "self", count: 1 }
-    if (ally) return { target: "ally_all", count: 4 }
+    // 没有半径的己方技能默认是单体。真·全体必须由描述里的「我方全体 / 对 N 名」说清楚，
+    // 见 allyPickOf —— 曾经这里一律 ally_all，花江 / 千夏的单奶、风香的「上限最高」全变成群奶。
+    if (ally) return { target: "ally_single", count: 1 }
     return { target: "enemy_single", count: 1 }
   }
   if (sk.Radius[0].Type === "Bounce") return { target: "enemy_random", count: 1 }
@@ -195,7 +213,11 @@ const descOf = (sk) =>
 /** 从中文描述里抠出触发规则（BA 数据没有结构化的触发字段）。 */
 function parseTrigger(desc) {
   if (!desc) return { type: "cooldown", turns: 5 }
-  const once = /仅可触发\s*(\d+)\s*次/.exec(desc)
+  // 「该技能仅可触发」才是整条技能的次数（星野 / 椿 / 纯子）。
+  // 「该效果仅可触发」是某一条效果的次数（绫音爱用品的急救状态），不能绑到整条技能上 ——
+  // 绑上去会把她每 30 秒的暴击抵抗也限成一场一次。
+  const once = /该技能仅可触发\s*(\d+)\s*次/.exec(desc)
+    || (!/该效果仅可触发/.test(desc) && /仅可触发\s*(\d+)\s*次/.exec(desc))
   // 瞬：开局回费。这类技能在建局时就结算，不进 ③-a 技能阶段 ——
   // 拖到那里的话 Cost 会晚于玩家首轮的 EX 窗口，开局那 2 点等于没给。
   if (/战斗开始时/.test(desc)) return { type: "battle_start", maxUses: once ? Number(once[1]) : 1 }
@@ -235,7 +257,9 @@ function parseTrigger(desc) {
       ...(once ? { maxUses: Number(once[1]) } : {}),
     }
   }
-  if (hp) return { type: "hp_below", value: Number(hp[1]) / 100, maxUses: once ? Number(once[1]) : 1 }
+  // 「每 N 秒」是技能周期时，脚注里的「生命值不高于 N% 时」是状态触发，不是技能触发。
+  // 绫音爱用品踩这条：支援自己没有会被打掉的血量，按 hp_below 会永远放不出来。
+  if (hp && !sec) return { type: "hp_below", value: Number(hp[1]) / 100, maxUses: once ? Number(once[1]) : 1 }
   if (sec) return { type: "cooldown", turns: secToTurns(Number(sec[1])), ...(once ? { maxUses: Number(once[1]) } : {}) }
   // 没有「每 N 秒」时，「(冷却 N 秒)」是**再次使用的间隔**，不是周期（小春的「我来治疗！」）。
   // 不认的话会退成默认的 5 轮，比原作慢一倍半。
@@ -336,8 +360,27 @@ const SPLASH_DESC = (d) => /对1名敌方单位/.test(d) && /为中心的[^。]*
  */
 function parseFalloff(desc) {
   const d = String(desc || "")
+  /**
+   * **「同一个目标被打了几次」那种不是 falloff。**
+   *
+   * `falloff` 的语义是「第 i 个**目标** ×(1 − rate×i)」，而响的爱用品普技写的是
+   * 「目标每受到 1 次该次技能的伤害，后续受到的伤害衰减 45%」—— 那是同一个目标身上的
+   * **逐段**衰减，而且**原数据的 `Hits` 里已经摊好了**：`[10000, 5500, 1000, 1000, 1000]`
+   * 正好是 100% / 55% / 10% / 10% / 10%。再套一层 falloff 就是双重衰减，维度还错了。
+   *
+   * 池内两个真 falloff 的措辞都指向**别的目标**：晴奈「每贯穿 1 名目标，后续对**其他目标**
+   * 造成的伤害衰减」、泉（泳装）「椰子继续**弹跳至该目标**…但伤害衰减」。
+   */
+  if (/目标每受到\s*\d*\s*次/.test(d)) return null
   const step = /衰减\s*([\d.]+)\s*%/.exec(d)
   if (!step) return null
+  /**
+   * 「最多衰减 30%」是**衰减量**的上限；「最多衰减**至** 10%」是**剩余伤害**的下限，
+   * 两者差一个字，含义正好相反 —— 后者要换算成 1 − 10% = 90% 的衰减上限。
+   * 没有这一条时 `cap` 匹配不上（正则里没有那个「至」），会静默退成 `max: 1` = 衰减到 0。
+   */
+  const floor = /最多衰减至\s*([\d.]+)\s*%/.exec(d)
+  if (floor) return { rate: Number(step[1]) / 100, max: 1 - Number(floor[1]) / 100 }
   const cap = /最多衰减\s*([\d.]+)\s*%/.exec(d)
   return { rate: Number(step[1]) / 100, max: cap ? Number(cap[1]) / 100 : 1 }
 }
@@ -375,27 +418,51 @@ function pctOfEffect(e) {
 }
 
 /**
- * 「对 1 名（除自身外）生命值（百分比最低 / 不高于 N%）的我方单位」——
- * 单体治疗的选人规则，同样只在描述里。不接的话 `resolveTarget` 会退成 `ally_all`：
- * 绿和小春的单奶会变成全队群奶。
+ * 己方选人，全部只写在描述里。不接的话 `resolveTarget` 会按有没有 Radius 乱猜：
+ * 没半径的曾一律 `ally_all`（花江 / 千夏单奶变群奶），有半径的「对圆形范围内的 1 名」
+ * （芹娜）也会被大圈收成全体。
+ *
+ * 人数和挑法以原文措辞为准，**别按 Radius 反推**：
+ *   「对 1 名我方单位」                         玩家指定 / 对线，`ally_single`
+ *   「对圆形范围内的 1 名我方单位」             还是单体 —— 圈是位移/瞄准，不是覆盖人数
+ *   「对 N 名生命值百分比最低的我方单位」       `ally_lowest`，count = N（花子爱用品是 2）
+ *   「对 1 名生命值不高于 N% 的我方单位」       `ally_hurt`（小春，原文没说最低）
+ *   「对 1 名生命值上限最高的我方单位」         `ally_maxhp`（风香普技）
+ *   「对圆形范围内的 4 名 / 对我方全体」        真·全体
+ *   「对圆形范围内的我方单位」（没写人数）      交给几何，走 `resolveTarget`
  */
-function allyLowestOf(desc) {
-  if (!/对\s*1\s*名[^。]*的我方单位/.test(desc)) return null
-  const cap = /生命值不高于\s*([\d.]+)\s*%/.exec(desc)
-  const lowest = /生命值百分比最低/.test(desc)
-  if (!cap && !lowest) return null
-  return {
-    // **两种写法要分开**：绿写的是「生命值百分比**最低**」，按血量挑；
-    // 小春写的是「生命值**不高于 50%**」，原文压根没说最低 —— 够格的人不止一个时
-    // 按**站位**就近喂（同战场 → 最近），跟对线锁定同一套规则。
-    target: lowest ? "ally_lowest" : "ally_hurt", count: 1,
-    ...(/除自身外/.test(desc) ? { exceptSelf: true } : {}),
-    ...(cap ? { hpMax: Number(cap[1]) / 100 } : {}),
-  }
+function allyPickOf(desc) {
+  if (!desc) return null
+  const except = /除自身外/.test(desc) ? { exceptSelf: true } : {}
+  // 「对我方全体」是真·全体（绫音爱用品的前锋场地 = 4 个主力）。放在「对 N 名」前面。
+  if (/对我方全体/.test(desc)) return { target: "ally_all", count: 4 }
+
+  // 「的」可有可无：花江是「对 1 名我方单位」，绿才是「对 1 名…最低的我方单位」
+  const one = /对(?:圆形范围内的|上述范围内的)?\s*(\d+)\s*名([^。\n]*?)的?我方单位/.exec(desc)
+  if (!one) return null
+  const n = Number(one[1])
+  const mid = one[2] || ""
+
+  const cap = /生命值不高于\s*([\d.]+)\s*%/.exec(mid)
+  if (cap) return { target: "ally_hurt", count: 1, hpMax: Number(cap[1]) / 100, ...except }
+  // **两种写法要分开**：绿写的是「生命值百分比**最低**」，按血量挑；
+  // 小春写的是「生命值**不高于 50%**」，原文压根没说最低 —— 够格的人不止一个时
+  // 按**站位**就近喂（同战场 → 最近），跟对线锁定同一套规则。
+  if (/生命值百分比最低/.test(mid)) return { target: "ally_lowest", count: n, ...except }
+  if (/生命值上限最高/.test(mid)) return { target: "ally_maxhp", count: n, ...except }
+
+  // 「对 1 名我方单位」没有血量条件 = 玩家指定（EX）/ 对线（默认）
+  // 「对圆形范围内的 1 名」也是单体 —— 芹娜那个 r=500 的圈是位移，不是奶 4 个人
+  if (n <= 1) return { target: "ally_single", count: 1, ...except }
+  if (n >= 4) return { target: "ally_all", count: 4 }
+  return { target: "ally_adjacent", count: n, ...except }
 }
 
 /** summons.json 的 Name 是日文，中文名手工补 */
-const SUMMON_CN = { 40002: "佩洛洛人偶" }
+// 99999 的模板名是「遮蔽物」，但玩家在技能描述里读到的是「掩体」，按描述走。
+// 静子 / 志美子 / 三森(泳装) / 伊吹(泳装) / 桐乃(泳装) 五个人共用它 —— 原作自己也没把
+// 这几人的掩体分开（专属的是 99997 月咏(礼服) / 99998 星野(武装)，各挂在自己的 CH 代号下）
+const SUMMON_CN = { 40002: "佩洛洛人偶", 99999: "掩体" }
 /** 实际被用到的召唤物，最后一并输出成 SUMMONS 表 */
 const usedSummons = new Map()
 
@@ -419,16 +486,47 @@ function summonTmpl(id) {
  */
 function buildSummon(e) {
   const s = summonData.find((x) => x.Id === e.SummonId)
-  if (!s || s.AttackPower1 > 0 || s.AttackPower100 > 0) return null
+  if (!s) return null
+  /**
+   * 闸门**不能只看 `AttackPower1`** —— 歌原的雷ちゃん自己的攻击力字段就是 0
+   * （攻击力整个来自施法者的 `AttackPower_Base`），伤害写在它**自己的 `Skills`** 里。
+   * 只看攻击力的话会放行一堵 2123 血、什么都不做的空壳。判据改成「有没有带伤害的技能」。
+   */
+  const armed = (s.Skills || []).some((k) => (k.Effects || []).some((x) => x.Type === "Damage"))
+  if (armed || s.AttackPower1 > 0 || s.AttackPower100 > 0) return null
   // 入场技能里的 Provoke → 嘲讽。别走 CrowdControl 的通用分支，那条会变成眩晕
   const cc = (s.Skills || []).flatMap((k) => k.Effects || []).find((x) => x.Type === "CrowdControl")
   const taunt = cc && /Provoke/i.test(cc.Icon || "") ? msToTurns(cc.Scale?.[SKILL_LV]) ?? 1 : 0
+  /**
+   * **掩体和人偶是两种东西**，`summons.json` 的 `Type` 就分好了：
+   *   `Summoned`（人偶）—— 抛出去的诱饵，扔进敌方半场，那一整个战场的刀都归它接
+   *   `Obstacle`（掩体）—— 架在自己这边的**掩护**，只管自己那一路，而且只接
+   *                       「打得中掩体」的那种攻击（见技能上的 `block`）
+   * 两者的挡刀口径完全不同，别再合成一条。
+   */
+  const cover = s.Type === "Obstacle"
+  // 血量 = 召唤物自身 + 施放者生命值 × Value（日富美是 160.06%，静子是 29.26%）
+  const hpRate = e.Stat === "MaxHP_Base" && e.CasterStat === "MaxHP"
+    ? Number(((e.Value?.[0]?.[SKILL_LV] ?? 0) / 1e4).toFixed(4)) : 0
+  const baseHp = interp(s.MaxHP1, s.MaxHP100, LEVEL, 1)
   return {
     type: "summon", summonId: e.SummonId,
-    // 血量 = 召唤物自身 + 施放者生命值 × Value（日富美是 160.06%）
-    hpRate: e.Stat === "MaxHP_Base" && e.CasterStat === "MaxHP"
-      ? Number(((e.Value?.[0]?.[SKILL_LV] ?? 0) / 1e4).toFixed(4)) : 0,
-    turns: msToTurns(e.Duration) ?? 6,
+    hpRate,
+    ...(cover ? { cover: true } : {}),
+    /**
+     * **两头都是 0 = 这个技能等级根本不部署它**。志美子的掩体 `Value` 是
+     * `[0, 0, 2019, 2019, 3804]`，而模板 `MaxHP1` 也是 0 —— 原文里那句
+     * 「掩体额外拥有志美子生命值 X% 的生命值」在 1/2 级压根不出现，不是我们漏接。
+     * 立一堵 0 血的墙等于当场碎掉，跟星野 0 秒的眩晕同一条口径：标 inactive。
+     */
+    ...(baseHp <= 0 && hpRate <= 0 ? { inactive: true } : {}),
+    /**
+     * **没有 Duration 就是永久**（`null`），别退回默认 6 轮。
+     * 人偶写的是 `Duration: 30000` = 6 轮；掩体那条 `Summon` 效果压根没有这个字段，
+     * 原文也只写「重复使用该技能时，清除先前部署的掩体」—— 唯二的消失方式是被打掉、被自己顶掉。
+     * `?? 6` 是当初给人偶写的兜底，套到掩体上会静默发明一个 6 轮的计时器。
+     */
+    turns: msToTurns(e.Duration),
     taunt,
   }
 }
@@ -458,9 +556,9 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
   const desc = descOf(sk)
   const dmgs = (sk.Effects || []).filter((e) => e.Type === "Damage")
   const allTargets = (sk.Effects || []).flatMap((e) => (Array.isArray(e.Target) ? e.Target : e.Target ? [e.Target] : []))
-  // 「对 1 名（除自身外）生命值最低 / 不高于 N% 的我方单位」优先于几何判定 ——
-  // 没有 Radius 的己方技能会被 resolveTarget 一律判成 ally_all，单奶就变成了群奶
-  const tg = allyLowestOf(desc) || resolveTarget(sk, allTargets)
+  // 描述里的「对 N 名我方」优先于几何判定 ——
+  // 没有 Radius 的己方技能不能一律判成 ally_all，有 Radius 的「1 名」也不能按圈收成全体
+  const tg = allyPickOf(desc) || resolveTarget(sk, allTargets)
   const out = { name: sk.Name, ...tg, effects: [] }
   if (isEx) out.cost = sk.Cost[SKILL_LV]
   else out.trigger = parseTrigger(desc)
@@ -488,11 +586,23 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
     out.hits = hitsOf(dmgs[0])
     out.target = "enemy_chain"
     out.count = Number(chain[1])
+  } else if (inst >= 4) {
+    /**
+     * **圈数比场上的人还多**：响的 EX 是 5 个圈，而战场上只有 4 个人。
+     * 写死 5 会让第 5 发凭空浪费掉，所以圈数**在引擎里按存活敌人数现算**
+     * （`enemy_instances`）—— 每圈的伤害不变，每圈仍按自己的半径铺
+     * （响是半径 150 → 面积 70686 → 同战场同身位 2 人），圈心逐个落在不同的敌人身上。
+     *
+     * 全 272 人里只有响踩这条；睦月那两个 3 圈仍走下面的固定窗口（≤ 场上人数，没有浪费）。
+     */
+    out.hits = [hitsOf(dmgs[0])[0]]
+    out.instances = inst
+    out.target = "enemy_instances"
   } else if (inst) {
     // N 个爆炸源 → 打 N 个人，每人吃一份。不拆的话睦月的 EX 会变成 2 个人各吃 1229%
     out.hits = [hitsOf(dmgs[0])[0]]
     out.count = inst
-    out.target = inst >= 4 ? "enemy_all" : "enemy_adjacent"
+    out.target = "enemy_adjacent"
   } else if (dmgs.length) {
     out.hits = hitsOf(dmgs[0])
     // 扩散段只在 enemy_adjacent 上成立 —— 那是唯一能保证 targets[0] 就是主目标的分支
@@ -508,6 +618,18 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
     // 按纯子那套走贯穿（用户口径，跟堇「原文是扇、口径按伊织」同类）。
     if (/对直线范围内/.test(desc) || student?.Id === 13011) out.depth = "through"
   }
+  /**
+   * **这一发挡不挡得住掩体**，原数据里是结构化字段（`Damage.Block`），不用按槽位猜。
+   *
+   * 规律是**物理的而不是槽位的**：直射单发 = 1（挡得住），范围 / 曲射 = 0（从掩体上面过去）。
+   * 池内 56 人里普攻 35 个可挡、3 个不可挡（千世的圆形普攻、柚子、爱丽丝的光束），
+   * EX 17 可挡 17 不可挡，普技 12 / 14 —— 跟「EX 一律穿墙」那种一刀切在 34 个技能上对不上。
+   *
+   * `Block` 还有 2 / 3 两档（全数据 15 处，全在池外：日向、时雨、未花、皋月、雪玲(泳装)…），
+   * 遇到了再说，现在只认 1。
+   */
+  if (dmgs.length && dmgs[0].Block === 1) out.block = true
+
   // 「目标生命值百分比越低/越高，取值越高」——结构化字段，不是描述抠的。
   // 明日奈爱用品普技：满血 ×1、空血 ×1.5，Scale 是 100% 那一档。
   if (out.hits && dmgs[0]) {
@@ -543,9 +665,9 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
     const condFields = !inCond ? {}
       : cond.named ? { scope: "ally_named", ally: condCode } : { ifAlly: condCode }
     if (inCond && cond.named) scope = "ally_named"
-    // 单体奶（`ally_lowest` / `ally_hurt`）里的 `Ally` 指的是**技能选中的那一个人**，不是全队。
-    // 不收窄的话绿和小春的单奶会变成群奶，还会顺手奶到明确排除的自己。
-    if (scope === "ally_all" && /^ally_(lowest|hurt)$/.test(tg.target)) scope = "ally_target"
+    // 单体 / 点名奶里的 `Ally` 指的是**技能选中的那几个人**，不是全队。
+    // 不收窄的话花江 / 千夏 / 芹娜的单奶会变成群奶，绿还会顺手奶到明确排除的自己。
+    if (scope === "ally_all" && /^ally_(lowest|hurt|single|maxhp)$/.test(tg.target)) scope = "ally_target"
     const turns = msToTurns(levelDuration(sk, e) ?? e.Duration)
     /**
      * 「位移至指定位置」（`Reposition`，全 272 人 19 处，Self/Ally/Enemy 三种）。
@@ -595,9 +717,25 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
         })
         break
       }
-      case "Heal":
+      case "Heal": {
+        /**
+         * 「赋予特殊状态…生命值不高于 N% 时，消耗该状态并回复」（绫音爱用品）。
+         * 不是当场群奶：技能每 30 秒照放（暴击抵抗那段会反复上），急救状态全场只赋予一次，
+         * 每个人掉到阈值才消耗自己那层回血。
+         */
+        const em = /生命值不高于\s*([\d.]+)\s*%\s*时[^。\n]*消耗[^。\n]*回复/.exec(desc)
+          || /拥有该特殊状态的我方单位生命值不高于\s*([\d.]+)\s*%\s*时/.exec(desc)
+        if (em) {
+          out.effects.push({
+            type: "ward", scope,
+            scale: Number((e.Scale[SKILL_LV] / 1e4).toFixed(4)), source: "heal",
+            hpMax: Number(em[1]) / 100, once: true,
+          })
+          break
+        }
         out.effects.push({ type: "heal", scope, scale: Number((e.Scale[SKILL_LV] / 1e4).toFixed(4)), source: "heal" })
         break
+      }
       case "Regen": {
         const rg = {
           type: "regen", scope, scale: Number((e.Scale[SKILL_LV] / 1e4).toFixed(4)), source: "heal",
@@ -793,6 +931,36 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
     })
   }
 
+  /**
+   * **概率追伤**（真白，全 272 人只有她）。跟 `altHits` 形状相似但不是一回事：
+   * `altHits` 是「某个状态下换一整套倍率」，这里是「掷一次骰子，中了再多打一发」，
+   * 所以它是**独立的一发**（单独 roll 命中和暴击），不是把第一段换掉。
+   *
+   * 第二段 `Damage` 就是那一发的倍率（623.28%，原数据里有，不用乘）。
+   * 概率写在描述的 `<?2>` 里，技能 1 级是 50%。
+   * 不接的话她的 EX 只剩 415%，整套 kit 的核心没了。
+   */
+  const bonus = /([\d.]+)\s*%\s*概率造成自身攻击力\s*[\d.]+\s*%\s*的追加伤害/.exec(desc)
+  if (bonus && dmgs.length > 1 && !out.altHits && !out.splashHits) {
+    out.bonus = { chance: Number(bonus[1]) / 100, hits: hitsOf(dmgs[1]) }
+    // 第二段是「可能有」的追加，不能留在主 hits 里当必中的一段
+    if (out.hits?.length > 1) out.hits = out.hits.slice(0, hitsOf(dmgs[0]).length)
+  }
+  /**
+   * 「下 1 次 EX 技能造成追加伤害的概率加算 12.5%．※ 最多叠加 2 次」（真白的爱用品普技）。
+   * 又是一条只写在描述里、`Effects` 里没有的规则 —— 那个数组里只有伤害和自身加攻两条。
+   * 攒到下一发 EX 用掉就清空（原文写的是「下 1 次」，不是永久）。
+   */
+  const upC = /下\s*1\s*次EX技能造成追加伤害的概率加算\s*([\d.]+)\s*%/.exec(desc)
+  if (upC) {
+    const cap = /最多叠加\s*(\d+)\s*次/.exec(desc)
+    const step = Number(upC[1]) / 100
+    out.effects.push({
+      type: "state", key: "bonusChance", scope: "self",
+      step, max: Number((step * (cap ? Number(cap[1]) : 1)).toFixed(4)),
+    })
+  }
+
   // 「对 1 名攻击力最高的敌方单位」/「以 1 名攻击力最高的敌方单位为中心」——
   // 跟瞬的索敌改写一样，**只写在描述里**，没有结构化字段。引擎侧走 laneTarget 的 max_atk 分支：
   // 嘲讽仍然拉得走，其余（战场分割 / 前中后排 / 挡刀）一概绕开。
@@ -804,6 +972,24 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
   // 没有结构化效果，也不会有第二个用例 —— 但漏了她就成了一个没有代价的 746% 直线 AoE。
   const hpCost = /失去\s*([\d.]+)\s*%\s*的当前生命值/.exec(desc)
   if (hpCost) out.effects.push({ type: "hp_cost", scope: "self", rate: Number(hpCost[1]) / 100 })
+
+  /**
+   * **「对上述范围内的我方单位」不是「对我方全体」**。
+   *
+   * 原数据的 `Target` 只写 `Ally` / `AllyMain`，圈多大只写在 `Radius` 里 —— 于是圈型的
+   * 增益/治疗会被判成 `ally_all`，静子半径 200 的圈（同战场同身位 2 人）会给全队 4 个人加命中，
+   * 绫音、花子、志美子、小玉、和香 全是同一个错法。
+   *
+   * 技能自己的 `target` 已经把覆盖面算好了（`ally_all` = 真·全体，`ally_adjacent` = 圈，
+   * `ally_lowest` / `ally_hurt` / `ally_single` / `ally_maxhp` = 点名），所以**只要技能
+   * 不是真·全体，`ally_all` 就收成 `ally_target`**（这一发实际圈到的人）。
+   *
+   * 反过来不能一律用 `ally_target`：绿 / 桃那种「打敌人的同时给全队加攻」的技能，
+   * 目标是敌方，`dmgTargets` 里装的是敌人 —— 那种就得保留 `ally_all`。判据是技能的 target。
+   */
+  if (String(out.target || "").startsWith("ally") && out.target !== "ally_all") {
+    for (const e of out.effects) if (e.scope === "ally_all") e.scope = "ally_target"
+  }
 
   // 不打人、效果又全落在自己身上 = 目标就是自己。`Effects` 为空时 resolveTarget 无从判断
   // （瞬的开局回费），会退成 enemy_single —— 那会让指令层按敌方去解析「打谁」。
@@ -857,8 +1043,17 @@ const units = IDS.map(([sid, code]) => {
   const na = Array.isArray(c.Skills.Normal) ? c.Skills.Normal[0] : c.Skills.Normal
   const nd = (na?.Effects || []).find((e) => e.Type === "Damage")
   const pub = pickPublicSkill(c)
+  /**
+   * 主力 / 支援。支援位**不站在场上**：不占号位、打不到、也不进 `settle` 的血量比，
+   * 只在 ③-a 跟着主力一起放普通技能，外加自己的 EX。
+   * 数值照主力同一套口径生成（Lv1 取 Stat1 / 统一 3★ / 官方 TRANS 表）—— 它们的血量和
+   * 攻击力照样有用，因为发出去的召唤物和增益是按施法者自己的面板算的
+   * （静子的掩体血量 = 她自己 HP 的 29.26%）。
+   */
+  const support = c.SquadType === "Support"
   return {
     id: code, sid, name: c.Name, star: FORCE_STAR, baseStar: c.StarGrade,
+    squad: support ? "支援" : "主力",
     atkType: BULLET_CN[c.BulletType], defType: ARMOR_CN[c.ArmorType],
     role: ROLE_CN[c.TacticRole], line: LINE_CN[c.Position],
     bullet: c.BulletType, armor: c.ArmorType,
@@ -870,8 +1065,13 @@ const units = IDS.map(([sid, code]) => {
     critDmg: c.CriticalDamageRate, critRes: 100, critDmgRes: 5000, stability: c.StabilityPoint,
     // 普攻也可能是范围的（全 272 人里 11 个带 Radius，池内只有千世）——
     // 只取 hits 不看 Radius 的话，她的圆形普攻会被当成单体
-    autoAttack: {
+    // 支援位**没有 `Skills.Normal`**（19 个无一例外），所以它们根本没有普攻这回事。
+    // 以前那个 `: [1]` 的兜底会给它们造一个 1% 倍率的假普攻 —— 那本身就是「它们不该走
+    // 普攻循环」的信号。这里直接给 null，引擎的 ③-b 也不遍历支援。
+    autoAttack: support ? null : {
       hits: nd ? nd.Hits.map((h) => Number(((nd.Scale[0] * h) / 1e4 / 100).toFixed(4))) : [1],
+      // 普攻同样按原数据认挡不挡得住：池内 35 个可挡，千世 / 柚子 / 爱丽丝那三个不可挡
+      ...(nd?.Block === 1 ? { block: true } : {}),
       ...(na?.Radius ? (({ target, count }) => ({ target, count }))(resolveTarget(na, [])) : {}),
     },
     gearSkill: pub.gear,
@@ -917,6 +1117,8 @@ export const TYPE_EFFECTIVENESS = ${JSON.stringify(cfg.TypeEffectiveness, null, 
 const ARMOR_KEY = {
   轻装: "LightArmor", 重装: "HeavyArmor", 特殊: "Unarmed", 弹力: "ElasticArmor", 复合: "CompositeArmor",
   轻装甲: "LightArmor", 重装甲: "HeavyArmor", 特殊装甲: "Unarmed", 弹力装甲: "ElasticArmor", 复合装甲: "CompositeArmor",
+  // 召唤物专用的第六种：掩体。官方克制表里对**所有**攻击属性都是 ×0.5，拆墙没法 counter-pick
+  构造物: "Structure", 构造: "Structure",
 }
 const BULLET_KEY = { 爆发: "Explosion", 贯通: "Pierce", 神秘: "Mystic", 振动: "Sonic", 变化: "Chemical" }
 
@@ -941,9 +1143,16 @@ export const CFG = {
   // Cost 在每个回合「结束时」回复，因此首轮双方都是开局值直接开打：
   // 先手首轮 0，后手首轮 2，之后后手恒定领先 2 点。
   COST_START: 0,
-  COST_REGEN_PER_UNIT: 0.5,          // 满编 4 人 = 2/回合
+  COST_REGEN_PER_UNIT: 0.5,          // 每人 0.5，**支援也算**：满编 4 主力 + 2 支援 = 3/回合
   COST_MAX: 10,                      // 与 BA 的 Cost 上限一致
-  EX_COOLDOWN_SLACK: 2,              // EX 冷却长度 = 存活人数 − 这个值
+  EX_COOLDOWN_SLACK: 3,              // EX 冷却长度 = 存活总人数（含支援）− 这个值，满编 6 人 = 3
+  /**
+   * 掩体的**格挡率**。原作公式是 \`30 + 攻击方遮蔽成功值 − 防御方遮蔽贯通率\`，
+   * 地形适应每升一级 +15，基础就是 30%。它是**独立的一次判定**，不走命中/闪避那条公式 ——
+   * 折成闪避值的话效果会随攻击者的命中浮动，而原作明确不是这样。
+   * 遮蔽成功值（\`BlockRate_Base\`）全 272 人只有优香的武器被动带，生成器不读那个槽，暂时接不到。
+   */
+  COVER_BLOCK_RATE: 0.3,
   SECOND_BONUS: 2,                   // 后手方开局补偿
 
   // ---- 白热化 / FEVER TIME（照搬原作，按 1 轮 = ${ROUND_SEC} 秒折算）----

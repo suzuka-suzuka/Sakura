@@ -6,20 +6,39 @@
  *
  *   node scripts/target-test.mjs
  */
-import { createBattle, playerTurn, validateAction, exCastableOf, exWaitOf, exCostOf, tmplOf, provokedBy, focusedOf, exLockedOf, exSealedOf, autoProcChance } from "../lib/ba/engine.js"
-import { ROSTER } from "../lib/ba/roster.js"
+import { createBattle, playerTurn, validateAction, exCastableOf, exWaitOf, exCostOf, exLockLenOf, regenOf, tmplOf, provokedBy, focusedOf, exLockedOf, exSealedOf, autoProcChance } from "../lib/ba/engine.js"
+import { ROSTER, CFG } from "../lib/ba/roster.js"
 import { describeEffect } from "../lib/ba/format.js"
 import { parseAction } from "../lib/ba/parse.js"
 
 const id = (n) => ROSTER.find((t) => t.name === n).id
 
+/**
+ * 编成是 4 主力 + 2 支援。绝大多数用例只关心 1~4 号位打谁，所以只写四个名字，
+ * 这里补两个支援凑满编成 —— **不能干脆不给**：EX 冷却长度 = 存活总人数 − 3，
+ * 少两个人整条冷却链就失真（第 16 组「剩 3 人放完 1 不能立刻再放 1」曾经因此假绿）。
+ *
+ * 但填充的支援必须**在编不出手**：随便挑两个都不惰性 —— 花子的普技加防走 Channel 103，
+ * 会把椿自己的防御层顶掉，第 26 组的窗口计数当场从 6 变 7。所以建局后直接把它们的
+ * 普通技能冷却压到永不就绪，它们只贡献人头（冷却长度、Cost 回复、可放名单）。
+ * 要真的让支援出手的用例，自己写满 6 个名字。
+ */
+const FILLER_SUPPORTS = ["芹娜", "花子"]
+const withSupports = (picks) => (picks.length >= 6 ? picks : [...picks, ...FILLER_SUPPORTS])
+const muteFillers = (st, given) => {
+  if (given.length >= 6) return
+  for (const side of st.sides) for (const u of side.supports || []) u.skillCd = 9999
+}
+
 /** 建一局并按 kill 列表把人打死（kill 是 [side, idx] 列表） */
 function setup(bluePicks, redPicks, kills = []) {
   const st = createBattle(
-    { uid: "a", name: "蓝", picks: bluePicks.map(id) },
-    { uid: "b", name: "红", picks: redPicks.map(id) },
+    { uid: "a", name: "蓝", picks: withSupports(bluePicks).map(id) },
+    { uid: "b", name: "红", picks: withSupports(redPicks).map(id) },
     { seed: 11, first: 0 }
   )
+  muteFillers(st, bluePicks)
+  muteFillers(st, redPicks)
   for (const [side, idx] of kills) {
     const u = st.sides[side].units[idx]
     u.alive = false; u.hp = 0
@@ -464,30 +483,37 @@ function leftover(n, cost = 10) {
   return st
 }
 {
+  // 2 主力 + 2 支援 = 4 人 → 冷却长度 4−3 = 1，茜放完要等本方再放一个才轮回来。
+  // **支援永远不死，所以「人少」的门槛整体后移了一格**：真正归零要等到只剩 1 个主力。
   const first = playerTurn(leftover(2), { type: "ex", casts: [{ pos: 0 }] })
-  check("剩 2 人放完茜，回合还开着", first.state.turnOpen, true)
-  check("剩 2 人放完茜，茜仍在可放名单", exCastableOf(first.state, 0).includes(0), true)
+  check("剩 2 主力放完茜，回合还开着", first.state.turnOpen, true)
+  check("剩 2 主力（+2 支援=4 人）放完茜进冷却", exCastableOf(first.state, 0).includes(0), false)
+  check("剩 2 主力时可放的人仍 ≥3", exCastableOf(first.state, 0).length >= 3, true)
   const second = playerTurn(first.state, { type: "ex", casts: [{ pos: 0 }] })
-  check("剩 2 人同一人连放不报错", Boolean(second.error), false)
-  check("剩 2 人第二发仍是茜的 EX",
+  check("剩 2 主力时连放同一人被拦下", Boolean(second.error), true)
+}
+{
+  // 1 主力 + 2 支援 = 3 人 → 冷却长度归零，同一人可以连放
+  const first = playerTurn(leftover(1), { type: "ex", casts: [{ pos: 0 }] })
+  check("剩 1 主力放完回合还开着", first.state.turnOpen, true)
+  check("剩 1 主力（+2 支援=3 人）放完仍能再放", exCastableOf(first.state, 0).includes(0), true)
+  const second = playerTurn(first.state, { type: "ex", casts: [{ pos: 0 }] })
+  check("剩 1 主力连放不报错", Boolean(second.error), false)
+  check("剩 1 主力第二发仍是茜的 EX",
     second.events.some((e) => e.type === "action" && e.action === "ex" && e.source.pos === 0), true)
 }
 {
-  const first = playerTurn(leftover(1), { type: "ex", casts: [{ pos: 0 }] })
-  check("剩 1 人放完回合还开着", first.state.turnOpen, true)
-  check("剩 1 人放完仍能再放", exCastableOf(first.state, 0).includes(0), true)
-  const second = playerTurn(first.state, { type: "ex", casts: [{ pos: 0 }] })
-  check("剩 1 人连放不报错", Boolean(second.error), false)
-}
-{
+  // 3 主力 + 2 支援 = 5 人 → 冷却长度 5−3 = 2，要 1→2→3 之后 1 才解锁
   const first = playerTurn(leftover(3), { type: "ex", casts: [{ pos: 0 }] })
-  check("剩 3 人放完 1 不能立刻再放 1", exCastableOf(first.state, 0).includes(0), false)
+  check("剩 3 主力放完 1 不能立刻再放 1", exCastableOf(first.state, 0).includes(0), false)
   const second = playerTurn(first.state, { type: "ex", casts: [{ pos: 1 }] })
-  check("剩 3 人放完 1→2 之后 1 解锁", exCastableOf(second.state, 0).includes(0), true)
-  const third = playerTurn(second.state, { type: "ex", casts: [{ pos: 0 }] })
-  check("剩 3 人 1→2→1 不报错", Boolean(third.error), false)
-  check("剩 3 人第三发仍是 1 的 EX",
-    third.events.some((e) => e.type === "action" && e.action === "ex" && e.source.pos === 0), true)
+  check("剩 3 主力 1→2 之后 1 还锁着（冷却 2）", exCastableOf(second.state, 0).includes(0), false)
+  const third = playerTurn(second.state, { type: "ex", casts: [{ pos: 2 }] })
+  check("剩 3 主力 1→2→3 之后 1 解锁", exCastableOf(third.state, 0).includes(0), true)
+  const fourth = playerTurn(third.state, { type: "ex", casts: [{ pos: 0 }] })
+  check("剩 3 主力 1→2→3→1 不报错", Boolean(fourth.error), false)
+  check("剩 3 主力第四发仍是 1 的 EX",
+    fourth.events.some((e) => e.type === "action" && e.action === "ex" && e.source.pos === 0), true)
 }
 {
   const first = playerTurn(leftover(4), { type: "ex", casts: [{ pos: 0 }] })
@@ -912,8 +938,12 @@ console.log("\n=== 27. 嘲讽 / 恐惧封 EX：全员被封也要等人发「过
   check("椿交回合后轮到蓝方，回合还没开", [taunted.activeSide, taunted.turnOpen, taunted.phase], [0, false, "command"])
   check("蓝方四人都被嘲讽锁住", taunted.sides[0].units.map((u) => exLockedOf(taunted, u)),
     ["嘲讽", "嘲讽", "嘲讽", "嘲讽"])
-  check("蓝方可放名单是空的", exCastableOf(taunted, 0), [])
-  check("全员被封（提示用）", exSealedOf(taunted, 0), true)
+  // **支援免疫嘲讽**：它们不站在场上，场地性的 Provoke 拉不到。
+  // 所以四个主力全被拉走的那一轮，5、6 号仍然出得了手 —— 名单不空，
+  // 指令层也就不会替玩家把回合自动过掉（那样等于吞掉支援的行动）。
+  check("四个主力被封，支援仍在可放名单里", exCastableOf(taunted, 0), [4, 5])
+  check("有支援时就不算全员被封", exSealedOf(taunted, 0), false)
+  check("支援自己没被嘲讽", taunted.sides[0].supports.map((u) => exLockedOf(taunted, u)), [null, null])
   check("点名放 EX 会被拦", validateAction(taunted, { type: "ex", casts: [{ pos: 0 }] }),
     "野宫 被嘲讽，放不出 EX")
   check("「过」仍然合法", validateAction(taunted, { type: "pass" }), null)
@@ -924,14 +954,18 @@ console.log("\n=== 27. 嘲讽 / 恐惧封 EX：全员被封也要等人发「过
   check("发「过」才交回合", [afterPass.state.activeSide, afterPass.state.turnOpen], [1, false])
 
   const doll = handoff(["日富美", "野宫", "野宫", "野宫"], 0)
-  check("人偶入场嘲讽同样封 EX", exSealedOf(doll, 0), true)
+  check("人偶入场嘲讽封住四个主力", doll.sides[0].units.map((u) => exLockedOf(doll, u)),
+    ["嘲讽", "嘲讽", "嘲讽", "嘲讽"])
+  check("人偶嘲讽下支援仍能放", exCastableOf(doll, 0), [4, 5])
   check("人偶嘲讽下也放不出", validateAction(doll, { type: "ex", casts: [{ pos: 2 }] }),
     "野宫 被嘲讽，放不出 EX")
 
   const feared = handoff(["佳代子", "野宫", "野宫", "野宫"], 0)
   check("佳代子 EX 恐惧也封 EX", feared.sides[0].units.map((u) => exLockedOf(feared, u)),
     ["恐惧", "恐惧", "恐惧", "恐惧"])
-  check("恐惧下全员被封", exSealedOf(feared, 0), true)
+  // 恐惧同理：`u.stun` 只可能挂在场上的人身上，支援根本不在被选中的名单里
+  check("恐惧下支援仍能放", exCastableOf(feared, 0), [4, 5])
+  check("恐惧下也不算全员被封", exSealedOf(feared, 0), false)
   check("恐惧下点名放 EX 会被拦", validateAction(feared, { type: "ex", casts: [{ pos: 0 }] }),
     "野宫 被恐惧，放不出 EX")
   const fearedPass = playerTurn(feared, { type: "pass" })
@@ -1708,6 +1742,268 @@ console.log("\n=== 42. 被控：条件技不吞，周期技照吞 ===")
     nR.log.some((l) => /野宫 眩晕，「.+」被打断/.test(l)), true)
   check("周期技没真正放出去",
     nR.events.some((e) => e.type === "action" && e.action === "skill" && e.source.side === 0 && e.source.pos === 0), false)
+}
+
+console.log("\n=== 36. 支援位：不站在场上、5/6 只是结算编号 ===")
+{
+  // 静子 5 号、真白 6 号；对面塞两个惰性支援凑满编成
+  const sup = setup(["野宫", "野宫", "野宫", "野宫", "静子", "真白"], ["伊织", "伊织", "伊织", "伊织", "芹娜", "芹娜"])
+  for (const side of sup.sides) for (const u of side.supports) u.skillCd = 9999
+  sup.sides[0].cost = 10
+
+  check("支援在独立数组里，units 仍是 4 个", [sup.sides[0].units.length, sup.sides[0].supports.length], [4, 2])
+  check("支援的号位是 4、5（对外 5、6 号）", sup.sides[0].supports.map((u) => u.idx), [4, 5])
+  check("EX 冷却长度 = 6 − 3", exLockLenOf(sup.sides[0]), 3)
+
+  // 打不到：敌方任何索敌都不该选中支援。伊织的连发会逐发重锁，最容易漏
+  const shot = run(sup, { type: "pass" })
+  const hitSup = shot.events.some((e) => e.type === "damage" && e.target?.pos >= 4)
+  check("支援挨不到刀", hitSup, false)
+  check("支援血量没动", shot.state.sides[0].supports.map((u) => u.hp === u.maxhp), [true, true])
+
+  // ally_* 的目标池只有 4 个主力：静子的圈不能落在支援自己头上
+  const cast = playerTurn(sup, { type: "ex", casts: [{ pos: 4 }] })
+  const tg = cast.events.find((e) => e.type === "action" && e.source.pos === 4)?.targets || []
+  check("静子的圈只圈得到主力", tg.every((t) => t.pos < 4), true)
+  check("掩体架在我方半场（onAlly）", Boolean(cast.state.sides[0].summons[0]?.onAlly), true)
+  check("掩体永久：turns 是 null", cast.state.sides[0].summons[0]?.turns, null)
+  check("掩体是构造物（全属性 ×0.5）", tmplOf(cast.state.sides[0].summons[0]).defType, "构造物")
+
+  // Cost 回复算支援：4 主力 + 2 支援 = 6 × 0.5 = 3
+  const fresh = setup(["野宫", "野宫", "野宫", "野宫"], OUT)
+  check("满编 Cost 回复 = 3/回合", regenOf(fresh.sides[0], fresh), 3)
+  fresh.sides[0].units[3].alive = false
+  check("死一个主力后 = 2.5/回合", regenOf(fresh.sides[0], fresh), 2.5)
+
+  // 冷却长度按**存活总人数**逐级退，剩 3 人（1 主力 + 2 支援）就完全没冷却了。
+  // 支援不死，所以 3 是下限 —— 这也是反死锁不变量「可放的人永远 ≥3」的来源。
+  const lens = [[], [3], [2, 3], [1, 2, 3]].map((kills) => {
+    const st = setup(["茜", "芹香", "野宫", "伊织"], OUT, kills.map((i) => [0, i]))
+    return exLockLenOf(st.sides[0])
+  })
+  check("冷却长度随人数退：6/5/4/3 人 → 3/2/1/0", lens, [3, 2, 1, 0])
+}
+
+console.log("\n=== 37. 支援免疫嘲讽，但**不免疫冷却** ===")
+{
+  /** 红方 pos 放 EX 之后把回合交回蓝方（跟第 33 组的 handoff 同一套，那个在块作用域里） */
+  const handoff = (red, pos) => {
+    const st = setup(OUT, red)
+    st.sides[1].cost = 10
+    let cur = run(st, { type: "pass" }).state
+    cur.sides[1].cost = 10
+    cur = playerTurn(cur, { type: "ex", casts: [{ pos }] }).state
+    while (cur.turnOpen) cur = playerTurn(cur, { type: "pass" }).state
+    cur.sides[0].cost = 10
+    return cur
+  }
+  // 椿把蓝方四个主力全拉走，蓝方只剩两个支援有出手权
+  const taunted = handoff(["椿", "野宫", "野宫", "野宫"], 0)
+  check("四个主力被嘲讽", taunted.sides[0].units.map((u) => exLockedOf(taunted, u)),
+    ["嘲讽", "嘲讽", "嘲讽", "嘲讽"])
+  check("支援没被嘲讽", taunted.sides[0].supports.map((u) => exLockedOf(taunted, u)), [null, null])
+  check("所以名单不空", exCastableOf(taunted, 0), [4, 5])
+
+  /**
+   * **免控不等于免冷却**：`exLockedOf` 只管控制那一把锁，冷却是另一把。
+   * 两个支援都压进冷却之后名单就空了 —— 这一轮玩家真的没有任何选择，
+   * 指令层按「`exCastableOf` 空就自动过回合」处理是对的，不算吞掉支援的行动。
+   */
+  const s = taunted.sides[0]
+  s.exCasts = 9
+  s.supports[0].exCastNo = 9
+  s.supports[1].exCastNo = 8
+  check("支援在冷却里", s.supports.map((u) => exWaitOf(s, u) > 0), [true, true])
+  check("嘲讽 + 支援冷却 → 名单是空的", exCastableOf(taunted, 0), [])
+  check("点名放支援：报冷却，不报嘲讽",
+    /冷却/.test(validateAction(taunted, { type: "ex", casts: [{ pos: 4 }] }) || ""), true)
+  check("点名放主力：仍然报嘲讽",
+    /嘲讽/.test(validateAction(taunted, { type: "ex", casts: [{ pos: 0 }] }) || ""), true)
+
+  // 恐惧同理：控制与冷却是两把独立的锁
+  const feared = handoff(["佳代子", "野宫", "野宫", "野宫"], 0)
+  const f = feared.sides[0]
+  f.exCasts = 9
+  f.supports[0].exCastNo = 9
+  f.supports[1].exCastNo = 8
+  check("恐惧 + 支援冷却 → 名单也是空的", exCastableOf(feared, 0), [])
+}
+
+console.log("\n=== 38. 掩体是「掩护」不是「墙」 ===")
+{
+  /**
+   * 掩体和人偶是两套口径，别混：
+   *   人偶 —— 抛到敌方半场的诱饵，**那一整个战场**打过来的刀全归它接，不问 Block 也不问指名
+   *   掩体 —— 架在自己这边，**只管自己那一路**，而且只接「打得中它」且**没被指名**的那部分
+   * 「打得中它」照搬原数据的 `Damage.Block`：直射单发 = 1，范围/曲射 = 0。
+   */
+  const cover = (red, lane) => {
+    // 静子要真的站 5 号位，所以蓝方自己写满 6 个；`setup` 只给 4 个的那一方补惰性支援
+    const st = setup(["星野", "白子", "千世", "芹香", "静子", "真白"], red)
+    // 真白会在 ③-a 打人干扰落点判定，压掉她的普技；静子的 EX 由用例自己放
+    for (const s of st.sides) for (const u of s.supports) u.skillCd = 9999
+    st.sides[0].cost = 10
+    const r = playerTurn(st, { type: "ex", casts: [{ pos: 4, target: { scope: "ally", idx: lane } }] })
+    const cur = playerTurn(r.state, { type: "pass" }).state
+    cur.sides[1].cost = 10
+    return cur
+  }
+  const landedOn = (r) => {
+    const e = r.events.find((x) => x.type === "damage" || x.type === "miss")
+    return e ? (e.target.summon ? "掩体" : tmplOf(r.state.sides[e.target.side].units[e.target.pos]).name) : "—"
+  }
+
+  const st0 = cover(["伊织", "野宫", "野宫", "野宫"], 1)
+  check("掩体架在 2 号位（blockIdx=1）", st0.sides[0].summons[0].blockIdx, 1)
+  check("它是 cover 不是人偶", Boolean(st0.sides[0].summons[0].cover), true)
+  check("只护自己那一路：打 1 号位不受影响", landedOn(run(st0, { type: "pass" })), "星野")
+
+  check("护住的那一路：可挡的普攻转到掩体",
+    landedOn(run(cover(["伊织", "野宫", "野宫", "野宫"], 0), { type: "pass" })), "掩体")
+  // 爱丽丝的普攻是光束（原数据 Block=0），从掩体上面过去
+  check("不可挡的普攻（爱丽丝 Block=0）照样打人",
+    landedOn(run(cover(["爱丽丝", "野宫", "野宫", "野宫"], 0), { type: "pass" })), "星野")
+
+  // 指名越过：EX 点谁打谁，掩体拦不住，只剩 strike 里那次格挡判定
+  const aimed = playerTurn(cover(["伊织", "野宫", "野宫", "野宫"], 0),
+    { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] })
+  check("玩家指名越过掩体", landedOn(aimed), "星野")
+
+  /**
+   * 30% 格挡是一次**独立判定**（不走命中/闪避那条公式）。跑够样本再比，
+   * 单局看不出来 —— 471 段的标准误就有 ±2.1%。
+   */
+  const blockRateOf = (attacker) => {
+    let seg = 0, blk = 0
+    for (let s = 0; s < 150; s++) {
+      const c = cover([attacker, "野宫", "野宫", "野宫"], 0)
+      c.rng = (s * 2654435761) >>> 0
+      for (const e of playerTurn(c, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] }).events) {
+        if ((e.type !== "damage" && e.type !== "miss") || e.target.summon) continue
+        if (e.target.side !== 0 || e.target.pos !== 0) continue
+        seg += e.hits || 0
+        blk += e.blocked || 0
+      }
+    }
+    return [blk / seg, seg]
+  }
+  /**
+   * **两条事件路径都要量**，它们的 `blocked` 是分开传的，只测一条会漏：
+   *   单段（伊织的连发）—— 被挡 = 一段没落地 = 走 `miss` 事件
+   *   多段（白子 EX 10 段）—— 部分被挡 = 仍然造成伤害 = 走 `damage` 事件
+   * `applyDamage` 曾经不转发 `blocked`，于是多段的格挡在图上和统计里**完全看不见**，
+   * 而只测单段的用例照样全绿。
+   */
+  for (const [who, tag] of [["伊织", "单段·miss 路径"], ["白子", "多段·damage 路径"]]) {
+    const [rate, n] = blockRateOf(who)
+    check(`${tag}：格挡率 ≈ ${CFG.COVER_BLOCK_RATE * 100}%（实测 ${(rate * 100).toFixed(1)}%，n=${n}）`,
+      Math.abs(rate - CFG.COVER_BLOCK_RATE) < 0.06, true)
+  }
+}
+
+console.log("\n=== 39. 支援位治疗：人数以描述为准，不是有圈就是全体 ===")
+{
+  const of = (n) => ROSTER.find((t) => t.name === n)
+  check("花江 EX 是单体持续治疗", [of("花江").ex.target, of("花江").ex.count], ["ally_single", 1])
+  check("千夏 EX 是单体治疗", [of("千夏").ex.target, of("千夏").ex.count], ["ally_single", 1])
+  check("芹娜 EX 是单体，大圈只是位移不是覆盖", [of("芹娜").ex.target, of("芹娜").ex.count], ["ally_single", 1])
+  check("绫音 EX 是同战场 2 人", [of("绫音").ex.target, of("绫音").ex.count], ["ally_adjacent", 2])
+  check("花子 EX 是同战场 2 人", [of("花子").ex.target, of("花子").ex.count], ["ally_adjacent", 2])
+  check("风香 EX 原文写 4 名，是真·全体", [of("风香").ex.target, of("风香").ex.count], ["ally_all", 4])
+  check("花子普技是 2 名最残，不是全队", [of("花子").skill.target, of("花子").skill.count], ["ally_lowest", 2])
+  check("风香普技是生命上限最高的那一个", [of("风香").skill.target, of("风香").skill.count], ["ally_maxhp", 1])
+  check("绫音普技仍是全体（前锋场地）", of("绫音").skill.target, "ally_all")
+  check("绫音普技按 30 秒转，不是看她自己的血量", of("绫音").skill.trigger, { type: "cooldown", turns: 6 })
+  check("绫音爱用品是周期暴击抵抗 + 急救状态，不是当场群奶",
+    of("绫音").skill.effects.map((e) => e.type), ["buff", "ward"])
+  check("急救是生命≤45%消耗、每场一次",
+    of("绫音").skill.effects.find((e) => e.type === "ward"),
+    { type: "ward", scope: "ally_all", scale: 0.624, source: "heal", hpMax: 0.45, once: true })
+
+  const mains = ["星野", "椿", "优香", "春香"]
+  const hurt = (st) => {
+    for (const u of st.sides[0].units) u.hp = Math.round(u.maxhp * 0.4)
+  }
+  const heals = (r, src) => r.events
+    .filter((e) => e.type === "heal" && (src == null || e.source?.pos === src))
+    .map((e) => e.target.pos).sort((a, b) => a - b)
+
+  const named = setup([...mains, "芹娜", "真白"], ["伊织", "伊织", "伊织", "伊织"])
+  hurt(named)
+  named.sides[0].cost = 10
+  check("芹娜指定 3 号位：只奶优香",
+    heals(playerTurn(named, { type: "ex", casts: [{ pos: 4, target: { scope: "ally", idx: 2 } }] }), 4), [2])
+
+  const def = setup([...mains, "芹娜", "真白"], ["伊织", "伊织", "伊织", "伊织"])
+  hurt(def)
+  def.sides[0].cost = 10
+  check("芹娜不指定：支援没有对位，默认奶号位最小的 1 号",
+    heals(playerTurn(def, { type: "ex", casts: [{ pos: 4 }] }), 4), [0])
+
+  const fuuka = setup([...mains, "风香", "真白"], ["伊织", "伊织", "伊织", "伊织"])
+  hurt(fuuka)
+  fuuka.sides[0].cost = 10
+  check("风香 EX 奶全部 4 个主力",
+    heals(playerTurn(fuuka, { type: "ex", casts: [{ pos: 4 }] }), 4), [0, 1, 2, 3])
+
+  const hanae = setup([...mains, "花江", "真白"], ["伊织", "伊织", "伊织", "伊织"])
+  hurt(hanae)
+  hanae.sides[0].cost = 10
+  const hanaeR = playerTurn(hanae, { type: "ex", casts: [{ pos: 4, target: { scope: "ally", idx: 1 } }] })
+  check("花江 EX 只给指定的那个人上持续治疗",
+    hanaeR.state.sides[0].units.map((u) => u.regens.length > 0), [false, true, false, false])
+
+  const hanako = setup([...mains, "花子", "真白"], ["伊织", "伊织", "伊织", "伊织"])
+  const us = hanako.sides[0].units
+  us[0].hp = Math.round(us[0].maxhp * 0.2)
+  us[1].hp = Math.round(us[1].maxhp * 0.9)
+  us[2].hp = Math.round(us[2].maxhp * 0.3)
+  us[3].hp = Math.round(us[3].maxhp * 0.5)
+  hanako.sides[0].supports[0].skillCd = 0
+  check("花子普技奶最残的两个：星野 + 优香",
+    heals(run(hanako, { type: "pass" }), 4), [0, 2])
+
+  const fk = setup([...mains, "风香", "真白"], ["伊织", "伊织", "伊织", "伊织"])
+  const fs = fk.sides[0].units
+  fs[0].maxhp = 1000; fs[0].hp = 1000
+  fs[1].maxhp = 5000; fs[1].hp = 5000
+  fs[2].maxhp = 2000; fs[2].hp = 2000
+  fs[3].maxhp = 3000; fs[3].hp = 3000
+  fk.sides[0].supports[0].skillCd = 0
+  const fkR = run(fk, { type: "pass" })
+  check("风香普技只给生命上限最高的椿加防",
+    fkR.state.sides[0].units.map((u) => u.buffs.some((b) => b.stat === "dfs")),
+    [false, true, false, false])
+
+  const muteMains = (st) => { for (const u of st.sides[0].units) u.skillUses = 99 }
+  const ayane = () => {
+    const st = setup([...mains, "绫音", "真白"], ["伊织", "伊织", "伊织", "伊织"])
+    muteMains(st)
+    st.sides[0].supports[0].skillCd = 0
+    return st
+  }
+  // 只用 playerTurn：run 会把对面那一轮也打完，伊织可能把人打到 45% 以下、提前消耗急救
+  const rFull = playerTurn(ayane(), { type: "pass" })
+  check("满血上急救：没人当场回血", heals(rFull, 4), [])
+  check("四个主力都挂着急救", rFull.state.sides[0].units.map((u) => Boolean(u.ward)), [true, true, true, true])
+  check("周期那段暴击抵抗照样上了",
+    rFull.state.sides[0].units.every((u) => u.buffs.some((b) => b.stat === "crit_res")), true)
+
+  const already = ayane()
+  already.sides[0].units[1].hp = Math.round(already.sides[0].units[1].maxhp * 0.3)
+  const rHurt = playerTurn(already, { type: "pass" })
+  check("已残血的人上急救当场消耗回血", heals(rHurt, 4), [1])
+  check("消耗过的人不再挂状态，别人还在",
+    rHurt.state.sides[0].units.map((u) => Boolean(u.ward)), [true, false, true, true])
+
+  // 不走过对面那一轮：伊织可能把还挂着急救的人打到 45% 以下，干扰「会不会再赋予」
+  const again = rHurt.state
+  again.activeSide = 0
+  again.turnOpen = true
+  again.sides[0].supports[0].skillCd = 0
+  const rAgain = playerTurn(again, { type: "pass" })
+  check("再放一次：消耗过的人不会再拿到急救",
+    rAgain.state.sides[0].units.map((u) => Boolean(u.ward)), [true, false, true, true])
 }
 
 console.log(bad ? `\n✗ ${bad} 条不符` : "\n全部符合")

@@ -15,8 +15,9 @@
  *
  * 注意本脚本只查不变量，查不出「打错人」——目标选择的规则回归在 target-test.mjs。
  *
- * 其中「全员被冷却锁死」是 EX 冷却机制的核心不变量：冷却长度 = 存活数−2，
- * 最多锁得住最近 n−2 个施放者，所以可放的人永远不少于 2。
+ * 其中「全员被冷却锁死」是 EX 冷却机制的核心不变量：冷却长度 = 存活总人数（含 2 个支援）−3，
+ * 最多锁得住最近 n−3 个施放者，所以可放的人永远不少于 3。
+ * 支援永远不死，所以这个下限恒定成立 —— 主力死到只剩 1 个时 n=3、长度归零。
  *
  * 用法：node scripts/stress-test.mjs [局数]
  */
@@ -26,7 +27,9 @@ import { ROSTER, CFG } from "../lib/ba/roster.js"
 const GAMES = Number(process.argv[2]) || 500
 /** 死循环保护：一轮两回合，每回合最多几次 EX + 一次过，再留余量 */
 const GUARD_MAX = CFG.MAX_ROUND * 2 * 6 + 16
-const ids = ROSTER.map((t) => t.id)
+// 编成是 4 主力 + 2 支援，两个池子分开抽 —— 支援不能站号位，主力也不能塞进支援格
+const mainIds = ROSTER.filter((t) => (t.squad || "主力") !== "支援").map((t) => t.id)
+const supIds = ROSTER.filter((t) => t.squad === "支援").map((t) => t.id)
 /** 固定序列的伪随机，保证复现 */
 const rnd = (seed) => { let x = seed; return () => ((x = (x * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff) }
 
@@ -37,7 +40,10 @@ const fail = (msg) => { errors++; console.log("  ✗ " + msg) }
 
 for (let seed = 1; seed <= GAMES; seed++) {
   const R = rnd(seed)
-  const pick = () => Array.from({ length: 4 }, () => ids[Math.floor(R() * ids.length)])
+  const pick = () => [
+    ...Array.from({ length: 4 }, () => mainIds[Math.floor(R() * mainIds.length)]),
+    ...Array.from({ length: 2 }, () => supIds[Math.floor(R() * supIds.length)]),
+  ]
   let st
   try {
     st = createBattle(
@@ -87,15 +93,23 @@ for (let seed = 1; seed <= GAMES; seed++) {
         if (u.shield < 0) fail(`seed ${seed} 负护盾`)
       }
       const h = exAvailableOf(r.state, s.side)
-      const aliveN = s.units.filter((u) => u.alive).length
+      // 会出手的是 4 主力 + 2 支援；支援打不到，`alive` 恒为 true
+      const casters = [...s.units, ...(s.supports || [])]
+      const at = (p) => (p < 4 ? s.units[p] : (s.supports || [])[p - 4])
+      const aliveN = casters.filter((u) => u.alive).length
       if (new Set(h).size !== h.length) fail(`seed ${seed} 可用EX重复`)
-      if (h.some((p) => !s.units[p].alive)) fail(`seed ${seed} 可用EX含阵亡角色`)
-      for (const u of s.units) {
+      if (h.some((p) => !at(p)?.alive)) fail(`seed ${seed} 可用EX含阵亡角色`)
+      for (const u of casters) {
         if (u.alive && exWaitOf(s, u) > exLockLenOf(s)) fail(`seed ${seed} EX冷却超出上限`)
       }
-      // 反死锁：冷却长度 = 存活数−2，最多只锁得住最近 n−2 个施放者，
-      // 所以任何时刻可放的人都不该少于 2（不足 2 人时按存活数算）
-      if (aliveN > 0 && h.length < Math.min(2, aliveN)) {
+      // 支援不站在场上：任何时候都不该出现在挨打名单里，也不该被算进胜负血量比
+      for (const u of s.supports || []) {
+        if (!u.alive) fail(`seed ${seed} 支援 ${u.id} 被打死了`)
+        if (u.hp !== u.maxhp) fail(`seed ${seed} 支援 ${u.id} 掉血了（${u.hp}/${u.maxhp}）`)
+      }
+      // 反死锁：冷却长度 = 存活总人数−3，最多只锁得住最近 n−3 个施放者，
+      // 所以任何时刻可放的人都不该少于 3（不足 3 人时按存活数算）
+      if (aliveN > 0 && h.length < Math.min(3, aliveN)) {
         fail(`seed ${seed} 全员被冷却锁死（存活 ${aliveN}，可放 ${h.length}）`)
       }
     }

@@ -36,7 +36,9 @@ export function buildCardHtml(tmpl) {
   const armorColor = ARMOR[tmpl.defType] || "#8AA"
   const ink = inkOf(ac)
   const portrait = artOf(tmpl.id, "portrait")
-  const autoPct = tmpl.autoAttack.hits.reduce((a, b) => a + b, 0)
+  // 支援位没有 `Skills.Normal`，`autoAttack` 是 null —— 角色卡上那一行改成说明它不站场上
+  const auto = tmpl.autoAttack
+  const autoPct = auto ? auto.hits.reduce((a, b) => a + b, 0) : 0
 
   const stat = (label, value, accent = false) => `
     <div class="cell${accent ? " accent" : ""}"><label>${label}</label><b>${esc(value)}</b></div>`
@@ -107,7 +109,9 @@ body{width:${CARD_WIDTH}px;height:${CARD_HEIGHT}px;font-family:${FONT_STACK};-we
   <div class="panel" id="ex">
     <h3>EX 技能 · ${esc(tmpl.ex.name)} · ${tmpl.ex.cost} Cost</h3>
     <p>${esc(describeEffect(tmpl.ex))}</p>
-    <p style="margin-top:8px;color:#8397AC;font-size:16px">普攻 ${autoPct.toFixed(0)}% 分 ${tmpl.autoAttack.hits.length} 段${tmpl.autoAttack.count > 1 ? ` · ${tmpl.autoAttack.depth === "through" ? "直线贯穿" : "同战场同身位"} ${tmpl.autoAttack.count} 人` : ""}</p>
+    <p style="margin-top:8px;color:#8397AC;font-size:16px">${auto
+      ? `普攻 ${autoPct.toFixed(0)}% 分 ${auto.hits.length} 段${auto.count > 1 ? ` · ${auto.depth === "through" ? "直线贯穿" : "同战场同身位"} ${auto.count} 人` : ""}`
+      : "支援位 · 不站在场上，打不到；没有普攻，索敌打最前面的"}</p>
   </div>
   <div class="inner"></div>
 </div>

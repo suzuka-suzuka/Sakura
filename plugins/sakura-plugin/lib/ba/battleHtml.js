@@ -15,9 +15,16 @@ import { tmplOf, exWaitOf, turnCostOf, exRefreshPending, exCostOf, provokedBy, f
 import { artOf, summonArtOf, statusIconOf, fontFace, FONT_STACK, ATTACK, ARMOR, inkOf, esc } from "./htmlAssets.js"
 
 export const MAP_WIDTH = 1200
-const HUD_HEIGHT = 288
-/** 阵列加高：前/中/后三层 + 抛出召唤物在敌方前排前面那一格 */
-const ARENA_H = 1200
+/** EX 卡从 4 张变成 6 张，塞不进一排（6×207 已经超出画布），拆成上下两排 */
+const HUD_HEIGHT = 460
+/**
+ * 支援带：两个支援站在**自己半场角色的后方**（离交战线更远的那一侧），分散居中。
+ * 它们不在 1~4 号位的战场分割里，所以刻意不跟主力排在同一行 —— 一眼就能看出「不在场上」。
+ * 一条带 = 一个整格（Q 版 270 + 名字），主力那两行相应往中间挪同样的距离。
+ */
+const SUPPORT_GAP = 300
+/** 阵列加高：前/中/后三层 + 抛出召唤物在敌方前排前面那一格 + 双方各一条支援带 */
+const ARENA_H = 1200 + SUPPORT_GAP * 2
 // 顶栏 130（含上下外边距）+ 阵列 + HUD；HUD 贴底绝对定位，三段正好接上
 export const MAP_HEIGHT = 130 + ARENA_H + HUD_HEIGHT
 
@@ -31,8 +38,19 @@ const ARENA_MARGIN = 34
 const ARENA_W = MAP_WIDTH - ARENA_MARGIN * 2
 /** 四个号位是等分的 grid 列，中心落在 1/8、3/8、5/8、7/8 */
 const LANE_X = [0, 1, 2, 3].map((i) => (ARENA_W * (i * 2 + 1)) / 8)
-const RED_Y = 200
-const BLUE_Y = ARENA_H - 200
+/**
+ * 一行 CSS 上 `top:T` 时，锚点 y = T + 200（`.bars` 50 + `.art` 270 的经验中心）。
+ * 主力两行让开一条支援带的高度，支援带贴在最外侧 —— 两处必须一起改，
+ * 否则箭头会画到人以外的地方。
+ */
+const RED_Y = 200 + SUPPORT_GAP
+const BLUE_Y = ARENA_H - 200 - SUPPORT_GAP
+/**
+ * 支援不占号位，所以**不压在任何一列上**：两个人站在两个战场的中线上 ——
+ * 1·2 之间（1/4 处）和 3·4 之间（3/4 处）。压在 2、3 号位上会让人以为它们参与战场分割。
+ */
+const SUP_X = [ARENA_W / 4, (ARENA_W * 3) / 4]
+const supportY = (side) => (side === 1 ? RED_Y - SUPPORT_GAP : BLUE_Y + SUPPORT_GAP)
 /** 前排往交战线迈一个身位，中排半步，后排不动。深度是角色属性，不是格子。 */
 const LINE_SHIFT = { 前: 96, 中: 48, 后: 0 }
 /** 抛出型召唤物站在敌方前排再往前一个身位 */
@@ -41,11 +59,16 @@ function lineShiftOf(side, u) {
   const step = LINE_SHIFT[tmplOf(u).line] ?? 0
   return side === 1 ? step : -step
 }
-/** 佩洛洛扔在敌方半场，挡在对方前排前面 */
+/**
+ * 召唤物站在哪半场。两种来源，画法相反：
+ *   **抛出型**（佩洛洛，日富美「打谁」）—— 扔到**敌方**半场，挡在对方前排前面
+ *   **布置型**（掩体，静子「给谁」）—— 架在**自己**半场，挡在自家前排前面
+ * 挡刀口径是同一条（按战场拦），只有画在哪半边不同 —— 画反了玩家会以为墙在替对面挡。
+ */
 function summonStandY(sm) {
-  const foe = 1 - sm.side
-  const front = foe === 1 ? RED_Y + LINE_SHIFT.前 : BLUE_Y - LINE_SHIFT.前
-  return front + (foe === 1 ? SUMMON_AHEAD : -SUMMON_AHEAD)
+  const half = sm.onAlly ? sm.side : 1 - sm.side
+  const front = half === 1 ? RED_Y + LINE_SHIFT.前 : BLUE_Y - LINE_SHIFT.前
+  return front + (half === 1 ? SUMMON_AHEAD : -SUMMON_AHEAD)
 }
 
 /**
@@ -230,6 +253,8 @@ function statusMarks(u, provoked) {
   }
   // 不死：残血 1 点却打不死，不出格的话对手会以为是自己算错了伤害
   if (u.immortal > 0) marks.push(markOrSvg("immortal", "immortal", "buff", u.immortal <= 1 ? "fading" : ""))
+  // 急救（绫音爱用品）：残血才消耗回血，不出格对手看不出谁还留着一次救援
+  if (u.ward) marks.push(markOrSvg("buff-aid", "heal", "buff"))
   // Fury（妮露）：期间她的 EX 威力翻倍，对手看得见才能决定要不要抢先手
   if (u.fury > 0) marks.push(markOrSvg("fury", "charge", "special", u.fury <= 1 ? "fading" : ""))
   // 能量充能（爱丽丝）：三档各一张官方图，**攒到满充她的 EX 就是两倍伤害**，
@@ -294,12 +319,18 @@ function pullBack(from, to, d) {
  * marker 按颜色各建一个，不用 `context-stroke`（那个的浏览器支持没保证）。
  */
 function arrowLayer(state, events) {
+  // 支援不在 units 里，号位是 4/5 —— 箭头的颜色要读施法者的攻击属性，走这个才不会 undefined
+  const actorOf = (ref) => (ref?.pos >= 4
+    ? (state.sides[ref.side]?.supports || [])[ref.pos - 4]
+    : state.sides[ref.side]?.units[ref.pos])
   const posOf = (ref) => {
     if (!ref) return null
     if (ref.summon) {
       const sm = (state.sides[ref.side]?.summons || []).find((s) => s.alive && s.idx === ref.pos)
       return { x: LANE_X[ref.pos], y: sm ? summonStandY(sm) : ARENA_H / 2 }
     }
+    // 支援站在自己半场的最外侧，只占中间两列。身位偏移对它们不成立（它们不在前中后排里）
+    if (ref.pos >= 4) return { x: SUP_X[ref.pos - 4] ?? ARENA_W / 2, y: supportY(ref.side) }
     const u = state.sides[ref.side]?.units[ref.pos]
     const base = ref.side === 1 ? RED_Y : BLUE_Y
     return { x: LANE_X[ref.pos], y: base + (u ? lineShiftOf(ref.side, u) : 0) }
@@ -316,7 +347,8 @@ function arrowLayer(state, events) {
       const b = posOf(tg)
       if (!b) continue
       // 亮底上属性原色（尤其贯通的 #F0C547）几乎看不见，箭头走压暗版
-      const color = inkOf(ATTACK[tmplOf(state.sides[ev.source.side].units[ev.source.pos]).atkType] || "#8AF")
+      const src = actorOf(ev.source)
+      const color = inkOf((src && ATTACK[tmplOf(src).atkType]) || "#8AF")
       if (!markers.has(color)) markers.set(color, `ah${markers.size}`)
       const mx = (a.x + b.x) / 2 + (a.x < b.x ? 40 : -40)
       const my = (a.y + b.y) / 2
@@ -366,15 +398,24 @@ function fxLabel(ev, wide) {
   // 持续伤害单独一种颜色：它没有施法者连线（施加者可能已阵亡），
   // 不换色的话玩家会以为是谁打的、然后去找那根不存在的线
   const kind = ev.type === "miss" ? "miss" : ev.type === "heal" ? "heal" : ev.dot ? "dot" : "dmg"
-  const text = ev.type === "miss" ? "MISS"
+  // 全被掩体挡下时印 BLOCK 而不是 MISS —— 两件事的应对完全不同：
+  // 一个要先拆墙 / 换个打得进去的角色，一个要堆命中
+  const allBlocked = ev.type === "miss" && ev.blocked === ev.hits
+  const text = ev.type === "miss" ? (allBlocked ? "BLOCK" : "MISS")
     : ev.type === "heal" ? `+${ev.amount}`
       : String(ev.totalAmount ?? ev.amount)
-  const qual = ev.affinity === "weak" ? "WEAK" : ev.affinity === "resist" ? "RESIST" : ""
+  /**
+   * 小字这一格三选一，优先级 BLOCK > 克制：**部分段被掩体挡下**时印 `BLOCKn`。
+   * 掩体格挡是一次独立判定（跟命中/闪避无关），玩家得看得出这一发是被墙吃掉的。
+   */
+  const qual = !allBlocked && ev.blocked ? `BLOCK${ev.blocked}`
+    : ev.affinity === "weak" ? "WEAK" : ev.affinity === "resist" ? "RESIST" : ""
+  const qualCls = !allBlocked && ev.blocked ? "block" : ev.affinity
   return `
-    <div class="fxlabel ${kind} ${ev.crit ? "crit" : ""} ${wide ? "wide" : ""}">
+    <div class="fxlabel ${kind} ${allBlocked ? "blocked" : ""} ${ev.crit ? "crit" : ""} ${wide ? "wide" : ""}">
       ${ev.crit ? `<span class="burst" style="--burst:polygon(${burstPolygon(critQ)})"></span>` : ""}
       <b>${esc(text)}</b>
-      ${qual ? `<i class="${ev.affinity}">${qual}</i>` : ""}
+      ${qual ? `<i class="${qualCls}">${qual}</i>` : ""}
       ${segsHtml(segs)}
     </div>`
 }
@@ -418,7 +459,7 @@ function hud(state) {
   const active = state.phase === "command"
   const avail = active ? turnCostOf(s) : Math.floor(s.cost)
 
-  const cards = s.units.filter((u) => u.alive).map((u) => {
+  const card = (u) => {
     const t = tmplOf(u)
     const icon = artOf(t.id, "icon")
     const ac = ATTACK[t.atkType] || "#8AA"
@@ -447,7 +488,11 @@ function hud(state) {
       <span class="cost ${cost < t.ex.cost ? "cut" : ""}">${cost}</span>
       <span class="nm">${esc(t.name)}</span>
     </div>`
-  }).join("")
+  }
+  // 6 张同尺寸的卡塞不进 1200 宽（6×207 + 间距已经超了），拆成上排 4 主力、下排 2 支援。
+  // 支援永远不死，所以下排恒定两张 —— 它们也是主力全被嘲讽那一轮唯一放得出 EX 的人。
+  const cards = s.units.filter((u) => u.alive).map(card).join("")
+  const supCards = (s.supports || []).map(card).join("")
 
   // 条按小数填：side.cost 永远是整数，攒了一半的那点在 regenAcc 里，
   // 加起来才是真实进度 —— 4.5 就画成 4 格满 + 第 5 格半格
@@ -459,7 +504,10 @@ function hud(state) {
 
   return `
   <div class="hud ${side === 0 ? "blue" : "red"}">
-    <div class="excards">${cards || '<div class="excard empty">无可用 EX</div>'}</div>
+    <div class="excards">
+      <div class="exrow">${cards || '<div class="excard empty">无可用 EX</div>'}</div>
+      ${supCards ? `<div class="exrow sup">${supCards}</div>` : ""}
+    </div>
     <div class="cells">${cells}</div>
   </div>`
 }
@@ -522,8 +570,17 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
   background:linear-gradient(180deg,rgba(217,72,92,.08) 0%,rgba(255,255,255,.52) 27%,
     rgba(255,255,255,.52) 73%,rgba(46,127,212,.13) 100%)}
 .laneRow{position:absolute;left:0;right:0;z-index:1;display:grid;grid-template-columns:repeat(4,1fr)}
-.laneRow.red{top:0}
-.laneRow.blue{bottom:0}
+/* 主力两行让开一条支援带；数值跟 RED_Y / BLUE_Y 是同一个 SUPPORT_GAP，改一处必须改两处 */
+.laneRow.red{top:${SUPPORT_GAP}px}
+.laneRow.blue{bottom:${SUPPORT_GAP}px}
+/* 支援带是**两列**（不是主力那套四列）：格心天然落在 1/4 和 3/4，
+   正好是 1·2 战场和 3·4 战场的中线，跟 SUP_X 对齐 */
+.supRow{position:absolute;left:0;right:0;z-index:1;display:grid;grid-template-columns:repeat(2,1fr)}
+.supRow.red{top:0}
+.supRow.blue{bottom:0}
+/* 支援不画血条：它们打不到，血量维度对玩家没有意义。名字挪到脚下，跟主力区分开 */
+.unit.sup>.bars{height:26px}
+.supnm{font-size:19px;color:#41586E;letter-spacing:.04em}
 .unit{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px}
 /* 变灰只作用到角色本体，不能套在 .unit 上 —— 数字是 .unit 的子元素，
    一起淡掉会让「打死这一下」正好最看不清 */
@@ -588,7 +645,8 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 .sm{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px}
 /* 站在红半场（挡红方）时数字往交战线甩；站在蓝半场同理 */
 .sm.foe-red .fxstack{top:auto;bottom:118px}
-.sm.foe-blue .fxstack{top:118px;bottom:auto}
+/* 站在蓝方半场时数字往下甩，要让开血条下面那行名字（掩体架在自己这边，正好撞上） */
+.sm.foe-blue .fxstack{top:158px;bottom:auto}
 .smart{position:relative;width:104px;height:104px;display:flex;align-items:center;justify-content:center}
 .smart img{width:104px;height:104px;object-fit:contain;
   filter:drop-shadow(0 4px 8px rgba(40,80,125,.28))}
@@ -630,6 +688,9 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 /* 克制走小字本身换色，不换伤害数字：WEAK 红、RESIST 蓝 */
 .fxlabel i.weak{color:#D9485C}
 .fxlabel i.resist{color:#2E7FD4}
+/* 掩体格挡走构造物那个中性灰，跟血条同一把尺子 —— 它不是克制关系，别混进红蓝那一档 */
+.fxlabel i.block{color:#67748A;font-weight:700}
+.fxlabel.miss.blocked{border-color:#67748A;color:#4C5A6E}
 /* 伤害只用一个颜色 —— 克制与暴击各有自己的表达位（WEAK/RESIST 文字、爆裂外框），
    再拿颜色重复编码一遍只会让人以为那是第三种东西 */
 .fxlabel.dmg,.fxlabel.crit{color:#C0342C}
@@ -667,7 +728,12 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
   box-shadow:0 -6px 18px rgba(40,80,125,.1)}
 .hud.red{border-color:#D9485C}
 .hud.blue{border-color:#2E7FD4}
-.excards{display:flex;gap:26px;justify-content:center}
+.excards{display:flex;flex-direction:column;gap:40px;align-items:center}
+.exrow{display:flex;gap:26px;justify-content:center}
+/* 下排是支援：缩小一圈，主力才是站在场上的那批，卡面大小顺带编码了这件事 */
+.exrow.sup .excard{width:152px;height:125px}
+.exrow.sup .excard .cost{width:34px;height:34px;top:-7px;left:15px;font-size:20px}
+.exrow.sup .excard .nm{bottom:-22px;font-size:13px}
 /* 等边平行四边形（与原作技能卡一致）：上下边长 = 斜边长，即 W − d = √(H² + d²)
    取 H=170、d=34 → W=207，四边均为 173，偏移比 d/W = 16.43% */
 .excard{--pg:polygon(16.43% 0,100% 0,83.57% 100%,0 100%);position:relative;width:207px;height:170px}
@@ -771,22 +837,58 @@ function summonBand(state, fx) {
       if (!sm.alive) continue
       const t = tmplOf(sm)
       const pct = Math.max(0, Math.min(100, (sm.hp / sm.maxhp) * 100))
-      const dur = Math.max(0, Math.min(100, (sm.turns / (sm.turnsMax || sm.turns || 6)) * 100))
+      // 掩体是**永久**的（`turns == null`）：不画橙色时间条，它的存续就是血条本身。
+      // 不判的话 null / null 会算出 NaN，条子直接不见
+      const dur = sm.turns == null
+        ? null
+        : Math.max(0, Math.min(100, (sm.turns / (sm.turnsMax || sm.turns || 6)) * 100))
       const art = summonArtOf(sm.id)
-      const foe = 1 - sm.side
+      // 伤害数字往哪一侧甩，看它站在哪半场 —— 布置型（掩体）在自己这边，抛出型（人偶）在对面
+      const half = sm.onAlly ? sm.side : 1 - sm.side
       const dy = summonStandY(sm) - ARENA_H / 2
-      cells.push(`<div class="sm foe-${foe === 1 ? "red" : "blue"}" style="grid-column:${sm.idx + 1};transform:translateY(${dy}px)">
+      cells.push(`<div class="sm foe-${half === 1 ? "red" : "blue"}" style="grid-column:${sm.idx + 1};transform:translateY(${dy}px)">
         <div class="smart">
           ${art ? `<img src="${art}" alt="">` : ""}
         </div>
         <div class="hpbar smhp"><div class="hp" style="width:${pct}%;background:${ARMOR[t.defType] || "#8AA"}"></div>${SEGS}</div>
-        <div class="smdur"><s style="width:${dur.toFixed(1)}%"></s></div>
+        ${dur == null ? "" : `<div class="smdur"><s style="width:${dur.toFixed(1)}%"></s></div>`}
         <b>${esc(t.name)}</b>
         ${fx.get(`${side}:${sm.idx}:s`) || ""}
       </div>`)
     }
   }
   return cells.length ? `<div class="smRow">${cells.join("")}</div>` : ""
+}
+
+/**
+ * 支援带：自己半场角色后方的两个 Q 版，分散居中、和场上角色一样大。
+ *
+ * **不画血条** —— 支援打不到，血量维度对玩家没有意义，画了反而像是能被集火。
+ * 只出「普通技能就绪」那一个黄底预警（跟主力头上同一个图标），因为那是唯一
+ * 会改变下一回合结果、而玩家又看不到别处的信息。
+ *
+ * 连线沿用主力那一套（直线 + 箭头 + 三种笔触），锚点在 arrowLayer 的 `supportY`。
+ */
+function supportBand(state, side) {
+  const list = state.sides[side].supports || []
+  if (!list.length) return ""
+  const cells = list.map((u) => {
+    const t = tmplOf(u)
+    // 缺 chibi 的人退回头像（小玉的 Q 版是手工补的，见 fetch-art.mjs 的 MANUAL_ART）
+    const art = artOf(t.id, "chibi") || artOf(t.id, "icon")
+    const tr = t.skill?.trigger?.type
+    const ready = u.skillCd <= 0 && (tr === "cooldown" || tr === "on_auto" || tr === "on_kill")
+    return `
+    <div class="unit sup">
+      <div class="bars">${ready ? `<div class="marks"><i class="mk warn">${ICON.warn}</i></div>` : ""}</div>
+      <div class="art">
+        ${art ? `<img src="${art}" alt="">` : `<div class="ph" style="background:${ATTACK[t.atkType]}">${esc(t.name[0])}</div>`}
+        <div class="shadow"></div>
+      </div>
+      <b class="supnm">${esc(t.name)}</b>
+    </div>`
+  }).join("")
+  return `<div class="supRow ${side === 1 ? "red" : "blue"}">${cells}</div>`
 }
 
 // ---------------- 主入口 ----------------
@@ -800,10 +902,12 @@ export function buildBattleHtml(state, events = []) {
   ${header(state)}
   <div class="arena">
     ${zoneLayer(state)}
+    ${supportBand(state, 1)}
     <div class="laneRow red">${row(1)}</div>
     <div class="engage"></div>
     ${summonBand(state, fx)}
     <div class="laneRow blue">${row(0)}</div>
+    ${supportBand(state, 0)}
     ${arrowLayer(state, events)}
   </div>
   ${hud(state)}

@@ -69,6 +69,8 @@ export const TYPE_EFFECTIVENESS = {
 const ARMOR_KEY = {
   轻装: "LightArmor", 重装: "HeavyArmor", 特殊: "Unarmed", 弹力: "ElasticArmor", 复合: "CompositeArmor",
   轻装甲: "LightArmor", 重装甲: "HeavyArmor", 特殊装甲: "Unarmed", 弹力装甲: "ElasticArmor", 复合装甲: "CompositeArmor",
+  // 召唤物专用的第六种：掩体。官方克制表里对**所有**攻击属性都是 ×0.5，拆墙没法 counter-pick
+  构造物: "Structure", 构造: "Structure",
 }
 const BULLET_KEY = { 爆发: "Explosion", 贯通: "Pierce", 神秘: "Mystic", 振动: "Sonic", 变化: "Chemical" }
 
@@ -93,9 +95,16 @@ export const CFG = {
   // Cost 在每个回合「结束时」回复，因此首轮双方都是开局值直接开打：
   // 先手首轮 0，后手首轮 2，之后后手恒定领先 2 点。
   COST_START: 0,
-  COST_REGEN_PER_UNIT: 0.5,          // 满编 4 人 = 2/回合
+  COST_REGEN_PER_UNIT: 0.5,          // 每人 0.5，**支援也算**：满编 4 主力 + 2 支援 = 3/回合
   COST_MAX: 10,                      // 与 BA 的 Cost 上限一致
-  EX_COOLDOWN_SLACK: 2,              // EX 冷却长度 = 存活人数 − 这个值
+  EX_COOLDOWN_SLACK: 3,              // EX 冷却长度 = 存活总人数（含支援）− 这个值，满编 6 人 = 3
+  /**
+   * 掩体的**格挡率**。原作公式是 `30 + 攻击方遮蔽成功值 − 防御方遮蔽贯通率`，
+   * 地形适应每升一级 +15，基础就是 30%。它是**独立的一次判定**，不走命中/闪避那条公式 ——
+   * 折成闪避值的话效果会随攻击者的命中浮动，而原作明确不是这样。
+   * 遮蔽成功值（`BlockRate_Base`）全 272 人只有优香的武器被动带，生成器不读那个槽，暂时接不到。
+   */
+  COVER_BLOCK_RATE: 0.3,
   SECOND_BONUS: 2,                   // 后手方开局补偿
 
   // ---- 白热化 / FEVER TIME（照搬原作，按 1 轮 = 5 秒折算）----
@@ -124,6 +133,19 @@ export const SUMMONS = {
     "critRes": 100,
     "critDmgRes": 5000,
     "stability": 300
+  },
+  "99999": {
+    "id": 99999,
+    "name": "掩体",
+    "defType": "构造物",
+    "role": "召唤",
+    "hp": 0,
+    "dfs": 0,
+    "dodge": 0,
+    "crit": 0,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 0
   }
 }
 
@@ -134,6 +156,7 @@ export const ROSTER = [
     "name": "爱露",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "爆发",
     "defType": "轻装",
     "role": "输出",
@@ -154,7 +177,8 @@ export const ROSTER = [
     "autoAttack": {
       "hits": [
         100
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -173,7 +197,8 @@ export const ROSTER = [
       ],
       "splashHits": [
         256.69
-      ]
+      ],
+      "block": true
     },
     "ex": {
       "name": "冷酷无情射击",
@@ -188,7 +213,8 @@ export const ROSTER = [
       ],
       "splashHits": [
         292.07
-      ]
+      ],
+      "block": true
     }
   },
   {
@@ -197,6 +223,7 @@ export const ROSTER = [
     "name": "艾米",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "爆发",
     "defType": "轻装",
     "role": "坦克",
@@ -219,7 +246,8 @@ export const ROSTER = [
         33.34,
         33.33,
         33.33
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -241,7 +269,8 @@ export const ROSTER = [
       },
       "hits": [
         405.56
-      ]
+      ],
+      "block": true
     },
     "ex": {
       "name": "不屈的意志",
@@ -267,6 +296,7 @@ export const ROSTER = [
     "name": "晴奈",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "神秘",
     "defType": "重装",
     "role": "输出",
@@ -287,7 +317,8 @@ export const ROSTER = [
     "autoAttack": {
       "hits": [
         100
-      ]
+      ],
+      "block": true
     },
     "gearSkill": false,
     "skill": {
@@ -301,7 +332,8 @@ export const ROSTER = [
       },
       "hits": [
         200.21
-      ]
+      ],
+      "block": true
     },
     "ex": {
       "name": "优雅地贯穿",
@@ -317,7 +349,8 @@ export const ROSTER = [
         "rate": 0.1,
         "max": 0.3
       },
-      "depth": "through"
+      "depth": "through",
+      "block": true
     }
   },
   {
@@ -326,6 +359,7 @@ export const ROSTER = [
     "name": "日富美",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "轻装",
     "role": "辅助",
@@ -348,7 +382,8 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
-      ]
+      ],
+      "block": true
     },
     "gearSkill": false,
     "skill": {
@@ -400,6 +435,7 @@ export const ROSTER = [
     "name": "日奈",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "爆发",
     "defType": "重装",
     "role": "输出",
@@ -426,7 +462,8 @@ export const ROSTER = [
         14.29,
         14.29,
         14.29
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -467,7 +504,8 @@ export const ROSTER = [
         63.604,
         63.604,
         63.604
-      ]
+      ],
+      "block": true
     }
   },
   {
@@ -476,6 +514,7 @@ export const ROSTER = [
     "name": "星野",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "重装",
     "role": "坦克",
@@ -498,7 +537,8 @@ export const ROSTER = [
         33.34,
         33.33,
         33.33
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -551,7 +591,8 @@ export const ROSTER = [
         87.198,
         87.198,
         87.198
-      ]
+      ],
+      "block": true
     }
   },
   {
@@ -560,6 +601,7 @@ export const ROSTER = [
     "name": "伊织",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "重装",
     "role": "输出",
@@ -580,7 +622,8 @@ export const ROSTER = [
     "autoAttack": {
       "hits": [
         100
-      ]
+      ],
+      "block": true
     },
     "gearSkill": false,
     "skill": {
@@ -594,7 +637,8 @@ export const ROSTER = [
       },
       "hits": [
         229.83
-      ]
+      ],
+      "block": true
     },
     "ex": {
       "name": "一网打尽",
@@ -607,7 +651,8 @@ export const ROSTER = [
         350.73,
         350.73,
         350.73
-      ]
+      ],
+      "block": true
     }
   },
   {
@@ -616,6 +661,7 @@ export const ROSTER = [
     "name": "真纪",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "轻装",
     "role": "输出",
@@ -640,7 +686,8 @@ export const ROSTER = [
         20,
         20,
         20
-      ]
+      ],
+      "block": true
     },
     "gearSkill": false,
     "skill": {
@@ -698,6 +745,7 @@ export const ROSTER = [
     "name": "泉",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "爆发",
     "defType": "轻装",
     "role": "输出",
@@ -720,7 +768,8 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -787,6 +836,7 @@ export const ROSTER = [
     "name": "白子",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "爆发",
     "defType": "轻装",
     "role": "输出",
@@ -809,7 +859,8 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -824,7 +875,8 @@ export const ROSTER = [
       },
       "hits": [
         290.51
-      ]
+      ],
+      "block": true
     },
     "ex": {
       "name": "召唤无人机：火力支援，开始",
@@ -843,7 +895,8 @@ export const ROSTER = [
         40.045,
         40.045,
         40.045
-      ]
+      ],
+      "block": true
     }
   },
   {
@@ -852,6 +905,7 @@ export const ROSTER = [
     "name": "瞬",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "爆发",
     "defType": "轻装",
     "role": "输出",
@@ -872,7 +926,8 @@ export const ROSTER = [
     "autoAttack": {
       "hits": [
         100
-      ]
+      ],
+      "block": true
     },
     "gearSkill": false,
     "skill": {
@@ -931,6 +986,7 @@ export const ROSTER = [
     "name": "堇",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "特殊",
     "role": "输出",
@@ -956,7 +1012,8 @@ export const ROSTER = [
         16.66,
         16.66,
         16.67
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -997,7 +1054,8 @@ export const ROSTER = [
         247.4728,
         247.3986,
         247.3986
-      ]
+      ],
+      "block": true
     }
   },
   {
@@ -1006,6 +1064,7 @@ export const ROSTER = [
     "name": "鹤城",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "重装",
     "role": "输出",
@@ -1031,7 +1090,8 @@ export const ROSTER = [
         16.66,
         16.67,
         16.67
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -1093,6 +1153,7 @@ export const ROSTER = [
     "name": "茜",
     "star": 3,
     "baseStar": 2,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "轻装",
     "role": "辅助",
@@ -1113,7 +1174,8 @@ export const ROSTER = [
     "autoAttack": {
       "hits": [
         100
-      ]
+      ],
+      "block": true
     },
     "gearSkill": false,
     "skill": {
@@ -1127,7 +1189,8 @@ export const ROSTER = [
       },
       "hits": [
         396.8
-      ]
+      ],
+      "block": true
     },
     "ex": {
       "name": "清除，要优雅",
@@ -1146,7 +1209,8 @@ export const ROSTER = [
       "cost": 2,
       "hits": [
         547.95
-      ]
+      ],
+      "block": true
     }
   },
   {
@@ -1155,6 +1219,7 @@ export const ROSTER = [
     "name": "千世",
     "star": 3,
     "baseStar": 2,
+    "squad": "主力",
     "atkType": "神秘",
     "defType": "重装",
     "role": "输出",
@@ -1192,7 +1257,8 @@ export const ROSTER = [
       },
       "hits": [
         298.99
-      ]
+      ],
+      "block": true
     },
     "ex": {
       "name": "可能会痛哦~",
@@ -1218,6 +1284,7 @@ export const ROSTER = [
     "name": "明里",
     "star": 3,
     "baseStar": 2,
+    "squad": "主力",
     "atkType": "爆发",
     "defType": "重装",
     "role": "输出",
@@ -1240,7 +1307,8 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
-      ]
+      ],
+      "block": true
     },
     "gearSkill": false,
     "skill": {
@@ -1281,6 +1349,7 @@ export const ROSTER = [
     "name": "莲见",
     "star": 3,
     "baseStar": 2,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "重装",
     "role": "输出",
@@ -1301,7 +1370,8 @@ export const ROSTER = [
     "autoAttack": {
       "hits": [
         100
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -1332,7 +1402,8 @@ export const ROSTER = [
       "cost": 5,
       "hits": [
         574.31
-      ]
+      ],
+      "block": true
     }
   },
   {
@@ -1341,6 +1412,7 @@ export const ROSTER = [
     "name": "野宫",
     "star": 3,
     "baseStar": 2,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "轻装",
     "role": "输出",
@@ -1365,7 +1437,8 @@ export const ROSTER = [
         20,
         20,
         20
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -1405,7 +1478,8 @@ export const ROSTER = [
       "hits": [
         216.27,
         216.27
-      ]
+      ],
+      "block": true
     }
   },
   {
@@ -1414,6 +1488,7 @@ export const ROSTER = [
     "name": "佳代子",
     "star": 3,
     "baseStar": 2,
+    "squad": "主力",
     "atkType": "爆发",
     "defType": "重装",
     "role": "辅助",
@@ -1434,7 +1509,8 @@ export const ROSTER = [
     "autoAttack": {
       "hits": [
         100
-      ]
+      ],
+      "block": true
     },
     "gearSkill": false,
     "skill": {
@@ -1456,7 +1532,8 @@ export const ROSTER = [
       },
       "hits": [
         132.83
-      ]
+      ],
+      "block": true
     },
     "ex": {
       "name": "恐慌传播者",
@@ -1484,6 +1561,7 @@ export const ROSTER = [
     "name": "睦月",
     "star": 3,
     "baseStar": 2,
+    "squad": "主力",
     "atkType": "爆发",
     "defType": "轻装",
     "role": "输出",
@@ -1506,7 +1584,8 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
-      ]
+      ],
+      "block": true
     },
     "gearSkill": false,
     "skill": {
@@ -1541,6 +1620,7 @@ export const ROSTER = [
     "name": "纯子",
     "star": 3,
     "baseStar": 2,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "轻装",
     "role": "输出",
@@ -1563,7 +1643,8 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -1609,7 +1690,8 @@ export const ROSTER = [
         186.5075,
         186.5075
       ],
-      "depth": "through"
+      "depth": "through",
+      "block": true
     }
   },
   {
@@ -1618,6 +1700,7 @@ export const ROSTER = [
     "name": "芹香",
     "star": 3,
     "baseStar": 2,
+    "squad": "主力",
     "atkType": "爆发",
     "defType": "轻装",
     "role": "输出",
@@ -1640,7 +1723,8 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -1690,6 +1774,7 @@ export const ROSTER = [
     "name": "椿",
     "star": 3,
     "baseStar": 2,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "特殊",
     "role": "坦克",
@@ -1712,7 +1797,8 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
-      ]
+      ],
+      "block": true
     },
     "gearSkill": false,
     "skill": {
@@ -1763,6 +1849,7 @@ export const ROSTER = [
     "name": "优香",
     "star": 3,
     "baseStar": 2,
+    "squad": "主力",
     "atkType": "爆发",
     "defType": "重装",
     "role": "坦克",
@@ -1785,7 +1872,8 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -1840,6 +1928,7 @@ export const ROSTER = [
     "name": "春香",
     "star": 3,
     "baseStar": 1,
+    "squad": "主力",
     "atkType": "爆发",
     "defType": "轻装",
     "role": "坦克",
@@ -1862,7 +1951,8 @@ export const ROSTER = [
         33.34,
         33.33,
         33.33
-      ]
+      ],
+      "block": true
     },
     "gearSkill": false,
     "skill": {
@@ -1901,7 +1991,8 @@ export const ROSTER = [
         91.2398,
         91.2398,
         91.2398
-      ]
+      ],
+      "block": true
     }
   },
   {
@@ -1910,6 +2001,7 @@ export const ROSTER = [
     "name": "明日奈",
     "star": 3,
     "baseStar": 1,
+    "squad": "主力",
     "atkType": "神秘",
     "defType": "轻装",
     "role": "输出",
@@ -1932,7 +2024,8 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -2005,6 +2098,7 @@ export const ROSTER = [
     "name": "铃美",
     "star": 3,
     "baseStar": 1,
+    "squad": "主力",
     "atkType": "爆发",
     "defType": "重装",
     "role": "辅助",
@@ -2027,7 +2121,8 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -2087,6 +2182,7 @@ export const ROSTER = [
     "name": "菲娜",
     "star": 3,
     "baseStar": 1,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "轻装",
     "role": "输出",
@@ -2111,7 +2207,8 @@ export const ROSTER = [
         20,
         20,
         20
-      ]
+      ],
+      "block": true
     },
     "gearSkill": false,
     "skill": {
@@ -2164,6 +2261,7 @@ export const ROSTER = [
     "name": "泉奈",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "神秘",
     "defType": "轻装",
     "role": "输出",
@@ -2186,7 +2284,8 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
-      ]
+      ],
+      "block": true
     },
     "gearSkill": false,
     "skill": {
@@ -2233,6 +2332,7 @@ export const ROSTER = [
     "name": "柚子",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "特殊",
     "role": "输出",
@@ -2300,6 +2400,7 @@ export const ROSTER = [
     "name": "梓",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "爆发",
     "defType": "重装",
     "role": "输出",
@@ -2320,7 +2421,8 @@ export const ROSTER = [
     "autoAttack": {
       "hits": [
         100
-      ]
+      ],
+      "block": true
     },
     "gearSkill": false,
     "skill": {
@@ -2343,7 +2445,8 @@ export const ROSTER = [
       },
       "hits": [
         292.67
-      ]
+      ],
+      "block": true
     },
     "ex": {
       "name": "intulit mortem",
@@ -2365,7 +2468,8 @@ export const ROSTER = [
         44.4526,
         44.4526,
         533.005
-      ]
+      ],
+      "block": true
     }
   },
   {
@@ -2374,6 +2478,7 @@ export const ROSTER = [
     "name": "妮露",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "轻装",
     "role": "输出",
@@ -2399,7 +2504,8 @@ export const ROSTER = [
         16.67,
         16.67,
         16.67
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -2572,6 +2678,7 @@ export const ROSTER = [
     "name": "琴里",
     "star": 3,
     "baseStar": 1,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "轻装",
     "role": "辅助",
@@ -2596,7 +2703,8 @@ export const ROSTER = [
         20,
         20,
         20
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -2650,7 +2758,8 @@ export const ROSTER = [
         15.4237,
         16.1581,
         16.1581
-      ]
+      ],
+      "block": true
     },
     "ex": {
       "name": "解答箱",
@@ -2674,6 +2783,7 @@ export const ROSTER = [
     "name": "爱丽丝",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "神秘",
     "defType": "特殊",
     "role": "输出",
@@ -2781,6 +2891,7 @@ export const ROSTER = [
     "name": "绿",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "轻装",
     "role": "输出",
@@ -2801,7 +2912,8 @@ export const ROSTER = [
     "autoAttack": {
       "hits": [
         100
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
@@ -2860,7 +2972,8 @@ export const ROSTER = [
         119.64,
         119.64,
         119.64
-      ]
+      ],
+      "block": true
     }
   },
   {
@@ -2869,6 +2982,7 @@ export const ROSTER = [
     "name": "桃",
     "star": 3,
     "baseStar": 2,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "轻装",
     "role": "输出",
@@ -2891,13 +3005,14 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
-      ]
+      ],
+      "block": true
     },
     "gearSkill": true,
     "skill": {
       "name": "死守期限＋",
-      "target": "ally_all",
-      "count": 4,
+      "target": "ally_single",
+      "count": 1,
       "effects": [
         {
           "type": "buff",
@@ -2953,7 +3068,8 @@ export const ROSTER = [
         112.7954,
         112.8292
       ],
-      "depth": "through"
+      "depth": "through",
+      "block": true
     }
   },
   {
@@ -2962,6 +3078,7 @@ export const ROSTER = [
     "name": "切里诺",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "贯通",
     "defType": "轻装",
     "role": "输出",
@@ -2982,7 +3099,8 @@ export const ROSTER = [
     "autoAttack": {
       "hits": [
         100
-      ]
+      ],
+      "block": true
     },
     "gearSkill": false,
     "skill": {
@@ -3032,6 +3150,7 @@ export const ROSTER = [
     "name": "小春",
     "star": 3,
     "baseStar": 3,
+    "squad": "主力",
     "atkType": "爆发",
     "defType": "重装",
     "role": "治疗",
@@ -3052,15 +3171,16 @@ export const ROSTER = [
     "autoAttack": {
       "hits": [
         100
-      ]
+      ],
+      "block": true
     },
     "gearSkill": false,
     "skill": {
       "name": "我来治疗！",
       "target": "ally_hurt",
       "count": 1,
-      "exceptSelf": true,
       "hpMax": 0.5,
+      "exceptSelf": true,
       "effects": [
         {
           "type": "heal",
@@ -3093,6 +3213,1191 @@ export const ROSTER = [
         227.31
       ],
       "circle": true
+    }
+  },
+  {
+    "id": "HIBIKI",
+    "sid": 20000,
+    "name": "响",
+    "star": 3,
+    "baseStar": 3,
+    "squad": "支援",
+    "atkType": "爆发",
+    "defType": "重装",
+    "role": "输出",
+    "line": "后",
+    "bullet": "Explosion",
+    "armor": "HeavyArmor",
+    "hp": 2506,
+    "atk": 301,
+    "dfs": 79,
+    "healPower": 1902,
+    "acc": 100,
+    "dodge": 201,
+    "crit": 201,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1141,
+    "autoAttack": null,
+    "gearSkill": true,
+    "skill": {
+      "name": "火力应该充足吧+",
+      "target": "enemy_adjacent",
+      "count": 2,
+      "area": 70686,
+      "effects": [],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 4
+      },
+      "hits": [
+        158.06,
+        86.933,
+        15.806,
+        15.806,
+        15.806
+      ],
+      "hpRate": {
+        "lo": 0,
+        "hi": 1,
+        "atLo": 2,
+        "atHi": 1
+      }
+    },
+    "ex": {
+      "name": "会痛的概率很高哦",
+      "target": "enemy_instances",
+      "count": 2,
+      "area": 70686,
+      "effects": [],
+      "cost": 4,
+      "hits": [
+        311.43
+      ],
+      "instances": 5
+    }
+  },
+  {
+    "id": "KARIN",
+    "sid": 20001,
+    "name": "花凛",
+    "star": 3,
+    "baseStar": 3,
+    "squad": "支援",
+    "atkType": "贯通",
+    "defType": "重装",
+    "role": "输出",
+    "line": "后",
+    "bullet": "Pierce",
+    "armor": "HeavyArmor",
+    "hp": 2592,
+    "atk": 337,
+    "dfs": 20,
+    "healPower": 1837,
+    "acc": 873,
+    "dodge": 194,
+    "crit": 194,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 2364,
+    "autoAttack": null,
+    "gearSkill": false,
+    "skill": {
+      "name": "火力支援，开始",
+      "target": "enemy_single",
+      "count": 1,
+      "effects": [
+        {
+          "type": "cc",
+          "scope": "enemy",
+          "icon": "Stunned",
+          "chance": 0.5,
+          "turns": 1
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 8
+      },
+      "hits": [
+        223.65
+      ],
+      "block": true
+    },
+    "ex": {
+      "name": "目标，排除",
+      "target": "enemy_single",
+      "count": 1,
+      "effects": [],
+      "cost": 4,
+      "hits": [
+        687.26
+      ],
+      "block": true
+    }
+  },
+  {
+    "id": "SAYA",
+    "sid": 20002,
+    "name": "纱绫",
+    "star": 3,
+    "baseStar": 3,
+    "squad": "支援",
+    "atkType": "爆发",
+    "defType": "轻装",
+    "role": "输出",
+    "line": "后",
+    "bullet": "Explosion",
+    "armor": "LightArmor",
+    "hp": 2563,
+    "atk": 237,
+    "dfs": 20,
+    "healPower": 1858,
+    "acc": 98,
+    "dodge": 1080,
+    "crit": 245,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1168,
+    "autoAttack": null,
+    "gearSkill": false,
+    "skill": {
+      "name": "新的实验！",
+      "target": "enemy_adjacent",
+      "count": 2,
+      "area": 70686,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "enemy",
+          "stat": "crit",
+          "value": -0.1218,
+          "turns": 4,
+          "channel": 609
+        },
+        {
+          "type": "dot",
+          "scope": "enemy",
+          "icon": "Poison",
+          "scale": 0.3652,
+          "turns": 4,
+          "period": 1
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 4
+      }
+    },
+    "ex": {
+      "name": "小爷的杰作！",
+      "target": "enemy_adjacent",
+      "count": 2,
+      "area": 125664,
+      "effects": [
+        {
+          "type": "dot",
+          "scope": "enemy",
+          "icon": "Zone",
+          "scale": 5.0484,
+          "turns": 2,
+          "period": 1
+        }
+      ],
+      "cost": 6
+    }
+  },
+  {
+    "id": "MASHIRO",
+    "sid": 20003,
+    "name": "真白",
+    "star": 3,
+    "baseStar": 3,
+    "squad": "支援",
+    "atkType": "爆发",
+    "defType": "重装",
+    "role": "输出",
+    "line": "后",
+    "bullet": "Explosion",
+    "armor": "HeavyArmor",
+    "hp": 2520,
+    "atk": 347,
+    "dfs": 20,
+    "healPower": 1892,
+    "acc": 900,
+    "dodge": 200,
+    "crit": 200,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 2300,
+    "autoAttack": null,
+    "gearSkill": true,
+    "skill": {
+      "name": "正义的审判+",
+      "target": "enemy_adjacent",
+      "count": 2,
+      "area": 70686,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "self",
+          "stat": "atk",
+          "value": 0.2102,
+          "turns": 3,
+          "channel": 2
+        },
+        {
+          "type": "state",
+          "key": "bonusChance",
+          "scope": "self",
+          "step": 0.125,
+          "max": 0.25
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 4
+      },
+      "hits": [
+        164.64
+      ]
+    },
+    "ex": {
+      "name": "正义的一击",
+      "target": "enemy_single",
+      "count": 1,
+      "effects": [],
+      "cost": 3,
+      "hits": [
+        415.52
+      ],
+      "block": true,
+      "bonus": {
+        "chance": 0.5,
+        "hits": [
+          623.28
+        ]
+      }
+    }
+  },
+  {
+    "id": "AIRI",
+    "sid": 23000,
+    "name": "爱理",
+    "star": 3,
+    "baseStar": 2,
+    "squad": "支援",
+    "atkType": "爆发",
+    "defType": "轻装",
+    "role": "辅助",
+    "line": "后",
+    "bullet": "Explosion",
+    "armor": "LightArmor",
+    "hp": 2527,
+    "atk": 204,
+    "dfs": 20,
+    "healPower": 1886,
+    "acc": 99,
+    "dodge": 1196,
+    "crit": 199,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1615,
+    "autoAttack": null,
+    "gearSkill": false,
+    "skill": {
+      "name": "可能会头晕哦……？",
+      "target": "enemy_single",
+      "count": 1,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "enemy",
+          "stat": "aa",
+          "value": -0.1848,
+          "turns": 6,
+          "channel": 624
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 5
+      }
+    },
+    "ex": {
+      "name": "虽然有点可惜……嘿！",
+      "target": "enemy_adjacent",
+      "count": 2,
+      "area": 125664,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "enemy",
+          "stat": "aa",
+          "value": 0,
+          "turns": 2,
+          "channel": 11523,
+          "inactive": true
+        }
+      ],
+      "cost": 5,
+      "hits": [
+        265.44
+      ]
+    }
+  },
+  {
+    "id": "FUUKA",
+    "sid": 23001,
+    "name": "风香",
+    "star": 3,
+    "baseStar": 2,
+    "squad": "支援",
+    "atkType": "爆发",
+    "defType": "重装",
+    "role": "治疗",
+    "line": "后",
+    "bullet": "Explosion",
+    "armor": "HeavyArmor",
+    "hp": 2852,
+    "atk": 177,
+    "dfs": 25,
+    "healPower": 2785,
+    "acc": 98,
+    "dodge": 1177,
+    "crit": 196,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1638,
+    "autoAttack": null,
+    "gearSkill": false,
+    "skill": {
+      "name": "供餐部的关怀",
+      "target": "ally_maxhp",
+      "count": 1,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "ally_target",
+          "stat": "dfs",
+          "value": 0.1816,
+          "turns": 4,
+          "channel": 103
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 4
+      }
+    },
+    "ex": {
+      "name": "供餐时间！",
+      "target": "ally_all",
+      "count": 4,
+      "effects": [
+        {
+          "type": "heal",
+          "scope": "ally_all",
+          "scale": 1.0925,
+          "source": "heal"
+        }
+      ],
+      "cost": 5
+    }
+  },
+  {
+    "id": "HANAE",
+    "sid": 23002,
+    "name": "花江",
+    "star": 3,
+    "baseStar": 2,
+    "squad": "支援",
+    "atkType": "爆发",
+    "defType": "重装",
+    "role": "治疗",
+    "line": "后",
+    "bullet": "Explosion",
+    "armor": "HeavyArmor",
+    "hp": 2870,
+    "atk": 198,
+    "dfs": 25,
+    "healPower": 2766,
+    "acc": 682,
+    "dodge": 780,
+    "crit": 195,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1647,
+    "autoAttack": null,
+    "gearSkill": false,
+    "skill": {
+      "name": "不能倒下！",
+      "target": "ally_lowest",
+      "count": 1,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "ally_target",
+          "stat": "dfs",
+          "value": 0.1775,
+          "turns": 4,
+          "channel": 103
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 5
+      }
+    },
+    "ex": {
+      "name": "治疗时间到了~",
+      "target": "ally_single",
+      "count": 1,
+      "effects": [
+        {
+          "type": "regen",
+          "scope": "ally_target",
+          "scale": 0.5415,
+          "source": "heal",
+          "turns": 4,
+          "period": 1
+        }
+      ],
+      "cost": 4
+    }
+  },
+  {
+    "id": "HARE",
+    "sid": 23003,
+    "name": "晴",
+    "star": 3,
+    "baseStar": 2,
+    "squad": "支援",
+    "atkType": "爆发",
+    "defType": "轻装",
+    "role": "辅助",
+    "line": "后",
+    "bullet": "Explosion",
+    "armor": "LightArmor",
+    "hp": 2469,
+    "atk": 235,
+    "dfs": 19,
+    "healPower": 1930,
+    "acc": 714,
+    "dodge": 816,
+    "crit": 204,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1573,
+    "autoAttack": null,
+    "gearSkill": true,
+    "skill": {
+      "name": "破坏工作：A计划+",
+      "target": "enemy_single",
+      "count": 1,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "enemy",
+          "stat": "heal_taken",
+          "value": -0.356,
+          "turns": 5,
+          "channel": 621
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 6
+      }
+    },
+    "ex": {
+      "name": "启动EMP无人机",
+      "target": "enemy_adjacent",
+      "count": 2,
+      "area": 125664,
+      "effects": [
+        {
+          "type": "cc",
+          "scope": "enemy",
+          "icon": "Stunned",
+          "chance": 1,
+          "turns": 1
+        }
+      ],
+      "cost": 4,
+      "hits": [
+        271.88
+      ]
+    }
+  },
+  {
+    "id": "AYANE",
+    "sid": 23005,
+    "name": "绫音",
+    "star": 3,
+    "baseStar": 2,
+    "squad": "支援",
+    "atkType": "贯通",
+    "defType": "轻装",
+    "role": "治疗",
+    "line": "后",
+    "bullet": "Pierce",
+    "armor": "LightArmor",
+    "hp": 2870,
+    "atk": 147,
+    "dfs": 25,
+    "healPower": 2766,
+    "acc": 97,
+    "dodge": 1072,
+    "crit": 195,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1178,
+    "autoAttack": null,
+    "gearSkill": true,
+    "skill": {
+      "name": "学习支援＋",
+      "target": "ally_all",
+      "count": 4,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "ally_all",
+          "stat": "crit_res",
+          "value": 0.1756,
+          "turns": 4,
+          "channel": 122
+        },
+        {
+          "type": "ward",
+          "scope": "ally_all",
+          "scale": 0.624,
+          "source": "heal",
+          "hpMax": 0.45,
+          "once": true
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 6
+      }
+    },
+    "ex": {
+      "name": "特级快递：战斗支援物资",
+      "target": "ally_adjacent",
+      "count": 2,
+      "effects": [
+        {
+          "type": "heal",
+          "scope": "ally_target",
+          "scale": 1.1835,
+          "source": "heal"
+        }
+      ],
+      "cost": 4
+    }
+  },
+  {
+    "id": "SHIZUKO",
+    "sid": 23006,
+    "name": "静子",
+    "star": 3,
+    "baseStar": 2,
+    "squad": "支援",
+    "atkType": "神秘",
+    "defType": "特殊",
+    "role": "辅助",
+    "line": "后",
+    "bullet": "Mystic",
+    "armor": "Unarmed",
+    "hp": 2508,
+    "atk": 205,
+    "dfs": 119,
+    "healPower": 1900,
+    "acc": 602,
+    "dodge": 200,
+    "crit": 200,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 2286,
+    "autoAttack": null,
+    "gearSkill": true,
+    "skill": {
+      "name": "妨碍营业，不可饶恕！+",
+      "target": "enemy_single",
+      "count": 1,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "enemy",
+          "stat": "atk",
+          "value": -0.238,
+          "turns": 5,
+          "channel": 602
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 5
+      },
+      "hits": [
+        252
+      ]
+    },
+    "ex": {
+      "name": "百夜堂出摊！",
+      "target": "ally_adjacent",
+      "count": 2,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "ally_target",
+          "stat": "acc",
+          "value": 0.1639,
+          "turns": 6,
+          "channel": 105
+        },
+        {
+          "type": "summon",
+          "summonId": 99999,
+          "hpRate": 0.2926,
+          "cover": true,
+          "turns": null,
+          "taunt": 0
+        }
+      ],
+      "cost": 3
+    }
+  },
+  {
+    "id": "HANAKO",
+    "sid": 23007,
+    "name": "花子",
+    "star": 3,
+    "baseStar": 2,
+    "squad": "支援",
+    "atkType": "贯通",
+    "defType": "特殊",
+    "role": "治疗",
+    "line": "后",
+    "bullet": "Pierce",
+    "armor": "Unarmed",
+    "hp": 2835,
+    "atk": 201,
+    "dfs": 25,
+    "healPower": 2802,
+    "acc": 691,
+    "dodge": 809,
+    "crit": 197,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1628,
+    "autoAttack": null,
+    "gearSkill": true,
+    "skill": {
+      "name": "快变硬吧~+",
+      "target": "ally_lowest",
+      "count": 2,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "ally_target",
+          "stat": "dfs",
+          "value": 0.2909,
+          "turns": 3,
+          "channel": 103
+        },
+        {
+          "type": "heal",
+          "scope": "ally_target",
+          "scale": 0.1675,
+          "source": "heal"
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 4
+      }
+    },
+    "ex": {
+      "name": "来玩禁忌的游戏吧？",
+      "target": "ally_adjacent",
+      "count": 2,
+      "effects": [
+        {
+          "type": "heal",
+          "scope": "ally_target",
+          "scale": 0.269,
+          "source": "heal"
+        }
+      ],
+      "cost": 5
+    }
+  },
+  {
+    "id": "CHINATSU",
+    "sid": 26000,
+    "name": "千夏",
+    "star": 3,
+    "baseStar": 1,
+    "squad": "支援",
+    "atkType": "贯通",
+    "defType": "轻装",
+    "role": "治疗",
+    "line": "后",
+    "bullet": "Pierce",
+    "armor": "LightArmor",
+    "hp": 2817,
+    "atk": 149,
+    "dfs": 25,
+    "healPower": 2819,
+    "acc": 99,
+    "dodge": 1093,
+    "crit": 198,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1155,
+    "autoAttack": null,
+    "gearSkill": true,
+    "skill": {
+      "name": "战况重整＋",
+      "target": "ally_lowest",
+      "count": 1,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "ally_target",
+          "stat": "dodge",
+          "value": 0.51,
+          "turns": 6,
+          "channel": 107
+        },
+        {
+          "type": "regen",
+          "scope": "ally_target",
+          "scale": 0.0959,
+          "source": "heal",
+          "turns": 6,
+          "period": 1
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 8
+      }
+    },
+    "ex": {
+      "name": "实施战术治疗",
+      "target": "ally_single",
+      "count": 1,
+      "effects": [
+        {
+          "type": "heal",
+          "scope": "ally_target",
+          "scale": 1.9553,
+          "source": "heal"
+        },
+        {
+          "type": "cleanse",
+          "scope": "ally_target"
+        }
+      ],
+      "cost": 4
+    }
+  },
+  {
+    "id": "KOTAMA",
+    "sid": 26001,
+    "name": "小玉",
+    "star": 3,
+    "baseStar": 1,
+    "squad": "支援",
+    "atkType": "爆发",
+    "defType": "轻装",
+    "role": "辅助",
+    "line": "后",
+    "bullet": "Explosion",
+    "armor": "LightArmor",
+    "hp": 2515,
+    "atk": 171,
+    "dfs": 19,
+    "healPower": 1895,
+    "acc": 100,
+    "dodge": 1101,
+    "crit": 200,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1145,
+    "autoAttack": null,
+    "gearSkill": false,
+    "skill": {
+      "name": "监听弱点",
+      "target": "enemy_single",
+      "count": 1,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "enemy",
+          "stat": "atk",
+          "value": -0.1899,
+          "turns": 4,
+          "channel": 602
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 6
+      },
+      "hits": [
+        237.3
+      ]
+    },
+    "ex": {
+      "name": "开始监听",
+      "target": "ally_adjacent",
+      "count": 2,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "ally_target",
+          "stat": "atk",
+          "value": 0.2497,
+          "turns": 6,
+          "channel": 102
+        }
+      ],
+      "cost": 3
+    }
+  },
+  {
+    "id": "JURI",
+    "sid": 26002,
+    "name": "朱莉",
+    "star": 3,
+    "baseStar": 1,
+    "squad": "支援",
+    "atkType": "爆发",
+    "defType": "轻装",
+    "role": "辅助",
+    "line": "后",
+    "bullet": "Explosion",
+    "armor": "LightArmor",
+    "hp": 2480,
+    "atk": 208,
+    "dfs": 118,
+    "healPower": 1920,
+    "acc": 609,
+    "dodge": 203,
+    "crit": 203,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 2263,
+    "autoAttack": null,
+    "gearSkill": false,
+    "skill": {
+      "name": "最棒的菜肴",
+      "target": "enemy_single",
+      "count": 1,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "enemy",
+          "stat": "aa",
+          "value": -0.1816,
+          "turns": 4,
+          "channel": 624
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 4
+      },
+      "pick": "max_atk"
+    },
+    "ex": {
+      "name": "朱莉的烹饪时间！",
+      "target": "enemy_adjacent",
+      "count": 2,
+      "area": 125664,
+      "effects": [
+        {
+          "type": "dot",
+          "scope": "enemy",
+          "icon": "Poison",
+          "scale": 0.5899,
+          "turns": 4,
+          "period": 1
+        }
+      ],
+      "cost": 3
+    }
+  },
+  {
+    "id": "SERINA",
+    "sid": 26003,
+    "name": "芹娜",
+    "star": 3,
+    "baseStar": 1,
+    "squad": "支援",
+    "atkType": "神秘",
+    "defType": "轻装",
+    "role": "治疗",
+    "line": "后",
+    "bullet": "Mystic",
+    "armor": "LightArmor",
+    "hp": 2780,
+    "atk": 204,
+    "dfs": 24,
+    "healPower": 2857,
+    "acc": 704,
+    "dodge": 805,
+    "crit": 201,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1596,
+    "autoAttack": null,
+    "gearSkill": false,
+    "skill": {
+      "name": "紧急救护方案B",
+      "target": "ally_lowest",
+      "count": 1,
+      "effects": [
+        {
+          "type": "heal",
+          "scope": "ally_target",
+          "scale": 0.9405,
+          "source": "heal"
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 7
+      }
+    },
+    "ex": {
+      "name": "集中治疗方案A",
+      "target": "ally_single",
+      "count": 1,
+      "effects": [
+        {
+          "type": "heal",
+          "scope": "ally_target",
+          "scale": 1.2,
+          "source": "heal"
+        }
+      ],
+      "cost": 2
+    }
+  },
+  {
+    "id": "SHIMIKO",
+    "sid": 26004,
+    "name": "志美子",
+    "star": 3,
+    "baseStar": 1,
+    "squad": "支援",
+    "atkType": "爆发",
+    "defType": "轻装",
+    "role": "辅助",
+    "line": "后",
+    "bullet": "Explosion",
+    "armor": "LightArmor",
+    "hp": 2477,
+    "atk": 235,
+    "dfs": 19,
+    "healPower": 1924,
+    "acc": 712,
+    "dodge": 813,
+    "crit": 203,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1578,
+    "autoAttack": null,
+    "gearSkill": false,
+    "skill": {
+      "name": "心灵的粮食",
+      "target": "ally_lowest",
+      "count": 1,
+      "effects": [
+        {
+          "type": "shield",
+          "scope": "ally_target",
+          "scale": 1.1922,
+          "source": "heal",
+          "turns": 4
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 7
+      }
+    },
+    "ex": {
+      "name": "知识的盾牌",
+      "target": "ally_adjacent",
+      "count": 2,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "ally_target",
+          "stat": "dfs",
+          "value": 0.1639,
+          "turns": 6,
+          "channel": 103
+        },
+        {
+          "type": "summon",
+          "summonId": 99999,
+          "hpRate": 0,
+          "cover": true,
+          "inactive": true,
+          "turns": null,
+          "taunt": 0
+        }
+      ],
+      "cost": 3
+    }
+  },
+  {
+    "id": "YOSHIMI",
+    "sid": 26005,
+    "name": "好美",
+    "star": 3,
+    "baseStar": 1,
+    "squad": "支援",
+    "atkType": "贯通",
+    "defType": "重装",
+    "role": "输出",
+    "line": "后",
+    "bullet": "Pierce",
+    "armor": "HeavyArmor",
+    "hp": 2500,
+    "atk": 327,
+    "dfs": 19,
+    "healPower": 1906,
+    "acc": 705,
+    "dodge": 806,
+    "crit": 201,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1596,
+    "autoAttack": null,
+    "gearSkill": true,
+    "skill": {
+      "name": "想吃苦头是吧？！+",
+      "target": "enemy_adjacent",
+      "count": 2,
+      "area": 31416,
+      "effects": [],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 5
+      },
+      "hits": [
+        261.45
+      ],
+      "block": true
+    },
+    "ex": {
+      "name": "谁，谁慌了？！",
+      "target": "enemy_adjacent",
+      "count": 2,
+      "area": 125664,
+      "effects": [
+        {
+          "type": "cc",
+          "scope": "enemy",
+          "icon": "Stunned",
+          "chance": 1,
+          "turns": 1
+        }
+      ],
+      "cost": 4,
+      "hits": [
+        220.92
+      ]
+    }
+  },
+  {
+    "id": "NODOKA",
+    "sid": 26006,
+    "name": "和香",
+    "star": 3,
+    "baseStar": 1,
+    "squad": "支援",
+    "atkType": "爆发",
+    "defType": "重装",
+    "role": "辅助",
+    "line": "后",
+    "bullet": "Explosion",
+    "armor": "HeavyArmor",
+    "hp": 2551,
+    "atk": 202,
+    "dfs": 20,
+    "healPower": 1868,
+    "acc": 98,
+    "dodge": 1215,
+    "crit": 197,
+    "critDmg": 20000,
+    "critRes": 100,
+    "critDmgRes": 5000,
+    "stability": 1628,
+    "autoAttack": null,
+    "gearSkill": false,
+    "skill": {
+      "name": "执着地监视",
+      "target": "enemy_single",
+      "count": 1,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "enemy",
+          "stat": "dodge",
+          "value": -0.1775,
+          "turns": 4,
+          "channel": 607
+        }
+      ],
+      "trigger": {
+        "type": "cooldown",
+        "turns": 5
+      },
+      "hits": [
+        221.76
+      ]
+    },
+    "ex": {
+      "name": "观测支援",
+      "target": "ally_adjacent",
+      "count": 2,
+      "effects": [
+        {
+          "type": "buff",
+          "scope": "ally_target",
+          "stat": "acc",
+          "value": 0.2523,
+          "turns": 6,
+          "channel": 105
+        }
+      ],
+      "cost": 3
     }
   }
 ]

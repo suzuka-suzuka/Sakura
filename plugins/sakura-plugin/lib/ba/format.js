@@ -208,8 +208,10 @@ const TARGET_TEXT = {
   enemy_cycle: "从自己对位起按号位循环点名",
   ally_all: "己方全体",
   ally_adjacent: "指定友方+相邻",
+  ally_single: "指定友方",
   ally_lowest: "己方最残",
   ally_hurt: "己方受伤的（就近）",
+  ally_maxhp: "己方生命上限最高",
   self: "自身",
 }
 
@@ -256,7 +258,9 @@ export function describeEffect(sk) {
   if (sk.trigger?.type === "on_kill") {
     parts.push(sk.trigger.turns ? `自己击杀时（冷却 ${sk.trigger.turns} 回合）` : "自己击杀时")
   }
-  const tg = TARGET_TEXT[sk.target] || sk.target
+  const tg = sk.target === "ally_lowest" && (sk.count || 1) > 1
+    ? `己方最残 ${sk.count} 人`
+    : (TARGET_TEXT[sk.target] || sk.target)
   // 小春：一个圈丢出去，圈里是敌人就只有伤害、是队友就只有治疗。这条得排在倍率前面，
   // 不然卡面读起来像是「炸完还顺手奶一口」——那正是原来搞错的地方
   if (sk.circle) parts.push("一个圈，砸哪边就只有那边生效，指令里中间那个字选边")
@@ -312,12 +316,19 @@ export function describeEffect(sk) {
       : e.scope === "ally_all" ? "己方全体"
         : e.scope === "ally_named" ? `${BY_ID[e.ally]?.name || e.ally}（不在场则不生效）`
           : e.scope === "circle_ally" ? "砸己方 → 同战场同身位 2 人"
-            : e.scope === "ally_target" ? "该队友" : "目标"
+            : e.scope === "ally_target"
+              ? (sk.target === "ally_adjacent" && (sk.count || 1) > 1 ? `同战场同身位 ${sk.count} 人`
+                : sk.target === "ally_lowest" && (sk.count || 1) > 1 ? `最残 ${sk.count} 人`
+                  : "该队友")
+              : "目标"
     switch (e.type) {
       case "buff":
         parts.push(`${who}${STAT_TEXT[e.stat] || e.stat} ${e.value > 0 ? "+" : ""}${/_flat$/.test(e.stat) ? flatText(e.stat, e.value) : pct(e.value)}（${e.turns}回合）`)
         break
       case "heal": parts.push(`${who}治疗 ${pct(e.scale)}治疗力`); break
+      case "ward":
+        parts.push(`${who}获得急救（生命≤${Math.round(e.hpMax * 100)}%时消耗，治疗 ${pct(e.scale)}治疗力${e.once ? "，每场限 1 次" : ""}）`)
+        break
       case "regen":
         parts.push(`${who}持续治疗 ${pct(e.scale)}治疗力` +
           (e.lostHpRate ? ` + 已损生命 ${pct(e.lostHpRate)}` : "") +
@@ -351,9 +362,13 @@ export function describeEffect(sk) {
       case "cleanse": parts.push(`${who}清除减益`); break
       // 自身状态：本身不改面板，价值全在「它让 EX 换一组倍率」上，所以要连着后果一起说
       case "state":
+        // 三种自身状态各说各的。少一个分支就会掉进 else 串到别人的文案上 ——
+        // 真白的追伤概率曾经被说成「能量充能 +0.125 档」
         parts.push(e.key === "fury"
           ? `进入 Fury（${e.turns}回合）`
-          : e.step ? `能量充能 +${e.step} 档（最高 ${e.max} 档）` : "能量充能清空")
+          : e.key === "bonusChance"
+            ? `下次 EX 的追伤概率 +${(e.step * 100).toFixed(1)}%（最多叠到 +${(e.max * 100).toFixed(1)}%，放完 EX 清零）`
+            : e.step ? `能量充能 +${e.step} 档（最高 ${e.max} 档）` : "能量充能清空")
         break
       // 位移换来的是战场分割与对位，不是一段距离 —— 说成「移动」玩家会以为有坐标
       case "reposition":
@@ -394,9 +409,14 @@ const ATK_ORDER = ["爆发", "贯通", "神秘", "振动", "变化"]
  * 两边的属性顺序对不上，玩家从图里挑中的人就得翻着找。
  * @returns {[string, object[]][]}
  */
-export function rosterByAtkType() {
+/** 图鉴先分主力 / 支援两段，段内再按攻击属性分节点。总览图与文字节点共用这个顺序 */
+export const SQUADS = ["主力", "支援"]
+export const squadOf = (t) => t.squad || "主力"
+
+export function rosterByAtkType(squad) {
   const groups = new Map()
   for (const t of ROSTER) {
+    if (squad && squadOf(t) !== squad) continue
     if (!groups.has(t.atkType)) groups.set(t.atkType, [])
     groups.get(t.atkType).push(t)
   }
@@ -411,14 +431,16 @@ export function rosterByAtkType() {
  * 要看完整数值就单独查 `档案图鉴 星野`，那才发角色卡图。
  */
 export function renderRosterByType() {
-  return rosterByAtkType().map(([atk, list]) => {
+  return SQUADS.flatMap((sq) => rosterByAtkType(sq).map(([atk, list]) => {
     const body = list.map((t) => [
       `${t.name}　${combatRoleOf(t)}　${atk}攻击 / ${ARMOR_LABEL[t.defType] || t.defType}`,
       `　普技「${t.skill?.name || "无"}」${describeEffect(t.skill)}`,
       `　EX「${t.ex.name}」${t.ex.cost}费　${describeEffect(t.ex)}`,
     ].join("\n"))
-    return `◤ ${atk}攻击 ◢　${list.length} 人\n\n${body.join("\n\n")}`
-  })
+    // 支援那几段加一句提要：它们不站在场上，配队时是完全不同的一格
+    const note = sq === "支援" ? "\n（支援位不站在场上、打不到，只放普通技能和 EX）" : ""
+    return `◤ ${sq} · ${atk}攻击 ◢　${list.length} 人${note}\n\n${body.join("\n\n")}`
+  }))
 }
 
 /** 角色图鉴，配队时私聊发送 */
@@ -436,7 +458,10 @@ export function renderRoster() {
       `${idxOf(t)}. ${t.name}　${t.atkType}/${t.defType}　定位 ${combatRoleOf(t)}\n` +
       `   生命${t.hp} 攻击${t.atk} 防御${t.dfs} 治疗${t.healPower}\n` +
       `   命中${t.acc} 闪避${t.dodge} 暴击${t.crit} 暴伤${(t.critDmg / 10000).toFixed(1)}x 稳定${t.stability}\n` +
-      `   [普攻] ${t.autoAttack.hits.reduce((a, b) => a + b, 0).toFixed(0)}% 分${t.autoAttack.hits.length}段\n` +
+      // 支援位原数据里就没有 `Skills.Normal`，`autoAttack` 是 null —— 它们压根没有普攻这回事
+      (t.autoAttack
+        ? `   [普攻] ${t.autoAttack.hits.reduce((a, b) => a + b, 0).toFixed(0)}% 分${t.autoAttack.hits.length}段\n`
+        : "   [支援] 不站在场上、打不到，也没有普攻\n") +
       `   [普通技能 ${TRIGGER_TEXT(t.skill?.trigger)}] ${t.skill?.name || "无"}\n` +
       `      ${describeEffect(t.skill)}\n` +
       `   [EX ${t.ex.cost}费] ${t.ex.name}\n` +
@@ -472,7 +497,9 @@ export function renderOne(t) {
     `生命 ${t.hp}　攻击 ${t.atk}　防御 ${t.dfs}　治疗 ${t.healPower}\n` +
     `命中 ${t.acc}　闪避 ${t.dodge}　暴击 ${t.crit}　暴伤 ${(t.critDmg / 10000).toFixed(1)}x\n` +
     `稳定 ${t.stability}（伤害下限 ${pct(Math.min(1, t.stability / (t.stability + CFG.STAB_BASE) + 0.2))}）\n\n` +
-    `[普攻] ${t.autoAttack.hits.reduce((a, b) => a + b, 0).toFixed(0)}% 分 ${t.autoAttack.hits.length} 段\n\n` +
+    (t.autoAttack
+      ? `[普攻] ${t.autoAttack.hits.reduce((a, b) => a + b, 0).toFixed(0)}% 分 ${t.autoAttack.hits.length} 段\n\n`
+      : "[支援] 不站在场上、打不到，也没有普攻；只放普通技能和 EX\n\n") +
     `[普通技能] ${t.skill?.name || "无"}　${TRIGGER_TEXT(t.skill?.trigger)}\n${describeEffect(t.skill)}\n\n` +
     `[EX ${t.ex.cost} 费] ${t.ex.name}\n${describeEffect(t.ex)}`
   )

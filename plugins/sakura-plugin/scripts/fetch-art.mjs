@@ -44,7 +44,26 @@ const KIVO_ALIAS = {
   // 名字整个不同：kivo 把 ネル 译成「尼禄」、コトリ 译成「小鸟」
   "美甘 妮露": "美甘 尼禄",
   "丰见 琴里": "丰见 小鸟",
+  // 支援位这三条：前两条是译名不同，第三条是 kivo 自己两套写法 ——
+  // 她的基础目录用「茱莉」，只有「打工」皮肤那一版才写「朱莉」
+  "栗村 爱理": "栗村 爱莉",
+  "爱清 风香": "爱清 枫香",
+  "牛牧 朱莉": "牛牧 茱莉",
+  // 小玉的 Q 版 kivo 根本没有（不是译名问题），见下面的 MANUAL_ART
 }
+
+/**
+ * **kivo 也没有的素材，手工补进 `resources/` 里，下载器一律跳过。**
+ * 不列在这儿的话 `--force` 每次都会为它们报一条假的 404 失败 —— 那是噪音，不是真问题。
+ *
+ * - `KOTAMA/chibi` —— 音濑 小玉：kivo 的目录是在的（`avatar.png` 返回 200），
+ *   但 `sd_model.png` 连同 sd / model / chibi 一圈文件名全是 404，别再试译名了。
+ *   现在这张是手工提取的原始 SD 模型（背景是一层 `rgba(0,0,0,153)` 的半透明黑而不是真透明，
+ *   alpha 只有 153 / 255 两个值，按「≠255 就抠掉」切干净），再按 kivo 的规格摆好：
+ *   454×452 画布、内容高 400、底部留白 14、水平居中 —— 战场图用 `object-fit:contain`
+ *   贴进 250×270 的框里，留白比例不一致她就会比别人大一圈或小一圈。
+ */
+const MANUAL_ART = new Set(["KOTAMA/chibi"])
 
 const SOURCES = {
   portrait: (s) => `https://schaledb.com/images/student/portrait/${s.Id}.webp`,
@@ -72,6 +91,7 @@ for (const t of ROSTER) {
 
   for (const [part, urlOf] of Object.entries(SOURCES)) {
     const file = path.join(dir, `${part}.png`)
+    if (MANUAL_ART.has(`${t.id}/${part}`)) { skip++; continue }
     if (fs.existsSync(file) && !FORCE) { skip++; continue }
     const url = urlOf(s)
     try {
