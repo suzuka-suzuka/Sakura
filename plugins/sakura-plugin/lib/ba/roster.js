@@ -1487,6 +1487,27 @@ export const ROSTER = [
           "scope": "enemy",
           "icon": "Zone",
           "scale": 3.0817,
+          "tickHits": [
+            [
+              56.03,
+              56.03,
+              56.03,
+              56.03,
+              56.03,
+              56.03
+            ],
+            [
+              56.03,
+              56.03,
+              56.03,
+              56.03,
+              56.03
+            ]
+          ],
+          "canCrit": true,
+          "alwaysCrit": false,
+          "canEvade": true,
+          "applyStability": true,
           "turns": 2,
           "period": 1
         }
@@ -3566,6 +3587,9 @@ export const ROSTER = [
           "scope": "enemy",
           "icon": "Poison",
           "scale": 0.3987,
+          "canCrit": false,
+          "canEvade": false,
+          "applyStability": true,
           "turns": 4,
           "period": 1,
           "ifAlly": "MOMOI"
@@ -3675,6 +3699,9 @@ export const ROSTER = [
           "scope": "enemy",
           "icon": "Burn",
           "scale": 0.7204,
+          "canCrit": false,
+          "canEvade": false,
+          "applyStability": true,
           "turns": 4,
           "period": 1,
           "ifAlly": "MIDORI"
@@ -4037,6 +4064,9 @@ export const ROSTER = [
           "scope": "enemy",
           "icon": "Poison",
           "scale": 0.3652,
+          "canCrit": false,
+          "canEvade": false,
+          "applyStability": true,
           "turns": 4,
           "period": 1
         }
@@ -4057,6 +4087,24 @@ export const ROSTER = [
           "scope": "enemy",
           "icon": "Zone",
           "scale": 5.0484,
+          "tickHits": [
+            [
+              126.21,
+              126.21,
+              126.21,
+              126.21
+            ],
+            [
+              126.21,
+              126.21,
+              126.21,
+              126.21
+            ]
+          ],
+          "canCrit": true,
+          "alwaysCrit": false,
+          "canEvade": true,
+          "applyStability": true,
           "turns": 2,
           "period": 1
         }
@@ -4814,6 +4862,9 @@ export const ROSTER = [
           "scope": "enemy",
           "icon": "Poison",
           "scale": 0.5899,
+          "canCrit": false,
+          "canEvade": false,
+          "applyStability": true,
           "turns": 4,
           "period": 1
         }

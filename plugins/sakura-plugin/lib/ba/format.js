@@ -215,6 +215,10 @@ const TARGET_TEXT = {
   self: "自身",
 }
 
+const DOT_TEXT = {
+  Burn: "灼烧", Poison: "中毒", Chill: "冰冻", ElectricShock: "感电", Bleed: "流血",
+}
+
 const STAT_TEXT = {
   atk: "攻击力", dfs: "防御力", heal: "治疗力", maxhp: "生命上限",
   crit: "暴击值", crit_dmg: "暴击伤害", acc: "命中值", dodge: "闪避值",
@@ -344,9 +348,9 @@ export function describeEffect(sk) {
       case "dot":
         // 场地是地上的圈，不是贴在人身上的减益，别写成「灼烧 / 减益」
         if (e.icon === "Zone") {
-          parts.push(`场地持续伤害 ${pct(e.scale)}攻击力（${e.turns}回合，盖住同战场两路，不问身位）`)
+          parts.push(`场地持续伤害 ${pct(e.scale)}攻击力（${e.turns}回合，盖住同战场两路，不问身位；每段判命中与暴击）`)
         } else {
-          parts.push(`${who}持续伤害 ${pct(e.scale)}攻击力（${e.turns}回合）`)
+          parts.push(`${who}${DOT_TEXT[e.icon] || "持续伤害"} ${pct(e.scale)}攻击力（${e.turns}回合，固定命中且不暴击）`)
         }
         break
       // 技能 1 级时控制时长是 0，效果根本不存在 —— 与其写「无效」不如不写

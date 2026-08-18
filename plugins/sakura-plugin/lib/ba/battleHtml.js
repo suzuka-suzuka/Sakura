@@ -131,7 +131,7 @@ const ICON = {
   // 命中：准星
   acc: SVG(`<path d="M12 2.2a1.4 1.4 0 0 1 1.4 1.4v1.6a7 7 0 0 1 5.4 5.4h1.6a1.4 1.4 0 0 1 0 2.8h-1.6a7 7 0 0 1-5.4 5.4v1.6a1.4 1.4 0 0 1-2.8 0v-1.6a7 7 0 0 1-5.4-5.4H3.6a1.4 1.4 0 0 1 0-2.8h1.6a7 7 0 0 1 5.4-5.4V3.6A1.4 1.4 0 0 1 12 2.2Zm0 5.6a4.2 4.2 0 1 0 0 8.4 4.2 4.2 0 0 0 0-8.4Z"/>
     <circle cx="12" cy="12" r="2"/>`),
-  // 持续伤害：火苗（灼烧/中毒/场地共用一个 —— 玩家要知道的是「在掉血」，不是掉血的花色）
+  // 持续伤害兜底图。正常优先用 resources/ba/status 下各类型自己的原作图标。
   dot: SVG(`<path d="M12.6 2.2c.4 3.1-1.2 4.4-2.7 5.9C8.2 9.8 6.4 11.6 6.4 14.6a5.6 5.6 0 0 0 11.2 0
     c0-2.4-1-3.9-2.1-5.2-.5 1.3-1.3 2-2.2 2.3.8-3-.2-6.7-.7-9.5Z"/>`),
   // 暴击：大小两枚星芒（凹边四角星，跟眩晕的六角爆星、兜底的实心菱形都分得开）
@@ -178,6 +178,15 @@ const OFFICIAL_STAT = {
   crit: "crit", crit_dmg: "crit_dmg", crit_dmg_flat: "crit_dmg",
   crit_res: "crit_res", crit_dmg_res_flat: "crit_dmg_res", crit_dmg_res: "crit_dmg_res",
   dmg_deal: "dmg_deal",
+}
+
+/** DamageDebuff.Icon → resources/ba/status 文件名。Zone 是地面场地，不出状态格。 */
+const DOT_STATUS_ICON = {
+  Burn: "burn",
+  Poison: "debuff-poison",
+  Chill: "debuff-chill",
+  ElectricShock: "debuff-electric-shock",
+  Bleed: "debuff-bleed",
 }
 
 /** 原作图标自带底色，缺图才退回我们画的 SVG */
@@ -229,13 +238,20 @@ function statusMarks(u, provoked) {
     }
   }
   if (u.regens?.length) marks.push(markOrSvg("regen", "heal", "buff"))
-  // 灼烧/中毒这类**挂在身上的 debuff** 才出状态格。
-  // 千世的 EX 是固定场地，不是 debuff，状态格不出图标 —— 地上的蓝圈已经表达了。
-  // 她的 ExtraPassive 灼烧现在也没接（被动先不上），所以这条目前不会亮。
-  const dotMarks = (u.dots || []).filter((d) => d.icon !== "Zone")
-  if (dotMarks.length) {
-    marks.push(`<i class="mk debuff ${Math.min(...dotMarks.map((d) => d.turns)) <= 1 ? "fading" : ""}">
-      ${ICON.dot}${dotMarks.length > 1 ? `<s>×${dotMarks.length}</s>` : ""}</i>`)
+  // 挂在人身上的 DamageDebuff 按**类型**分别出状态格：灼烧、中毒不能混成同一个火苗。
+  // 同类型多来源才合并 ×N。Zone 是地面场地，不是 debuff，脚下蓝圈已经表达了。
+  const dotsByIcon = new Map()
+  for (const d of u.dots || []) {
+    if (d.icon === "Zone") continue
+    const list = dotsByIcon.get(d.icon) || []
+    list.push(d)
+    dotsByIcon.set(d.icon, list)
+  }
+  for (const [icon, dots] of dotsByIcon) {
+    const extra = Math.min(...dots.map((d) => d.turns)) <= 1 ? "fading" : ""
+    const tag = dots.length > 1 ? `<s>×${dots.length}</s>` : ""
+    const mark = markOrSvg(DOT_STATUS_ICON[icon] || "", "dot", "debuff", extra)
+    marks.push(tag ? mark.replace("</i>", `${tag}</i>`) : mark)
   }
   // **嘲讽的减益标记落在被拉走的人身上，不是放嘲讽的那个人身上**（原作就是这么画的）：
   // 中了嘲讽的顶一个紫底感叹号，椿自己什么都不多。集火是另一回事，蓝底靶心画在被点名的人头上。

@@ -344,10 +344,27 @@ function zoneDot(dmg) {
   const frames = dmg.HitFrames
   if (!(frames?.length > (dmg.Hits || [10000]).length)) return null
   const turns = msToTurns((Math.max(...frames) / 30) * 1000) ?? 2
+  const perFrame = hitsOf(dmg)
+  const tickHits = Array.from({ length: turns }, () => [])
+  const turnFrames = ROUND_SEC * 30
+  // 原作每个 HitFrame 都是一段独立伤害。压成回合后按 5 秒窗口分桶，保留每段的
+  // 命中 / 暴击 / 稳定判定；不能把 11 跳合成一个「全中或全空、全爆或全不爆」的大数字。
+  for (const frame of frames) {
+    const bucket = Math.min(turns - 1, Math.floor(Math.max(0, frame - 1) / turnFrames))
+    tickHits[bucket].push(...perFrame)
+  }
   const totalPct = hitsOf(dmg).reduce((a, b) => a + b, 0) * frames.length
   return {
     type: "dot", scope: "enemy", icon: "Zone",
-    scale: Number((totalPct / 100 / turns).toFixed(4)), turns, period: 1,
+    // scale 只供卡面描述；实际结算用 tickHits，避免分桶不均（千世第一轮 6 跳、第二轮 5 跳）失真。
+    // 这里沿用原来的运算顺序，避免 616.329999... 的浮点尾差把 3.0817 写成 3.0816。
+    scale: Number((totalPct / 100 / turns).toFixed(4)),
+    tickHits,
+    canCrit: dmg.CriticalCheck !== "Never",
+    alwaysCrit: dmg.CriticalCheck === "Always",
+    canEvade: dmg.CanEvade !== false,
+    applyStability: dmg.ApplyStability !== false,
+    turns, period: 1,
   }
 }
 
@@ -878,6 +895,8 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
         out.effects.push({
           type: "dot", scope, icon: e.Icon || "Burn",
           scale: Number(((e.Scale?.[SKILL_LV] ?? 0) / 1e4).toFixed(4)),
+          // DMGDot 是挂上后固定生效的周期伤害，不再做命中 / 暴击；场地 DMGZone 另走上面的结构化字段。
+          canCrit: false, canEvade: false, applyStability: true,
           turns: turns ?? 4, period: msToTurns(e.Period) ?? 1,
         })
         break

@@ -430,7 +430,7 @@ function makeUnit(tmpl, idx, side) {
     maxhp: tmpl.hp, hp: tmpl.hp,
     shield: 0, shieldMax: 0, shieldTurns: 0, shieldTickSide: 1 - side, shieldSt: -1,
     buffs: [], regens: [],
-    // 持续伤害（场地/灼烧）。跟施加者解绑：他阵亡、被控都照跳，所以只存算好的数值
+    // 周期伤害。场地保留来源与分段、每跳读当前面板；来源阵亡后退回施放快照继续存在。
     dots: [],
     stun: 0, stunSt: -1, stunIcon: null,
     // taunt = Provoke（椿 / 人偶）：这个单位吃掉对面的刀
@@ -1384,8 +1384,8 @@ function applyEffects(ctx, u, skill, dmgTargets, allies, pick, actionKind) {
         }
         break
 
-      // 持续伤害：伤害值在施放瞬间按施加者攻击力算死，之后跟他再无关系 ——
-      // 场地是留在地上的，施加者阵亡、被控都不影响它继续跳。
+      // 周期伤害先保存来源与倍率。正常每跳读取当前攻防 / 增减伤；场地施加者阵亡后
+      // 退回施放快照继续存在。DMGZone 与 DMGDot 的命中 / 暴击规则在 endTurn 分流。
       case "dot":
         // 固定场地先落在地上：圈按技能生效范围画，不按当时站了几个人。
         // 伤害仍然只打施放瞬间站在里面的人，之后谁死了都不换目标。
@@ -1409,8 +1409,15 @@ function applyEffects(ctx, u, skill, dmgTargets, allies, pick, actionKind) {
           for (const t of inField.length ? inField : targets) {
             if (!t.alive) continue
             t.dots.push({
-              icon: "Zone", amount: atkOf(u) * eff.scale,
+              icon: "Zone", scale: eff.scale, tickHits: eff.tickHits,
+              canCrit: Boolean(eff.canCrit), alwaysCrit: Boolean(eff.alwaysCrit),
+              canEvade: Boolean(eff.canEvade), applyStability: eff.applyStability !== false,
               turns: eff.turns, period: eff.period || 1, tick: 0,
+              sourceId: u.id, sourceSide: u.side, sourcePos: u.idx,
+              // 老对局 / 找不到来源时的兜底；正常结算读取来源与目标的**当前**面板。
+              sourceAtk: atkOf(u), sourceAcc: accOf(u), sourceCrit: critOf(u), sourceCritDmg: critDmgOf(u),
+              sourceDealF: factorOf(u, "dmg_deal") * factorOf(u, `enh_${tmplOf(u).bullet}`),
+              sourceStabilityFloor: stabilityFloor(u), sourceBullet: tmplOf(u).bullet,
               attackType: tmplOf(u).atkType, st: T,
             })
             ctx.log(`  ${nameOf(t)} 陷入${DOT_TEXT.Zone}（${eff.turns}回合，每${eff.period || 1}回合跳）`)
@@ -1420,8 +1427,14 @@ function applyEffects(ctx, u, skill, dmgTargets, allies, pick, actionKind) {
         for (const t of targets) {
           if (!t.alive) continue
           t.dots.push({
-            icon: eff.icon || "Burn", amount: atkOf(u) * eff.scale,
+            icon: eff.icon || "Burn", scale: eff.scale,
+            canCrit: Boolean(eff.canCrit), alwaysCrit: Boolean(eff.alwaysCrit),
+            canEvade: Boolean(eff.canEvade), applyStability: eff.applyStability !== false,
             turns: eff.turns, period: eff.period || 1, tick: 0,
+            sourceId: u.id, sourceSide: u.side, sourcePos: u.idx,
+            sourceAtk: atkOf(u), sourceAcc: accOf(u), sourceCrit: critOf(u), sourceCritDmg: critDmgOf(u),
+            sourceDealF: factorOf(u, "dmg_deal") * factorOf(u, `enh_${tmplOf(u).bullet}`),
+            sourceStabilityFloor: stabilityFloor(u), sourceBullet: tmplOf(u).bullet,
             attackType: tmplOf(u).atkType, st: T,
           })
           ctx.log(`  ${nameOf(t)} 陷入${DOT_TEXT[eff.icon] || "持续伤害"}（${eff.turns}回合，每${eff.period || 1}回合跳）`)
@@ -1966,10 +1979,149 @@ function tryAutoProc(ctx, u) {
 
 // ---------------- 回合结算 ----------------
 
+/** 周期伤害的施加者。支援也可能放场地，所以按 0~5 号位找；老存档没有来源时返回 null。 */
+function periodicSourceOf(state, d) {
+  if (!Number.isInteger(d?.sourceSide)) return null
+  const side = state.sides[d.sourceSide]
+  if (!side) return null
+  // 泉奈换位后 idx 会变，保存的 sourcePos 可能已经站着别人；先验 id，不对就按 id 追到当前对象。
+  if (Number.isInteger(d.sourcePos)) {
+    const at = casterAt(side, d.sourcePos)
+    if (at?.id === d.sourceId) return at
+  }
+  return castersOf(side).find((u) => u.id === d.sourceId) || null
+}
+
+/** 用快照命中值计算命中率，供施加者已阵亡但场地仍存续时使用。 */
+function hitChanceFrom(acc, tgt) {
+  const gap = Math.max(dodgeOf(tgt) - Math.max(0, acc || 0), 0)
+  return Math.min(1, Math.max(0, CFG.HIT_BASE / (gap * CFG.HIT_C + CFG.HIT_BASE)))
+}
+
+/** 用快照暴击值计算暴击率。 */
+function critChanceFrom(crit, tgt) {
+  const gap = Math.max(Math.max(0, crit || 0) - critResOf(tgt), 0)
+  return Math.min(1, Math.max(0, 1 - CFG.CRIT_BASE / (gap * CFG.CRIT_C + CFG.CRIT_BASE)))
+}
+
+/** 周期伤害不画施加者连线，但伤害本身仍走护盾、不死、急救和死亡清理。 */
+function applyPeriodicDamage(ctx, tgt, dmg, meta) {
+  const total = dmg
+  const wasAlive = tgt.alive
+  let absorbed = 0
+  if (tgt.shield > 0) {
+    absorbed = Math.min(tgt.shield, dmg)
+    tgt.shield -= absorbed
+    dmg -= absorbed
+    if (tgt.shield <= 0) { tgt.shield = 0; tgt.shieldMax = 0; tgt.shieldTurns = 0 }
+  }
+  tgt.hp -= dmg
+  const saved = tgt.hp <= 0 && tgt.immortal > 0 && wasAlive
+  if (saved) tgt.hp = 1
+
+  emitEvent(ctx, {
+    type: "damage", source: null, target: unitRef(tgt), dot: true, dotIcon: meta.icon,
+    amount: Math.round(dmg), absorbed: Math.round(absorbed), totalAmount: Math.round(total),
+    crit: meta.critHits > 0, critHits: meta.critHits,
+    affinity: affinityMark(meta.aff), attackType: meta.attackType,
+    hits: meta.hits, landed: meta.landed,
+  })
+  const seg = meta.hits > 1 ? ` [${meta.landed}/${meta.hits}段]` : ""
+  ctx.log(`  ${nameOf(tgt)} ${DOT_TEXT[meta.icon] || "持续伤害"} ${Math.round(dmg)}${seg}` +
+    (meta.critHits ? `（${meta.critHits}段暴击）` : ""))
+  if (saved) ctx.log(`  ${nameOf(tgt)} 靠不死撑住了（剩 1 生命）`)
+
+  if (tgt.hp <= 0) {
+    tgt.hp = 0
+    if (wasAlive) {
+      tgt.alive = false; tgt.taunt = 0; tgt.focus = 0
+      tgt.regens.length = 0; tgt.dots.length = 0
+      tgt.ward = null
+      ctx.log(`  ✝ ${nameOf(tgt)} ${tgt.summon ? "被烧毁" : "倒下"}`)
+    }
+  } else {
+    tryWard(ctx, tgt)
+  }
+}
+
+/**
+ * 一次周期伤害跳动。
+ *
+ * - DMGZone：每个原始 HitFrame 独立判命中 / 暴击 / 稳定，并读取结算时当前攻防与增减伤。
+ * - DMGDot：不判闪避、不暴击，但同样读取当前攻防与增减伤。
+ * - 老存档只有 `amount` 时保留旧固定伤害，避免 Redis 中进行中的对局崩掉。
+ */
+function tickPeriodicDamage(ctx, tgt, d) {
+  const { state } = ctx
+  if (!tgt.alive) return
+
+  const idx = Math.max(0, (d.tick || 1) - 1)
+  const hits = Array.isArray(d.tickHits)
+    ? (d.tickHits[Math.min(idx, d.tickHits.length - 1)] || [])
+    : d.scale != null ? [d.scale * 100] : null
+
+  // 老存档兼容：以前在施放时把 `atk × scale` 算死，既没有来源也没有倍率。
+  if (!hits?.length) {
+    const hurt = Math.max(1, d.amount || 0)
+    applyPeriodicDamage(ctx, tgt, hurt, {
+      icon: d.icon, hits: 1, landed: 1, critHits: 0,
+      aff: 1, attackType: d.attackType || "持续",
+    })
+    return
+  }
+
+  const src = periodicSourceOf(state, d)
+  // 来源存活时读当前面板；场地施加者已阵亡时退回施放快照，场地本身继续存在。
+  const liveSource = src?.alive ? src : null
+  const attackType = liveSource ? tmplOf(liveSource).atkType : (d.attackType || "持续")
+  const bullet = liveSource ? tmplOf(liveSource).bullet : d.sourceBullet
+  const atk = liveSource ? atkOf(liveSource) : (d.sourceAtk || 0)
+  const dealF = liveSource
+    ? factorOf(liveSource, "dmg_deal") * factorOf(liveSource, `enh_${bullet}`)
+    : (d.sourceDealF || 1)
+  const acc = liveSource ? accOf(liveSource) : d.sourceAcc
+  const crit = liveSource ? critOf(liveSource) : d.sourceCrit
+  const critDmg = liveSource ? critDmgOf(liveSource) : d.sourceCritDmg
+  const floor = d.applyStability === false
+    ? 1
+    : liveSource ? stabilityFloor(liveSource) : (d.sourceStabilityFloor ?? 1)
+
+  const aff = affinity(attackType, tmplOf(tgt).defType)
+  const dm = defModOf(tgt)
+  const takeF = Math.max(0.1, factorOf(tgt, "dmg_take"))
+  const hr = d.canEvade ? hitChanceFrom(acc, tgt) : 1
+  const cr = d.canCrit ? critChanceFrom(crit, tgt) : 0
+  const cm = Math.max(1, ((critDmg || 0) - critDmgResOf(tgt)) / 10000)
+
+  let total = 0, landed = 0, critHits = 0
+  for (const pct of hits) {
+    if (d.canEvade && nextRandom(state) >= hr) continue
+    landed++
+    const isCrit = d.alwaysCrit || (d.canCrit && nextRandom(state) < cr)
+    if (isCrit) critHits++
+    let amount = atk * (pct / 100) * aff * dm * Math.max(0.1, dealF) * takeF
+    amount *= randRange(state, floor, 1)
+    if (isCrit) amount *= cm
+    total += Math.max(1, amount)
+  }
+
+  if (!landed) {
+    ctx.log(`  ${nameOf(tgt)} 闪避了${DOT_TEXT[d.icon] || "持续伤害"}（${hits.length}段全空）`)
+    emitEvent(ctx, {
+      type: "miss", source: null, target: unitRef(tgt), dot: true, dotIcon: d.icon,
+      attackType, hits: hits.length, landed: 0,
+    })
+    return
+  }
+  applyPeriodicDamage(ctx, tgt, total, {
+    icon: d.icon, hits: hits.length, landed, critHits, aff, attackType,
+  })
+}
+
 /**
  * 状态都从施放瞬间写入，时长一律按「**它真正起作用的 N 个攻击窗口**」计：
  * 防御向（含护盾、不死、嘲讽）跟敌方回合跳，进攻向与控制、持续治疗跟自己方回合跳。
- * 判据见 `DEFENSIVE_STATS` 的注释。
+ * 回合末固定顺序是：状态层更新 → 持续治疗 → 伤害性状态。判据见 `DEFENSIVE_STATS` 的注释。
  */
 function endTurn(ctx, side) {
   const { state } = ctx
@@ -2024,52 +2176,9 @@ function endTurn(ctx, side) {
     s.summons = (s.summons || []).filter((x) => x.alive)
   }
 
-  /**
-   * 持续伤害（场地/灼烧）在承受者自己的回合跳。三条性质都是有意的：
-   *
-   * - **不发 `action` 事件**，战场图上就不会画连线 —— 施加者可能已经阵亡，
-   *   从他身上拉一根线出来是错的；伤害直接记在承受者头上，靠橙色区分来源。
-   * - **不转移目标**：场地在施放瞬间就贴到当时站在里面的人身上，其中一个死了，
-   *   剩下的照跳，但不会跑去烧别人。
-   * - **召唤物也在列**：人偶站在场地里一样挨烧，所以这里要连 summons 一起遍历。
-   */
-  for (const u of [...side.units, ...summonsOf(side)]) {
-    for (const d of [...(u.dots || [])]) {
-      if (d.st === T) continue
-      d.tick += 1
-      if (d.tick % d.period === 0 && u.alive) {
-        const hurt = Math.max(1, d.amount)
-        u.hp -= hurt
-        // 场地/灼烧也杀不死不死状态的人 —— 它拦的是「掉到 0」，不分伤害来源
-        if (u.hp <= 0 && u.immortal > 0) u.hp = 1
-        ctx.log(`  ${nameOf(u)} ${DOT_TEXT[d.icon] || "持续伤害"} ${Math.round(hurt)}`)
-        emitEvent(ctx, {
-          type: "damage", source: null, target: unitRef(u), dot: true, dotIcon: d.icon,
-          amount: Math.round(hurt), totalAmount: Math.round(hurt), absorbed: 0,
-          crit: false, critHits: 0, affinity: "none", attackType: d.attackType || "持续",
-        })
-        if (u.hp <= 0) {
-          u.hp = 0; u.alive = false; u.taunt = 0; u.focus = 0
-          u.regens.length = 0; u.dots.length = 0
-          u.ward = null
-          ctx.log(`  ✝ ${nameOf(u)} ${u.summon ? "被烧毁" : "倒下"}`)
-          break
-        }
-        tryWard(ctx, u)
-      }
-      d.turns -= 1
-      if (d.turns <= 0) u.dots.splice(u.dots.indexOf(d), 1)
-    }
-  }
-
-  // 地上的圈跟身上的 DoT 分开计时：人死了 DoT 清掉，圈还在原处，直到自己的时长走完。
-  for (const f of [...(side.fields || [])]) {
-    if (f.st === T) continue
-    f.turns -= 1
-    if (f.turns <= 0) side.fields.splice(side.fields.indexOf(f), 1)
-  }
-
-  // 持续治疗按承受者自己的回合跳。
+  // 持续治疗在状态层更新之后、伤害性状态之前结算。
+  // 先抬血再吃 DoT / 场地伤害；这也是为什么回合末顺序会直接改变生死。
+  // 持续治疗按承受者自己的回合跳，固定排在 DoT / 场地伤害之前。
   //
   // 这里**不能**照抄 buff/护盾那套 `st === T 就跳过本回合` 的写法：持续治疗永远由己方
   // 施加，也就永远在自己的回合结算，跳过施放回合等于把第一跳推迟整整一轮。星野的急救
@@ -2103,6 +2212,33 @@ function endTurn(ctx, side) {
     // （暴击 +26%）同一把尺子 —— 都是「从下个己方回合开始」的第三类，两者同轮到期。
     // 施放那一轮她忙着放 EX 没有普攻，所以那一轮不扣，6 轮换来 6 发强化普攻。
     if (u.charge?.turns > 0 && u.charge.st !== T && --u.charge.turns <= 0) u.charge = null
+  }
+
+  /**
+   * 伤害性状态最后结算：状态层跳时 / 到期 → 持续治疗 → DoT / 固定场地。
+   *
+   * - DMGZone（场地）：每个压缩后的原始 HitFrame 独立判命中、暴击、稳定；读取当前攻防与增减伤。
+   * - DMGDot（灼烧 / 中毒等）：不判闪避、不暴击，但同样读取当前攻防与增减伤。
+   * - 不发 action 事件，战场图不画来源连线；场地施加者阵亡后用施放快照继续跳。
+   * - 目标不转移；召唤物站在场地里也会受到伤害。
+   */
+  for (const u of [...side.units, ...summonsOf(side)]) {
+    for (const d of [...(u.dots || [])]) {
+      if (d.st === T) continue
+      d.tick += 1
+      if (d.tick % d.period === 0 && u.alive) tickPeriodicDamage(ctx, u, d)
+      // 致死会在 applyPeriodicDamage 里清空 dots；对象已不在数组时别再回写时长。
+      if (!(u.dots || []).includes(d)) break
+      d.turns -= 1
+      if (d.turns <= 0) u.dots.splice(u.dots.indexOf(d), 1)
+    }
+  }
+
+  // 地上的圈跟身上的 Zone DoT 分开计时：人死了 DoT 清掉，圈还在原处，直到自己的时长走完。
+  for (const f of [...(side.fields || [])]) {
+    if (f.st === T) continue
+    f.turns -= 1
+    if (f.turns <= 0) side.fields.splice(side.fields.indexOf(f), 1)
   }
 }
 

@@ -123,10 +123,16 @@ function auditSkill(u, slot, raw, gen) {
   if (ds.length === 1 && hasZone(ds[0])) {
     summary.zone++
     assert(`${label}：场地伤害不生成即时 hits`, Boolean(gen?.hits), false)
-    assert(`${label}：场地伤害存在 Zone`, Boolean(gen?.effects?.some((e) => e.type === "dot" && e.icon === "Zone")), true)
+    const zone = gen?.effects?.find((e) => e.type === "dot" && e.icon === "Zone")
+    assert(`${label}：场地伤害存在 Zone`, Boolean(zone), true)
+    assert(`${label}：保留全部 HitFrame 分段`, zone?.tickHits?.flat().length,
+      (ds[0].HitFrames?.length || 0) * (ds[0].Hits?.length || 1))
+    assert(`${label}：CriticalCheck 映射`, [zone?.canCrit, zone?.alwaysCrit],
+      [ds[0].CriticalCheck !== "Never", ds[0].CriticalCheck === "Always"])
+    assert(`${label}：CanEvade 映射`, zone?.canEvade, ds[0].CanEvade !== false)
     // 当前场地技两条都是 Block=0；若以后出现 Block=1，必须设计「圈是否被掩体接走」，不能静默放行。
     assert(`${label}：场地伤害必须是 Block=0`, ds[0].Block, 0)
-    record(true, u, slot, raw, "场地伤害", "Block 0，落地后持续跳伤，不进掩体格挡")
+    record(true, u, slot, raw, "场地伤害", "Block 0；保留 HitFrame，每段判命中/暴击")
     return
   }
 

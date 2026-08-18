@@ -10,6 +10,8 @@ import { createBattle, playerTurn, validateAction, exCastableOf, exWaitOf, exCos
 import { ROSTER, CFG } from "../lib/ba/roster.js"
 import { describeEffect } from "../lib/ba/format.js"
 import { parseAction } from "../lib/ba/parse.js"
+import { buildBattleHtml } from "../lib/ba/battleHtml.js"
+import { statusIconOf } from "../lib/ba/htmlAssets.js"
 
 const id = (n) => ROSTER.find((t) => t.name === n).id
 
@@ -2324,6 +2326,170 @@ console.log("\n=== 38b. 爱露分段掩体：直击可挡、爆风无视 ===")
   check(`爱露两段合计格挡率 ≈ 15%（实测 ${(rate * 100).toFixed(1)}%，n=${seg}）`,
     Math.abs(rate - CFG.COVER_BLOCK_RATE / 2) < 0.05, true)
   check("爆风段贡献的超额 BLOCK 必须是 0", splashBlk, 0)
+}
+
+
+console.log("\n=== 44. 状态 → 持续治疗 → DoT/场地；场地判闪避与暴击 ===")
+{
+  const timed = (hp, dots, regen) => {
+    const st = setup(["野宫", "野宫", "野宫", "野宫"], OUT)
+    const u = st.sides[0].units[0]
+    u.maxhp = 1000
+    u.hp = hp
+    u.dots = dots.map(({ icon, amount }) => ({
+      icon, amount, turns: 3, period: 1, tick: 0, attackType: "爆发", st: -1,
+    }))
+    u.regens = [{ amount: regen, turns: 3, period: 1, tick: 0, st: -1 }]
+    return playerTurn(st, { type: "pass" })
+  }
+
+  // 同一回合固定为治疗先、伤害性状态后。用治疗上限做出可观测差异：
+  // 治疗先：min(1000,950+100)-30-40 = 930；DoT 先则会是 980。
+  const survived = timed(950, [
+    { icon: "Burn", amount: 30 },
+    { icon: "Poison", amount: 40 },
+  ], 100)
+  const order = survived.events
+    .filter((e) => e.target?.side === 0 && e.target?.pos === 0 && (e.dot || e.type === "heal"))
+    .map((e) => e.dot ? e.dotIcon : "Regen")
+  check("同回合固定顺序：持续治疗 → 灼烧 → 中毒", order, ["Regen", "Burn", "Poison"])
+  check("持续治疗先抬满、DoT 后扣，最终 930", survived.state.sides[0].units[0].hp, 930)
+
+  // 治疗可以先把人抬出致死线；伤害性状态仍在最后继续扣血。
+  const rescued = timed(50, [
+    { icon: "Burn", amount: 30 },
+    { icon: "Poison", amount: 40 },
+  ], 100)
+  check("持续治疗先救起，再承受 DoT", [rescued.state.sides[0].units[0].alive, rescued.state.sides[0].units[0].hp], [true, 80])
+
+  // 治疗后仍不够扛住全部 DoT 时照常死亡；治疗事件必须先出现。
+  const dead = timed(50, [
+    { icon: "Burn", amount: 30 },
+    { icon: "Poison", amount: 40 },
+  ], 10)
+  const deadUnit = dead.state.sides[0].units[0]
+  check("治疗后仍被 DoT 击倒", [deadUnit.alive, deadUnit.hp, deadUnit.regens.length], [false, 0, 0])
+  check("致死回合治疗事件在 DoT 之前已经发生",
+    dead.events.filter((e) => e.target?.side === 0 && e.target?.pos === 0 && (e.dot || e.type === "heal"))
+      .map((e) => e.dot ? e.dotIcon : "Regen"), ["Regen", "Burn", "Poison"])
+
+  // 跳动归属是承受者自己的回合；从施加者视角才叫“对面回合结束”。
+  {
+    const st = setup(["星野", "野宫", "野宫", "野宫"], OUT)
+    const u = st.sides[0].units[0]
+    u.maxhp = u.hp = 1e9
+    u.dots = [{ icon: "Poison", amount: 10, turns: 3, period: 1, tick: 0, attackType: "爆发", st: -1 }]
+    u.regens = [{ amount: 10, turns: 3, period: 1, tick: 0, st: -1 }]
+    st.activeSide = 1
+    const enemyTurn = playerTurn(st, { type: "pass" })
+    check("敌方行动回合结束：我方承受者的 DoT / Regen 不跳",
+      [enemyTurn.state.sides[0].units[0].dots[0].tick, enemyTurn.state.sides[0].units[0].regens[0].tick], [0, 0])
+    const ownTurn = playerTurn(enemyTurn.state, { type: "pass" })
+    check("轮到承受者自己的回合结束才一起跳",
+      [ownTurn.state.sides[0].units[0].dots[0].tick, ownTurn.state.sides[0].units[0].regens[0].tick], [1, 1])
+  }
+
+  // 原数据的固定场地是 DMGZone + CriticalCheck:Check：保留每个 HitFrame 的命中 / 暴击判定。
+  {
+    const chise = ROSTER.find((t) => t.name === "千世")
+    const zone = chise.ex.effects.find((e) => e.icon === "Zone")
+    check("千世场地保留 11 个原始伤害段，并按 5 秒分成 6+5",
+      zone.tickHits.map((x) => x.length), [6, 5])
+    check("场地允许闪避和暴击", [zone.canEvade, zone.canCrit, zone.alwaysCrit], [true, true, false])
+  }
+
+  // 运行路径：场地能出现部分闪避，也能出现暴击；中毒即使对高闪目标也固定命中且不暴击。
+  {
+    const chise = ROSTER.find((t) => t.name === "千世")
+    const zoneSample = (seed, { crit = false } = {}) => {
+      const st = setup(["优香", "野宫", "野宫", "野宫"], ["千世", "野宫", "野宫", "野宫"])
+      const src = st.sides[1].units[0]
+      const tgt = st.sides[0].units[0]
+      for (const s of st.sides) for (const u of s.units) { u.maxhp = 1e9; u.hp = 1e9 }
+      // 不让普通行动干扰目标；只读回合末的 Zone 事件。
+      for (const s of st.sides) for (const u of s.units) u.skillCd = 9999
+      if (crit) src.buffs.push({ stat: "crit", value: 1e6, turns: 99, st: -1 })
+      tgt.dots = [{
+        icon: "Zone", scale: 1, tickHits: [[50, 50, 50, 50, 50, 50]],
+        canCrit: true, alwaysCrit: false, canEvade: !crit, applyStability: false,
+        turns: 2, period: 1, tick: 0, sourceId: src.id, sourceSide: 1, sourcePos: 0,
+        sourceAtk: atkOf(src), sourceAcc: src.acc, sourceCrit: src.crit, sourceCritDmg: src.critDmg,
+        sourceDealF: 1, sourceStabilityFloor: 1, sourceBullet: chise.bullet,
+        attackType: chise.atkType, st: -1,
+      }]
+      st.rng = seed >>> 0
+      const r = playerTurn(st, { type: "pass" })
+      return r.events.find((e) => (e.type === "damage" || e.type === "miss") && e.dotIcon === "Zone")
+    }
+    let total = 0, landed = 0
+    for (let seed = 1; seed <= 120; seed++) {
+      const e = zoneSample(seed)
+      total += e?.hits || 0
+      landed += e?.landed || 0
+    }
+    check("场地逐段做闪避判定（高闪目标既有命中也有落空）", landed > 0 && landed < total, true)
+    const crit = zoneSample(9, { crit: true })
+    check("场地逐段允许暴击", [crit?.crit, crit?.critHits, crit?.hits], [true, 6, 6])
+
+    const st = setup(["优香", "野宫", "野宫", "野宫"], ["绿", "野宫", "野宫", "野宫"])
+    const src = st.sides[1].units[0]
+    const tgt = st.sides[0].units[0]
+    for (const s of st.sides) for (const u of s.units) { u.maxhp = 1e9; u.hp = 1e9; u.skillCd = 9999 }
+    src.buffs.push({ stat: "crit", value: 1e6, turns: 99, st: -1 })
+    tgt.buffs.push({ stat: "dodge", value: 1e6, turns: 99, st: -1 })
+    tgt.dots = [{
+      icon: "Poison", scale: 1, canCrit: false, canEvade: false, applyStability: false,
+      turns: 2, period: 1, tick: 0, sourceId: src.id, sourceSide: 1, sourcePos: 0,
+      sourceAtk: atkOf(src), sourceDealF: 1, sourceStabilityFloor: 1,
+      sourceBullet: ROSTER.find((t) => t.name === "绿").bullet,
+      attackType: ROSTER.find((t) => t.name === "绿").atkType, st: -1,
+    }]
+    const poison = playerTurn(st, { type: "pass" }).events.find((e) => e.dotIcon === "Poison")
+    check("中毒不判闪避且不暴击", [poison?.type, poison?.landed, poison?.crit], ["damage", 1, false])
+  }
+
+  // 周期伤害读取结算时的当前攻防 / 增伤减伤，而不是永远用施放瞬间的固定数值。
+  {
+    const periodicDamage = ({ sourceBuff = null, targetBuff = null } = {}) => {
+      const st = setup(["星野", "野宫", "野宫", "野宫"], ["千世", "野宫", "野宫", "野宫"])
+      const src = st.sides[1].units[0]
+      const tgt = st.sides[0].units[0]
+      for (const s of st.sides) for (const u of s.units) { u.maxhp = 1e9; u.hp = 1e9; u.skillCd = 9999 }
+      if (sourceBuff) src.buffs.push({ ...sourceBuff, turns: 99, st: -1 })
+      if (targetBuff) tgt.buffs.push({ ...targetBuff, turns: 99, st: -1 })
+      tgt.dots = [{
+        icon: "Zone", scale: 1, tickHits: [[100]], canCrit: false, canEvade: false, applyStability: false,
+        turns: 2, period: 1, tick: 0, sourceId: src.id, sourceSide: 1, sourcePos: 0,
+        sourceAtk: atkOf(src), sourceDealF: 1, sourceStabilityFloor: 1,
+        sourceBullet: ROSTER.find((t) => t.name === "千世").bullet,
+        attackType: ROSTER.find((t) => t.name === "千世").atkType, st: -1,
+      }]
+      const r = playerTurn(st, { type: "pass" })
+      return r.events.find((e) => e.dotIcon === "Zone")?.totalAmount || 0
+    }
+    const base = periodicDamage()
+    const boosted = periodicDamage({ sourceBuff: { stat: "dmg_deal", value: 1 } })
+    const defended = periodicDamage({ targetBuff: { stat: "dfs", value: 1 } })
+    check("场地读取当前增伤：+100% 造成约双倍", Math.abs(boosted / base - 2) < 0.02, true)
+    check("场地读取当前防御：增防后伤害下降", defended < base, true)
+  }
+
+  // 状态格按类型分组：两个灼烧合成一格 ×2，中毒单独一格，不能共用一个火苗。
+  {
+    const st = setup(["星野", "野宫", "野宫", "野宫"], OUT)
+    st.sides[0].units[0].dots = [
+      { icon: "Burn", amount: 1, turns: 3, period: 1, tick: 0, st: -1 },
+      { icon: "Burn", amount: 1, turns: 2, period: 1, tick: 0, st: -1 },
+      { icon: "Poison", amount: 1, turns: 4, period: 1, tick: 0, st: -1 },
+    ]
+    const burn = statusIconOf("burn")
+    const poison = statusIconOf("debuff-poison")
+    const html = buildBattleHtml(st)
+    const countOf = (x) => x ? html.split(x).length - 1 : 0
+    check("灼烧 / 中毒资源都存在且不是同一张", [Boolean(burn), Boolean(poison), burn !== poison], [true, true, true])
+    check("战场图各使用一次独立图标", [countOf(burn), countOf(poison)], [1, 1])
+    check("只有同类型的两个灼烧合并 ×2", html.split("<s>×2</s>").length - 1, 1)
+  }
 }
 
 console.log(bad ? `\n✗ ${bad} 条不符` : "\n全部符合")
