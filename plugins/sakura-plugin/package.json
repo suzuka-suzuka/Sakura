@@ -4,7 +4,10 @@
   "type": "module",
   "author": "suzuka",
   "scripts": {
-    "generate:fishing-guides": "node scripts/generate-fishing-guides.mjs"
+    "generate:fishing-guides": "node scripts/generate-fishing-guides.mjs",
+    "test:ba-target": "node scripts/target-test.mjs",
+    "test:ba-stress": "node scripts/stress-test.mjs",
+    "audit:ba-cover": "node scripts/audit-cover.mjs"
   },
   "dependencies": {
     "@book000/pixivts": "^0.45.69",

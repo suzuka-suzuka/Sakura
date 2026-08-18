@@ -878,6 +878,29 @@ function allyLaneTarget(u, allies) {
   return alive.length ? nearestAlly(u, alive) : null
 }
 
+/** 当前状态真正会打出的那组分段 Block；条件倍率（妮露 / 爱丽丝）也从这里切换。 */
+function coverHitBlocksOf(u, skill) {
+  return altHitsOf(u, skill)?.hitBlocks
+    || skill?.hitBlocks
+    || (skill?.hits || []).map(() => Boolean(skill?.block))
+}
+
+/** 同一项技能里既有可被掩体挡的段、又有无视掩体的段（当前池内是爱露 EX / 普技）。 */
+function hasMixedCoverHits(u, skill) {
+  const blocks = coverHitBlocksOf(u, skill)
+  return Boolean(blocks.some(Boolean) && blocks.some((b) => !b))
+}
+
+/**
+ * 伤害段混合时不能在目标选择阶段把**整项技能**转成掩体：
+ * 爱露的直击要落在掩体，爆风仍要落在原目标范围。这里先保留原目标，execute 再按段拆落点。
+ * 条件形态以当前真正生效的 `altHits` 为准，不能永远拿基础档的 `skill.block` 猜。
+ */
+function wholeSkillBlockable(u, skill) {
+  const blocks = coverHitBlocksOf(u, skill)
+  return Boolean(blocks[0]) && !hasMixedCoverHits(u, skill)
+}
+
 /**
  * @param {object} pick 玩家指定的目标 {scope:'foe'|'ally', idx:0-3}，可为空
  * @returns {Array<object>} 命中的单位列表（AoE 无衰减，每个目标吃全额）
@@ -885,6 +908,7 @@ function allyLaneTarget(u, allies) {
 function resolveTargets(state, u, skill, foes, allies, pick, actionKind) {
   let tg = skill.target || "enemy_single"
   const count = skill.count || 1
+  const wholeBlockable = wholeSkillBlockable(u, skill)
   /**
    * 「一个圈，砸哪边就只有那边生效」（小春的神圣手榴弹，全 272 人只有她）。
    * 原文是「对圆形范围内的**我方**单位回复 / 对上述范围内的**敌方**单位造成伤害」，
@@ -942,8 +966,9 @@ function resolveTargets(state, u, skill, foes, allies, pick, actionKind) {
   } else if (pick) {
     const p = (pick.scope === "ally" ? allies : foes).units[pick.idx]
     if (p?.alive && (pick.scope === "ally") === tg.startsWith("ally")) primary = p
-    // 指定的人已经倒下：不当成「还打他那一片」。下面走施法者自己的对线 ——
-    // 先打施法者同战场，那一边空了再越界打最近的。
+    // EX 指名只允许存活且阵营匹配的目标；validateAction 会在扣费前拦掉非法目标。
+    // 这里不做「目标已死就自动重锁」的兜底，避免把非法指令静默变成另一发攻击。
+    else return []
   }
 
   // **玩家指名的那一发越过掩体**（EX 点谁打谁）。掩体只改「没指定目标时刀落在哪」，
@@ -951,9 +976,9 @@ function resolveTargets(state, u, skill, foes, allies, pick, actionKind) {
   const picked = primary !== null
 
   if (tg === "enemy_random") return aliveOf(foes) // 逐段随机，在 strike 里再抽
-  // 连发第一发也要有人：指定的死了走上面的同战场溢出，再空就对线（会越界）
+  // 连发第一发也要有人；有效指名用指定目标，不指定时才走对线。
   if (tg === "enemy_chain") {
-    if (!primary) primary = laneTarget(u, foes, false, { blockable: Boolean(skill.block) })
+    if (!primary) primary = laneTarget(u, foes, false, { blockable: wholeBlockable })
     return primary ? [primary] : []
   }
 
@@ -968,7 +993,7 @@ function resolveTargets(state, u, skill, foes, allies, pick, actionKind) {
     primary = tg.startsWith("ally")
       ? allyLaneTarget(u, allies)
       // blockable：这一发打不打得中掩体，来自原数据的 `Damage.Block`
-      : laneTarget(u, foes, skill.pick === "max_atk", { ignoreTaunt: markFocus, blockable: Boolean(skill.block) })
+      : laneTarget(u, foes, skill.pick === "max_atk", { ignoreTaunt: markFocus, blockable: wholeBlockable })
   }
   if (!primary) return []
   // 召唤物不在 pool.units 里，扩散算不出邻居；打到它就只打它
@@ -998,7 +1023,7 @@ function resolveTargets(state, u, skill, foes, allies, pick, actionKind) {
      *   3. **主目标就是它护着的那个人** —— 主目标是旁边的人、你只是被溅射到的话，
      *      这一发照样落在你头上（只是要过一次 30% 格挡）
      */
-    if (skill.block && !picked) {
+    if (wholeBlockable && !picked) {
       const cov = summonsOf(pool).find((s) => s.cover && s.blockIdx === primary.idx)
       if (cov) return [cov]
     }
@@ -1042,6 +1067,25 @@ function resolveTargets(state, u, skill, foes, allies, pick, actionKind) {
   return [primary]
 }
 
+/**
+ * 目标列表之外，再记一条「只有部分伤害段被掩体接走」的落点计划。
+ *
+ * 玩家指名 / 嘲讽 / 集火都越过掩体；只有无指名的正常索敌会走这条。
+ * 计划在 ③-a 同时锁定时一并保存，避免前面角色刚施加的集火状态反过来改写后手已经锁好的刀。
+ */
+function resolveTargetPlan(state, u, skill, foes, allies, pick, actionKind) {
+  const targets = resolveTargets(state, u, skill, foes, allies, pick, actionKind)
+  let partialCover = null
+
+  // 能走到结算层的 pick 已由 validateAction 保证有效；有效指名一律越过掩体。
+  const picked = Boolean(pick)
+  if (hasMixedCoverHits(u, skill) && !picked && targets[0] && !targets[0].summon) {
+    const forced = tauntTargetOf(foes, Boolean(u.support))
+    if (!forced || forced !== targets[0]) partialCover = coverOf(state, targets[0])
+  }
+  return { targets, partialCover }
+}
+
 // ---------------- 伤害 ----------------
 
 function applyDamage(ctx, src, tgt, dmg, meta = {}) {
@@ -1081,7 +1125,7 @@ function applyDamage(ctx, src, tgt, dmg, meta = {}) {
 
   if (tgt.hp <= 0) {
     tgt.hp = 0
-    // 同时锁定的后手仍会打到这个人（伤害照记、图也照画），但击杀只认第一次掉到 0 的那个人
+    // 同一伤害链若重复落到该目标，击杀也只认第一次掉到 0 的那一段。
     if (wasAlive) {
       tgt.alive = false
       tgt.taunt = 0
@@ -1113,10 +1157,10 @@ function hpRateMult(mod, tgt) {
   return mod.atLo + t * (mod.atHi - mod.atLo)
 }
 
-function strike(ctx, src, tgt, hits, actionKind, skill) {
+function strike(ctx, src, tgt, hits, actionKind, skill, hitBlocks) {
   const { state } = ctx
-  // 同时锁定的后手可以打在已经倒下的人身上（原作同一拍，伤害不丢）。
-  // 击杀触发只在 applyDamage 里认「第一次掉到 0」。
+  // ③-a / ③-b 锁定目标已倒下时由 execute 直接丢弃伤害；这里仍允许同一技能内部的
+  // 独立后续段（概率追伤等）按自己的规则调用。击杀只在 applyDamage 里认第一次掉到 0。
   if (!src.alive || !tgt) return 0
 
   const aff = affinity(tmplOf(src).atkType, tmplOf(tgt).defType)
@@ -1138,8 +1182,12 @@ function strike(ctx, src, tgt, hits, actionKind, skill) {
   const takeF = Math.max(0.1, factorOf(tgt, "dmg_take"))
 
   /**
-   * **掩体格挡**：躲在掩体后的人，被「打得中掩体」的攻击（`skill.block`，原数据的
-   * `Damage.Block`）打到时，每一段有 `COVER_BLOCK_RATE`（原作基础 30%）被挡下。
+   * **掩体格挡**：躲在掩体后的人，被「打得中掩体」的**那一段**（原数据的 `Damage.Block`）
+   * 打到时，这一段有 `COVER_BLOCK_RATE`（原作基础 30%）被挡下。
+   *
+   * 判定是**分段的**，不能拿技能级 `skill.block` 盖掉整发：爱露 EX 直击 `Block=1`、
+   * 爆风 `Block=0`，第二段必须无视掩体。`hitBlocks` 跟 `hits` 等长；没给时才退回
+   * `skill.block`（普攻那种整枪同性质）。
    *
    * 这是**独立的一次判定**，不走命中/闪避那条公式 —— 原作里它不随攻击者的命中浮动。
    * 判定放在分段循环里，跟命中/暴击同一个粒度（「分段独立判定」那条）。
@@ -1148,11 +1196,14 @@ function strike(ctx, src, tgt, hits, actionKind, skill) {
    * 普攻和普通技能」消耗着，再让它吃掉所有格挡伤害会瞬间碎掉，而且一发攻击的数字
    * 被拆到两个单位上，战场图就读不出来了。
    */
-  const blockRate = skill?.block && coverOf(state, tgt) ? CFG.COVER_BLOCK_RATE : 0
+  const covered = Boolean(coverOf(state, tgt))
+  const blocks = Array.isArray(hitBlocks) && hitBlocks.length === hits.length
+    ? hitBlocks
+    : hits.map(() => Boolean(skill?.block))
 
   let total = 0, landed = 0, critHits = 0, blocked = 0
-  for (const pct of hits) {
-    if (blockRate && nextRandom(state) < blockRate) { blocked++; continue }
+  for (const [i, pct] of hits.entries()) {
+    if (covered && blocks[i] && nextRandom(state) < CFG.COVER_BLOCK_RATE) { blocked++; continue }
     if (nextRandom(state) >= hr) continue // 这一段被闪避
     landed++
     const crit = nextRandom(state) < cr
@@ -1239,7 +1290,7 @@ function scopeTargets(scope, u, allies, dmgTargets, eff) {
 function altHitsOf(u, skill) {
   for (const a of skill.altHits || []) {
     const cur = a.state === "fury" ? (u.fury > 0 ? 1 : 0) : (u.energy || 0)
-    if (cur >= a.min) return a.hits
+    if (cur >= a.min) return { hits: a.hits, hitBlocks: a.hitBlocks }
   }
   return null
 }
@@ -1380,7 +1431,7 @@ function applyEffects(ctx, u, skill, dmgTargets, allies, pick, actionKind) {
 
       case "charge": {
         u.charge = {
-          hits: eff.hits, count: eff.count,
+          hits: eff.hits, hitBlocks: eff.hitBlocks, block: Boolean(eff.block), count: eff.count,
           ...(eff.shots != null ? { shots: eff.shots } : {}),
           // 按轮数存续的（瞬）跟自身进攻增益同一把尺子：施放那一轮她不普攻，
           // 从下个己方回合才开始跳，30 秒换来的就是 6 发强化普攻而不是 5 发。
@@ -1605,17 +1656,33 @@ function applyEffects(ctx, u, skill, dmgTargets, allies, pick, actionKind) {
 }
 
 /**
+ * ③-a / ③-b 是同一拍先锁目标：前手把目标击倒后，后手不重锁，但那份伤害直接丢失。
+ * action 事件仍保留原锁定目标，图上能看出「这一刀原本打谁」；不再生成 damage / miss 数字。
+ */
+function lockedTargetGone(locked, tgt) {
+  return Boolean(locked && tgt && !tgt.alive)
+}
+
+/** 某一段是否能被掩体挡；旧数据没带 hitBlocks 时退回技能级 block。 */
+function blockAt(skill, hitBlocks, i) {
+  return Array.isArray(hitBlocks) && i < hitBlocks.length
+    ? Boolean(hitBlocks[i])
+    : Boolean(skill?.block)
+}
+
+/**
  * 执行一个技能（EX / 普通技能 / 普攻）。
  * @param {string} label 日志抬头，含技能名
  * @param {"ex"|"skill"|"normal"} actionKind 供渲染层区分动作类型
- * @param {Array<object>} [lockedTargets] ③-a 同时锁定的目标，传入后不再重算、打死也不换人
+ * @param {{targets:Array<object>,partialCover?:object}} [lockedPlan] ③-a 同时锁定的落点计划，传入后不再重算、打死也不换人
  */
-function execute(ctx, u, skill, label, actionKind, pick, lockedTargets) {
+function execute(ctx, u, skill, label, actionKind, pick, lockedPlan) {
   const { state } = ctx
   const me = state.sides[u.side]
   const foes = state.sides[1 - u.side]
-  const locked = Boolean(lockedTargets)
-  const targets = lockedTargets || resolveTargets(state, u, skill, foes, me, pick, actionKind)
+  const locked = Boolean(lockedPlan)
+  const plan = lockedPlan || resolveTargetPlan(state, u, skill, foes, me, pick, actionKind)
+  const { targets, partialCover } = plan
   // 一个合法目标都没有 = 这一发根本没出去。返回 false 让调用方决定要不要算「出手过」——
   // 小春的「我来治疗！」要求队友血量 ≤50%，全队满血时她不该白白扣掉冷却和普攻
   if (!targets.length && skill.target !== "self") return false
@@ -1628,14 +1695,6 @@ function execute(ctx, u, skill, label, actionKind, pick, lockedTargets) {
   const onAlly = Boolean(skill.circle) && targets[0]?.side === u.side
 
   ctx.log(`[${u.side === 0 ? "蓝" : "红"}] ${nameOf(u)} ${label}`)
-  // 集火时第一个 EX 已经把指定目标打死，这一发按施法者对线重锁
-  if (pick && pick.idx != null && !pick.summon && actionKind === "ex") {
-    const intended = (pick.scope === "ally" ? me : foes).units[pick.idx]
-    const got = targets[0]
-    if (intended && !intended.alive && got && got !== intended) {
-      ctx.log(`  ${nameOf(intended)} 已倒下，${onAlly ? "改落在" : "转打"} ${nameOf(got)}`)
-    }
-  }
   // action.targets 是「这一发实际打到谁」，战场图按它画连线。
   // 连发 / 弹射会在结算过程中换人，先占位再回填，否则图上只剩第一发那条线。
   const actionEv = {
@@ -1644,13 +1703,16 @@ function execute(ctx, u, skill, label, actionKind, pick, lockedTargets) {
     skillName: skill.name || null,
     kind: skill.hits && !onAlly ? "damage" : "support",
     targetType: onAlly ? "ally_adjacent" : (skill.target || "enemy_single"),
-    targets: targets.map(unitRef),
+    // 部分段被掩体接走时，图上同时画「枪线到掩体」和「爆风到原目标」。
+    targets: (partialCover ? [partialCover, ...targets] : targets).map(unitRef),
   }
   emitEvent(ctx, actionEv)
 
   const hit = []
   // 条件追伤：状态到了哪一档就换哪一组倍率（妮露的 Fury、爱丽丝的能量充能）
-  const hits = onAlly ? null : (altHitsOf(u, skill) || skill.hits)
+  const alt = onAlly ? null : altHitsOf(u, skill)
+  const hits = onAlly ? null : (alt?.hits || skill.hits)
+  const hitBlocks = onAlly ? null : (alt?.hitBlocks || skill.hitBlocks)
   if (hits?.length) {
     // ③-a 同时锁定后不再走连发/弹射的「打死换人」——那是单发技能内部的逐段重锁
     if (!locked && skill.target === "enemy_cycle") {
@@ -1668,8 +1730,10 @@ function execute(ctx, u, skill, label, actionKind, pick, lockedTargets) {
         // 从自己号位开始排一圈：idx 大于等于自己的排前面，小的接在后面
         const ring = [...al].sort((a, b) =>
           ((a.idx - u.idx + 4) % 4) - ((b.idx - u.idx + 4) % 4))
-        const t = ring[i % ring.length]
-        strike(ctx, u, t, [hits[i]], actionKind, skill)
+        const aim = ring[i % ring.length]
+        // 每一发都是一个新的主目标；该段 Block=1 时，目标身前的掩体确定性接走这一发。
+        const t = blockAt(skill, hitBlocks, i) ? (coverOf(state, aim) || aim) : aim
+        strike(ctx, u, t, [hits[i]], actionKind, skill, [blockAt(skill, hitBlocks, i)])
         if (!hit.includes(t)) hit.push(t)
       }
     } else if (!locked && skill.target === "enemy_chain") {
@@ -1679,18 +1743,22 @@ function execute(ctx, u, skill, label, actionKind, pick, lockedTargets) {
       // 每发都在结算之后重算，所以打死人会自动换目标（本战场清空就越界）。
       const first = targets[0]
       for (const [i, pct] of hits.entries()) {
-        const t = i === 0 && first?.alive ? first : laneTarget(u, foes)
+        // 第一枪沿用玩家指定 / 初始锁定；后续每枪按普攻规则重锁，Block 也必须跟着这一枪传。
+        // 漏掉 blockable 会变成「第一枪打墙，后两枪穿墙打人」。
+        const t = i === 0 && first?.alive
+          ? first
+          : laneTarget(u, foes, false, { blockable: blockAt(skill, hitBlocks, i) })
         if (!t) break
-        strike(ctx, u, t, [pct], actionKind, skill)
+        strike(ctx, u, t, [pct], actionKind, skill, [blockAt(skill, hitBlocks, i)])
         if (!hit.includes(t)) hit.push(t)
       }
     } else if (!locked && skill.target === "enemy_random") {
       // 弹射：每一段单独抽目标
-      for (const pct of hits) {
+      for (const [i, pct] of hits.entries()) {
         const al = aliveOf(foes)
         if (!al.length) break
         const t = randPick(state, al)
-        strike(ctx, u, t, [pct], actionKind, skill)
+        strike(ctx, u, t, [pct], actionKind, skill, [blockAt(skill, hitBlocks, i)])
         if (!hit.includes(t)) hit.push(t)
       }
     } else {
@@ -1698,11 +1766,46 @@ function execute(ctx, u, skill, label, actionKind, pick, lockedTargets) {
       // （由 expandAdjacent 保证，生成器也只在 adjacent/all 上给这两个字段）：
       //   splashHits —— 「单体 + 以其为中心的范围」，主目标吃直击＋爆风，扩散只吃爆风（爱露）
       //   falloff    —— 贯穿逐个递减，第 i 个目标 ×(1 − min(rate×i, max))（晴奈）
-      for (const [i, t] of targets.entries()) {
-        const base = i > 0 && skill.splashHits ? skill.splashHits : hits
-        const cut = skill.falloff ? Math.min(skill.falloff.rate * i, skill.falloff.max) : 0
-        strike(ctx, u, t, cut ? base.map((h) => h * (1 - cut)) : base, actionKind, skill)
-        hit.push(t)
+      if (partialCover) {
+        /**
+         * 爱露这种混合段：没指名时直击被掩体确定性接走，`Block=0` 的爆风仍落在原目标范围。
+         * 不能把整项技能退化成只打掩体，也不能让直击继续打人后再 roll 一次 30%。
+         */
+        const coverHits = [], coverBlocks = [], bypassHits = [], bypassBlocks = []
+        for (const [i, pct] of hits.entries()) {
+          if (hitBlocks?.[i]) { coverHits.push(pct); coverBlocks.push(true) }
+          else { bypassHits.push(pct); bypassBlocks.push(false) }
+        }
+        if (coverHits.length && !lockedTargetGone(locked, partialCover)) {
+          strike(ctx, u, partialCover, coverHits, actionKind, skill, coverBlocks)
+          hit.push(partialCover)
+        }
+        if (bypassHits.length && targets[0] && !lockedTargetGone(locked, targets[0])) {
+          strike(ctx, u, targets[0], bypassHits, actionKind, skill, bypassBlocks)
+          hit.push(targets[0])
+        }
+        // 旁边的人只吃扩散段；他自己若也躲在掩体后，只按该段自己的 Block 做 30% 判定。
+        for (let i = 1; i < targets.length; i++) {
+          const t = targets[i]
+          if (lockedTargetGone(locked, t)) continue
+          const base = skill.splashHits || hits
+          const blocks = skill.splashHitBlocks || hitBlocks
+          const cut = skill.falloff ? Math.min(skill.falloff.rate * i, skill.falloff.max) : 0
+          strike(ctx, u, t, cut ? base.map((h) => h * (1 - cut)) : base, actionKind, skill, blocks)
+          hit.push(t)
+        }
+      } else {
+        for (const [i, t] of targets.entries()) {
+          if (lockedTargetGone(locked, t)) continue
+          const splashOnly = i > 0 && skill.splashHits
+          const base = splashOnly ? skill.splashHits : hits
+          const blocks = splashOnly
+            ? (skill.splashHitBlocks || skill.splashHits.map(() => false))
+            : hitBlocks
+          const cut = skill.falloff ? Math.min(skill.falloff.rate * i, skill.falloff.max) : 0
+          strike(ctx, u, t, cut ? base.map((h) => h * (1 - cut)) : base, actionKind, skill, blocks)
+          hit.push(t)
+        }
       }
     }
   }
@@ -1719,12 +1822,14 @@ function execute(ctx, u, skill, label, actionKind, pick, lockedTargets) {
     if (nextRandom(state) < chance) {
       const t = hit.find((x) => x.alive) || hit[0]
       ctx.log(`  追加伤害触发（${Math.round(chance * 100)}%）`)
-      strike(ctx, u, t, skill.bonus.hits, actionKind, skill)
+      strike(ctx, u, t, skill.bonus.hits, actionKind, skill, skill.bonus.hitBlocks)
       if (!hit.includes(t)) hit.push(t)
     }
     if (actionKind === "ex") u.bonusChance = 0
   }
-  if (hit.length) actionEv.targets = hit.map(unitRef)
+  // ③-a / ③-b 同时锁定时保留开场锁定列表：后手目标已倒下会伤害缺失，但不能在图上伪装成换了目标。
+  // 只有连发 / 循环 / 弹射这类未锁定技能，才用结算过程中实际换到的人回填。
+  if (hit.length && !locked) actionEv.targets = hit.map(unitRef)
 
   applyEffects(ctx, u, skill, hit.length ? hit : targets, me, pick, actionKind)
   return true
@@ -1736,20 +1841,25 @@ function execute(ctx, u, skill, label, actionKind, pick, lockedTargets) {
  */
 function autoSkillOf(u) {
   const tmpl = tmplOf(u)
-  // 挡不挡得住掩体是**枪本身**的性质，强化形态换的是倍率和段数，不换这一条
   const block = Boolean(tmpl.autoAttack?.block)
   const c = u.charge
   if (c && (c.shots > 0 || c.turns > 0)) {
+    const hits = c.hits
+    // 强化形态读取自己的 FormChange.Damage.Block；没带元数据的旧存档才退回基础普攻。
+    const chargedBlock = Array.isArray(c.hitBlocks) ? Boolean(c.hitBlocks[0]) : block
     return {
       target: c.count > 1 ? "enemy_adjacent" : "enemy_single",
-      count: c.count, hits: c.hits, effects: [],
-      charged: true, block,
+      count: c.count, hits, effects: [],
+      charged: true, block: chargedBlock,
+      hitBlocks: c.hitBlocks || hits.map(() => chargedBlock),
     }
   }
+  const hits = tmpl.autoAttack.hits
   return {
     target: tmpl.autoAttack.target || "enemy_single",
     count: tmpl.autoAttack.count || 1,
-    hits: tmpl.autoAttack.hits, effects: [], block,
+    hits, effects: [], block,
+    hitBlocks: tmpl.autoAttack.hitBlocks || hits.map(() => block),
   }
 }
 
@@ -1762,18 +1872,19 @@ function autoSkillOf(u) {
  * 主目标仍然走 `laneTarget` —— 强化的是威力和覆盖面。**索敌是不是也变了由 charge.targeting 决定**，
  * 那是瞬独有的，鹤城不带这个字段。
  *
- * `lockedTargets` 由 ③-b 同时锁定传入。不换人，伤害照算；普攻触发的技能（泉奈手里剑）
+ * `lockedPlan` 由 ③-b 同时锁定传入。不换人，伤害照算；普攻触发的技能（泉奈手里剑）
  * 在 tryAutoProc 里另走 execute，不带锁，目标死了会重锁。
  */
-function autoAttack(ctx, u, lockedTargets) {
+function autoAttack(ctx, u, lockedPlan) {
   const c = u.charge
   const sk = autoSkillOf(u)
   if (c && c.shots > 0) c.shots -= 1
   execute(ctx, u, {
-    // `block` 不能漏：这里重新拼了一个技能对象交给 execute，漏掉的话普攻虽然会被掩体
-    // 接走（那条走 resolveTargets 的 laneTarget），但溅射/越过时的 30% 格挡判定不生效
-    target: sk.target, count: sk.count, hits: sk.hits, effects: [], block: sk.block,
-  }, sk.charged ? "强化普攻" : "普攻", "normal", null, lockedTargets)
+    // `block` / `hitBlocks` 不能漏：这里重新拼了一个技能对象交给 execute，漏掉的话普攻
+    // 虽然会被掩体接走（那条走 resolveTargets 的 laneTarget），但溅射/越过时的 30% 格挡不生效
+    target: sk.target, count: sk.count, hits: sk.hits, effects: [],
+    block: sk.block, hitBlocks: sk.hitBlocks,
+  }, sk.charged ? "强化普攻" : "普攻", "normal", null, lockedPlan)
   // 打完最后一发才清：清早了这一发就读不到 charge.targeting，瞬的最后一枪会打回对位
   if (c && c.shots != null && c.shots <= 0) u.charge = null
   tryAutoProc(ctx, u)
@@ -2115,6 +2226,16 @@ export function validateAction(state, action) {
   if (lock) return `${nameOf(u)} 被${lock}，放不出 EX`
   const cost = exCostOf(u)
   if (budget < cost) return `Cost 不够：${nameOf(u)} 要 ${cost} 点，你还剩 ${budget} 点`
+
+  // EX 一次只结算一发，不参与 ③-a / ③-b 的同时锁定。指名对象必须在出手时仍存活；
+  // 前一发 EX 已经击倒的人不能再作为下一发目标，更不能静默回退成默认索敌。
+  if (cast.target?.idx != null && !cast.target.summon) {
+    const targetSide = cast.target.scope === "ally" ? side : draft.sides[1 - draft.activeSide]
+    const target = targetSide.units[cast.target.idx]
+    if (!target) return "那个目标不在场上，不能作为 EX 目标"
+    if (!target.alive) return `${nameOf(target)} 已经倒下了，不能作为 EX 目标`
+  }
+
   /**
    * 一个圈砸哪边（小春）：中间那个字在这儿不是可省的修饰，而是**技能的一半**——
    * 写「打」是 227% 的手榴弹，写「奶」是 101% 治愈力的回复，两者互斥。
@@ -2281,8 +2402,8 @@ export function playerTurn(prev, action) {
     const sk = tmplOf(u).skill
     // 先打出去再记账：没有合法目标（小春全队满血）就当这一轮没放 ——
     // 不进冷却、也不占掉 ③-b 的普攻
-    const locked = resolveTargets(state, u, sk, foes(), side, null, "skill")
-    if (!locked.length && sk.target !== "self") continue
+    const locked = resolveTargetPlan(state, u, sk, foes(), side, null, "skill")
+    if (!locked.targets.length && sk.target !== "self") continue
     skillQueue.push({ u, sk, locked })
   }
   for (const { u, sk, locked } of skillQueue) {
@@ -2307,7 +2428,7 @@ export function playerTurn(prev, action) {
     if (usedEx.has(u.idx) && !tmplOf(u).ex?.thenAutoAttack) continue
     autoQueue.push({
       u,
-      locked: resolveTargets(state, u, autoSkillOf(u), foes(), side, null, "normal"),
+      locked: resolveTargetPlan(state, u, autoSkillOf(u), foes(), side, null, "normal"),
     })
   }
   for (const { u, locked } of autoQueue) {

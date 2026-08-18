@@ -296,7 +296,13 @@ export function describeEffect(sk) {
         : `能量${a.min >= 2 ? "满充" : "半充"}时改为 ${a.total.toFixed(0)}%`)
     }
     if (sk.splashHits?.length) {
-      parts.push(`扩散仅同战场同身位，只吃 ${sk.splashHits.reduce((a, b) => a + b, 0).toFixed(0)}%`)
+      const splash = `扩散仅同战场同身位，只吃 ${sk.splashHits.reduce((a, b) => a + b, 0).toFixed(0)}%`
+      // 爱露：直击能被掩体挡，爆风从掩体上面过去 —— 不写出来卡面读成整发都可挡
+      if (sk.block && sk.splashHitBlocks?.every((b) => !b)) {
+        parts.push(`${splash}（直击可被掩体挡，爆风无视掩体）`)
+      } else {
+        parts.push(splash)
+      }
     }
     if (sk.falloff) {
       parts.push(`每多打 1 人衰减 ${Math.round(sk.falloff.rate * 100)}%（最多 ${Math.round(sk.falloff.max * 100)}%）`)

@@ -188,6 +188,9 @@ export const ROSTER = [
       "hits": [
         100
       ],
+      "hitBlocks": [
+        true
+      ],
       "block": true
     },
     "gearSkill": true,
@@ -205,8 +208,15 @@ export const ROSTER = [
         156.16,
         256.69
       ],
+      "hitBlocks": [
+        true,
+        false
+      ],
       "splashHits": [
         256.69
+      ],
+      "splashHitBlocks": [
+        false
       ],
       "block": true
     },
@@ -221,8 +231,15 @@ export const ROSTER = [
         274.38,
         292.07
       ],
+      "hitBlocks": [
+        true,
+        false
+      ],
       "splashHits": [
         292.07
+      ],
+      "splashHitBlocks": [
+        false
       ],
       "block": true
     }
@@ -257,6 +274,11 @@ export const ROSTER = [
         33.33,
         33.33
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true
+      ],
       "block": true
     },
     "gearSkill": true,
@@ -279,6 +301,9 @@ export const ROSTER = [
       },
       "hits": [
         405.56
+      ],
+      "hitBlocks": [
+        true
       ],
       "block": true
     },
@@ -328,6 +353,9 @@ export const ROSTER = [
       "hits": [
         100
       ],
+      "hitBlocks": [
+        true
+      ],
       "block": true
     },
     "gearSkill": false,
@@ -343,6 +371,9 @@ export const ROSTER = [
       "hits": [
         200.21
       ],
+      "hitBlocks": [
+        true
+      ],
       "block": true
     },
     "ex": {
@@ -354,6 +385,9 @@ export const ROSTER = [
       "cost": 4,
       "hits": [
         506.96
+      ],
+      "hitBlocks": [
+        true
       ],
       "falloff": {
         "rate": 0.1,
@@ -393,6 +427,11 @@ export const ROSTER = [
         33.33,
         33.34
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true
+      ],
       "block": true
     },
     "gearSkill": false,
@@ -416,6 +455,9 @@ export const ROSTER = [
       },
       "hits": [
         212.81
+      ],
+      "hitBlocks": [
+        false
       ]
     },
     "ex": {
@@ -436,6 +478,10 @@ export const ROSTER = [
       "hits": [
         101.88,
         101.88
+      ],
+      "hitBlocks": [
+        false,
+        false
       ]
     }
   },
@@ -472,6 +518,15 @@ export const ROSTER = [
         14.29,
         14.29,
         14.29
+      ],
+      "hitBlocks": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
       ],
       "block": true
     },
@@ -515,6 +570,18 @@ export const ROSTER = [
         63.604,
         63.604
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
       "block": true
     }
   },
@@ -547,6 +614,11 @@ export const ROSTER = [
         33.34,
         33.33,
         33.33
+      ],
+      "hitBlocks": [
+        true,
+        true,
+        true
       ],
       "block": true
     },
@@ -602,6 +674,13 @@ export const ROSTER = [
         87.198,
         87.198
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
       "block": true
     }
   },
@@ -633,6 +712,9 @@ export const ROSTER = [
       "hits": [
         100
       ],
+      "hitBlocks": [
+        true
+      ],
       "block": true
     },
     "gearSkill": false,
@@ -648,6 +730,9 @@ export const ROSTER = [
       "hits": [
         229.83
       ],
+      "hitBlocks": [
+        true
+      ],
       "block": true
     },
     "ex": {
@@ -661,6 +746,11 @@ export const ROSTER = [
         350.73,
         350.73,
         350.73
+      ],
+      "hitBlocks": [
+        true,
+        true,
+        true
       ],
       "block": true
     }
@@ -696,6 +786,13 @@ export const ROSTER = [
         20,
         20,
         20
+      ],
+      "hitBlocks": [
+        true,
+        true,
+        true,
+        true,
+        true
       ],
       "block": true
     },
@@ -746,6 +843,19 @@ export const ROSTER = [
         67.617,
         67.617,
         67.617
+      ],
+      "hitBlocks": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
       ]
     }
   },
@@ -778,6 +888,11 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
+      ],
+      "hitBlocks": [
+        true,
+        true,
+        true
       ],
       "block": true
     },
@@ -814,6 +929,29 @@ export const ROSTER = [
         20.5542,
         20.5542,
         20.5542
+      ],
+      "hitBlocks": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
       ]
     },
     "ex": {
@@ -870,6 +1008,11 @@ export const ROSTER = [
         33.33,
         33.34
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true
+      ],
       "block": true
     },
     "gearSkill": true,
@@ -885,6 +1028,9 @@ export const ROSTER = [
       },
       "hits": [
         290.51
+      ],
+      "hitBlocks": [
+        true
       ],
       "block": true
     },
@@ -905,6 +1051,18 @@ export const ROSTER = [
         40.045,
         40.045,
         40.045
+      ],
+      "hitBlocks": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
       ],
       "block": true
     }
@@ -937,6 +1095,9 @@ export const ROSTER = [
       "hits": [
         100
       ],
+      "hitBlocks": [
+        true
+      ],
       "block": true
     },
     "gearSkill": false,
@@ -966,6 +1127,10 @@ export const ROSTER = [
           "hits": [
             153.12
           ],
+          "hitBlocks": [
+            true
+          ],
+          "block": true,
           "count": 1,
           "turns": 6,
           "targeting": "max_atk"
@@ -1023,6 +1188,14 @@ export const ROSTER = [
         16.66,
         16.67
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
       "block": true
     },
     "gearSkill": true,
@@ -1065,6 +1238,11 @@ export const ROSTER = [
         247.3986,
         247.3986
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true
+      ],
       "block": true
     }
   },
@@ -1100,6 +1278,14 @@ export const ROSTER = [
         16.66,
         16.67,
         16.67
+      ],
+      "hitBlocks": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
       ],
       "block": true
     },
@@ -1141,6 +1327,11 @@ export const ROSTER = [
             69.355,
             69.355
           ],
+          "hitBlocks": [
+            true,
+            true
+          ],
+          "block": true,
           "count": 2,
           "shots": 2
         },
@@ -1185,6 +1376,9 @@ export const ROSTER = [
       "hits": [
         100
       ],
+      "hitBlocks": [
+        true
+      ],
       "block": true
     },
     "gearSkill": false,
@@ -1199,6 +1393,9 @@ export const ROSTER = [
       },
       "hits": [
         396.8
+      ],
+      "hitBlocks": [
+        true
       ],
       "block": true
     },
@@ -1219,6 +1416,9 @@ export const ROSTER = [
       "cost": 2,
       "hits": [
         547.95
+      ],
+      "hitBlocks": [
+        true
       ],
       "block": true
     }
@@ -1251,6 +1451,9 @@ export const ROSTER = [
       "hits": [
         100
       ],
+      "hitBlocks": [
+        false
+      ],
       "target": "enemy_adjacent",
       "count": 2
     },
@@ -1267,6 +1470,9 @@ export const ROSTER = [
       },
       "hits": [
         298.99
+      ],
+      "hitBlocks": [
+        true
       ],
       "block": true
     },
@@ -1318,6 +1524,11 @@ export const ROSTER = [
         33.33,
         33.34
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true
+      ],
       "block": true
     },
     "gearSkill": false,
@@ -1350,6 +1561,9 @@ export const ROSTER = [
       "cost": 4,
       "hits": [
         392.11
+      ],
+      "hitBlocks": [
+        false
       ]
     }
   },
@@ -1380,6 +1594,9 @@ export const ROSTER = [
     "autoAttack": {
       "hits": [
         100
+      ],
+      "hitBlocks": [
+        true
       ],
       "block": true
     },
@@ -1412,6 +1629,9 @@ export const ROSTER = [
       "cost": 5,
       "hits": [
         574.31
+      ],
+      "hitBlocks": [
+        true
       ],
       "block": true
     }
@@ -1447,6 +1667,13 @@ export const ROSTER = [
         20,
         20,
         20
+      ],
+      "hitBlocks": [
+        true,
+        true,
+        true,
+        true,
+        true
       ],
       "block": true
     },
@@ -1489,6 +1716,10 @@ export const ROSTER = [
         216.27,
         216.27
       ],
+      "hitBlocks": [
+        true,
+        true
+      ],
       "block": true
     }
   },
@@ -1520,6 +1751,9 @@ export const ROSTER = [
       "hits": [
         100
       ],
+      "hitBlocks": [
+        true
+      ],
       "block": true
     },
     "gearSkill": false,
@@ -1543,6 +1777,9 @@ export const ROSTER = [
       "hits": [
         132.83
       ],
+      "hitBlocks": [
+        true
+      ],
       "block": true
     },
     "ex": {
@@ -1562,6 +1799,9 @@ export const ROSTER = [
       "cost": 6,
       "hits": [
         349.08
+      ],
+      "hitBlocks": [
+        false
       ]
     }
   },
@@ -1595,6 +1835,11 @@ export const ROSTER = [
         33.33,
         33.34
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true
+      ],
       "block": true
     },
     "gearSkill": false,
@@ -1610,6 +1855,9 @@ export const ROSTER = [
       },
       "hits": [
         334.59
+      ],
+      "hitBlocks": [
+        false
       ]
     },
     "ex": {
@@ -1621,6 +1869,9 @@ export const ROSTER = [
       "cost": 4,
       "hits": [
         409.72
+      ],
+      "hitBlocks": [
+        false
       ]
     }
   },
@@ -1653,6 +1904,11 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
+      ],
+      "hitBlocks": [
+        true,
+        true,
+        true
       ],
       "block": true
     },
@@ -1700,6 +1956,12 @@ export const ROSTER = [
         186.5075,
         186.5075
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true,
+        true
+      ],
       "depth": "through",
       "block": true
     }
@@ -1734,6 +1996,11 @@ export const ROSTER = [
         33.33,
         33.34
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true
+      ],
       "block": true
     },
     "gearSkill": true,
@@ -1758,6 +2025,19 @@ export const ROSTER = [
         30.5397,
         30.5397,
         30.5733
+      ],
+      "hitBlocks": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
       ]
     },
     "ex": {
@@ -1807,6 +2087,11 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
+      ],
+      "hitBlocks": [
+        true,
+        true,
+        true
       ],
       "block": true
     },
@@ -1883,6 +2168,11 @@ export const ROSTER = [
         33.33,
         33.34
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true
+      ],
       "block": true
     },
     "gearSkill": true,
@@ -1914,6 +2204,17 @@ export const ROSTER = [
         36.5986,
         36.5986,
         36.5986
+      ],
+      "hitBlocks": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
       ]
     },
     "ex": {
@@ -1962,6 +2263,11 @@ export const ROSTER = [
         33.33,
         33.33
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true
+      ],
       "block": true
     },
     "gearSkill": false,
@@ -2002,6 +2308,17 @@ export const ROSTER = [
         91.2398,
         91.2398
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
       "block": true
     }
   },
@@ -2034,6 +2351,11 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
+      ],
+      "hitBlocks": [
+        true,
+        true,
+        true
       ],
       "block": true
     },
@@ -2068,6 +2390,19 @@ export const ROSTER = [
         24.4494,
         24.4494,
         24.4494
+      ],
+      "hitBlocks": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
       ],
       "hpRate": {
         "lo": 0,
@@ -2132,6 +2467,11 @@ export const ROSTER = [
         33.33,
         33.34
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true
+      ],
       "block": true
     },
     "gearSkill": true,
@@ -2163,6 +2503,18 @@ export const ROSTER = [
         25.452,
         25.452,
         25.452
+      ],
+      "hitBlocks": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
       ]
     },
     "ex": {
@@ -2183,6 +2535,9 @@ export const ROSTER = [
       "cost": 4,
       "hits": [
         389.14
+      ],
+      "hitBlocks": [
+        false
       ]
     }
   },
@@ -2217,6 +2572,13 @@ export const ROSTER = [
         20,
         20,
         20
+      ],
+      "hitBlocks": [
+        true,
+        true,
+        true,
+        true,
+        true
       ],
       "block": true
     },
@@ -2295,6 +2657,11 @@ export const ROSTER = [
         33.33,
         33.34
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true
+      ],
       "block": true
     },
     "gearSkill": false,
@@ -2312,6 +2679,9 @@ export const ROSTER = [
       },
       "hits": [
         444.73
+      ],
+      "hitBlocks": [
+        false
       ]
     },
     "ex": {
@@ -2364,6 +2734,9 @@ export const ROSTER = [
       "hits": [
         100
       ],
+      "hitBlocks": [
+        false
+      ],
       "target": "enemy_adjacent",
       "count": 2
     },
@@ -2390,6 +2763,9 @@ export const ROSTER = [
       "hits": [
         159.54
       ],
+      "hitBlocks": [
+        false
+      ],
       "pick": "max_atk"
     },
     "ex": {
@@ -2401,6 +2777,9 @@ export const ROSTER = [
       "cost": 4,
       "hits": [
         312.92
+      ],
+      "hitBlocks": [
+        false
       ]
     }
   },
@@ -2432,6 +2811,9 @@ export const ROSTER = [
       "hits": [
         100
       ],
+      "hitBlocks": [
+        true
+      ],
       "block": true
     },
     "gearSkill": false,
@@ -2456,6 +2838,9 @@ export const ROSTER = [
       "hits": [
         292.67
       ],
+      "hitBlocks": [
+        true
+      ],
       "block": true
     },
     "ex": {
@@ -2478,6 +2863,21 @@ export const ROSTER = [
         44.4526,
         44.4526,
         533.005
+      ],
+      "hitBlocks": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
       ],
       "block": true
     }
@@ -2514,6 +2914,14 @@ export const ROSTER = [
         16.67,
         16.67,
         16.67
+      ],
+      "hitBlocks": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
       ],
       "block": true
     },
@@ -2611,6 +3019,68 @@ export const ROSTER = [
         8.6299,
         8.6299
       ],
+      "hitBlocks": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
       "altHits": [
         {
           "state": "fury",
@@ -2677,6 +3147,68 @@ export const ROSTER = [
             17.2598,
             17.2598
           ],
+          "hitBlocks": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+          ],
           "total": 952.72
         }
       ]
@@ -2713,6 +3245,13 @@ export const ROSTER = [
         20,
         20,
         20
+      ],
+      "hitBlocks": [
+        true,
+        true,
+        true,
+        true,
+        true
       ],
       "block": true
     },
@@ -2769,6 +3308,48 @@ export const ROSTER = [
         16.1581,
         16.1581
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
       "block": true
     },
     "ex": {
@@ -2814,6 +3395,9 @@ export const ROSTER = [
     "autoAttack": {
       "hits": [
         100
+      ],
+      "hitBlocks": [
+        false
       ],
       "target": "enemy_adjacent",
       "count": 2
@@ -2874,6 +3458,9 @@ export const ROSTER = [
       "hits": [
         311.15
       ],
+      "hitBlocks": [
+        false
+      ],
       "depth": "through",
       "altHits": [
         {
@@ -2882,6 +3469,9 @@ export const ROSTER = [
           "hits": [
             622.25
           ],
+          "hitBlocks": [
+            false
+          ],
           "total": 622.25
         },
         {
@@ -2889,6 +3479,9 @@ export const ROSTER = [
           "min": 1,
           "hits": [
             466.7
+          ],
+          "hitBlocks": [
+            false
           ],
           "total": 466.7
         }
@@ -2922,6 +3515,9 @@ export const ROSTER = [
     "autoAttack": {
       "hits": [
         100
+      ],
+      "hitBlocks": [
+        true
       ],
       "block": true
     },
@@ -2983,6 +3579,13 @@ export const ROSTER = [
         119.64,
         119.64
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
       "block": true
     }
   },
@@ -3015,6 +3618,11 @@ export const ROSTER = [
         33.33,
         33.33,
         33.34
+      ],
+      "hitBlocks": [
+        true,
+        true,
+        true
       ],
       "block": true
     },
@@ -3078,6 +3686,11 @@ export const ROSTER = [
         112.7954,
         112.8292
       ],
+      "hitBlocks": [
+        true,
+        true,
+        true
+      ],
       "depth": "through",
       "block": true
     }
@@ -3109,6 +3722,9 @@ export const ROSTER = [
     "autoAttack": {
       "hits": [
         100
+      ],
+      "hitBlocks": [
+        true
       ],
       "block": true
     },
@@ -3151,6 +3767,12 @@ export const ROSTER = [
         128.9575,
         128.9575,
         128.9575
+      ],
+      "hitBlocks": [
+        false,
+        false,
+        false,
+        false
       ]
     }
   },
@@ -3181,6 +3803,9 @@ export const ROSTER = [
     "autoAttack": {
       "hits": [
         100
+      ],
+      "hitBlocks": [
+        true
       ],
       "block": true
     },
@@ -3221,6 +3846,9 @@ export const ROSTER = [
       "cost": 3,
       "hits": [
         227.31
+      ],
+      "hitBlocks": [
+        false
       ],
       "circle": true
     }
@@ -3268,6 +3896,13 @@ export const ROSTER = [
         15.806,
         15.806
       ],
+      "hitBlocks": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
       "hpRate": {
         "lo": 0,
         "hi": 1,
@@ -3284,6 +3919,9 @@ export const ROSTER = [
       "cost": 4,
       "hits": [
         311.43
+      ],
+      "hitBlocks": [
+        false
       ],
       "instances": 5
     }
@@ -3334,6 +3972,9 @@ export const ROSTER = [
       "hits": [
         223.65
       ],
+      "hitBlocks": [
+        true
+      ],
       "block": true
     },
     "ex": {
@@ -3344,6 +3985,9 @@ export const ROSTER = [
       "cost": 4,
       "hits": [
         687.26
+      ],
+      "hitBlocks": [
+        true
       ],
       "block": true
     }
@@ -3474,6 +4118,9 @@ export const ROSTER = [
       },
       "hits": [
         164.64
+      ],
+      "hitBlocks": [
+        false
       ]
     },
     "ex": {
@@ -3485,11 +4132,17 @@ export const ROSTER = [
       "hits": [
         415.52
       ],
+      "hitBlocks": [
+        true
+      ],
       "block": true,
       "bonus": {
         "chance": 0.5,
         "hits": [
           623.28
+        ],
+        "hitBlocks": [
+          true
         ]
       }
     }
@@ -3558,6 +4211,9 @@ export const ROSTER = [
       "cost": 5,
       "hits": [
         265.44
+      ],
+      "hitBlocks": [
+        false
       ]
     }
   },
@@ -3745,6 +4401,9 @@ export const ROSTER = [
       "cost": 4,
       "hits": [
         271.88
+      ],
+      "hitBlocks": [
+        false
       ]
     }
   },
@@ -3862,6 +4521,9 @@ export const ROSTER = [
       },
       "hits": [
         252
+      ],
+      "hitBlocks": [
+        false
       ]
     },
     "ex": {
@@ -4073,6 +4735,9 @@ export const ROSTER = [
       },
       "hits": [
         237.3
+      ],
+      "hitBlocks": [
+        false
       ]
     },
     "ex": {
@@ -4323,6 +4988,9 @@ export const ROSTER = [
       "hits": [
         261.45
       ],
+      "hitBlocks": [
+        true
+      ],
       "block": true
     },
     "ex": {
@@ -4342,6 +5010,9 @@ export const ROSTER = [
       "cost": 4,
       "hits": [
         220.92
+      ],
+      "hitBlocks": [
+        false
       ]
     }
   },
@@ -4391,6 +5062,9 @@ export const ROSTER = [
       },
       "hits": [
         221.76
+      ],
+      "hitBlocks": [
+        false
       ]
     },
     "ex": {

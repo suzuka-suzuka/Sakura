@@ -323,6 +323,12 @@ function hitsOf(dmg) {
   return split.map((h) => Number(((total * h) / 1e4 / 100).toFixed(4)))
 }
 
+/** 与 hitsOf 等长：这一段 `Damage.Block === 1` 才挡得住掩体。爱露直击=1、爆风=0，必须分段记。 */
+function hitBlocksOf(dmg) {
+  const split = dmg.Hits || [10000]
+  return split.map(() => dmg.Block === 1)
+}
+
 /**
  * 「固定场地」类技能（全 272 人里 5 个：惠、千世、纱绫×2、切里诺（温泉））：
  * 在地上留一片区域，站在里面的人**持续挨打**，施放者死了场地也还在。
@@ -580,10 +586,12 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
     out.effects.push(zone)
   } else if (cyc && dmgs.length) {
     out.hits = hitsOf(dmgs[0])
+    out.hitBlocks = hitBlocksOf(dmgs[0])
     out.target = "enemy_cycle"
     out.count = Number(cyc[1])
   } else if (chain && dmgs.length) {
     out.hits = hitsOf(dmgs[0])
+    out.hitBlocks = hitBlocksOf(dmgs[0])
     out.target = "enemy_chain"
     out.count = Number(chain[1])
   } else if (inst >= 4) {
@@ -596,19 +604,24 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
      * 全 272 人里只有响踩这条；睦月那两个 3 圈仍走下面的固定窗口（≤ 场上人数，没有浪费）。
      */
     out.hits = [hitsOf(dmgs[0])[0]]
+    out.hitBlocks = [dmgs[0].Block === 1]
     out.instances = inst
     out.target = "enemy_instances"
   } else if (inst) {
     // N 个爆炸源 → 打 N 个人，每人吃一份。不拆的话睦月的 EX 会变成 2 个人各吃 1229%
     out.hits = [hitsOf(dmgs[0])[0]]
+    out.hitBlocks = [dmgs[0].Block === 1]
     out.count = inst
     out.target = "enemy_adjacent"
   } else if (dmgs.length) {
     out.hits = hitsOf(dmgs[0])
+    out.hitBlocks = hitBlocksOf(dmgs[0])
     // 扩散段只在 enemy_adjacent 上成立 —— 那是唯一能保证 targets[0] 就是主目标的分支
     if (dmgs.length > 1 && out.target === "enemy_adjacent" && SPLASH_DESC(desc)) {
       out.splashHits = dmgs.slice(1).flatMap(hitsOf)
+      out.splashHitBlocks = dmgs.slice(1).flatMap(hitBlocksOf)
       out.hits = out.hits.concat(out.splashHits)
+      out.hitBlocks = out.hitBlocks.concat(out.splashHitBlocks)
     }
     // 只在 AoE 上成立：弹射（enemy_random）逐段抽目标，没有「第几个」的概念
     const fo = parseFalloff(desc)
@@ -619,11 +632,15 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
     if (/对直线范围内/.test(desc) || student?.Id === 13011) out.depth = "through"
   }
   /**
-   * **这一发挡不挡得住掩体**，原数据里是结构化字段（`Damage.Block`），不用按槽位猜。
+   * **这一段挡不挡得住掩体**，原数据里是结构化字段（`Damage.Block`），不用按槽位猜。
    *
    * 规律是**物理的而不是槽位的**：直射单发 = 1（挡得住），范围 / 曲射 = 0（从掩体上面过去）。
    * 池内 56 人里普攻 35 个可挡、3 个不可挡（千世的圆形普攻、柚子、爱丽丝的光束），
    * EX 17 可挡 17 不可挡，普技 12 / 14 —— 跟「EX 一律穿墙」那种一刀切在 34 个技能上对不上。
+   *
+   * **同一技能里两段可以不同**：爱露 EX / 普技都是直击 `Block=1`、爆风 `Block=0`。
+   * 分段标记写在 `hitBlocks` / `splashHitBlocks`；`block` 只表示「主伤害段打得中掩体」，
+   * 给没指名时的整发转掩体用 —— 不能拿它去盖掉爆风段。
    *
    * `Block` 还有 2 / 3 两档（全数据 15 处，全在池外：日向、时雨、未花、皋月、雪玲(泳装)…），
    * 遇到了再说，现在只认 1。
@@ -794,11 +811,17 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
         const nd = (na?.Effects || []).find((x) => x.Type === "Damage")
         const m = /倍率强化至\s*([\d.]+)\s*%/.exec(desc)
         const mult = m ? Number(m[1]) / 100 : 1
+        const chargeHits = fcd ? hitsOf(fcd)
+          : nd ? hitsOf(nd).map((h) => Number((h * mult).toFixed(4)))
+            : [100 * mult]
         const ch = {
           type: "charge",
-          hits: fcd ? hitsOf(fcd)
-            : nd ? hitsOf(nd).map((h) => Number((h * mult).toFixed(4)))
-              : [100 * mult],
+          hits: chargeHits,
+          // 强化普攻有自己的 `Normal.FormChange.Damage.Block`，不能假定与基础普攻一致。
+          hitBlocks: fcd ? hitBlocksOf(fcd)
+            : nd ? chargeHits.map(() => nd.Block === 1)
+              : chargeHits.map(() => false),
+          ...(fcd?.Block === 1 || (!fcd && nd?.Block === 1) ? { block: true } : {}),
           // 扇形也在强化普攻自己身上（EX 的 Radius 描述的就是它），取不到才退回 EX 的范围
           count: (fc ? resolveTarget(fc, []).count : 0) || tg.count || 1,
         }
@@ -924,8 +947,10 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
     // 倍率有原数据那一段就直接抄它的分段（精确），只有描述覆写（妮露爱用品 ×2）才乘出来
     if (alts.length) out.altHits = alts.sort((a, b) => b.min - a.min).map((a) => {
       const hits = a.src ? hitsOf(a.src) : out.hits.map((h) => Number((h * a.mult).toFixed(4)))
+      const hitBlocks = a.src ? hitBlocksOf(a.src)
+        : (out.hitBlocks || hits.map(() => Boolean(out.block)))
       return {
-        state: a.state, min: a.min, hits,
+        state: a.state, min: a.min, hits, hitBlocks,
         total: Number(hits.reduce((x, y) => x + y, 0).toFixed(2)),
       }
     })
@@ -942,9 +967,17 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
    */
   const bonus = /([\d.]+)\s*%\s*概率造成自身攻击力\s*[\d.]+\s*%\s*的追加伤害/.exec(desc)
   if (bonus && dmgs.length > 1 && !out.altHits && !out.splashHits) {
-    out.bonus = { chance: Number(bonus[1]) / 100, hits: hitsOf(dmgs[1]) }
+    out.bonus = {
+      chance: Number(bonus[1]) / 100,
+      hits: hitsOf(dmgs[1]),
+      hitBlocks: hitBlocksOf(dmgs[1]),
+    }
     // 第二段是「可能有」的追加，不能留在主 hits 里当必中的一段
-    if (out.hits?.length > 1) out.hits = out.hits.slice(0, hitsOf(dmgs[0]).length)
+    if (out.hits?.length > 1) {
+      const n0 = hitsOf(dmgs[0]).length
+      out.hits = out.hits.slice(0, n0)
+      if (out.hitBlocks?.length) out.hitBlocks = out.hitBlocks.slice(0, n0)
+    }
   }
   /**
    * 「下 1 次 EX 技能造成追加伤害的概率加算 12.5%．※ 最多叠加 2 次」（真白的爱用品普技）。
@@ -1069,7 +1102,8 @@ const units = IDS.map(([sid, code]) => {
     // 以前那个 `: [1]` 的兜底会给它们造一个 1% 倍率的假普攻 —— 那本身就是「它们不该走
     // 普攻循环」的信号。这里直接给 null，引擎的 ③-b 也不遍历支援。
     autoAttack: support ? null : {
-      hits: nd ? nd.Hits.map((h) => Number(((nd.Scale[0] * h) / 1e4 / 100).toFixed(4))) : [1],
+      hits: nd ? hitsOf(nd) : [1],
+      hitBlocks: nd ? hitBlocksOf(nd) : [false],
       // 普攻同样按原数据认挡不挡得住：池内 35 个可挡，千世 / 柚子 / 爱丽丝那三个不可挡
       ...(nd?.Block === 1 ? { block: true } : {}),
       ...(na?.Radius ? (({ target, count }) => ({ target, count }))(resolveTarget(na, [])) : {}),

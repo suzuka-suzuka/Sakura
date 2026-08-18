@@ -413,25 +413,25 @@ check("千世普攻 · 人偶挡 3 位（另一战场）→ 不拦，仍打 1·2
 check("野宫单体普攻 · 人偶挡 2 位（同战场）→ 照样接走", autoVsDoll("野宫", 0, 1), ["偶"])
 check("野宫单体普攻 · 人偶挡 3 位（另一战场）→ 不接", autoVsDoll("野宫", 0, 2), [1])
 
-console.log("\n=== 13. 指定目标已死：按施法者同战场对线，空了越界打最近 ===")
-/** 真纪 1 位 + 茜 4 位都点名打红1。kills 是开局已死的红方号位（0-based） */
-function stackedEx(kills = [], hp0 = 1) {
-  const st = setup(["真纪", "野宫", "野宫", "茜"], ["白子", "星野", "日奈", "爱露"], kills.map((i) => [1, i]))
-  if (st.sides[1].units[0].alive) st.sides[1].units[0].hp = hp0
+console.log("\n=== 13. EX 指名目标必须存活，不自动换目标 ===")
+{
+  // 第一发真纪 EX 击倒红1；第二发茜继续点红1应直接报错，不扣费、不产生事件。
+  const st = setup(["真纪", "野宫", "野宫", "茜"], ["白子", "星野", "日奈", "爱露"])
+  st.sides[1].units[0].hp = 1
   const first = playerTurn(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] })
-  const second = playerTurn(first.state, { type: "ex", casts: [{ pos: 3, target: { scope: "foe", idx: 0 } }] })
-  const akane = second.events.find((e) => e.type === "action" && e.action === "ex" && e.source.pos === 3)
-  return (akane?.targets || []).map((t) => t.pos + 1)
+  const secondAction = { type: "ex", casts: [{ pos: 3, target: { scope: "foe", idx: 0 } }] }
+  check("第一发已经击倒红1", first.state.sides[1].units[0].alive, false)
+  check("第二发继续指名红1：校验直接报已倒下", /已经倒下/.test(validateAction(first.state, secondAction) || ""), true)
+  const second = playerTurn(first.state, secondAction)
+  check("非法第二发不产生事件", second.events?.length || 0, 0)
+  check("非法第二发不改变 Cost", second.state.sides[0].cost, first.state.sides[0].cost)
+
+  // 开局已经倒下的角色同样不能作为 EX 目标，不存在默认对线 / 越界兜底。
+  const deadAtStart = setup(["野宫", "野宫", "野宫", "茜"],
+    ["白子", "星野", "日奈", "爱露"], [[1, 0], [1, 2], [1, 3]])
+  check("开局已倒下目标也直接判非法",
+    /已经倒下/.test(validateAction(deadAtStart, secondAction) || ""), true)
 }
-check("红1 被真纪秒了，茜仍点红1 → 打茜自己同战场的红4", stackedEx(), [4])
-// 只放茜，避免真纪先把红2 也打掉。红1 已死、茜这边 3·4 也空，只剩红2
-const onlyAkane = (() => {
-  const st = setup(["野宫", "野宫", "野宫", "茜"], ["白子", "星野", "日奈", "爱露"], [[1, 0], [1, 2], [1, 3]])
-  const r = playerTurn(st, { type: "ex", casts: [{ pos: 3, target: { scope: "foe", idx: 0 } }] })
-  const ev = r.events.find((e) => e.type === "action" && e.action === "ex" && e.source.pos === 3)
-  return (ev?.targets || []).map((t) => t.pos + 1)
-})()
-check("红1 已死且茜这边 3·4 也空 → 越界打最近的红2", onlyAkane, [2])
 
 const two = setup(["真纪", "野宫", "野宫", "茜"], ["白子", "星野", "日奈", "爱露"])
 const rejected = playerTurn(two, {
@@ -630,7 +630,8 @@ console.log("\n=== 19. 鹤城的换弹强化仍然按发数走 ===")
   const afterPass = playerTurn(justEx.state, { type: "pass" })
   check("过了之后才打出第 1 发强化普攻",
     afterPass.log.filter((l) => /鹤城 强化普攻/.test(l)).length, 1)
-  check("按发数存续，不带 turns", afterPass.state.sides[0].units[0].charge, { hits: [69.355, 69.355], count: 2, shots: 1 })
+  check("按发数存续，并保留强化普攻自己的 Block", afterPass.state.sides[0].units[0].charge,
+    { hits: [69.355, 69.355], hitBlocks: [true, true], block: true, count: 2, shots: 1 })
   let r = afterPass
   r = run(run(r.state, { type: "pass" }).state, { type: "pass" })
   check("下个己方回合打出第 2 发", r.log.filter((l) => /鹤城 强化普攻/.test(l)).length, 1)
@@ -1599,7 +1600,7 @@ console.log("\n=== 39. 切里诺：EX 全体、集火选最高攻、嘲讽优先
 console.log("\n=== 40. ③-a 同时锁定：打死不换目标，奶也按开场血量锁人 ===")
 {
   // 两个茜都是单体伤害普技。红 1 是前排星野，同战场两个人都会锁她。
-  // 她只剩 1 血，第一个人足够打死。同时锁定则两发都锁星野，第二发伤害照记。
+  // 她只剩 1 血，第一个人足够打死。同时锁定则两发都锁星野；第二发不换人，但伤害缺失。
   const dmg = setup(["茜", "茜", "野宫", "野宫"], ["星野", "野宫", "野宫", "野宫"])
   for (const s of dmg.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
   // 命中拉满：闪避有 0.2 下限，星野底闪 1416，得给茜加命中才必中
@@ -1612,9 +1613,9 @@ console.log("\n=== 40. ③-a 同时锁定：打死不换目标，奶也按开场
     .filter((e) => e.type === "action" && e.action === "skill" && e.source.side === 0)
     .map((e) => (e.targets || []).map((t) => t.pos + 1))
   check("两个单体普技都锁开场那个残血前排，第二发不换人", skillHits, [[1], [1]])
-  check("第二发伤害仍记在同一个人头上（同时命中，不丢）",
-    dmgR.events.some((e) => e.type === "damage" && !e.dot && e.source?.side === 0
-      && e.source?.pos === 1 && e.target?.pos === 0 && (e.totalAmount ?? e.amount) > 0), true)
+  check("第二发不换人，但目标已倒下所以伤害缺失",
+    dmgR.events.some((e) => (e.type === "damage" || e.type === "miss") && !e.dot && e.source?.side === 0
+      && e.source?.pos === 1 && e.target?.pos === 0), false)
   check("倒下只报一次", dmgR.log.filter((l) => /倒下/.test(l)).length, 1)
 
   // 椿 20% 会自奶，小春 / 绿同一回合都就绪。同时锁定则三个人都认椿；
@@ -1647,12 +1648,12 @@ console.log("\n=== 41. ③-b 普攻同时锁定；普攻触发的技能仍会换
   // 1·2 号位同战场，都会锁红 1；3·4 是另一战场，本来就打自己那边
   check("同战场两个普攻都锁开场那个残血前排，不换人", autos.slice(0, 2), [[1], [1]])
   check("另一战场不受影响", autos.slice(2), [[3], [4]])
-  check("后手普攻伤害仍记在红 1 头上",
-    r.events.some((e) => e.type === "damage" && !e.dot && e.source?.side === 0
-      && e.source?.pos === 1 && e.target?.pos === 0 && (e.totalAmount ?? e.amount) > 0), true)
+  check("后手普攻不换人，但目标已倒下所以伤害缺失",
+    r.events.some((e) => (e.type === "damage" || e.type === "miss") && !e.dot && e.source?.side === 0
+      && e.source?.pos === 1 && e.target?.pos === 0), false)
   check("普攻阶段倒下只报一次", r.log.filter((l) => /倒下/.test(l)).length, 1)
 
-  // 泉奈第 6 枪触发手里剑：普攻仍打尸体，手里剑按当时场上重锁到红 2
+  // 泉奈第 6 枪触发手里剑：队友普攻仍锁尸体但伤害缺失；手里剑按触发时场上重锁到红 2
   const iz = setup(["泉奈", "野宫", "野宫", "野宫"], ["星野", "野宫", "野宫", "野宫"])
   for (const s of iz.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
   for (const u of iz.sides[0].units) u.buffs.push({ stat: "acc", value: 20, turns: 99, st: -1 })
@@ -1668,6 +1669,9 @@ console.log("\n=== 41. ③-b 普攻同时锁定；普攻触发的技能仍会换
     e.type === "action" && e.action === "normal" && e.source.side === 0 && e.source.pos === 1)
   check("泉奈普攻仍锁开场的残血前排", (izAuto?.targets || []).map((t) => t.pos + 1), [1])
   check("队友普攻也锁那具尸体，不换人", (allyAuto?.targets || []).map((t) => t.pos + 1), [1])
+  check("队友锁尸体的普攻伤害缺失",
+    izR.events.some((e) => (e.type === "damage" || e.type === "miss") && !e.dot
+      && e.source?.side === 0 && e.source?.pos === 1 && e.target?.pos === 0), false)
   check("手里剑是普攻触发，目标死了会换到红 2", (izSkill?.targets || []).map((t) => t.pos + 1), [2])
 
   // 击杀触发只认内部谁先把血打到 0
@@ -1678,7 +1682,7 @@ console.log("\n=== 41. ③-b 普攻同时锁定；普攻触发的技能仍会换
   killSt.sides[0].units[0].skillCd = 0
   const killR = run(killSt, { type: "pass" })
   check("只有先把血打到 0 的鹤城触发击杀技", killR.state.sides[0].units[0].skillUses, 1)
-  check("后手野宫打在已倒下的人身上，不再触发击杀", killR.state.sides[0].units[1].skillUses, 0)
+  check("后手野宫仍锁已倒下目标，伤害缺失且不触发击杀", killR.state.sides[0].units[1].skillUses, 0)
 }
 
 console.log("\n=== 42. 被控：条件技不吞，周期技照吞 ===")
@@ -1892,7 +1896,8 @@ console.log("\n=== 38. 掩体是「掩护」不是「墙」 ===")
    */
   const blockRateOf = (attacker) => {
     let seg = 0, blk = 0
-    for (let s = 0; s < 150; s++) {
+    // 单段样本 150 时标准误约 3.7%，固定种子偶尔会擦过 ±6% 边界；提到 600 稳定量两条事件路径。
+    for (let s = 0; s < 600; s++) {
       const c = cover([attacker, "野宫", "野宫", "野宫"], 0)
       c.rng = (s * 2654435761) >>> 0
       for (const e of playerTurn(c, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] }).events) {
@@ -1911,7 +1916,7 @@ console.log("\n=== 38. 掩体是「掩护」不是「墙」 ===")
    * `applyDamage` 曾经不转发 `blocked`，于是多段的格挡在图上和统计里**完全看不见**，
    * 而只测单段的用例照样全绿。
    */
-  for (const [who, tag] of [["伊织", "单段·miss 路径"], ["白子", "多段·damage 路径"]]) {
+  for (const [who, tag] of [["茜", "单段·miss 路径"], ["白子", "多段·damage 路径"]]) {
     const [rate, n] = blockRateOf(who)
     check(`${tag}：格挡率 ≈ ${CFG.COVER_BLOCK_RATE * 100}%（实测 ${(rate * 100).toFixed(1)}%，n=${n}）`,
       Math.abs(rate - CFG.COVER_BLOCK_RATE) < 0.06, true)
@@ -2170,6 +2175,155 @@ console.log("\n=== 43. 支援的刀不被嘲讽拉走，但照吃集火 ===")
     check("支援吃集火：爱理改打被点名的 2 位", out["5技"], "2")
     check("真白也锁在被点名的人身上", out["6技"], "2")
   }
+}
+
+
+console.log("\n=== 38b. 爱露分段掩体：直击可挡、爆风无视 ===")
+{
+  const of = (n) => ROSTER.find((t) => t.name === n)
+  check("爱露 EX 主段可挡", of("爱露").ex.block, true)
+  check("爱露 EX hitBlocks = [直击可挡, 爆风不可挡]", of("爱露").ex.hitBlocks, [true, false])
+  check("爱露 EX splashHitBlocks = [爆风不可挡]", of("爱露").ex.splashHitBlocks, [false])
+  check("爱露普技同样分段", of("爱露").skill.hitBlocks, [true, false])
+  // 真白追伤两段都是直射 Block=1，别被爱露那条改坏
+  check("真白 EX 主段可挡", of("真白").ex.block, true)
+  check("真白 EX 追伤也可挡", of("真白").ex.bonus.hitBlocks, [true])
+
+  /**
+   * 指名越过掩体后，主目标吃直击+爆风两段。旧实现把 skill.block=true 套到整发，
+   * 爆风也会被 30% 格挡；修完之后只有第一段可能 BLOCK。
+   */
+  const cover = (red = ["爱露", "野宫", "野宫", "野宫"], lane = 0) => {
+    const st = setup(["星野", "白子", "千世", "芹香", "静子", "真白"], red)
+    for (const s of st.sides) for (const u of s.supports) u.skillCd = 9999
+    st.sides[0].cost = 10
+    const r = playerTurn(st, { type: "ex", casts: [{ pos: 4, target: { scope: "ally", idx: lane } }] })
+    const cur = playerTurn(r.state, { type: "pass" }).state
+    cur.sides[1].cost = 10
+    return cur
+  }
+  const shotEvents = (r, pos = 0) => r.events.filter((e) =>
+    (e.type === "damage" || e.type === "miss") && e.source?.side === 1 && e.source?.pos === pos)
+  const landed = (e) => e.target.summon ? "掩体" : String(e.target.pos + 1)
+
+  /**
+   * **不指名时也要拆落点**：第一段直击确定性转给掩体，第二段爆风仍打原目标。
+   * 旧实现虽然把格挡改成逐段了，但目标选择仍会把整项技能退化成只打掩体，爆风照样丢失。
+   */
+  {
+    const r = playerTurn(cover(), { type: "ex", casts: [{ pos: 0 }] })
+    const ev = shotEvents(r)
+    check("爱露 EX 不指名：直击→掩体，爆风→原目标", ev.map(landed), ["掩体", "1"])
+    check("爱露 EX 不指名：爆风 Block=0，不产生格挡", ev.find((e) => !e.target.summon)?.blocked || 0, 0)
+    const action = r.events.find((e) => e.type === "action" && e.action === "ex" && e.source?.side === 1 && e.source?.pos === 0)
+    check("爱露 EX 战场图同时记录掩体与原目标", action.targets.map((t) => t.summon ? "掩体" : String(t.pos + 1)), ["掩体", "1"])
+  }
+
+  // EX 不参与 ③-a / ③-b 的同时锁定：指名对象已经倒下就直接判非法，不自动换目标。
+  {
+    const c = cover(["爱露", "野宫", "野宫", "野宫"], 1)
+    c.sides[0].units[0].alive = false
+    c.sides[0].units[0].hp = 0
+    const action = { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] }
+    check("爱露 EX 指定已倒下目标：直接判非法", /已经倒下/.test(validateAction(c, action) || ""), true)
+    const r = playerTurn(c, action)
+    check("非法 EX 不扣费、不产生事件", [r.error?.includes("已经倒下"), r.events?.length || 0], [true, 0])
+  }
+
+  // 普技走 ③-a 的「先锁目标再同时结算」，也必须保存同一份分段落点计划。
+  {
+    const c = cover()
+    c.sides[1].units[0].skillCd = 0
+    const r = playerTurn(c, { type: "pass" })
+    const ev = shotEvents(r)
+    check("爱露普技同时锁定：直击→掩体，爆风→原目标", ev.map(landed), ["掩体", "1"])
+  }
+
+  // Block=0 的普通范围技完全越过掩体，不做整发转移、也不做 30% 格挡。
+  {
+    const r = playerTurn(cover(["明里", "野宫", "野宫", "野宫"]), { type: "ex", casts: [{ pos: 0 }] })
+    const ev = shotEvents(r)
+    check("明里 EX Block=0：不指名也直接打人", ev.map(landed), ["1"])
+    check("明里 EX Block=0：格挡数为 0", ev[0]?.blocked || 0, 0)
+  }
+
+  // 连发每一枪都要按自己的 Block 重新锁。把掩体血量抬高，三枪都应继续打墙。
+  {
+    const c = cover(["伊织", "野宫", "野宫", "野宫"])
+    c.sides[0].summons[0].hp = c.sides[0].summons[0].maxhp = 1e9
+    const r = playerTurn(c, { type: "ex", casts: [{ pos: 0 }] })
+    check("伊织 EX 连发：后两枪重锁时仍认 Block=1", shotEvents(r).map(landed), ["掩体", "掩体", "掩体"])
+  }
+
+  // 强化普攻读取 FormChange 自己的 Block。鹤城的扇形强化普攻仍是 Block=1，整发由掩体接走。
+  {
+    const c = cover(["野宫", "野宫", "野宫", "野宫"])
+    c.sides[0].summons[0].hp = c.sides[0].summons[0].maxhp = 1e9
+    c.sides[1].units[0].charge = {
+      hits: [69.355, 69.355], hitBlocks: [true, true], block: true, count: 2, shots: 1,
+    }
+    const r = playerTurn(c, { type: "pass" })
+    const ev = r.events.filter((e) =>
+      (e.type === "damage" || e.type === "miss") && e.source?.side === 1 && e.source?.pos === 0)
+    check("强化普攻读取 FormChange.Block：鹤城式扇形仍由掩体接走", ev.map(landed), ["掩体"])
+  }
+
+  // 绿的循环点名是逐发换主目标；轮到被护的 1 位时，该发仍要被掩体接走。
+  {
+    const c = cover(["绿", "野宫", "野宫", "野宫"])
+    c.sides[0].summons[0].hp = c.sides[0].summons[0].maxhp = 1e9
+    for (const u of c.sides[0].units) u.hp = u.maxhp = 1e9
+    const r = playerTurn(c, { type: "ex", casts: [{ pos: 0 }] })
+    check("绿 EX 循环点名：1→2→3→4→1，其中 1 位两发都被掩体接走",
+      shotEvents(r).map(landed), ["掩体", "2", "3", "4", "掩体"])
+  }
+
+  // 支援位没有自己的战场，但 Block=1 的单体技能仍先选人，再看那一路有没有掩体。
+  {
+    const c = cover(["星野", "野宫", "野宫", "野宫", "花凛", "真白"])
+    c.sides[0].summons[0].hp = c.sides[0].summons[0].maxhp = 1e9
+    const r = playerTurn(c, { type: "ex", casts: [{ pos: 4 }] })
+    check("花凛 EX（支援位）Block=1：不指名时由掩体接走", shotEvents(r, 4).map(landed), ["掩体"])
+  }
+
+  // enemy_all 没有「主目标」，不能把全屏攻击整发塞进一堵墙；仅被护的那个人逐段过 30%。
+  {
+    const c = cover(["日奈", "野宫", "野宫", "野宫"])
+    c.sides[0].summons[0].hp = c.sides[0].summons[0].maxhp = 1e9
+    for (const u of c.sides[0].units) u.hp = u.maxhp = 1e9
+    const r = playerTurn(c, { type: "ex", casts: [{ pos: 0 }] })
+    check("日奈 EX enemy_all：无主目标，不整发转掩体", shotEvents(r).map(landed).sort(), ["1", "2", "3", "4"])
+  }
+
+  // Block=0 的场地从掩体上方落下：人和掩体都在圈里挨持续伤害，掩体不会替人接走圈。
+  {
+    const c = cover(["千世", "野宫", "野宫", "野宫"])
+    const r = playerTurn(c, { type: "ex", casts: [{ pos: 0 }] })
+    check("千世 EX 场地：被护的 1 位仍进入场地", r.state.sides[0].units[0].dots.some((d) => d.icon === "Zone"), true)
+    check("千世 EX 场地：掩体本身在圈里也进入场地", r.state.sides[0].summons[0].dots.some((d) => d.icon === "Zone"), true)
+  }
+  let seg = 0, blk = 0, splashBlk = 0
+  for (let s = 0; s < 200; s++) {
+    const c = cover()
+    c.rng = (s * 2654435761) >>> 0
+    const r = playerTurn(c, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] })
+    for (const e of r.events) {
+      if ((e.type !== "damage" && e.type !== "miss") || e.target.summon) continue
+      if (e.target.side !== 0 || e.target.pos !== 0) continue
+      // 爱露主目标吃 2 段；只统计她自己这一发
+      if (e.source?.side !== 1 || e.source?.pos !== 0) continue
+      seg += e.hits || 0
+      blk += e.blocked || 0
+      // hits=2 且 blocked 只可能来自第一段：第二段 hitBlocks=false 绝不该贡献 BLOCK
+      if ((e.hits || 0) === 2) splashBlk += Math.max(0, (e.blocked || 0) - 1)
+    }
+  }
+  check("爱露指名打掩体后：只统计到 2 段/发", seg > 300 && seg % 2 === 0, true)
+  // 只有一半段（直击）可挡 → 期望格挡率 ≈ 15%
+  const rate = blk / seg
+  check(`爱露两段合计格挡率 ≈ 15%（实测 ${(rate * 100).toFixed(1)}%，n=${seg}）`,
+    Math.abs(rate - CFG.COVER_BLOCK_RATE / 2) < 0.05, true)
+  check("爆风段贡献的超额 BLOCK 必须是 0", splashBlk, 0)
 }
 
 console.log(bad ? `\n✗ ${bad} 条不符` : "\n全部符合")
