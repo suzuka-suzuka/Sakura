@@ -6,10 +6,39 @@ import {
   searchImageByUrl,
 } from '../../imageSearch/index.js'
 
+export function formatFirstImageSearchResult(item) {
+  if (!item || typeof item !== 'object') return ''
+
+  const title = String(item.title || '').replace(/\s+/g, ' ').trim()
+  const url = String(item.url || '').trim()
+  const matchedText = title || url
+  if (!matchedText) return ''
+
+  const lines = [`匹配结果：${matchedText}`]
+  if (title && url) lines.push(`链接：${url}`)
+
+  return lines.join('\n')
+}
+
+export function stripImageSearchCitationBlock(text = '') {
+  return String(text)
+    .replace(/\r/g, '')
+    .replace(/\n{0,2}(?:引用链接|引用連結|参考链接|參考連結|Reference links?)[:：][\s\S]*$/iu, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+export function formatImageSearchToolResult(result) {
+  const aiText = stripImageSearchCitationBlock(result?.aiText)
+  const firstResult = Array.isArray(result?.items) ? result.items[0] : null
+  const formattedResult = formatFirstImageSearchResult(firstResult)
+  return [aiText, formattedResult].filter(Boolean).join('\n\n')
+}
+
 export class ImageSearchTool extends AbstractTool {
   name = 'ImageSearch'
 
-  description = '当你需要根据图片进行搜图时使用'
+  description = '搜图工具'
 
   parameters = {
     properties: {
@@ -49,11 +78,12 @@ export class ImageSearchTool extends AbstractTool {
         googleLogin: searchConfig.googleLogin,
       })
 
-      if (!result.aiText) {
+      const formattedResult = formatImageSearchToolResult(result)
+      if (!formattedResult) {
         return '未找到结果。'
       }
 
-      return result.aiText
+      return formattedResult
     } catch (error) {
       logger.error('[ImageSearchTool] 执行失败:', error)
       return `搜图失败: ${error.message}`
