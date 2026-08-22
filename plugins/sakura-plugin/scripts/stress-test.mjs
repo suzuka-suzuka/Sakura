@@ -63,13 +63,8 @@ for (let seed = 1; seed <= GAMES; seed++) {
 
     if (R() < 0.75 && hand.length) {
       const p = hand[Math.floor(R() * hand.length)]
-      // 故意混入非法目标：越界索引、友敌错配
-      const roll = R()
-      let target
-      if (roll < 0.2) target = { scope: "foe", idx: Math.floor(R() * 4) }
-      else if (roll < 0.3) target = { scope: "ally", idx: Math.floor(R() * 4) }
-      else if (roll < 0.35) target = { scope: "foe", idx: 9 }
-      action = { type: "ex", casts: [{ pos: p, target }] }
+      // 玩家只选择释放者；目标始终由技能描述和站位规则自动决定。
+      action = { type: "ex", casts: [{ pos: p }] }
       if (validateAction(st, action)) action = { type: "pass" }
     }
 
@@ -91,6 +86,21 @@ for (let seed = 1; seed <= GAMES; seed++) {
         if (u.alive && u.hp <= 0) fail(`seed ${seed} 血空但存活`)
         if (!u.alive && u.hp > 0) fail(`seed ${seed} 已死但有血`)
         if (u.shield < 0) fail(`seed ${seed} 负护盾`)
+      }
+      const summonKeys = new Set()
+      const coverLanes = new Set()
+      for (const sm of s.summons || []) {
+        if (sm.hp < 0 || sm.hp > sm.maxhp) fail(`seed ${seed} 召唤物 HP 越界 ${sm.hp}/${sm.maxhp}`)
+        if (sm.alive && sm.hp <= 0) fail(`seed ${seed} 召唤物血空但存活`)
+        if (!Number.isInteger(sm.blockIdx) || sm.blockIdx < 0 || sm.blockIdx > 3) {
+          fail(`seed ${seed} 召唤物号位越界 ${sm.blockIdx}`)
+        }
+        if (sm.sourceKey && summonKeys.has(sm.sourceKey)) fail(`seed ${seed} 召唤物 sourceKey 重复 ${sm.sourceKey}`)
+        if (sm.sourceKey) summonKeys.add(sm.sourceKey)
+        if (sm.cover) {
+          if (coverLanes.has(sm.blockIdx)) fail(`seed ${seed} ${sm.blockIdx + 1} 路叠了多个掩体`)
+          coverLanes.add(sm.blockIdx)
+        }
       }
       const h = exAvailableOf(r.state, s.side)
       // 会出手的是 4 主力 + 2 支援；支援打不到，`alive` 恒为 true

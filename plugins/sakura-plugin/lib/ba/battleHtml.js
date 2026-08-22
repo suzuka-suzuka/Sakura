@@ -12,11 +12,11 @@
  */
 import { CFG } from "./roster.js"
 import { tmplOf, exWaitOf, turnCostOf, exRefreshPending, exCostOf, provokedBy, focusedOf, exLockedOf } from "./engine.js"
-import { artOf, summonArtOf, statusIconOf, fontFace, FONT_STACK, ATTACK, ARMOR, inkOf, esc } from "./htmlAssets.js"
+import { artOf, summonArtOf, fieldCoverArtOf, statusIconOf, fontFace, FONT_STACK, ATTACK, ARMOR, inkOf, esc } from "./htmlAssets.js"
 
 export const MAP_WIDTH = 1200
-/** EX 卡从 4 张变成 6 张，塞不进一排（6×207 已经超出画布），拆成上下两排 */
-const HUD_HEIGHT = 460
+/** 六张同尺寸 EX 卡塞不进一排（6×207 已经超出画布），拆成上下两排并给 Cost 条留足空间。 */
+const HUD_HEIGHT = 510
 /**
  * 支援带：两个支援站在**自己半场角色的后方**（离交战线更远的那一侧），分散居中。
  * 它们不在 1~4 号位的战场分割里，所以刻意不跟主力排在同一行 —— 一眼就能看出「不在场上」。
@@ -62,14 +62,17 @@ function lineShiftOf(side, u) {
 /**
  * 召唤物站在哪半场。两种来源，画法相反：
  *   **抛出型**（佩洛洛，日富美「打谁」）—— 扔到**敌方**半场，挡在对方前排前面
- *   **布置型**（掩体，静子「给谁」）—— 架在**自己**半场，挡在自家前排前面
- * 挡刀口径是同一条（按战场拦），只有画在哪半边不同 —— 画反了玩家会以为墙在替对面挡。
+ *   **布置型**（场地 / 静子掩体）—— 架在**自己**半场，只护同号位的角色
+ * 两者都走 summons 渲染，但人偶按战场截获，掩体只在 `Block=1` 分段的 30% 判定成功时承伤。
  */
 function summonStandY(sm) {
   const half = sm.onAlly ? sm.side : 1 - sm.side
   const front = half === 1 ? RED_Y + LINE_SHIFT.前 : BLUE_Y - LINE_SHIFT.前
   return front + (half === 1 ? SUMMON_AHEAD : -SUMMON_AHEAD)
 }
+
+/** 同号位可能同时有场地掩体和佩洛洛，事件必须用 sourceKey 精确挂到实际承伤物。 */
+const summonFxKey = (side, pos, sourceKey) => `${side}:${pos}:s${sourceKey ? `:${sourceKey}` : ""}`
 
 /**
  * 暴击框的爆炸轮廓。
@@ -342,7 +345,9 @@ function arrowLayer(state, events) {
   const posOf = (ref) => {
     if (!ref) return null
     if (ref.summon) {
-      const sm = (state.sides[ref.side]?.summons || []).find((s) => s.alive && s.idx === ref.pos)
+      const pool = state.sides[ref.side]?.summons || []
+      const sm = (ref.summonKey ? pool.find((s) => s.sourceKey === ref.summonKey) : null)
+        || pool.find((s) => s.alive && s.idx === ref.pos)
       return { x: LANE_X[ref.pos], y: sm ? summonStandY(sm) : ARENA_H / 2 }
     }
     // 支援站在自己半场的最外侧，只占中间两列。身位偏移对它们不成立（它们不在前中后排里）
@@ -405,30 +410,32 @@ function segsHtml(segs) {
 }
 
 function fxLabel(ev, wide) {
-  const segs = Number(ev.hits) > 1
-    ? { total: Number(ev.hits), landed: Math.max(0, Math.min(Number(ev.hits), Number(ev.landed ?? ev.hits))) }
+  const hitCount = Number(ev.visualHits ?? ev.hits)
+  const landedCount = Number(ev.visualLanded ?? ev.landed ?? ev.hits)
+  const segs = hitCount > 1
+    ? { total: hitCount, landed: Math.max(0, Math.min(hitCount, landedCount)) }
     : null
   // critHits 是后加的字段：老对局（Redis 里存着的）没有，按满爆退化回原来的样子
-  const landed = Number(ev.landed) || (segs ? segs.landed : 1) || 1
+  const landed = Number(ev.visualLanded ?? ev.landed) || (segs ? segs.landed : 1) || 1
   const critQ = ev.critHits == null ? 1 : Math.min(1, Number(ev.critHits) / landed)
   // 持续伤害单独一种颜色：它没有施法者连线（施加者可能已阵亡），
   // 不换色的话玩家会以为是谁打的、然后去找那根不存在的线
-  const kind = ev.type === "miss" ? "miss" : ev.type === "heal" ? "heal" : ev.dot ? "dot" : "dmg"
-  // 全被掩体挡下时印 BLOCK 而不是 MISS —— 两件事的应对完全不同：
-  // 一个要先拆墙 / 换个打得进去的角色，一个要堆命中
-  const allBlocked = ev.type === "miss" && ev.blocked === ev.hits
-  const text = ev.type === "miss" ? (allBlocked ? "BLOCK" : "MISS")
+  const blockOnly = ev.type === "block"
+  const kind = ev.type === "miss" || blockOnly ? "miss" : ev.type === "heal" ? "heal" : ev.dot ? "dot" : "dmg"
+  // 老对局里整挡记录成 miss + blocked，继续兼容；新结算把 0 与 BLOCK 明确分成主字和小字。
+  const legacyAllBlocked = ev.type === "miss" && ev.blocked === ev.hits
+  const blocked = Number(ev.visualBlocked ?? ev.blocked) || 0
+  const text = blockOnly ? "0" : ev.type === "miss" ? (legacyAllBlocked ? "BLOCK" : "MISS")
     : ev.type === "heal" ? `+${ev.amount}`
       : String(ev.totalAmount ?? ev.amount)
   /**
-   * 小字这一格三选一，优先级 BLOCK > 克制：**部分段被掩体挡下**时印 `BLOCKn`。
-   * 掩体格挡是一次独立判定（跟命中/闪避无关），玩家得看得出这一发是被墙吃掉的。
+   * 小字这一格三选一，优先级 BLOCK > 克制。BLOCK 永远挂回原本被自动锁定的角色。
    */
-  const qual = !allBlocked && ev.blocked ? `BLOCK${ev.blocked}`
+  const qual = !legacyAllBlocked && blocked ? (blocked > 1 ? `BLOCK${blocked}` : "BLOCK")
     : ev.affinity === "weak" ? "WEAK" : ev.affinity === "resist" ? "RESIST" : ""
-  const qualCls = !allBlocked && ev.blocked ? "block" : ev.affinity
+  const qualCls = !legacyAllBlocked && blocked ? "block" : ev.affinity
   return `
-    <div class="fxlabel ${kind} ${allBlocked ? "blocked" : ""} ${ev.crit ? "crit" : ""} ${wide ? "wide" : ""}">
+    <div class="fxlabel ${kind} ${blockOnly || legacyAllBlocked ? "blocked" : ""} ${ev.crit ? "crit" : ""} ${wide ? "wide" : ""}">
       ${ev.crit ? `<span class="burst" style="--burst:polygon(${burstPolygon(critQ)})"></span>` : ""}
       <b>${esc(text)}</b>
       ${qual ? `<i class="${qualCls}">${qual}</i>` : ""}
@@ -449,9 +456,13 @@ function fxByUnit(events) {
   const byUnit = new Map()
   for (const ev of events) {
     // cost 事件不出标签：目前没有靠技能回费的角色，真加了也只落在文字日志里
-    if (!["damage", "miss", "heal"].includes(ev.type) || !ev.target) continue
-    // 召唤物与同号位的角色必须分开挂，否则打人偶的数字会跑到队友血条下面
-    const key = `${ev.target.side}:${ev.target.pos}${ev.target.summon ? ":s" : ""}`
+    if (!["damage", "miss", "heal", "block"].includes(ev.type) || !ev.target) continue
+    // 掩体的实际耐久变化已经由血条表达，所有直接 / 转移到掩体的伤害都不再单独冒数字。
+    if (ev.target.cover) continue
+    // 召唤物与同号位角色、同号位的不同召唤物都必须分开挂。
+    const key = ev.target.summon
+      ? summonFxKey(ev.target.side, ev.target.pos, ev.target.summonKey)
+      : `${ev.target.side}:${ev.target.pos}`
     if (!byUnit.has(key)) byUnit.set(key, [])
     byUnit.get(key).push(ev)
   }
@@ -506,7 +517,7 @@ function hud(state) {
     </div>`
   }
   // 6 张同尺寸的卡塞不进 1200 宽（6×207 + 间距已经超了），拆成上排 4 主力、下排 2 支援。
-  // 支援永远不死，所以下排恒定两张 —— 它们也是主力全被嘲讽那一轮唯一放得出 EX 的人。
+  // 支援永远不死，所以下排恒定两张并固定居中 —— 它们也是主力全被嘲讽那一轮唯一放得出 EX 的人。
   const cards = s.units.filter((u) => u.alive).map(card).join("")
   const supCards = (s.supports || []).map(card).join("")
 
@@ -654,11 +665,12 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
   paint-order:stroke;stroke:#fff;stroke-width:4.5px}
 .zones .fading{opacity:.45}
 
-/* 召唤物：抛出型站在敌方半场、对方前排再往前一格。列仍是挡住的号位 */
+/* 召唤物：人偶在敌方半场；场地/技能掩体在己方半场。列仍是其所在号位 */
 .smRow{position:absolute;left:0;right:0;top:0;bottom:0;z-index:2;
-  display:grid;grid-template-columns:repeat(4,1fr);align-items:center;pointer-events:none}
-/* .sm 必须 position:relative —— .fxstack 是绝对定位的，不给锚点它会挂到 .smRow 上 */
-.sm{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px}
+  display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:1fr;align-items:center;pointer-events:none}
+/* 红蓝双方会在相同号位各有一座掩体。没有显式 grid-row 时，CSS Grid 会把同列后出现的
+   召唤物塞进隐式第二行，后续基于整张战场中心计算的 translateY 就会把它压到角色身上。 */
+.sm{position:relative;grid-row:1;display:flex;flex-direction:column;align-items:center;gap:4px}
 /* 站在红半场（挡红方）时数字往交战线甩；站在蓝半场同理 */
 .sm.foe-red .fxstack{top:auto;bottom:118px}
 /* 站在蓝方半场时数字往下甩，要让开血条下面那行名字（掩体架在自己这边，正好撞上） */
@@ -746,10 +758,8 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 .hud.blue{border-color:#2E7FD4}
 .excards{display:flex;flex-direction:column;gap:40px;align-items:center}
 .exrow{display:flex;gap:26px;justify-content:center}
-/* 下排是支援：缩小一圈，主力才是站在场上的那批，卡面大小顺带编码了这件事 */
-.exrow.sup .excard{width:152px;height:125px}
-.exrow.sup .excard .cost{width:34px;height:34px;top:-7px;left:15px;font-size:20px}
-.exrow.sup .excard .nm{bottom:-22px;font-size:13px}
+/* 支援卡与主力卡同尺寸；下排占满可用宽度，始终固定在 HUD 正中。 */
+.exrow.sup{width:100%;justify-content:center}
 /* 等边平行四边形（与原作技能卡一致）：上下边长 = 斜边长，即 W − d = √(H² + d²)
    取 H=170、d=34 → W=207，四边均为 173，偏移比 d/W = 16.43% */
 .excard{--pg:polygon(16.43% 0,100% 0,83.57% 100%,0 100%);position:relative;width:207px;height:170px}
@@ -789,7 +799,7 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
  *
  * 正圆贴在脸上太大，也读不出「躺在地上」。压扁成透视椭圆（约 3.4:1），
  * 外圈 + 内圈 + 靠中线一侧加粗，才像地面上的范围指示。
- * 位置读 `side.fields`，人死了圈不缩、不换人。
+ * 位置读 `side.fields`，人死了圈不缩；实际伤害每跳按圈内当前号位重新扫描。
  * 老对局里没有 `fields`，才退回从身上的 Zone 反推。
  */
 function fieldsOf(side) {
@@ -858,10 +868,13 @@ function summonBand(state, fx) {
       const dur = sm.turns == null
         ? null
         : Math.max(0, Math.min(100, (sm.turns / (sm.turnsMax || sm.turns || 6)) * 100))
-      const art = summonArtOf(sm.id)
-      // 伤害数字往哪一侧甩，看它站在哪半场 —— 布置型（掩体）在自己这边，抛出型（人偶）在对面
+      // 99999 是静子系技能召唤物的百夜堂摊位；开局固定掩体必须走独立的通用路障素材。
+      const art = sm.fieldCover ? fieldCoverArtOf() : summonArtOf(sm.id)
+      // 伤害数字往哪一侧甩，看它站在哪半场 —— 掩体在自己这边，人偶在对面
       const half = sm.onAlly ? sm.side : 1 - sm.side
       const dy = summonStandY(sm) - ARENA_H / 2
+      const smFx = fx.get(summonFxKey(side, sm.idx, sm.sourceKey))
+        || fx.get(summonFxKey(side, sm.idx)) || ""
       cells.push(`<div class="sm foe-${half === 1 ? "red" : "blue"}" style="grid-column:${sm.idx + 1};transform:translateY(${dy}px)">
         <div class="smart">
           ${art ? `<img src="${art}" alt="">` : ""}
@@ -869,7 +882,7 @@ function summonBand(state, fx) {
         <div class="hpbar smhp"><div class="hp" style="width:${pct}%;background:${ARMOR[t.defType] || "#8AA"}"></div>${SEGS}</div>
         ${dur == null ? "" : `<div class="smdur"><s style="width:${dur.toFixed(1)}%"></s></div>`}
         <b>${esc(t.name)}</b>
-        ${fx.get(`${side}:${sm.idx}:s`) || ""}
+        ${smFx}
       </div>`)
     }
   }

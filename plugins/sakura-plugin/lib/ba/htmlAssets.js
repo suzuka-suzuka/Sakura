@@ -30,6 +30,8 @@ function dataUri(file, mime) {
 export const artOf = (id, part) => dataUri(path.join(ASSET_DIR, id, `${part}.png`), "image/png")
 /** 召唤物只有 Q 版一张图，跟角色素材分目录放 */
 export const summonArtOf = (id) => dataUri(path.join(SUMMON_DIR, String(id), "chibi.png"), "image/png")
+/** 场地固定掩体使用原创通用路障，不能复用静子专属的 99999 百夜堂摊位。 */
+export const fieldCoverArtOf = () => dataUri(path.join(SUMMON_DIR, "field", "chibi.png"), "image/png")
 /** 原作状态格图标。缺图时返回空串，调用方退回 SVG */
 export const statusIconOf = (name) => dataUri(path.join(STATUS_DIR, `${name}.png`), "image/png")
 export const fontUri = () => dataUri(FONT_FILE, "font/ttf")

@@ -446,7 +446,7 @@ function pctOfEffect(e) {
  * （芹娜）也会被大圈收成全体。
  *
  * 人数和挑法以原文措辞为准，**别按 Radius 反推**：
- *   「对 1 名我方单位」                         玩家指定 / 对线，`ally_single`
+ *   「对 1 名我方单位」                         自动按位置选择，`ally_single`
  *   「对圆形范围内的 1 名我方单位」             还是单体 —— 圈是位移/瞄准，不是覆盖人数
  *   「对 N 名生命值百分比最低的我方单位」       `ally_lowest`，count = N（花子爱用品是 2）
  *   「对 1 名生命值不高于 N% 的我方单位」       `ally_hurt`（小春，原文没说最低）
@@ -474,7 +474,7 @@ function allyPickOf(desc) {
   if (/生命值百分比最低/.test(mid)) return { target: "ally_lowest", count: n, ...except }
   if (/生命值上限最高/.test(mid)) return { target: "ally_maxhp", count: n, ...except }
 
-  // 「对 1 名我方单位」没有血量条件 = 玩家指定（EX）/ 对线（默认）
+  // 「对 1 名我方单位」没有血量条件 = 交给引擎按位置自动选择
   // 「对圆形范围内的 1 名」也是单体 —— 芹娜那个 r=500 的圈是位移，不是奶 4 个人
   if (n <= 1) return { target: "ally_single", count: 1, ...except }
   if (n >= 4) return { target: "ally_all", count: 4 }
@@ -683,15 +683,11 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
     let scope = t.every((x) => x === "Self") ? "self" : t.some((x) => /Ally/.test(x)) ? "ally_all" : "enemy"
     /**
      * `Any` = 「上述范围内」的单位，不分敌我（全 272 人 8 处）。
-     * 非伤害效果落在**我方**那一半 —— 原文写得很清楚「对圆形范围内的**我方**单位…回复」。
-     * 照原来「不含 Ally ⇒ 敌方」的判定，小春炸完还会给对面回血。
-     *
-     * 技能**同时带伤害**时（全 272 人只有小春的神圣手榴弹）标成 `circle_ally`，
-     * 并在下面给技能补一个 `circle: true`：一个 r=200 的圈丢出去，
-     * **圈里是敌人就只有伤害、是队友就只有治疗**。敌我两队隔着整个场地，
-     * 一个圈装不下两边 —— 所以这两半永远只成立一个，见引擎的 `circle` 分支。
+     * 非伤害效果落在我方；技能同时带伤害时，全池只有小春的神圣手榴弹。
+     * 回合制规则把它收敛为：伤害照常命中自动攻击目标，同时治疗该主目标对位的己方主力；
+     * 对位主力已经阵亡则治疗落空。
      */
-    if (t.includes("Any")) scope = dmgs.length ? "circle_ally" : "ally_all"
+    if (t.includes("Any")) scope = dmgs.length ? "mirror_ally" : "ally_all"
     // 这条效果在不在编队条件那一段里
     const pct = pctOfEffect(e)
     const inCond = Boolean(cond && condCode && pct != null
@@ -708,10 +704,9 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
      * 它是挂在 Buff 效果上的**附加字段**，不是独立效果，所以这里额外补一条，
      * 效果本体照常生成（泉奈的攻速、明日奈的闪避都还在）。
      *
-     * **`Self` 折成「与相邻号位的队友交换站位」**（`range: 1`，池内只有泉奈）。
+     * **`Self` 折成「向自动攻击目标移动一格」**（`range: 1`，池内只有泉奈）。
      * 回合制没有连续坐标，但**有站位** —— 战场分割（1·2 / 3·4）和对位锁定都由号位定，
-     * 所以「换一格」是有意义的博弈：只有站在 2 / 3 号位时那一跳才跨得过战场分界线。
-     * 换位而不是「挪过去」，四个格子仍然一格一人，战场图不会叠人。
+     * 因此用数组换位维持四格不重叠；邻格角色已经阵亡时也照常进入那个空位。
      *
      * `Ally` / `Enemy`（把队友拉过来 / 把敌人扯过来）**仍然丢掉**：那是「谁被搬动」而不是
      * 「我站哪」，牵扯到多人重排，等真有角色进池再单独设计。
@@ -906,12 +901,6 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
     // 编队条件盖在这一轮刚 push 进去的效果上（一个 Effect 可能 push 出不止一条）
     if (inCond) for (let i = before; i < out.effects.length; i++) Object.assign(out.effects[i], condFields)
   }
-  /**
-   * 「一个圈，砸哪边只有那边生效」——`Target: "Any"` 的效果跟伤害同时存在时才成立。
-   * 指令层靠中间那个动词选边（`小春ex打白子` / `小春ex奶桃`），两半互斥。
-   */
-  if (out.effects.some((e) => e.scope === "circle_ally")) out.circle = true
-
   // 「获得 N 技能COST」（往 Cost 池加点，跟上面的 CostChange 打折是两回事）**没有结构化效果**
   // —— 瞬的普通技能 `Effects` 是个空数组（全 272 人里这样的技能有 9 个），数值只在描述里。
   if (!out.effects.some((e) => e.type === "cost")) {
@@ -1017,7 +1006,7 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
   // 跟瞬的索敌改写一样，**只写在描述里**，没有结构化字段。引擎侧走 laneTarget 的 max_atk 分支：
   // 嘲讽仍然拉得走，其余（战场分割 / 前中后排 / 挡刀）一概绕开。
   // 池内是柚子的普通技能（带伤害，嘲讽拉得走）和切里诺的集火（选人条件，嘲讽改不了落点）。
-  // 玩家指定目标时以玩家为准，所以只在没指定时生效。
+  // 这是技能描述自带的索敌，优先于通用位置规则。
   if (/攻击力最高的敌方单位/.test(desc) && String(out.target || "").startsWith("enemy")) out.pick = "max_atk"
 
   // 纯子 EX 的「失去25.7%的当前生命值」。跟艾米的 ExtraStatSource 一样是**全数据唯一一处**，
@@ -1033,7 +1022,7 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
    * 绫音、花子、志美子、小玉、和香 全是同一个错法。
    *
    * 技能自己的 `target` 已经把覆盖面算好了（`ally_all` = 真·全体，`ally_adjacent` = 圈，
-   * `ally_lowest` / `ally_hurt` / `ally_single` / `ally_maxhp` = 点名），所以**只要技能
+   * `ally_lowest` / `ally_hurt` / `ally_single` / `ally_maxhp` = 单体），所以**只要技能
    * 不是真·全体，`ally_all` 就收成 `ally_target`**（这一发实际圈到的人）。
    *
    * 反过来不能一律用 `ally_target`：绿 / 桃那种「打敌人的同时给全队加攻」的技能，
@@ -1201,11 +1190,13 @@ export const CFG = {
   EX_COOLDOWN_SLACK: 3,              // EX 冷却长度 = 存活总人数（含支援）− 这个值，满编 6 人 = 3
   /**
    * 掩体的**格挡率**。原作公式是 \`30 + 攻击方遮蔽成功值 − 防御方遮蔽贯通率\`，
-   * 地形适应每升一级 +15，基础就是 30%。它是**独立的一次判定**，不走命中/闪避那条公式 ——
-   * 折成闪避值的话效果会随攻击者的命中浮动，而原作明确不是这样。
+   * 地形适应每升一级 +15，基础就是 30%。每个 Damage.Block=1 伤害段独立判定；成功时由
+   * 掩体承伤并扣耐久，失败才继续攻击角色。它不并入命中/闪避公式。
    * 遮蔽成功值（\`BlockRate_Base\`）全 272 人只有优香的武器被动带，生成器不读那个槽，暂时接不到。
    */
   COVER_BLOCK_RATE: 0.3,
+  FIELD_COVER_HP: 700,               // 场地掩体：构造物装甲（全属性 ×0.5），等效耐久 1400
+  FIELD_COVER_POSITIONS: [0, 3],     // 内部 0-based；对外即每方固定在 1、4 号位
   SECOND_BONUS: 2,                   // 后手方开局补偿；2000 局压测先手胜率约 51.4%
   /**
    * 支援把自己的基础面板按比例转给每个主力（官方编成加成，不是 buff）。
@@ -1243,15 +1234,15 @@ export function combatRoleOf(x) {
 }
 
 /**
- * 按角色名或内部代号查角色。**不认编号** —— 配队和出招一律写名字，
- * 记「星野ex打白子」比记「ex 1>3」容易得多，角色也不再对外暴露序号。
+ * 按角色名或内部代号查角色。**不认编号** —— 配队和出招一律写名字；
+ * 出招只需写「星野ex」，角色也不再对外暴露序号。
  */
 export function findUnit(token) {
   const s = String(token).trim()
   return BY_ID[s.toUpperCase()] || ROSTER.find((t) => t.name === s) || null
 }
 
-/** 召唤物按名字查，供「伊织ex打佩洛洛人偶」这种指令定位。允许省略「人偶」等后缀 */
+/** 召唤物按名字查；允许省略「人偶」等后缀。 */
 export function findSummon(token) {
   const s = String(token).trim()
   if (!s) return null

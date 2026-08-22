@@ -3,17 +3,14 @@
  *
  *   配队（私聊）  星野 白子 野宫 芹香     顺序即左起 1~4 号位（决定对位）
  *   出招（群内）  过
- *                星野ex          星野放 EX，目标走技能默认规则
- *                星野ex打白子     打敌方的白子
- *                星野ex给芹香     目标是己方的芹香（治疗 / 护盾 / 增益）
+ *                星野ex          星野放 EX，目标由技能描述和战场位置自动决定
  *                过                结束本回合的 EX，结算技能和普攻
  *
- *   一律写角色名，不收编号 —— 同队禁止重名，名字足以唯一定位，也比数字好记。
- *   中间那个字（打/给）决定目标在敌方还是己方 —— 双方都可能选同一个角色，
- *   光凭名字分不出是哪一边的；不写就按技能自己的目标类型判定。
+ *   玩家只决定「谁放 EX」，不能点名目标；具体落点由技能自带索敌优先，
+ *   没有特殊索敌时再按站位规则自动决定。
  */
 
-import { findUnit, findSummon } from "./roster.js"
+import { findUnit } from "./roster.js"
 
 /**
  * 解析配队。
@@ -51,14 +48,19 @@ export function parseDraft(text) {
 }
 
 const PASS_RE = /^(过|pass|p)$/i
-const EX_MARK = /ex|EX|Ex|技|大/
-/** 中间那个字：打人还是帮人。写法可以随意，认的是意思 */
-const FOE_VERB = "打攻揍轰砸捶秒锤"
-// 换 / 跳是给泉奈的位移用的（跟队友交换站位），归到己方那一档 —— 没人会去跟敌人换位
-const ALLY_VERB = "给帮为治奶助换跳"
-const CAST_RE = new RegExp(
-  `^(.+?)(?:ex|EX|Ex|技|大)(?:\\s*([${FOE_VERB}${ALLY_VERB}])?\\s*(.+))?$`
-)
+const EX_MARK = /ex|技|大/i
+
+/**
+ * 找到紧跟在一个已知角色名后的 EX 标记。
+ * 不直接用非贪婪正则切，避免未来角色名自身带「大 / 技」时被从中间截断。
+ */
+function splitCast(s) {
+  for (const m of s.matchAll(/ex|技|大/gi)) {
+    const who = refOf(s.slice(0, m.index))
+    if (who) return { who, tail: s.slice(m.index + m[0].length) }
+  }
+  return null
+}
 
 /**
  * 解析出招指令。
@@ -69,53 +71,18 @@ export function parseAction(text) {
   if (PASS_RE.test(s)) return { ok: true, action: { type: "pass" } }
   if (!EX_MARK.test(s)) return null
 
-  const specs = splitCasts(s)
-  if (!specs.length) return { ok: false, error: "要指定放哪个角色的 EX，例：星野ex" }
-
-  const casts = []
-  for (const [i, spec] of specs.entries()) {
-    const mm = spec.match(CAST_RE)
-    if (!mm) return { ok: false, error: `看不懂「${spec}」，格式是 星野ex 或 星野ex打白子` }
-    const who = refOf(mm[1])
-    // 第一段的施放者都认不出来，说明这压根不是出招指令（聊天里带个 ex 就被当指令很烦），
-    // 返回 null 让上层放行；后面几段认不出才算写错了
-    if (!who && i === 0) return null
-    if (!who) return { ok: false, error: `找不到角色「${mm[1]}」，写角色名，例：星野ex打白子` }
-    const cast = { ...who }
-    if (mm[3]) {
-      // 召唤物也能当目标 —— 不然墙立起来玩家只能干等它自己过期
-      const sm = findSummon(mm[3])
-      if (sm) {
-        cast.target = { scope: mm[2] && ALLY_VERB.includes(mm[2]) ? "ally" : "foe", summonId: sm.id }
-        casts.push(cast)
-        continue
-      }
-      const tgt = refOf(mm[3])
-      if (!tgt) return { ok: false, error: `找不到目标「${mm[3]}」，写角色名，例：星野ex打白子` }
-      // 没写动词就留空，交给引擎按技能自己的目标类型判定
-      const scope = mm[2] ? (ALLY_VERB.includes(mm[2]) ? "ally" : "foe") : null
-      cast.target = { scope, ...(tgt.pos != null ? { idx: tgt.pos } : { id: tgt.id }) }
+  const spec = splitCast(s)
+  // 施放者认不出来，说明这很可能只是带了 ex 的普通聊天，交给上层放行。
+  if (!spec) {
+    if (/^(?:ex|技|大)\s*$/i.test(s)) {
+      return { ok: false, error: "要指定放哪个角色的 EX，例：星野ex" }
     }
-    casts.push(cast)
+    return null
   }
-  return { ok: true, action: { type: "ex", casts } }
-}
-
-/**
- * 按空格切出每一次释放。
- *
- * 空格是「下一个人」的分隔符，但人总会顺手在里面也敲空格（「星野ex 打白子」），
- * 所以规则是：只有当当前这段已经含 ex 时，遇到新的 ex 才另起一段。
- */
-function splitCasts(s) {
-  const out = []
-  let buf = ""
-  for (const tk of s.split(/[\s,，、]+/).filter(Boolean)) {
-    if (buf && EX_MARK.test(buf) && EX_MARK.test(tk)) { out.push(buf); buf = "" }
-    buf += tk
+  if (spec.tail.trim()) {
+    return { ok: false, error: "EX 不能指定目标，只需选择释放者，例：星野ex" }
   }
-  if (buf) out.push(buf)
-  return out
+  return { ok: true, action: { type: "ex", casts: [spec.who] } }
 }
 
 /**

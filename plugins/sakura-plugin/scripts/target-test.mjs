@@ -11,7 +11,7 @@ import { ROSTER, CFG } from "../lib/ba/roster.js"
 import { describeEffect } from "../lib/ba/format.js"
 import { parseAction } from "../lib/ba/parse.js"
 import { buildBattleHtml } from "../lib/ba/battleHtml.js"
-import { statusIconOf } from "../lib/ba/htmlAssets.js"
+import { statusIconOf, summonArtOf, fieldCoverArtOf } from "../lib/ba/htmlAssets.js"
 
 const id = (n) => ROSTER.find((t) => t.name === n).id
 
@@ -32,8 +32,11 @@ const muteFillers = (st, given) => {
   for (const side of st.sides) for (const u of side.supports || []) u.skillCd = 9999
 }
 
-/** 建一局并按 kill 列表把人打死（kill 是 [side, idx] 列表） */
-function setup(bluePicks, redPicks, kills = []) {
+/**
+ * 建一局并按 kill 列表把人打死（kill 是 [side, idx] 列表）。多数规则用例隔离掉场地掩体，
+ * 避免随机格挡改写与该用例无关的伤害；掩体 / 场地联动组显式传 `fieldCovers:true` 测真实开局。
+ */
+function setup(bluePicks, redPicks, kills = [], { fieldCovers = false } = {}) {
   const st = createBattle(
     { uid: "a", name: "蓝", picks: withSupports(bluePicks).map(id) },
     { uid: "b", name: "红", picks: withSupports(redPicks).map(id) },
@@ -41,6 +44,7 @@ function setup(bluePicks, redPicks, kills = []) {
   )
   muteFillers(st, bluePicks)
   muteFillers(st, redPicks)
+  if (!fieldCovers) for (const side of st.sides) side.summons = []
   for (const [side, idx] of kills) {
     const u = st.sides[side].units[idx]
     u.alive = false; u.hp = 0
@@ -124,13 +128,12 @@ console.log("\n=== 4b. 前 / 中 / 后：按层打，不是按坦克职业 ===")
 }
 
 console.log("\n=== 5. 星野 EX（2 目标范围）不跨战场 ===")
-const pickIdx = (st, idx) => {
-  const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx } }] })
+const exTargets = (st, pos = 0) => {
+  const r = run(st, { type: "ex", casts: [{ pos }] })
   return r.events.find((e) => e.type === "action" && e.action === "ex").targets.map((t) => t.pos + 1)
 }
-check("指定红3 → 波及红4", pickIdx(setup(TANK1, OUT), 2), [3, 4])
-check("指定红1 → 波及红2，不碰 3·4", pickIdx(setup(TANK1, OUT), 0), [1, 2])
-check("红4 已阵亡，指定红3 → 退化成单体", pickIdx(setup(TANK1, OUT, [[1, 3]]), 2), [3])
+check("自动主目标在 1·2 → 波及同战场两人", exTargets(setup(TANK1, OUT)), [1, 2])
+check("自动主目标的同战场只剩一人 → 退化成单体", exTargets(setup(TANK1, OUT, [[1, 1]])), [1])
 
 console.log("\n=== 6. 野宫全体技能仍然打 4 个 ===")
 const allSt = setup(["野宫", "星野", "野宫", "野宫"], OUT)
@@ -139,18 +142,20 @@ check("敌方全体命中数",
   rAll.events.find((e) => e.type === "action" && e.action === "ex").targets.length, 4)
 
 console.log("\n=== 7. 3 目标技能走「以主目标为中心的固定窗口」（睦月）===")
-const mutsuki = (idx) => {
-  const st = setup(["睦月", "野宫", "野宫", "野宫"], OUT)
-  const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx } }] })
+const mutsuki = (pos) => {
+  const picks = ["野宫", "野宫", "野宫", "野宫"]
+  picks[pos] = "睦月"
+  const st = setup(picks, OUT)
+  const r = run(st, { type: "ex", casts: [{ pos }] })
   return r.events.find((e) => e.type === "action" && e.action === "ex").targets
     .map((t) => t.pos + 1).sort()
 }
-check("指定 1 号位 → 越界那发浪费，只炸 2 个", mutsuki(0), [1, 2])
-check("指定 2 号位 → 炸满 3 个且跨战场", mutsuki(1), [1, 2, 3])
-check("指定 3 号位 → 炸满 3 个且跨战场", mutsuki(2), [2, 3, 4])
-check("指定 4 号位 → 只炸 2 个", mutsuki(3), [3, 4])
+check("睦月站 1 位、自动锁 1 位 → 边缘只炸 2 个", mutsuki(0), [1, 2])
+check("睦月站 2 位、自动锁 2 位 → 炸满 3 个", mutsuki(1), [1, 2, 3])
+check("睦月站 3 位、自动锁 3 位 → 炸满 3 个", mutsuki(2), [2, 3, 4])
+check("睦月站 4 位、自动锁 4 位 → 边缘只炸 2 个", mutsuki(3), [3, 4])
 // 2 目标技能的战场分割限制不受影响，第 5 组已经断言过，这里再钉一次边界
-check("2 目标技能仍然不跨战场（星野指定 2 位）", pickIdx(setup(TANK1, OUT), 1).sort(), [1, 2])
+check("2 目标技能仍然不跨战场", exTargets(setup(TANK1, OUT)).sort(), [1, 2])
 
 console.log("\n=== 5b. 多目标只打最前那一层（白子普技 / 千世普攻 / 睦月）===")
 /** who 站 1 位放普通技能，红方 picks；返回命中号位 */
@@ -171,71 +176,73 @@ check("白子 2 目标 · 两个后排 → 两个都打", skillHits("白子", OU
 check("白子 2 目标 · 前+中 → 只打前排", skillHits("白子", ["星野", "白子", "野宫", "野宫"]), [1])
 check("白子 2 目标 · 中+后 → 只打中排", skillHits("白子", ["白子", "野宫", "野宫", "野宫"]), [1])
 check("白子 2 目标 · 两个前排 → 两个都打", skillHits("白子", ["星野", "鹤城", "野宫", "野宫"]), [1, 2])
-check("星野 EX 指中排 · 前+中 → 越过去只打中排", pickIdx(setup(["星野", "野宫", "野宫", "野宫"], ["星野", "白子", "野宫", "野宫"]), 1), [2])
+check("星野 EX · 前+中 → 固定索敌先打前排", exTargets(setup(["星野", "野宫", "野宫", "野宫"], ["星野", "白子", "野宫", "野宫"])), [1])
 check("千世普攻 · 两个后排 → 两个都打", chiseAA(OUT), [1, 2])
 check("千世普攻 · 前+中 → 只打前排", chiseAA(["星野", "白子", "野宫", "野宫"]), [1])
 check("千世普攻 · 中+后 → 只打中排", chiseAA(["白子", "野宫", "野宫", "野宫"]), [1])
 {
-  const mutsukiMix = (red, idx) => {
-    const st = setup(["睦月", "野宫", "野宫", "野宫"], red)
-    const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx } }] })
+  const mutsukiMix = (red, pos = 0) => {
+    const picks = ["野宫", "野宫", "野宫", "野宫"]
+    picks[pos] = "睦月"
+    const st = setup(picks, red)
+    const r = run(st, { type: "ex", casts: [{ pos }] })
     return r.events.find((e) => e.type === "action" && e.action === "ex").targets
       .map((t) => t.pos + 1).sort()
   }
-  // 指定中排 2 位，窗口 {1,2,3}：前 / 中 / 前 → 只打被点的那一层中排
-  check("睦月 3 目标 · 指定中排 → 越过前排只打中排",
-    mutsukiMix(["星野", "白子", "鹤城", "野宫"], 1), [2])
-  // 指定前排 2 位，窗口里两个前排夹一个中排
-  check("睦月 3 目标 · 指定前排 · 窗口两个前排 → 打两个前排",
+  check("睦月 3 目标 · 有前排时不能越过前排打中排",
+    mutsukiMix(["星野", "白子", "鹤城", "野宫"]), [1])
+  check("睦月站 2 位 · 自动主目标同为前排 · 窗口三个前排",
     mutsukiMix(["星野", "鹤城", "春香", "野宫"], 1), [1, 2, 3])
-  // 指定前排，窗口里只有她一个前排
-  check("睦月 3 目标 · 指定前排 · 旁边都是中后 → 退化成单体",
-    mutsukiMix(["星野", "白子", "芹香", "野宫"], 0), [1])
+  check("睦月 3 目标 · 自动前排主目标旁边都是中后 → 退化成单体",
+    mutsukiMix(["星野", "白子", "芹香", "野宫"]), [1])
 }
 
 console.log("\n=== 5c. 直线贯穿 / 场地盖战场 / 堇连发 ===")
-function exHits(who, red, idx) {
-  const st = setup([who, "野宫", "野宫", "野宫"], red)
+function exHits(who, red, pos = 0) {
+  const picks = ["野宫", "野宫", "野宫", "野宫"]
+  picks[pos] = who
+  const st = setup(picks, red)
   st.sides[0].cost = 10
-  const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx } }] })
+  const r = run(st, { type: "ex", casts: [{ pos }] })
   return (r.events.find((e) => e.type === "action" && e.action === "ex")?.targets || [])
     .map((t) => (t.summon ? "偶" : t.pos + 1))
 }
-check("晴奈直线 · 前+中 指定前 → 两个都打",
-  exHits("晴奈", ["星野", "白子", "野宫", "野宫"], 0).sort(), [1, 2])
-check("纯子直线 · 窗口前/中/前 → 三个都打",
-  exHits("纯子", ["星野", "白子", "鹤城", "野宫"], 1).sort(), [1, 2, 3])
-check("爱露二段 · 前+中 指定前 → 不同层吃不到溅射",
-  exHits("爱露", ["星野", "白子", "野宫", "野宫"], 0).sort(), [1])
+check("晴奈直线 · 自动锁前排后贯穿同战场两人",
+  exHits("晴奈", ["星野", "白子", "野宫", "野宫"]).sort(), [1, 2])
+check("纯子站 2 位 · 自动锁 2 位前排 → 固定窗口贯穿三人",
+  exHits("纯子", ["白子", "星野", "鹤城", "野宫"], 1).sort(), [1, 2, 3])
+check("爱露二段 · 前+中自动锁前排 → 不同层吃不到溅射",
+  exHits("爱露", ["星野", "白子", "野宫", "野宫"]).sort(), [1])
 check("爱露二段 · 两个前排 → 第二人吃溅射",
   exHits("爱露", ["星野", "鹤城", "野宫", "野宫"], 0).sort(), [1, 2])
-check("日富美 EX · 指定中排 · 前中前 → 横向只打中排",
-  exHits("日富美", ["星野", "白子", "鹤城", "野宫"], 1).sort(), [2])
+check("日富美 EX · 前中前 → 自动锁本战场前排",
+  exHits("日富美", ["星野", "白子", "鹤城", "野宫"]).sort(), [1])
 {
   const st = setup(["千世", "野宫", "野宫", "野宫"], ["星野", "白子", "野宫", "野宫"])
   st.sides[0].cost = 10
-  const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] })
-  const burned = r.state.sides[1].units
-    .map((u, i) => (u.dots.some((d) => d.icon === "Zone") ? i + 1 : null))
-    .filter(Boolean)
-  check("千世场地 · 前+中 同战场两路都烧", burned, [1, 2])
+  const r = run(st, { type: "ex", casts: [{ pos: 0 }] })
+  check("千世场地 · 前+中 仍盖住同战场两路",
+    r.state.sides[1].fields.map((f) => [f.lo + 1, f.hi + 1]), [[1, 2]])
 }
-function sumireShots(pickIdx) {
-  const st = setup(["堇", "野宫", "野宫", "野宫"], OUT)
+function sumireShots(pos) {
+  const picks = ["野宫", "野宫", "野宫", "野宫"]
+  picks[pos] = "堇"
+  const st = setup(picks, OUT)
   st.sides[0].cost = 10
-  const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: pickIdx } }] })
-  return r.events.filter((e) => e.type === "damage" && e.source?.side === 0 && e.source.pos === 0)
+  const r = run(st, { type: "ex", casts: [{ pos }] })
+  return r.events.filter((e) => e.type === "damage" && e.source?.side === 0 && e.source.pos === pos)
     .map((e) => e.target.pos + 1)
 }
-check("堇 EX 连发 · 指定 1 位 → 三发全在 1", sumireShots(0), [1, 1, 1])
-check("堇 EX 连发 · 指定另一战场 → 后两发回本战场对位", sumireShots(2), [3, 1, 1])
+check("堇 EX 连发 · 站 1 位自动锁 1 位，三发全在 1", sumireShots(0), [1, 1, 1])
+check("堇 EX 连发 · 站 3 位自动锁 3 位，三发全在 3", sumireShots(2), [3, 3, 3])
 
 console.log("\n=== 8. 召唤物挡刀（日富美的佩洛洛人偶）===")
 /** 蓝1 = 日富美，EX 把人偶扔向红方 blockIdx 号位，返回随后红方普攻的 源→目标 */
 function withDoll(blockIdx, skipTaunt) {
-  const st = setup(["日富美", "野宫", "野宫", "野宫"], OUT)
-  run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: blockIdx } }] })
-  let cur = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: blockIdx } }] }).state
+  const picks = ["野宫", "野宫", "野宫", "野宫"]
+  picks[blockIdx] = "日富美"
+  const st = setup(picks, OUT)
+  let cur = run(st, { type: "ex", casts: [{ pos: blockIdx }] }).state
   if (skipTaunt) {
     cur = run(cur, { type: "pass" }).state // 红方（嘲讽期）
     cur = run(cur, { type: "pass" }).state // 蓝方
@@ -249,12 +256,12 @@ check("嘲讽那一轮：红方全员都被拉去打人偶", withDoll(0, false),
 // 嘲讽过期之后它仍然挡在那半边最前面：扔进 1·2 就把 1·2 两路的刀全接了
 check("嘲讽过后扔进 1·2 战场：红1 红2 都打人偶", withDoll(0, true), ["1→偶", "2→偶", "3→3", "4→4"])
 // 蓝 1 日富美是中排、蓝 2 野宫是后排：红 1·2 都打最前的日富美，不是对位
-check("嘲讽过后扔进 3·4 战场：红3 红4 都打人偶", withDoll(2, true), ["1→1", "2→1", "3→偶", "4→偶"])
+check("嘲讽过后扔进 3·4 战场：红3 红4 都打人偶", withDoll(2, true), ["1→1", "2→2", "3→偶", "4→偶"])
 // 人偶比前排还靠前：同战场有星野也照样先打人偶
 {
   const st = setup(["日富美", "野宫", "野宫", "野宫"], TANK1)
   st.sides[0].cost = 10
-  let cur = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] }).state
+  let cur = run(st, { type: "ex", casts: [{ pos: 0 }] }).state
   cur = run(cur, { type: "pass" }).state // 红方（嘲讽期）
   cur = run(cur, { type: "pass" }).state // 蓝方
   const r = run(cur, { type: "pass" })
@@ -287,15 +294,15 @@ function skillVsDoll(who, pos, doll) {
 check("睦月 3 目标 · 无人偶", skillVsDoll("睦月", 1, null).sort(), [1, 2, 3])
 check("睦月 3 目标 · 人偶在 1·2 战场", skillVsDoll("睦月", 1, 0), ["偶"])
 check("睦月 3 目标 · 人偶在 3·4 战场（窗口伸到了 3 位）", skillVsDoll("睦月", 1, 3), ["偶"])
-// 睦月指 4 位 → 窗口 {3,4} 只在 3·4 战场，1·2 那边的墙够不着
-check("睦月 3 目标 · 指 4 位、人偶在 1·2 战场 → 拦不住", skillVsDoll("睦月", 3, 0).sort(), [3, 4])
+// 睦月位于 4 位 → 自动目标窗口 {3,4} 只在 3·4 战场，1·2 那边的墙够不着
+check("睦月 3 目标 · 位于 4 位、人偶在 1·2 战场 → 拦不住", skillVsDoll("睦月", 3, 0).sort(), [3, 4])
 // 白子在 1 位 → 2 目标，覆盖面就是主目标那个战场
 check("白子 2 目标 · 人偶挡 2 位（同战场）", skillVsDoll("白子", 0, 1), ["偶"])
 check("白子 2 目标 · 人偶挡 3 位（另一战场）", skillVsDoll("白子", 0, 2).sort(), [1, 2])
 
-console.log("\n=== 10. 伊织 EX：只有第一发听指挥，后两发按普攻规则重锁 ===")
-/** 伊织在 1 位，指定 pickIdx；kill 是开局就打死的号位，doll 是人偶挡的号位 */
-function iori(pickIdx, kill = [], doll = null) {
+console.log("\n=== 10. 伊织 EX：第一发固定索敌，后两发按普攻规则重锁 ===")
+/** 伊织在 1 位；kill 是开局就打死的号位，doll 是人偶挡的号位 */
+function iori(kill = [], doll = null) {
   const st = setup(["伊织", "日富美", "野宫", "芹香"], FOE, kill.map((k) => [1, k]))
   st.sides[0].cost = 10
   if (doll != null) {
@@ -305,33 +312,32 @@ function iori(pickIdx, kill = [], doll = null) {
       buffs: [], regens: [], stun: 0, taunt: 0, turns: 6, st: -1, sourceKey: "x", alive: true,
     }]
   }
-  const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: pickIdx } }] })
+  const r = run(st, { type: "ex", casts: [{ pos: 0 }] })
   return r.events.filter((e) => e.type === "damage" && e.source.side === 0 && e.source.pos === 0)
     .map((e) => (e.target.summon ? "偶" : e.target.pos + 1))
 }
 // 后两发不再「不能和上一发相同」：普攻锁谁就锁谁，锁定的人没死就连吃三发
-check("指定同战场的 1 位 → 三发全在 1（对位）", iori(0), [1, 1, 1])
-check("指定另一战场的 3 位 → 后两发回到本战场对位", iori(2), [3, 1, 1])
-check("本战场只剩 1 位 → 后两发继续打它", iori(0, [1]), [1, 1, 1])
-check("人偶在本战场 → 后两发全被它接走", iori(0, [], 0), [1, "偶", "偶"])
-check("人偶挡另一路（同战场）→ 一样接走后两发", iori(0, [], 1), [1, "偶", "偶"])
-check("人偶在另一战场 → 本战场还有人时不接", iori(0, [], 2), [1, 1, 1])
-check("本战场打空 + 人偶在本战场 → 后两发全打人偶", iori(2, [0, 1], 0), [3, "偶", "偶"])
-check("本战场打空 + 人偶在另一战场 → 越界前先拆墙，后两发都在墙上", iori(2, [0, 1], 2), [3, "偶", "偶"])
+check("自动锁同战场 1 位 → 三发全在 1（对位）", iori(), [1, 1, 1])
+check("本战场只剩 1 位 → 后两发继续打它", iori([1]), [1, 1, 1])
+check("人偶在本战场 → 从第一发起全被它接走", iori([], 0), ["偶", "偶", "偶"])
+check("人偶挡同战场另一路 → 一样从第一发接走", iori([], 1), ["偶", "偶", "偶"])
+check("人偶在另一战场 → 本战场还有人时不接", iori([], 2), [1, 1, 1])
+check("本战场打空 + 人偶在本战场 → 三发全打人偶", iori([0, 1], 0), ["偶", "偶", "偶"])
+check("本战场打空 + 人偶在另一战场 → 越界前先拆墙", iori([0, 1], 2), ["偶", "偶", "偶"])
 // 有前排就后两发都落前排身上（敌 1 位放星野，伊织在 1 位）
 check("同战场有前排 → 后两发都打前排", (() => {
   const st = setup(["伊织", "日富美", "野宫", "芹香"], TANK1)
   st.sides[0].cost = 10
-  const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 1 } }] })
+  const r = run(st, { type: "ex", casts: [{ pos: 0 }] })
   return r.events.filter((e) => e.type === "damage" && e.source?.side === 0 && e.source.pos === 0)
     .map((e) => e.target.pos + 1)
-})(), [2, 1, 1])
+})(), [1, 1, 2])
 // 打死锁定的人会自动换目标：这条机制还在
 check("对位被打死 → 后面的发数换成同战场另一个", (() => {
   const st = setup(["伊织", "日富美", "野宫", "芹香"], FOE)
   st.sides[0].cost = 10
   st.sides[1].units[0].hp = 1 // 第一发就能打死红1
-  const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] })
+  const r = run(st, { type: "ex", casts: [{ pos: 0 }] })
   return r.events.filter((e) => e.type === "damage" && e.source?.side === 0 && e.source.pos === 0)
     .map((e) => e.target.pos + 1)
 })(), [1, 2, 2])
@@ -340,21 +346,22 @@ check("对位被打死 → 后面的发数换成同战场另一个", (() => {
   const st = setup(["伊织", "日富美", "野宫", "芹香"], FOE)
   st.sides[0].cost = 10
   st.sides[1].units[0].hp = 1
-  const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] })
+  const r = run(st, { type: "ex", casts: [{ pos: 0 }] })
   const ev = r.events.find((e) => e.type === "action" && e.action === "ex" && e.source.pos === 0)
   check("换过目标后 action.targets 两个人都在",
     (ev?.targets || []).map((t) => t.pos + 1).sort(), [1, 2])
 }
 
-console.log("\n=== 11. 千世场地：盖在生效范围，人死不转移 ===")
-function chiseCast(kills = [], pick = 0) {
-  const st = setup(["千世", "野宫", "野宫", "野宫"], OUT, kills)
+console.log("\n=== 11. 千世场地：固定范围，每跳重扫当前号位 ===")
+function chiseCast(kills = [], red = OUT) {
+  const st = setup(["千世", "野宫", "野宫", "野宫"], red, kills, { fieldCovers: true })
   st.sides[0].cost = 10
-  return run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: pick } }] })
+  return run(st, { type: "ex", casts: [{ pos: 0 }] })
 }
-const zoneOn = (side) => side.units
-  .filter((u) => (u.dots || []).some((d) => d.icon === "Zone"))
-  .map((u) => u.idx + 1)
+const zoneHits = (result) => result.events
+  .filter((e) => (e.type === "damage" || e.type === "miss") && e.dotIcon === "Zone")
+  .map((e) => e.target.summon ? "掩体" : e.target.pos + 1)
+const fieldShape = (side) => (side.fields || []).map((f) => [f.lo, f.hi, f.turns, f.tick])
 const kill = (st, idx) => {
   const u = st.sides[1].units[idx]
   u.alive = false
@@ -363,32 +370,46 @@ const kill = (st, idx) => {
 }
 
 const drop = chiseCast()
-check("指定红1 → 地上的圈盖住 1·2 整个战场", drop.state.sides[1].fields, [{ lo: 0, hi: 1, turns: 2, st: drop.state.turnId }])
-check("指定红1 → 当时站在里面的 1·2 挨烧", zoneOn(drop.state.sides[1]), [1, 2])
-check("指定红1 → 另一战场的 3·4 没有场地", zoneOn(drop.state.sides[1]).includes(3) || zoneOn(drop.state.sides[1]).includes(4), false)
+check("自动锁定红1 → 地上的圈盖住 1·2 整个战场", fieldShape(drop.state.sides[1]), [[0, 1, 2, 0]])
+check("场地伤害存在 field 上，不给施放瞬间的人挂 Zone DoT",
+  drop.state.sides[1].units.some((u) => (u.dots || []).some((d) => d.icon === "Zone")), false)
+const firstTick = playerTurn(drop.state, { type: "pass" })
+check("第一次跳伤害重新扫描：当前 1·2 号位和圈内掩体挨烧", zoneHits(firstTick), [1, 2, "掩体"])
+check("另一战场的 3·4 不受伤", zoneHits(firstTick).some((p) => p === 3 || p === 4), false)
 
 const emptyNeighbor = chiseCast([[1, 1]])
 check("红2 已死再打红1 → 圈仍盖 1·2（生效范围，不缩成单体）",
   emptyNeighbor.state.sides[1].fields.map((f) => [f.lo, f.hi]), [[0, 1]])
-check("红2 已死再打红1 → 只有红1 身上有 DoT", zoneOn(emptyNeighbor.state.sides[1]), [1])
+check("红2 已死时场地重扫 → 烧当前红1和圈内掩体",
+  zoneHits(playerTurn(emptyNeighbor.state, { type: "pass" })), [1, "掩体"])
 
 const afterKill = chiseCast()
 kill(afterKill.state, 0)
 const afterRed = playerTurn(afterKill.state, { type: "pass" })
 check("场里红1 死后，圈还在原处 1·2", afterRed.state.sides[1].fields.map((f) => [f.lo, f.hi]), [[0, 1]])
-check("场里红1 死后，不会把 DoT 转给 3·4", zoneOn(afterRed.state.sides[1]), [2])
+check("场里红1 死后，每跳烧当前红2和圈内掩体", zoneHits(afterRed), [2, "掩体"])
 
 const bothDead = chiseCast()
 kill(bothDead.state, 0)
 kill(bothDead.state, 1)
 const afterEmpty = playerTurn(bothDead.state, { type: "pass" })
 check("场里两人都死后，圈仍留在 1·2", afterEmpty.state.sides[1].fields.map((f) => [f.lo, f.hi]), [[0, 1]])
-check("场里两人都死后，3·4 不会走进空场地", zoneOn(afterEmpty.state.sides[1]), [])
+check("场里两人都死后，圈内掩体仍作为构造物受伤", zoneHits(afterEmpty), ["掩体"])
+
+// 位移后按对象现在站的格子算：原本在圈内的星野移出，原本在圈外的野宫进入。
+const moved = chiseCast([], ["星野", "白子", "野宫", "伊织"])
+const movedSide = moved.state.sides[1]
+const leaving = movedSide.units[0]
+const entering = movedSide.units[2]
+movedSide.units[0] = entering; entering.idx = 0
+movedSide.units[2] = leaving; leaving.idx = 2
+const movedTick = playerTurn(moved.state, { type: "pass" })
+const movedNames = zoneHits(movedTick).filter(Number.isInteger)
+  .map((pos) => tmplOf(movedTick.state.sides[1].units[pos - 1]).name)
+check("移入场地的野宫开始受伤，移出去的星野不再受伤", movedNames, ["野宫", "白子"])
 check("EX 不是 debuff：身上不加 buff", drop.state.sides[1].units.every((u) => !(u.buffs || []).length), true)
 check("EX 不是 debuff：不发 debuff 事件", drop.events.some((e) => e.type === "debuff"), false)
-check("EX 的持续伤害标成 Zone，不是灼烧",
-  drop.state.sides[1].units.filter((u) => (u.dots || []).length)
-    .every((u) => u.dots.every((d) => d.icon === "Zone")), true)
+check("EX 的场地对象标成 Zone，不是灼烧", drop.state.sides[1].fields.every((f) => f.icon === "Zone"), true)
 
 console.log("\n=== 12. 千世圆形普攻依旧被人偶挡 ===")
 /** who 站 pos 位普攻，敌方 doll 号位有人偶；返回这一发普攻的命中 */
@@ -415,38 +436,28 @@ check("千世普攻 · 人偶挡 3 位（另一战场）→ 不拦，仍打 1·2
 check("野宫单体普攻 · 人偶挡 2 位（同战场）→ 照样接走", autoVsDoll("野宫", 0, 1), ["偶"])
 check("野宫单体普攻 · 人偶挡 3 位（另一战场）→ 不接", autoVsDoll("野宫", 0, 2), [1])
 
-console.log("\n=== 13. EX 指名目标必须存活，不自动换目标 ===")
+console.log("\n=== 13. EX 只能选择释放者，任何 target 注入都拒绝 ===")
 {
-  // 第一发真纪 EX 击倒红1；第二发茜继续点红1应直接报错，不扣费、不产生事件。
   const st = setup(["真纪", "野宫", "野宫", "茜"], ["白子", "星野", "日奈", "爱露"])
-  st.sides[1].units[0].hp = 1
-  const first = playerTurn(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] })
-  const secondAction = { type: "ex", casts: [{ pos: 3, target: { scope: "foe", idx: 0 } }] }
-  check("第一发已经击倒红1", first.state.sides[1].units[0].alive, false)
-  check("第二发继续指名红1：校验直接报已倒下", /已经倒下/.test(validateAction(first.state, secondAction) || ""), true)
-  const second = playerTurn(first.state, secondAction)
-  check("非法第二发不产生事件", second.events?.length || 0, 0)
-  check("非法第二发不改变 Cost", second.state.sides[0].cost, first.state.sides[0].cost)
-
-  // 开局已经倒下的角色同样不能作为 EX 目标，不存在默认对线 / 越界兜底。
-  const deadAtStart = setup(["野宫", "野宫", "野宫", "茜"],
-    ["白子", "星野", "日奈", "爱露"], [[1, 0], [1, 2], [1, 3]])
-  check("开局已倒下目标也直接判非法",
-    /已经倒下/.test(validateAction(deadAtStart, secondAction) || ""), true)
+  const injected = { type: "ex", casts: [{ pos: 3, target: { scope: "foe", idx: 0 } }] }
+  check("引擎校验拒绝 target 字段", validateAction(st, injected), "EX 不能指定目标，只能选择释放者")
+  const rejectedTarget = playerTurn(st, injected)
+  check("非法点名不产生事件", rejectedTarget.events?.length || 0, 0)
+  check("非法点名不改变 Cost", rejectedTarget.state.sides[0].cost, st.sides[0].cost)
+  check("解析器拒绝旧式敌方点名", parseAction("真纪ex打白子")?.ok, false)
+  check("解析器拒绝旧式友方点名", parseAction("茜ex给野宫")?.ok, false)
+  check("裸 EX 仍能解析", parseAction("茜ex"), { ok: true, action: { type: "ex", casts: [{ id: id("茜") }] } })
 }
 
 const two = setup(["真纪", "野宫", "野宫", "茜"], ["白子", "星野", "日奈", "爱露"])
 const rejected = playerTurn(two, {
   type: "ex",
-  casts: [
-    { pos: 0, target: { scope: "foe", idx: 0 } },
-    { pos: 3, target: { scope: "foe", idx: 0 } },
-  ],
+  casts: [{ pos: 0 }, { pos: 3 }],
 })
 check("一条指令两个 EX 被拒绝", Boolean(rejected.error), true)
 check("放完一个 EX 且还能再放时回合还开着",
   playerTurn(setup(["真纪", "野宫", "野宫", "茜"], ["白子", "星野", "日奈", "爱露"]), {
-    type: "ex", casts: [{ pos: 3, target: { scope: "foe", idx: 0 } }],
+    type: "ex", casts: [{ pos: 3 }],
   }).state.turnOpen, true)
 
 console.log("\n=== 14. 泉普技是普攻触发，不是每 5 回合必放 ===")
@@ -752,13 +763,13 @@ console.log("\n=== 23. EX 自伤：失去当前生命的 25.7%，但打不死自
 {
   const st = setup(["纯子", "野宫", "野宫", "野宫"], OUT)
   const before = J(st).hp
-  const r = run(st, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 1 } }] })
+  const r = run(st, { type: "ex", casts: [{ pos: 0 }] })
   check("按当前生命扣 25.7%", Math.round(before - J(r.state).hp), Math.round(before * 0.257))
   const ev = r.events.find((e) => e.type === "damage" && !e.source)
   check("自伤事件不带施法者（战场图不画连线），走持续伤害那套配色",
     ev && [ev.source, ev.dot, ev.attackType], [null, true, "自伤"])
-  check("直线 3 目标以主目标为中心，主目标排第一",
-    r.events.find((e) => e.type === "action" && e.action === "ex").targets.map((x) => x.pos + 1), [2, 1, 3])
+  check("直线 3 目标以自动主目标为中心；站在边缘会少覆盖一格",
+    r.events.find((e) => e.type === "action" && e.action === "ex").targets.map((x) => x.pos + 1), [1, 2])
 
   const low = setup(["纯子", "野宫", "野宫", "野宫"], SHUN_FOE)
   J(low).hp = 3
@@ -817,7 +828,8 @@ function redThenBlue(order, red = ["椿", "日富美", "野宫", "野宫"], blue
     let cur = run(st, { type: "pass" }).state
     cur = playerTurn(cur, { type: "ex", casts: [{ pos: 1 }] }).state // 人偶
     cur = playerTurn(cur, { type: "ex", casts: [{ pos: 0 }] }).state // 椿顶掉它
-    check("椿接手之后人偶身上的嘲讽已清零", cur.sides[1].summons[0].taunt, 0)
+    check("椿接手之后人偶身上的嘲讽已清零",
+      cur.sides[1].summons.find((s) => !s.cover)?.taunt, 0)
     check("同一方同时只有一个嘲讽目标",
       cur.sides[1].units.filter((u) => u.taunt > 0).length + cur.sides[1].summons.filter((s) => s.taunt > 0).length, 1)
   }
@@ -827,7 +839,7 @@ function redThenBlue(order, red = ["椿", "日富美", "野宫", "野宫"], blue
     const st = setup(OUT, ["椿", "日富美", "野宫", "野宫"])
     st.sides[1].cost = 10
     let cur = run(st, { type: "pass" }).state
-    cur = playerTurn(cur, { type: "ex", casts: [{ pos: 1, target: { scope: "foe", idx: 0 } }] }).state
+    cur = playerTurn(cur, { type: "ex", casts: [{ pos: 1 }] }).state
     cur = playerTurn(cur, { type: "ex", casts: [{ pos: 0 }] }).state
     while (cur.turnOpen) cur = playerTurn(cur, { type: "pass" }).state
     const r = playerTurn(cur, { type: "pass" })
@@ -948,7 +960,7 @@ console.log("\n=== 27. 嘲讽 / 恐惧封 EX：全员被封也要等人发「过
   check("四个主力被封，支援仍在可放名单里", exCastableOf(taunted, 0), [4, 5])
   check("有支援时就不算全员被封", exSealedOf(taunted, 0), false)
   check("支援自己没被嘲讽", taunted.sides[0].supports.map((u) => exLockedOf(taunted, u)), [null, null])
-  check("点名放 EX 会被拦", validateAction(taunted, { type: "ex", casts: [{ pos: 0 }] }),
+  check("选择该角色释放 EX 会被拦", validateAction(taunted, { type: "ex", casts: [{ pos: 0 }] }),
     "野宫 被嘲讽，放不出 EX")
   check("「过」仍然合法", validateAction(taunted, { type: "pass" }), null)
 
@@ -970,7 +982,7 @@ console.log("\n=== 27. 嘲讽 / 恐惧封 EX：全员被封也要等人发「过
   // 恐惧同理：`u.stun` 只可能挂在场上的人身上，支援根本不在被选中的名单里
   check("恐惧下支援仍能放", exCastableOf(feared, 0), [4, 5])
   check("恐惧下也不算全员被封", exSealedOf(feared, 0), false)
-  check("恐惧下点名放 EX 会被拦", validateAction(feared, { type: "ex", casts: [{ pos: 0 }] }),
+  check("恐惧下选择该角色释放 EX 会被拦", validateAction(feared, { type: "ex", casts: [{ pos: 0 }] }),
     "野宫 被恐惧，放不出 EX")
   const fearedPass = playerTurn(feared, { type: "pass" })
   check("恐惧那一轮普攻被跳过",
@@ -1157,35 +1169,41 @@ console.log("\n=== 31. 菲娜：无视开火间隔折成普攻增伤，与攻击
   check("走的是普攻增伤，不是造成伤害", /攻速|普攻/.test(describeEffect(pina.ex)), true)
 }
 
-console.log("\n=== 32. 泉奈的位移：与相邻一格的队友交换站位 ===")
+console.log("\n=== 32. 泉奈的位移：朝自动攻击目标移动，阵亡邻位也能进入 ===")
 {
-  // 号位不变量：units[i].idx === i。换位必须同时换数组槽和 idx，否则下标索引全乱
+  // 四格实现仍通过交换数组槽保持 units[i].idx === i，但规则语义是泉奈移动。
   const order = (st) => st.sides[0].units.map((u) => tmplOf(u).name)
   const idxOk = (st) => st.sides[0].units.every((u, i) => u.idx === i)
-  const cast = (st, to) => run(st, { type: "ex", casts: [{ pos: st.sides[0].units.findIndex((u) => u.id === id("泉奈")), ...(to ? { target: { scope: "ally", idx: to } } : {}) }] })
+  const cast = (st) => run(st, { type: "ex", casts: [{ pos: st.sides[0].units.findIndex((u) => u.id === id("泉奈")) }] })
 
-  const base = () => setup(["泉奈", "椿", "野宫", "茜"], ["茜", "茜", "茜", "茜"])
+  // 红 2 是前排，泉奈站 1 位时会自动锁它，因此向右移动一格。
+  const base = () => setup(["泉奈", "椿", "野宫", "茜"], ["野宫", "星野", "茜", "茜"])
 
-  const a = cast(base(), 1)
-  check("跟 2 号位换：站位互调", order(a.state), ["椿", "泉奈", "野宫", "茜"])
+  const a = cast(base())
+  check("自动目标在 2 位：泉奈从 1 位向右移动一格", order(a.state), ["椿", "泉奈", "野宫", "茜"])
   check("units[i].idx === i 仍成立", idxOk(a.state), true)
-  check("同战场内换，两人都还在 1 战场", [a.state.sides[0].units[0].idx, a.state.sides[0].units[1].idx], [0, 1])
+  check("同战场内移动后仍保持四格唯一占位", a.state.sides[0].units.map((u) => u.idx), [0, 1, 2, 3])
 
-  // 2 号位 → 3 号位是唯一跨得过战场分界的那一跳
-  const st2 = setup(["椿", "泉奈", "野宫", "茜"], ["茜", "茜", "茜", "茜"])
-  const b = cast(st2, 2)
-  check("站 2 号位跳 3 号位：跨过战场分界", order(b.state), ["椿", "野宫", "泉奈", "茜"])
+  // 泉奈站 2 位，本战场敌人已空，自动越界锁 3 位，因此跨到 3 位。
+  const st2 = setup(["椿", "泉奈", "野宫", "茜"], ["茜", "茜", "茜", "茜"], [[1, 0], [1, 1]])
+  const b = cast(st2)
+  check("站 2 位且本战场已空：朝 3 位移动并跨界", order(b.state), ["椿", "野宫", "泉奈", "茜"])
   check("日志写明跨了战场", b.log.some((l) => /跨过战场分界/.test(l)), true)
 
-  // 不相邻的要在校验层就拦下来，别扣了 Cost 才发现没动
-  const st3 = base()
-  check("换到不相邻的一格：直接报错，不扣 Cost",
-    validateAction(st3, { type: "ex", casts: [{ pos: 0, target: { scope: "ally", idx: 3 } }] }),
-    "茜 不在 泉奈 隔壁，位移只能跟相邻的一格换")
-  check("不指定就不动", order(cast(base(), null).state), ["泉奈", "椿", "野宫", "茜"])
+  // 邻位已经阵亡也不是障碍：泉奈进入空位，阵亡对象退到她原来的数组槽。
+  const deadNeighbor = base()
+  deadNeighbor.sides[0].units[1].alive = false
+  deadNeighbor.sides[0].units[1].hp = 0
+  const d = cast(deadNeighbor)
+  check("相邻队友阵亡仍会进入其位置", [order(d.state), d.state.sides[0].units[1].id],
+    [["椿", "泉奈", "野宫", "茜"], id("泉奈")])
+  check("日志写明进入阵亡位置", d.log.some((l) => /阵亡位置/.test(l)), true)
+
+  const aligned = setup(["泉奈", "椿", "野宫", "茜"], ["茜", "茜", "茜", "茜"])
+  check("已经与自动目标对位时留在原位", order(cast(aligned).state), ["泉奈", "椿", "野宫", "茜"])
 
   // turnEx 是按号位记的：不跟着换的话，换完位的泉奈会被当成没放过 EX 而多打一枪
-  const c = playerTurn(base(), { type: "ex", casts: [{ pos: 0, target: { scope: "ally", idx: 1 } }] })
+  const c = playerTurn(base(), { type: "ex", casts: [{ pos: 0 }] })
   const izunaIdx = c.state.sides[0].units.findIndex((u) => u.id === id("泉奈"))
   check("turnEx 跟着换位一起改号位", [izunaIdx, c.state.turnEx], [1, [1]])
   const done = run(c.state, { type: "pass" })
@@ -1206,12 +1224,12 @@ const noMiss = (u) => {
 
 console.log("\n=== 33. 绿：按号位循环点名 5 次，玩家指不了目标 ===")
 {
-  const cyclePairs = (bluePicks, redPicks, kills = [], target) => {
+  const cyclePairs = (bluePicks, redPicks, kills = []) => {
     const st = setup(bluePicks, redPicks, kills)
     for (const s of st.sides) for (const u of s.units) { u.maxhp = 9e6; u.hp = 9e6 }
     const pos = st.sides[0].units.findIndex((u) => u.id === id("绿"))
     noMiss(st.sides[0].units[pos])
-    const r = playerTurn(st, { type: "ex", casts: [{ pos, ...(target ? { target } : {}) }] })
+    const r = playerTurn(st, { type: "ex", casts: [{ pos }] })
     return r.events
       .filter((e) => e.type === "damage" && e.source?.side === 0 && !e.dot)
       .map((e) => e.target.pos + 1)
@@ -1223,8 +1241,10 @@ console.log("\n=== 33. 绿：按号位循环点名 5 次，玩家指不了目标
     cyclePairs(["绿", "椿", "椿", "椿"], FOUR, [[1, 1], [1, 2], [1, 3]]), [1, 1, 1, 1, 1])
   check("剩 3 个：1→2→3→1→2",
     cyclePairs(["绿", "椿", "椿", "椿"], FOUR, [[1, 3]]), [1, 2, 3, 1, 2])
-  check("指定目标无效，落点仍由自己的号位定",
-    cyclePairs(["椿", "绿", "椿", "椿"], FOUR, [], { scope: "foe", idx: 3 }), [2, 3, 4, 1, 2])
+  const injected = setup(["椿", "绿", "椿", "椿"], FOUR)
+  check("即使循环目标固定，额外 target 字段仍被统一拒绝",
+    validateAction(injected, { type: "ex", casts: [{ pos: 1, target: { scope: "foe", idx: 3 } }] }),
+    "EX 不能指定目标，只能选择释放者")
 }
 
 console.log("\n=== 34. 绿 ⇄ 桃：编队条件，同时上场才有 DoT ===")
@@ -1325,98 +1345,45 @@ console.log("\n=== 35. 妮露的 Fury / 爱丽丝的能量充能：条件追伤 
   })(), 0)
 }
 
-console.log("\n=== 36. 小春：一个圈，砸哪边就只有那边生效 ===")
+console.log("\n=== 36. 小春：伤害自动目标，同时治疗其对位友军 ===")
 {
-  /**
-   * 原文「对圆形范围内的**我方**单位回复 / 对上述范围内的**敌方**单位造成伤害」，
-   * 但圈只有 r=200、投掷距离 950 —— 敌我两队隔着整个场地，圈里装不下两边。
-   * 所以「打」和「奶」互斥，中间那个字选的是技能的哪一半。两边都是同战场同身位 2 人。
-   */
-  const cast = (picks, target) => {
-    const st = setup(picks, ["椿", "椿", "椿", "椿"])
-    for (const u of st.sides[0].units) { u.hp = Math.round(u.maxhp / 2) }
-    noMiss(st.sides[0].units[0])
+  const cast = (blue, red, kills = []) => {
+    const st = setup(blue, red, kills)
+    for (const u of st.sides[0].units) if (u.alive) u.hp = Math.round(u.maxhp / 2)
+    for (const u of st.sides[1].units) { u.maxhp = 9e6; u.hp = 9e6 }
+    const pos = st.sides[0].units.findIndex((u) => u.id === id("小春"))
+    noMiss(st.sides[0].units[pos])
     st.sides[0].cost = 10
-    const r = playerTurn(st, { type: "ex", casts: [{ pos: 0, ...(target ? { target } : {}) }] })
+    const r = playerTurn(st, { type: "ex", casts: [{ pos }] })
     const at = (type, side) => r.events
       .filter((e) => e.type === type && e.target.side === side).map((e) => e.target.pos + 1)
     return { r, dmg: at("damage", 1), heal: at("heal", 0), selfDmg: at("damage", 0) }
   }
-  const four = ["小春", "野宫", "野宫", "野宫"]
 
-  // ① 砸对面：只有伤害
-  const foe = cast(four, { scope: "foe", idx: 2 })
-  check("打：伤害落在指定的敌方 3·4", foe.dmg, [3, 4])
-  check("打：己方一滴血都不回（圈里没有自己人）", foe.heal, [])
+  // 小春站 2 位；红 1 是本战场唯一前排，所以自动主目标是红 1，治疗蓝 1。
+  const mirrored = cast(["野宫", "小春", "野宫", "野宫"], ["星野", "野宫", "野宫", "野宫"])
+  check("伤害照常落在自动攻击目标", mirrored.dmg, [1])
+  check("同时只治疗攻击主目标对位的蓝 1", mirrored.heal, [1])
+  check("不会对己方造成伤害", mirrored.selfDmg, [])
 
-  // ② 砸自己人：只有治疗，且**不能**误伤自家。桃和切里诺都是中排，同战场同身位吃满 2 人
-  const ally = cast(["小春", "野宫", "桃", "切里诺"], { scope: "ally", idx: 2 })
-  check("奶：治疗落在己方 3·4（桃和同身位的切里诺）", ally.heal, [3, 4])
-  check("奶：对面一点伤害都不吃", ally.dmg, [])
-  check("奶：更不会砸到自己人头上", ally.selfDmg, [])
-  // 身位过滤跟伤害圈同一套：4 号位换成不同身位的人就只奶得到桃
-  check("奶：同战场但不同身位的奶不到",
-    cast(["小春", "野宫", "桃", "野宫"], { scope: "ally", idx: 2 }).heal, [3])
+  const missing = cast(["野宫", "小春", "野宫", "野宫"],
+    ["星野", "野宫", "野宫", "野宫"], [[0, 0]])
+  check("攻击主目标没有存活对位友军时不治疗", missing.heal, [])
 
-  // ③ 不写目标：走技能自己的 target（enemy_adjacent）+ 对线锁定，还是伤害圈
-  const bare = cast(four, null)
-  check("不写目标：默认伤害圈，走小春自己的对线 1·2", bare.dmg, [1, 2])
-  check("不写目标：没有治疗", bare.heal, [])
+  // 红 2 是本战场唯一前排，主目标改成 2 位，治疗也跟着落在蓝 2（小春自己）。
+  const shifted = cast(["野宫", "小春", "野宫", "野宫"], ["野宫", "星野", "野宫", "野宫"])
+  check("自动主目标改变时，对位治疗同步改变", [shifted.dmg, shifted.heal], [[2], [2]])
 
-  // ④ 写了名字却不写那个字：直接打回，不猜。双方可能有同名角色，猜错就是把奶办成炸
-  // （`scope: null` 就是 parseAction 在「小春ex椿」这种没写动词时给出的形状）
-  {
-    const st = setup(four, ["椿", "椿", "椿", "椿"])
-    st.sides[0].cost = 10
-    const err = validateAction(st, {
-      type: "ex", casts: [{ pos: 0, target: { scope: null, id: "TSUBAKI" } }],
-    })
-    check("没写「打/奶」就报错，不替玩家猜", /砸哪边/.test(err || ""), true)
-    check("写了就放行", validateAction(st, {
-      type: "ex", casts: [{ pos: 0, target: { scope: "foe", id: "TSUBAKI" } }],
-    }), null)
-    // 别人不受影响：星野没写动词照样按技能默认规则走
-    check("只卡小春这种圈，星野照常", validateAction(
-      setup(["星野", "野宫", "野宫", "野宫"], ["椿", "椿", "椿", "椿"]),
-      { type: "ex", casts: [{ pos: 0, target: { scope: null, id: "TSUBAKI" } }] },
-    ), null)
-  }
-
-  check("治疗的 scope 是 circle_ally、技能标了 circle",
-    [ROSTER.find((t) => t.name === "小春").ex.effects[0].scope,
-      ROSTER.find((t) => t.name === "小春").ex.circle], ["circle_ally", true])
-
-  /**
-   * ⑤ 从**指令字符串**走一遍：认的是哪一档动词，不是某个字。
-   * 打攻揍轰砸捶秒锤 八个字全是伤害圈，给帮为治奶助换跳 八个字全是治疗圈 ——
-   * `小春ex给桃` 跟 `小春ex奶桃` 必须完全等价，引擎只看 `pick.scope`。
-   * 文案里拿「打 / 奶」举例，别让哪天有人把判定收窄成只认这两个字。
-   */
-  {
-    const verbs = (chars) => [...chars].map((v) => {
-      const st = setup(["小春", "野宫", "桃", "切里诺"], ["椿", "白子", "桃", "野宫"])
-      for (const u of st.sides[0].units) { u.hp = Math.round(u.maxhp / 2) }
-      noMiss(st.sides[0].units[0])
-      st.sides[0].cost = 10
-      const p = parseAction(`小春ex${v}桃`)
-      if (!p?.ok) return `${v}:解析失败`
-      if (validateAction(st, p.action)) return `${v}:被拦`
-      const r = playerTurn(st, p.action)
-      const d = r.events.some((e) => e.type === "damage")
-      const h = r.events.some((e) => e.type === "heal")
-      return `${v}:${d ? "伤害" : ""}${h ? "治疗" : ""}`
-    })
-    check("给帮为治奶助换跳 八个字都是治疗圈",
-      verbs("给帮为治奶助换跳"), [..."给帮为治奶助换跳"].map((v) => `${v}:治疗`))
-    check("打攻揍轰砸捶秒锤 八个字都是伤害圈",
-      verbs("打攻揍轰砸捶秒锤"), [..."打攻揍轰砸捶秒锤"].map((v) => `${v}:伤害`))
-  }
-
-  // 她的单奶：排除自己、且只挑血量 ≤50% 的
   const koharu = ROSTER.find((t) => t.name === "小春")
-  // 原文只写「不高于 50%」没说「最低」，所以是 ally_hurt（按站位就近）而不是 ally_lowest
-  check("普技是单体奶、按站位就近，不是群奶", [koharu.skill.target, koharu.skill.exceptSelf, koharu.skill.hpMax],
-    ["ally_hurt", true, 0.5])
+  check("EX 治疗效果生成成 mirror_ally，不再带 circle 分支",
+    [koharu.ex.effects[0].scope, Boolean(koharu.ex.circle)], ["mirror_ally", false])
+  check("裸指令可用", parseAction("小春ex")?.ok, true)
+  check("带敌方目标的旧写法被拒绝", parseAction("小春ex打白子")?.ok, false)
+  check("带友方目标的旧写法被拒绝", parseAction("小春ex奶桃")?.ok, false)
+
+  // 她的普通技能仍服从原文：排除自己、只选血量 ≤50% 的，不被通用位置规则改成最低血量。
+  check("普技仍是 ally_hurt，不被改写成 ally_lowest",
+    [koharu.skill.target, koharu.skill.exceptSelf, koharu.skill.hpMax], ["ally_hurt", true, 0.5])
   check("冷却 10 秒 = 2 回合，不是默认的 5", koharu.skill.trigger, { type: "cooldown", turns: 2, icd: true })
 }
 
@@ -1755,13 +1722,23 @@ console.log("\n=== 42. 被控：条件技不吞，周期技照吞 ===")
 console.log("\n=== 36. 支援位：不站在场上、5/6 只是结算编号 ===")
 {
   // 静子 5 号、真白 6 号；对面塞两个惰性支援凑满编成
-  const sup = setup(["野宫", "野宫", "野宫", "野宫", "静子", "真白"], ["伊织", "伊织", "伊织", "伊织", "芹娜", "芹娜"])
+  const sup = setup(["野宫", "野宫", "野宫", "野宫", "静子", "真白"],
+    ["伊织", "伊织", "伊织", "伊织", "芹娜", "芹娜"], [], { fieldCovers: true })
   for (const side of sup.sides) for (const u of side.supports) u.skillCd = 9999
   sup.sides[0].cost = 10
 
   check("支援在独立数组里，units 仍是 4 个", [sup.sides[0].units.length, sup.sides[0].supports.length], [4, 2])
   check("支援的号位是 4、5（对外 5、6 号）", sup.sides[0].supports.map((u) => u.idx), [4, 5])
   check("EX 冷却长度 = 6 − 3", exLockLenOf(sup.sides[0]), 3)
+  check("开局双方都在 1、4 号位生成场地掩体",
+    sup.sides.map((s) => s.summons.filter((sm) => sm.fieldCover).map((sm) => [sm.blockIdx, sm.maxhp])),
+    [[[0, 700], [3, 700]], [[0, 700], [3, 700]]])
+  check("场地掩体不复用静子 99999 的百夜堂摊位素材",
+    [Boolean(fieldCoverArtOf()), Boolean(summonArtOf(99999)), fieldCoverArtOf() !== summonArtOf(99999)],
+    [true, true, true])
+  const fieldHtml = buildBattleHtml(sup)
+  check("红蓝同号位掩体固定共用一行坐标系，不被 Grid 挤到人物行",
+    /grid-template-rows:1fr/.test(fieldHtml) && /\.sm\{[^}]*grid-row:1/.test(fieldHtml), true)
 
   // 打不到：敌方任何索敌都不该选中支援。伊织的连发会逐发重锁，最容易漏
   const shot = run(sup, { type: "pass" })
@@ -1772,10 +1749,15 @@ console.log("\n=== 36. 支援位：不站在场上、5/6 只是结算编号 ==="
   // ally_* 的目标池只有 4 个主力：静子的圈不能落在支援自己头上
   const cast = playerTurn(sup, { type: "ex", casts: [{ pos: 4 }] })
   const tg = cast.events.find((e) => e.type === "action" && e.source.pos === 4)?.targets || []
+  const placedCover = cast.state.sides[0].summons.find((sm) => sm.cover && !sm.fieldCover)
   check("静子的圈只圈得到主力", tg.every((t) => t.pos < 4), true)
-  check("掩体架在我方半场（onAlly）", Boolean(cast.state.sides[0].summons[0]?.onAlly), true)
-  check("掩体永久：turns 是 null", cast.state.sides[0].summons[0]?.turns, null)
-  check("掩体是构造物（全属性 ×0.5）", tmplOf(cast.state.sides[0].summons[0]).defType, "构造物")
+  check("掩体架在我方半场（onAlly）", Boolean(placedCover?.onAlly), true)
+  check("掩体永久：turns 是 null", placedCover?.turns, null)
+  check("掩体是构造物（全属性 ×0.5）", tmplOf(placedCover).defType, "构造物")
+  check("静子掩体按 29.26% 生命生成 734 耐久", placedCover?.maxhp, 734)
+  check("静子部署到 1 路时替换场地掩体，同路不叠加",
+    cast.state.sides[0].summons.filter((sm) => sm.cover).map((sm) => [sm.blockIdx, Boolean(sm.fieldCover)]).sort((a, b) => a[0] - b[0]),
+    [[0, false], [3, true]])
 
   // Cost 回复算支援：4 主力 + 2 支援 = 6 × 0.5 = 3
   const fresh = setup(["野宫", "野宫", "野宫", "野宫"], OUT)
@@ -1838,9 +1820,9 @@ console.log("\n=== 37. 支援免疫嘲讽，但**不免疫冷却** ===")
   s.supports[1].exCastNo = 8
   check("支援在冷却里", s.supports.map((u) => exWaitOf(s, u) > 0), [true, true])
   check("嘲讽 + 支援冷却 → 名单是空的", exCastableOf(taunted, 0), [])
-  check("点名放支援：报冷却，不报嘲讽",
+  check("选择支援释放：报冷却，不报嘲讽",
     /冷却/.test(validateAction(taunted, { type: "ex", casts: [{ pos: 4 }] }) || ""), true)
-  check("点名放主力：仍然报嘲讽",
+  check("选择主力释放：仍然报嘲讽",
     /嘲讽/.test(validateAction(taunted, { type: "ex", casts: [{ pos: 0 }] }) || ""), true)
 
   // 恐惧同理：控制与冷却是两把独立的锁
@@ -1852,77 +1834,72 @@ console.log("\n=== 37. 支援免疫嘲讽，但**不免疫冷却** ===")
   check("恐惧 + 支援冷却 → 名单也是空的", exCastableOf(feared, 0), [])
 }
 
-console.log("\n=== 38. 掩体是「掩护」不是「墙」 ===")
+console.log("\n=== 38. 场地掩体：Block=1 每段 30% 决定谁承伤 ===")
 {
-  /**
-   * 掩体和人偶是两套口径，别混：
-   *   人偶 —— 抛到敌方半场的诱饵，**那一整个战场**打过来的刀全归它接，不问 Block 也不问指名
-   *   掩体 —— 架在自己这边，**只管自己那一路**，而且只接「打得中它」且**没被指名**的那部分
-   * 「打得中它」照搬原数据的 `Damage.Block`：直射单发 = 1，范围/曲射 = 0。
-   */
-  const cover = (red, lane) => {
-    // 静子要真的站 5 号位，所以蓝方自己写满 6 个；`setup` 只给 4 个的那一方补惰性支援
-    const st = setup(["星野", "白子", "千世", "芹香", "静子", "真白"], red)
-    // 真白会在 ③-a 打人干扰落点判定，压掉她的普技；静子的 EX 由用例自己放
+  /** 先让蓝方交回合，再只留红 1 一名攻击者，隔离其他人的伤害。 */
+  const fieldBattle = (blue, attacker) => {
+    const st = setup(blue, [attacker, "野宫", "野宫", "野宫"], [], { fieldCovers: true })
     for (const s of st.sides) for (const u of s.supports) u.skillCd = 9999
-    st.sides[0].cost = 10
-    const r = playerTurn(st, { type: "ex", casts: [{ pos: 4, target: { scope: "ally", idx: lane } }] })
-    const cur = playerTurn(r.state, { type: "pass" }).state
-    cur.sides[1].cost = 10
+    for (const u of st.sides[1].units) u.hp = u.maxhp = 1e9
+    const cur = playerTurn(st, { type: "pass" }).state
+    for (let i = 1; i < 4; i++) { cur.sides[1].units[i].alive = false; cur.sides[1].units[i].hp = 0 }
     return cur
   }
-  const landedOn = (r) => {
-    const e = r.events.find((x) => x.type === "damage" || x.type === "miss")
-    return e ? (e.target.summon ? "掩体" : tmplOf(r.state.sides[e.target.side].units[e.target.pos]).name) : "—"
+  const shotOf = (r) => r.events.find((e) =>
+    (e.type === "damage" || e.type === "miss") && e.source?.side === 1 && e.source?.pos === 0)
+  const oldRate = CFG.COVER_BLOCK_RATE
+  try {
+    CFG.COVER_BLOCK_RATE = 1
+    const blocked = fieldBattle(["星野", "白子", "千世", "芹香"], "伊织")
+    const cover = blocked.sides[0].summons.find((s) => s.fieldCover && s.blockIdx === 0)
+    const hp = blocked.sides[0].units[0].hp
+    const r = run(blocked, { type: "pass" })
+    const ev = shotOf(r)
+    check("Block=1 强制成功：伤害事件落在场地掩体", Boolean(ev?.target?.summon), true)
+    check("掩体事件带 cover 标记，渲染层可以统一过滤", ev?.target?.cover, true)
+    check("格挡不是免伤：掩体实际掉耐久，角色不掉血",
+      [r.state.sides[0].summons.find((s) => s.sourceKey === cover.sourceKey)?.hp < 700,
+        r.state.sides[0].units[0].hp === hp], [true, true])
+    check("掩体承伤事件记录 BLOCK 段数", ev?.blocked, 1)
+    const blockFx = r.events.find((e) => e.type === "block" && e.source?.side === 1 && e.source?.pos === 0)
+    check("全挡反馈仍挂回原角色并显示 0",
+      [blockFx?.target?.pos, Boolean(blockFx?.target?.summon), blockFx?.totalAmount, blockFx?.blocked],
+      [0, false, 0, 1])
+    const blockHtml = buildBattleHtml(r.state, r.events)
+    check("战场图只在角色处显示一个 0 BLOCK，掩体不再单独冒伤害数字",
+      [(blockHtml.match(/class="fxstack"/g) || []).length,
+        blockHtml.includes("<b>0</b>"), blockHtml.includes(">BLOCK</i>")],
+      [1, true, true])
+    const action = r.events.find((e) => e.type === "action" && e.action === "normal" && e.source?.side === 1)
+    check("掩体不改索敌：出手线仍指向自动选中的 1 号角色",
+      action?.targets.map((t) => [t.pos, Boolean(t.summon)]), [[0, false]])
+
+    CFG.COVER_BLOCK_RATE = 0
+    const failed = fieldBattle(["星野", "白子", "千世", "芹香"], "伊织")
+    const failedCover = failed.sides[0].summons.find((s) => s.fieldCover && s.blockIdx === 0)
+    const failedHp = failed.sides[0].units[0].hp
+    const missBlock = run(failed, { type: "pass" })
+    check("Block=1 格挡失败：伤害落回角色，掩体耐久不变",
+      [Boolean(shotOf(missBlock)?.target?.summon), missBlock.state.sides[0].units[0].hp < failedHp,
+        failedCover.hp], [false, true, 700])
+
+    CFG.COVER_BLOCK_RATE = 1
+    const uncovered = run(fieldBattle(["野宫", "星野", "千世", "芹香"], "伊织"), { type: "pass" })
+    check("掩体只护同号位：自动锁定无掩体的 2 号仍直接打人",
+      [shotOf(uncovered)?.target?.pos, Boolean(shotOf(uncovered)?.target?.summon)], [1, false])
+    const bypass = fieldBattle(["星野", "白子", "千世", "芹香"], "爱丽丝")
+    const bypassCover = bypass.sides[0].summons.find((s) => s.fieldCover && s.blockIdx === 0)
+    const bypassResult = run(bypass, { type: "pass" })
+    check("Block=0 光束直接穿过：打角色且掩体不掉血",
+      [Boolean(shotOf(bypassResult)?.target?.summon), bypassCover.hp], [false, 700])
+  } finally {
+    CFG.COVER_BLOCK_RATE = oldRate
   }
 
-  const st0 = cover(["伊织", "野宫", "野宫", "野宫"], 1)
-  check("掩体架在 2 号位（blockIdx=1）", st0.sides[0].summons[0].blockIdx, 1)
-  check("它是 cover 不是人偶", Boolean(st0.sides[0].summons[0].cover), true)
-  check("只护自己那一路：打 1 号位不受影响", landedOn(run(st0, { type: "pass" })), "星野")
-
-  check("护住的那一路：可挡的普攻转到掩体",
-    landedOn(run(cover(["伊织", "野宫", "野宫", "野宫"], 0), { type: "pass" })), "掩体")
-  // 爱丽丝的普攻是光束（原数据 Block=0），从掩体上面过去
-  check("不可挡的普攻（爱丽丝 Block=0）照样打人",
-    landedOn(run(cover(["爱丽丝", "野宫", "野宫", "野宫"], 0), { type: "pass" })), "星野")
-
-  // 指名越过：EX 点谁打谁，掩体拦不住，只剩 strike 里那次格挡判定
-  const aimed = playerTurn(cover(["伊织", "野宫", "野宫", "野宫"], 0),
-    { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] })
-  check("玩家指名越过掩体", landedOn(aimed), "星野")
-
-  /**
-   * 30% 格挡是一次**独立判定**（不走命中/闪避那条公式）。跑够样本再比，
-   * 单局看不出来 —— 471 段的标准误就有 ±2.1%。
-   */
-  const blockRateOf = (attacker) => {
-    let seg = 0, blk = 0
-    // 单段样本 150 时标准误约 3.7%，固定种子偶尔会擦过 ±6% 边界；提到 600 稳定量两条事件路径。
-    for (let s = 0; s < 600; s++) {
-      const c = cover([attacker, "野宫", "野宫", "野宫"], 0)
-      c.rng = (s * 2654435761) >>> 0
-      for (const e of playerTurn(c, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] }).events) {
-        if ((e.type !== "damage" && e.type !== "miss") || e.target.summon) continue
-        if (e.target.side !== 0 || e.target.pos !== 0) continue
-        seg += e.hits || 0
-        blk += e.blocked || 0
-      }
-    }
-    return [blk / seg, seg]
-  }
-  /**
-   * **两条事件路径都要量**，它们的 `blocked` 是分开传的，只测一条会漏：
-   *   单段（伊织的连发）—— 被挡 = 一段没落地 = 走 `miss` 事件
-   *   多段（白子 EX 10 段）—— 部分被挡 = 仍然造成伤害 = 走 `damage` 事件
-   * `applyDamage` 曾经不转发 `blocked`，于是多段的格挡在图上和统计里**完全看不见**，
-   * 而只测单段的用例照样全绿。
-   */
-  for (const [who, tag] of [["茜", "单段·miss 路径"], ["白子", "多段·damage 路径"]]) {
-    const [rate, n] = blockRateOf(who)
-    check(`${tag}：格挡率 ≈ ${CFG.COVER_BLOCK_RATE * 100}%（实测 ${(rate * 100).toFixed(1)}%，n=${n}）`,
-      Math.abs(rate - CFG.COVER_BLOCK_RATE) < 0.06, true)
-  }
+  const aimed = { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] }
+  check("有掩体也不能靠玩家点名绕过固定索敌",
+    validateAction(fieldBattle(["星野", "白子", "千世", "芹香"], "伊织"), aimed),
+    "EX 不能指定目标，只能选择释放者")
 }
 
 console.log("\n=== 39. 支援位治疗：人数以描述为准，不是有圈就是全体 ===")
@@ -1955,14 +1932,21 @@ console.log("\n=== 39. 支援位治疗：人数以描述为准，不是有圈就
   const named = setup([...mains, "芹娜", "真白"], ["伊织", "伊织", "伊织", "伊织"])
   hurt(named)
   named.sides[0].cost = 10
-  check("芹娜指定 3 号位：只奶优香",
-    heals(playerTurn(named, { type: "ex", casts: [{ pos: 4, target: { scope: "ally", idx: 2 } }] }), 4), [2])
+  check("芹娜 EX 不接受点名字段",
+    validateAction(named, { type: "ex", casts: [{ pos: 4, target: { scope: "ally", idx: 2 } }] }),
+    "EX 不能指定目标，只能选择释放者")
 
   const def = setup([...mains, "芹娜", "真白"], ["伊织", "伊织", "伊织", "伊织"])
   hurt(def)
   def.sides[0].cost = 10
-  check("芹娜不指定：支援没有对位，默认奶号位最小的 1 号",
+  check("四人同为前排时，芹娜按同排号位优先奶 1 号",
     heals(playerTurn(def, { type: "ex", casts: [{ pos: 4 }] }), 4), [0])
+
+  const positioned = setup(["野宫", "白子", "星野", "伊织", "芹娜", "真白"], ["伊织", "伊织", "伊织", "伊织"])
+  hurt(positioned)
+  positioned.sides[0].cost = 10
+  check("支援治疗按前排 → 中排 → 后排，而不是最低血量/最高攻击",
+    heals(playerTurn(positioned, { type: "ex", casts: [{ pos: 4 }] }), 4), [2])
 
   const fuuka = setup([...mains, "风香", "真白"], ["伊织", "伊织", "伊织", "伊织"])
   hurt(fuuka)
@@ -1973,9 +1957,63 @@ console.log("\n=== 39. 支援位治疗：人数以描述为准，不是有圈就
   const hanae = setup([...mains, "花江", "真白"], ["伊织", "伊织", "伊织", "伊织"])
   hurt(hanae)
   hanae.sides[0].cost = 10
-  const hanaeR = playerTurn(hanae, { type: "ex", casts: [{ pos: 4, target: { scope: "ally", idx: 1 } }] })
-  check("花江 EX 只给指定的那个人上持续治疗",
-    hanaeR.state.sides[0].units.map((u) => u.regens.length > 0), [false, true, false, false])
+  const hanaeR = playerTurn(hanae, { type: "ex", casts: [{ pos: 4 }] })
+  check("花江 EX 按前排、同排号位顺序只给 1 号上持续治疗",
+    hanaeR.state.sides[0].units.map((u) => u.regens.length > 0), [true, false, false, false])
+
+  const putPeroro = (st, idx = 2, hpRate = 0.4) => {
+    const maxhp = 10000
+    st.sides[0].summons = [{
+      summon: true, id: 40002, side: 0, idx, blockIdx: idx,
+      hp: Math.round(maxhp * hpRate), maxhp,
+      shield: 0, shieldMax: 0, shieldTurns: 0,
+      buffs: [], regens: [], dots: [], stun: 0,
+      taunt: 0, tauntKind: null, focus: 0,
+      turns: 6, turnsMax: 6, st: -1, sourceKey: "test:peroro", alive: true,
+    }]
+    return st.sides[0].summons[0]
+  }
+
+  const dollFirst = setup([...mains, "芹娜", "真白"], ["伊织", "伊织", "伊织", "伊织"])
+  hurt(dollFirst)
+  const doll = putPeroro(dollFirst)
+  dollFirst.sides[0].cost = 10
+  const dollHeal = playerTurn(dollFirst, { type: "ex", casts: [{ pos: 4 }] })
+  check("治疗型支援的通用位置规则优先选择己方佩洛洛",
+    dollHeal.events.some((e) => e.type === "heal" && e.source?.pos === 4 && e.target?.summon), true)
+  check("佩洛洛的生命会被实际回复", dollHeal.state.sides[0].summons[0].hp > doll.hp, true)
+
+  const lowest = (dollRate, mainRate) => {
+    const st = setup([...mains, "芹娜", "真白"], ["伊织", "伊织", "伊织", "伊织"])
+    for (const u of st.sides[0].units) { u.hp = Math.round(u.maxhp * 0.9); u.skillUses = 99 }
+    st.sides[0].units[2].hp = Math.round(st.sides[0].units[2].maxhp * mainRate)
+    putPeroro(st, 1, dollRate)
+    st.sides[0].supports[0].skillCd = 0
+    return playerTurn(st, { type: "pass" }).events.find((e) => e.type === "heal" && e.source?.pos === 4)?.target
+  }
+  check("芹娜普技自带最低血量：主力更残时不会被佩洛洛优先级覆盖",
+    lowest(0.8, 0.2), { side: 0, pos: 2 })
+  check("芹娜普技自带最低血量：佩洛洛更残时能选中佩洛洛",
+    ((x) => x && ({ side: x.side, pos: x.pos, summon: x.summon }))(lowest(0.1, 0.8)),
+    { side: 0, pos: 1, summon: true })
+
+  const koharuDoll = setup(["小春", "椿", "优香", "春香"], ["伊织", "伊织", "伊织", "伊织"])
+  for (const u of koharuDoll.sides[0].units) { u.hp = u.maxhp; u.skillUses = 99 }
+  koharuDoll.sides[0].units[0].skillUses = 0
+  koharuDoll.sides[0].units[0].skillCd = 0
+  putPeroro(koharuDoll, 1, 0.4)
+  const koharuDollR = playerTurn(koharuDoll, { type: "pass" })
+  check("小春普技的生命≤50%判定也包含佩洛洛",
+    koharuDollR.events.some((e) => e.type === "heal" && e.source?.pos === 0 && e.target?.summon), true)
+
+  const dollRegen = setup([...mains, "花江", "真白"], ["伊织", "伊织", "伊织", "伊织"])
+  const regenDoll = putPeroro(dollRegen, 2, 0.2)
+  dollRegen.sides[0].cost = 10
+  const regenCast = playerTurn(dollRegen, { type: "ex", casts: [{ pos: 4 }] })
+  check("持续治疗也能挂到佩洛洛", regenCast.state.sides[0].summons[0].regens.length, 1)
+  const beforeTick = regenDoll.hp
+  const regenDone = run(regenCast.state, { type: "pass" })
+  check("佩洛洛身上的持续治疗会正常跳动", regenDone.state.sides[0].summons[0].hp > beforeTick, true)
 
   const hanako = setup([...mains, "花子", "真白"], ["伊织", "伊织", "伊织", "伊织"])
   const us = hanako.sides[0].units
@@ -2028,6 +2066,36 @@ console.log("\n=== 39. 支援位治疗：人数以描述为准，不是有圈就
   const rAgain = playerTurn(again, { type: "pass" })
   check("再放一次：消耗过的人不会再拿到急救",
     rAgain.state.sides[0].units.map((u) => Boolean(u.ward)), [true, false, true, true])
+}
+
+console.log("\n=== 39b. 非支援位的队友增益：同战场优先，其次最近 ===")
+{
+  // 当前角色池没有「主力 + 任意队友增益」样本，用一个最小技能模板锁住引擎的未来兼容规则。
+  const nonSupport = ROSTER.find((t) => t.name === "野宫")
+  const originalSkill = nonSupport.skill
+  nonSupport.skill = {
+    name: "测试·队友增益",
+    target: "ally_single",
+    count: 1,
+    effects: [{ type: "buff", scope: "ally_target", stat: "atk", value: 0.1, turns: 2 }],
+    trigger: { type: "cooldown", turns: 1 },
+  }
+  try {
+    const cast = (killSameField = false) => {
+      const st = setup(["星野", "野宫", "白子", "伊织"], ["伊织", "伊织", "伊织", "伊织"])
+      if (killSameField) {
+        st.sides[0].units[0].alive = false
+        st.sides[0].units[0].hp = 0
+      }
+      st.sides[0].units[1].skillCd = 0
+      return playerTurn(st, { type: "pass" }).events
+        .find((e) => e.type === "buff" && e.source?.pos === 1)?.target
+    }
+    check("右边的 3 号更近，但 2 号先选同战场的 1 号", cast(false), { side: 0, pos: 0 })
+    check("同战场队友阵亡后，才跨场选距离最近的 3 号", cast(true), { side: 0, pos: 2 })
+  } finally {
+    nonSupport.skill = originalSkill
+  }
 }
 
 console.log("\n=== 40. 支援把基础面板按比例转给每个主力 ===")
@@ -2091,8 +2159,8 @@ console.log("\n=== 40. 支援把基础面板按比例转给每个主力 ===")
 
   const doll = setup(["日富美", "野宫", "野宫", "野宫", "绫音", "芹娜"], ["伊织", "伊织", "伊织", "伊织"])
   doll.sides[0].cost = 10
-  const summoned = playerTurn(doll, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] })
-  const sm = summoned.state.sides[0].summons[0]
+  const summoned = playerTurn(doll, { type: "ex", casts: [{ pos: 0 }] })
+  const sm = summoned.state.sides[0].summons.find((s) => !s.cover)
   const hifumi = of("日富美")
   const hpRate = hifumi.ex.effects.find((e) => e.type === "summon")?.hpRate || 0
   check("召唤物自己拿不到这份加成", Boolean(sm.gift), false)
@@ -2144,24 +2212,24 @@ console.log("\n=== 43. 支援的刀不被嘲讽拉走，但照吃集火 ===")
   }
 
   // 红方：星野(前) 1 位、椿(前) 2 位、两个野宫(后) 3·4 位。
-  // 支援没有对位，默认打最前那层里号位最小的 → 星野；椿放了嘲讽也还是星野。
+  // 进攻支援默认后 → 中 → 前，同排号位小，因此先锁 3 位野宫；椿的场地嘲讽拉不走支援。
   const RED = ["星野", "椿", "野宫", "野宫"]
   const calm = blueShots(RED)
   check("对照组·无嘲讽：主力各打各的战场", [calm["1普"], calm["2普"], calm["3普"], calm["4普"]],
     ["1", "2", "3", "4"])
-  check("对照组·无嘲讽：爱理打最前面的星野", calm["5技"], "1")
-  check("对照组·无嘲讽：真白铺开打星野 + 椿", calm["6技"], "12")
+  check("对照组·无嘲讽：爱理按后排优先打 3 位", calm["5技"], "3")
+  check("对照组·无嘲讽：真白从后排主目标铺开打 3·4", calm["6技"], "34")
 
   const taunt = blueShots(RED, 1)
   check("四个主力被椿全拉走（说明这一轮嘲讽确实生效）",
     [taunt["1普"], taunt["2普"], taunt["3普"], taunt["4普"]], ["2", "2", "2", "2"])
-  check("爱理（单体）不被拉走，照打星野", taunt["5技"], "1")
+  check("爱理（单体）不被拉走，照打后排 3 位", taunt["5技"], "3")
   // 「嘲讽把整发吸走」的前提是这一发本来就被拉过来了 —— 支援没被拉，范围技当然照常铺开
-  check("真白（2 目标）也不被吸成单体，星野 + 椿 两个都吃到", taunt["6技"], "12")
+  check("真白（2 目标）也不被吸成单体，后排 3·4 都吃到", taunt["6技"], "34")
 
   /**
    * 集火：切里诺的普技把标记打在**攻击力最高**的红方身上（星野 213 < 野宫 321 → 2 位），
-   * 而支援默认打的是最前面的星野 —— 两者岔开，才量得出支援到底跟不跟标记。
+   * 而支援默认打的是后排 3 位野宫 —— 集火落 2 位，两者岔开，才量得出支援是否跟标记。
    * ③-a 是先锁目标再一起结算，所以标记要在**上一轮**打出去。
    */
   {
@@ -2191,15 +2259,17 @@ console.log("\n=== 38b. 爱露分段掩体：直击可挡、爆风无视 ===")
   check("真白 EX 主段可挡", of("真白").ex.block, true)
   check("真白 EX 追伤也可挡", of("真白").ex.bonus.hitBlocks, [true])
 
-  /**
-   * 指名越过掩体后，主目标吃直击+爆风两段。旧实现把 skill.block=true 套到整发，
-   * 爆风也会被 30% 格挡；修完之后只有第一段可能 BLOCK。
-   */
-  const cover = (red = ["爱露", "野宫", "野宫", "野宫"], lane = 0) => {
-    const st = setup(["星野", "白子", "千世", "芹香", "静子", "真白"], red)
+  const cover = (red = ["爱露", "野宫", "野宫", "野宫"], lane = 0,
+    blue = ["星野", "白子", "千世", "芹香", "静子", "真白"]) => {
+    const st = setup(blue, red, [], { fieldCovers: true })
     for (const s of st.sides) for (const u of s.supports) u.skillCd = 9999
     st.sides[0].cost = 10
-    const r = playerTurn(st, { type: "ex", casts: [{ pos: 4, target: { scope: "ally", idx: lane } }] })
+    const r = playerTurn(st, { type: "ex", casts: [{ pos: 4 }] })
+    const placed = r.state.sides[0].summons.find((s) => s.cover && !s.fieldCover)
+    // 移动夹具前先清掉目标路原有掩体，维持「同路最多一个」不变量。
+    r.state.sides[0].summons = r.state.sides[0].summons.filter((s) =>
+      s === placed || !(s.cover && s.blockIdx === lane))
+    placed.idx = placed.blockIdx = lane
     const cur = playerTurn(r.state, { type: "pass" }).state
     cur.sides[1].cost = 10
     return cur
@@ -2207,125 +2277,112 @@ console.log("\n=== 38b. 爱露分段掩体：直击可挡、爆风无视 ===")
   const shotEvents = (r, pos = 0) => r.events.filter((e) =>
     (e.type === "damage" || e.type === "miss") && e.source?.side === 1 && e.source?.pos === pos)
   const landed = (e) => e.target.summon ? "掩体" : String(e.target.pos + 1)
+  const skillCover = (st) => st.sides[0].summons.find((s) => s.cover && !s.fieldCover)
+  const oldRate = CFG.COVER_BLOCK_RATE
+  CFG.COVER_BLOCK_RATE = 1
 
-  /**
-   * **不指名时也要拆落点**：第一段直击确定性转给掩体，第二段爆风仍打原目标。
-   * 旧实现虽然把格挡改成逐段了，但目标选择仍会把整项技能退化成只打掩体，爆风照样丢失。
-   */
-  {
+  try {
+    // 同一 strike 内，Block=1 直击由掩体承伤，Block=0 爆风仍落在角色。
     const r = playerTurn(cover(), { type: "ex", casts: [{ pos: 0 }] })
     const ev = shotEvents(r)
-    check("爱露 EX 不指名：直击→掩体，爆风→原目标", ev.map(landed), ["掩体", "1"])
-    check("爱露 EX 不指名：爆风 Block=0，不产生格挡", ev.find((e) => !e.target.summon)?.blocked || 0, 0)
-    const action = r.events.find((e) => e.type === "action" && e.action === "ex" && e.source?.side === 1 && e.source?.pos === 0)
-    check("爱露 EX 战场图同时记录掩体与原目标", action.targets.map((t) => t.summon ? "掩体" : String(t.pos + 1)), ["掩体", "1"])
-  }
+    check("爱露 EX：Block=1 直击由掩体承伤，Block=0 爆风打原目标", ev.map(landed), ["掩体", "1"])
+    check("爱露 EX：只有掩体承伤事件记录 BLOCK", ev.map((e) => e.blocked || 0), [1, 0])
+    check("部分挡只把角色实际承伤画在原目标，并合并 BLOCK 段数",
+      [ev[1]?.visualBlocked, ev[1]?.visualHits, ev[1]?.visualLanded], [1, 2, 1])
+    const mixedHtml = buildBattleHtml(r.state, r.events)
+    check("部分挡的掩体段不另起数字，角色处只保留实际伤害 + BLOCK",
+      [(mixedHtml.match(/class="fxstack"/g) || []).length,
+        mixedHtml.includes(`<b>${ev[1]?.totalAmount}</b>`), mixedHtml.includes(">BLOCK</i>")],
+      [1, true, true])
+    const actionEv = r.events.find((e) => e.type === "action" && e.action === "ex" && e.source?.side === 1 && e.source?.pos === 0)
+    check("随机格挡不改索敌记录：战场图出手线只指向自动目标",
+      actionEv.targets.map((t) => t.summon ? "掩体" : String(t.pos + 1)), ["1"])
 
-  // EX 不参与 ③-a / ③-b 的同时锁定：指名对象已经倒下就直接判非法，不自动换目标。
-  {
+    // 所有 EX 共用同一条输入边界：即使目标已倒下，也先因携带 target 字段被拒绝。
     const c = cover(["爱露", "野宫", "野宫", "野宫"], 1)
     c.sides[0].units[0].alive = false
     c.sides[0].units[0].hp = 0
     const action = { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] }
-    check("爱露 EX 指定已倒下目标：直接判非法", /已经倒下/.test(validateAction(c, action) || ""), true)
-    const r = playerTurn(c, action)
-    check("非法 EX 不扣费、不产生事件", [r.error?.includes("已经倒下"), r.events?.length || 0], [true, 0])
-  }
+    check("爱露 EX 携带目标字段：直接判非法", validateAction(c, action), "EX 不能指定目标，只能选择释放者")
+    const invalid = playerTurn(c, action)
+    check("非法 EX 不扣费、不产生事件", [invalid.error?.includes("不能指定目标"), invalid.events?.length || 0], [true, 0])
 
-  // 普技走 ③-a 的「先锁目标再同时结算」，也必须保存同一份分段落点计划。
-  {
-    const c = cover()
-    c.sides[1].units[0].skillCd = 0
-    const r = playerTurn(c, { type: "pass" })
-    const ev = shotEvents(r)
-    check("爱露普技同时锁定：直击→掩体，爆风→原目标", ev.map(landed), ["掩体", "1"])
-  }
+    // 普技走 ③-a 同时锁定，也必须由 strike 按自己的 hitBlocks 分流承伤。
+    const skillState = cover()
+    skillState.sides[1].units[0].skillCd = 0
+    check("爱露普技：直击由掩体承伤，爆风仍打原目标",
+      shotEvents(playerTurn(skillState, { type: "pass" })).map(landed), ["掩体", "1"])
 
-  // Block=0 的普通范围技完全越过掩体，不做整发转移、也不做 30% 格挡。
-  {
-    const r = playerTurn(cover(["明里", "野宫", "野宫", "野宫"]), { type: "ex", casts: [{ pos: 0 }] })
-    const ev = shotEvents(r)
-    check("明里 EX Block=0：不指名也直接打人", ev.map(landed), ["1"])
-    check("明里 EX Block=0：格挡数为 0", ev[0]?.blocked || 0, 0)
-  }
+    // Block=0 的普通范围技完全越过掩体。
+    const bypass = playerTurn(cover(["明里", "野宫", "野宫", "野宫"]), { type: "ex", casts: [{ pos: 0 }] })
+    check("明里 EX Block=0：自动选目标后直接打人", shotEvents(bypass).map(landed), ["1"])
+    check("明里 EX Block=0：格挡数为 0", shotEvents(bypass)[0]?.blocked || 0, 0)
 
-  // 连发每一枪都要按自己的 Block 重新锁。把掩体血量抬高，三枪都应继续打墙。
-  {
-    const c = cover(["伊织", "野宫", "野宫", "野宫"])
-    c.sides[0].summons[0].hp = c.sides[0].summons[0].maxhp = 1e9
-    const r = playerTurn(c, { type: "ex", casts: [{ pos: 0 }] })
-    check("伊织 EX 连发：后两枪重锁时仍认 Block=1", shotEvents(r).map(landed), ["掩体", "掩体", "掩体"])
-  }
+    // 连发每枪独立判定；掩体够硬时三枪都由它承伤。
+    const chain = cover(["伊织", "野宫", "野宫", "野宫"])
+    skillCover(chain).hp = skillCover(chain).maxhp = 1e9
+    check("伊织 EX 连发：三枪分别进行 Block=1 判定",
+      shotEvents(playerTurn(chain, { type: "ex", casts: [{ pos: 0 }] })).map(landed),
+      ["掩体", "掩体", "掩体"])
 
-  // 强化普攻读取 FormChange 自己的 Block。鹤城的扇形强化普攻仍是 Block=1，整发由掩体接走。
-  {
-    const c = cover(["野宫", "野宫", "野宫", "野宫"])
-    c.sides[0].summons[0].hp = c.sides[0].summons[0].maxhp = 1e9
-    c.sides[1].units[0].charge = {
+    // 第一枪打碎掩体后，后两枪必须落回角色，不能继续由一堵 0 血墙吸收。
+    const broken = cover(["伊织", "野宫", "野宫", "野宫"])
+    skillCover(broken).hp = 1
+    check("掩体中途被打碎：后续分段/连发立即落回角色",
+      shotEvents(playerTurn(broken, { type: "ex", casts: [{ pos: 0 }] })).map(landed),
+      ["掩体", "1", "1"])
+
+    // 强化普攻读取 FormChange 自己的 Block；范围不再因为主目标有掩体而退化成单体。
+    const charged = cover(["野宫", "野宫", "野宫", "野宫"], 0,
+      ["星野", "鹤城", "千世", "芹香", "静子", "真白"])
+    skillCover(charged).hp = skillCover(charged).maxhp = 1e9
+    charged.sides[1].units[0].charge = {
       hits: [69.355, 69.355], hitBlocks: [true, true], block: true, count: 2, shots: 1,
     }
-    const r = playerTurn(c, { type: "pass" })
-    const ev = r.events.filter((e) =>
+    const chargedResult = playerTurn(charged, { type: "pass" })
+    const chargedEvents = chargedResult.events.filter((e) =>
       (e.type === "damage" || e.type === "miss") && e.source?.side === 1 && e.source?.pos === 0)
-    check("强化普攻读取 FormChange.Block：鹤城式扇形仍由掩体接走", ev.map(landed), ["掩体"])
-  }
+    check("Block=1 范围技：被护主目标由掩体承伤，旁边目标仍正常受伤",
+      chargedEvents.map(landed), ["掩体", "2"])
 
-  // 绿的循环点名是逐发换主目标；轮到被护的 1 位时，该发仍要被掩体接走。
-  {
-    const c = cover(["绿", "野宫", "野宫", "野宫"])
-    c.sides[0].summons[0].hp = c.sides[0].summons[0].maxhp = 1e9
-    for (const u of c.sides[0].units) u.hp = u.maxhp = 1e9
-    const r = playerTurn(c, { type: "ex", casts: [{ pos: 0 }] })
-    check("绿 EX 循环点名：1→2→3→4→1，其中 1 位两发都被掩体接走",
-      shotEvents(r).map(landed), ["掩体", "2", "3", "4", "掩体"])
-  }
+    // 绿逐发换目标；1、4 号位各有掩体，各自在轮到该号位时判定。
+    const cycle = cover(["绿", "野宫", "野宫", "野宫"])
+    for (const sm of cycle.sides[0].summons.filter((s) => s.cover)) sm.hp = sm.maxhp = 1e9
+    for (const u of cycle.sides[0].units) u.hp = u.maxhp = 1e9
+    check("绿 EX 循环点名：1、4 号位的分段分别由各自掩体承伤",
+      shotEvents(playerTurn(cycle, { type: "ex", casts: [{ pos: 0 }] })).map(landed),
+      ["掩体", "2", "3", "掩体", "掩体"])
 
-  // 支援位没有自己的战场，但 Block=1 的单体技能仍先选人，再看那一路有没有掩体。
-  {
-    const c = cover(["星野", "野宫", "野宫", "野宫", "花凛", "真白"])
-    c.sides[0].summons[0].hp = c.sides[0].summons[0].maxhp = 1e9
-    const r = playerTurn(c, { type: "ex", casts: [{ pos: 4 }] })
-    check("花凛 EX（支援位）Block=1：不指名时由掩体接走", shotEvents(r, 4).map(landed), ["掩体"])
-  }
+    // 支援先按位置选人，再由那个人同路的掩体判定；掩体本身不参与索敌。
+    const karinOpen = cover(["星野", "野宫", "野宫", "野宫", "花凛", "真白"])
+    skillCover(karinOpen).hp = skillCover(karinOpen).maxhp = 1e9
+    check("花凛 EX 先选中排 2 号：1 路掩体不会改写索敌",
+      shotEvents(playerTurn(karinOpen, { type: "ex", casts: [{ pos: 4 }] }), 4).map(landed), ["2"])
+    const karinCovered = cover(["星野", "野宫", "野宫", "野宫", "花凛", "真白"], 1)
+    skillCover(karinCovered).hp = skillCover(karinCovered).maxhp = 1e9
+    check("花凛 EX 锁定 2 号后，由 2 路掩体承伤",
+      shotEvents(playerTurn(karinCovered, { type: "ex", casts: [{ pos: 4 }] }), 4).map(landed), ["掩体"])
 
-  // enemy_all 没有「主目标」，不能把全屏攻击整发塞进一堵墙；仅被护的那个人逐段过 30%。
-  {
-    const c = cover(["日奈", "野宫", "野宫", "野宫"])
-    c.sides[0].summons[0].hp = c.sides[0].summons[0].maxhp = 1e9
-    for (const u of c.sides[0].units) u.hp = u.maxhp = 1e9
-    const r = playerTurn(c, { type: "ex", casts: [{ pos: 0 }] })
-    check("日奈 EX enemy_all：无主目标，不整发转掩体", shotEvents(r).map(landed).sort(), ["1", "2", "3", "4"])
-  }
+    // 全体攻击逐个角色判本路掩体，不会被一堵墙吞成单体。
+    const all = cover(["日奈", "野宫", "野宫", "野宫"])
+    for (const sm of all.sides[0].summons.filter((s) => s.cover)) sm.hp = sm.maxhp = 1e9
+    for (const u of all.sides[0].units) u.hp = u.maxhp = 1e9
+    check("日奈 EX enemy_all：1、4 路由掩体承伤，2、3 路仍各自受伤",
+      shotEvents(playerTurn(all, { type: "ex", casts: [{ pos: 0 }] })).map(landed).sort(),
+      ["2", "3", "掩体", "掩体"].sort())
 
-  // Block=0 的场地从掩体上方落下：人和掩体都在圈里挨持续伤害，掩体不会替人接走圈。
-  {
-    const c = cover(["千世", "野宫", "野宫", "野宫"])
-    const r = playerTurn(c, { type: "ex", casts: [{ pos: 0 }] })
-    check("千世 EX 场地：被护的 1 位仍进入场地", r.state.sides[0].units[0].dots.some((d) => d.icon === "Zone"), true)
-    check("千世 EX 场地：掩体本身在圈里也进入场地", r.state.sides[0].summons[0].dots.some((d) => d.icon === "Zone"), true)
+    // Block=0 场地不替人转移；掩体若在圈里，作为独立构造物另吃一份范围伤害。
+    const zoneState = cover(["千世", "野宫", "野宫", "野宫"])
+    const cast = run(zoneState, { type: "ex", casts: [{ pos: 0 }] })
+    const tick = playerTurn(cast.state, { type: "pass" })
+    const hit = tick.events
+      .filter((e) => (e.type === "damage" || e.type === "miss") && e.dotIcon === "Zone")
+      .map(landed)
+    check("千世 EX 场地：每跳重扫时被护的 1 位仍受伤", hit.includes("1"), true)
+    check("千世 EX 场地：每跳重扫时掩体本身也受伤", hit.includes("掩体"), true)
+  } finally {
+    CFG.COVER_BLOCK_RATE = oldRate
   }
-  let seg = 0, blk = 0, splashBlk = 0
-  for (let s = 0; s < 200; s++) {
-    const c = cover()
-    c.rng = (s * 2654435761) >>> 0
-    const r = playerTurn(c, { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] })
-    for (const e of r.events) {
-      if ((e.type !== "damage" && e.type !== "miss") || e.target.summon) continue
-      if (e.target.side !== 0 || e.target.pos !== 0) continue
-      // 爱露主目标吃 2 段；只统计她自己这一发
-      if (e.source?.side !== 1 || e.source?.pos !== 0) continue
-      seg += e.hits || 0
-      blk += e.blocked || 0
-      // hits=2 且 blocked 只可能来自第一段：第二段 hitBlocks=false 绝不该贡献 BLOCK
-      if ((e.hits || 0) === 2) splashBlk += Math.max(0, (e.blocked || 0) - 1)
-    }
-  }
-  check("爱露指名打掩体后：只统计到 2 段/发", seg > 300 && seg % 2 === 0, true)
-  // 只有一半段（直击）可挡 → 期望格挡率 ≈ 15%
-  const rate = blk / seg
-  check(`爱露两段合计格挡率 ≈ 15%（实测 ${(rate * 100).toFixed(1)}%，n=${seg}）`,
-    Math.abs(rate - CFG.COVER_BLOCK_RATE / 2) < 0.05, true)
-  check("爆风段贡献的超额 BLOCK 必须是 0", splashBlk, 0)
 }
 
 
@@ -2389,6 +2446,20 @@ console.log("\n=== 44. 状态 → 持续治疗 → DoT/场地；场地判闪避�
       [ownTurn.state.sides[0].units[0].dots[0].tick, ownTurn.state.sides[0].units[0].regens[0].tick], [1, 1])
   }
 
+  // 进行中的旧对局仍是「无伤害参数的 field + 人身上的 Zone DoT」；升级后要照旧结算，不能双跳或崩档。
+  {
+    const st = setup(["星野", "野宫", "野宫", "野宫"], OUT)
+    const u = st.sides[0].units[0]
+    u.maxhp = u.hp = 1e9
+    u.dots = [{ icon: "Zone", amount: 10, turns: 2, period: 1, tick: 0, attackType: "爆发", st: -1 }]
+    st.sides[0].fields = [{ lo: 0, hi: 1, turns: 2, st: -1 }]
+    const r = playerTurn(st, { type: "pass" })
+    const ev = r.events.find((e) => e.dotIcon === "Zone")
+    const field = r.state.sides[0].fields[0]
+    check("旧存档的单位 Zone DoT 继续结算，旧 field 只负责圈的倒计时",
+      [ev?.totalAmount, field?.turns, field?.icon ?? null], [10, 1, null])
+  }
+
   // 原数据的固定场地是 DMGZone + CriticalCheck:Check：保留每个 HitFrame 的命中 / 暴击判定。
   {
     const chise = ROSTER.find((t) => t.name === "千世")
@@ -2409,7 +2480,8 @@ console.log("\n=== 44. 状态 → 持续治疗 → DoT/场地；场地判闪避�
       // 不让普通行动干扰目标；只读回合末的 Zone 事件。
       for (const s of st.sides) for (const u of s.units) u.skillCd = 9999
       if (crit) src.buffs.push({ stat: "crit", value: 1e6, turns: 99, st: -1 })
-      tgt.dots = [{
+      st.sides[0].fields = [{
+        lo: 0, hi: 0,
         icon: "Zone", scale: 1, tickHits: [[50, 50, 50, 50, 50, 50]],
         canCrit: true, alwaysCrit: false, canEvade: !crit, applyStability: false,
         turns: 2, period: 1, tick: 0, sourceId: src.id, sourceSide: 1, sourcePos: 0,
@@ -2457,7 +2529,8 @@ console.log("\n=== 44. 状态 → 持续治疗 → DoT/场地；场地判闪避�
       for (const s of st.sides) for (const u of s.units) { u.maxhp = 1e9; u.hp = 1e9; u.skillCd = 9999 }
       if (sourceBuff) src.buffs.push({ ...sourceBuff, turns: 99, st: -1 })
       if (targetBuff) tgt.buffs.push({ ...targetBuff, turns: 99, st: -1 })
-      tgt.dots = [{
+      st.sides[0].fields = [{
+        lo: 0, hi: 0,
         icon: "Zone", scale: 1, tickHits: [[100]], canCrit: false, canEvade: false, applyStability: false,
         turns: 2, period: 1, tick: 0, sourceId: src.id, sourceSide: 1, sourcePos: 0,
         sourceAtk: atkOf(src), sourceDealF: 1, sourceStabilityFloor: 1,

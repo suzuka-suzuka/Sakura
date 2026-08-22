@@ -100,11 +100,13 @@ export const CFG = {
   EX_COOLDOWN_SLACK: 3,              // EX 冷却长度 = 存活总人数（含支援）− 这个值，满编 6 人 = 3
   /**
    * 掩体的**格挡率**。原作公式是 `30 + 攻击方遮蔽成功值 − 防御方遮蔽贯通率`，
-   * 地形适应每升一级 +15，基础就是 30%。它是**独立的一次判定**，不走命中/闪避那条公式 ——
-   * 折成闪避值的话效果会随攻击者的命中浮动，而原作明确不是这样。
+   * 地形适应每升一级 +15，基础就是 30%。每个 `Block=1` 伤害段独立判定；成功时由
+   * 掩体承伤并扣耐久，失败才继续攻击角色。它不并入命中/闪避公式。
    * 遮蔽成功值（`BlockRate_Base`）全 272 人只有优香的武器被动带，生成器不读那个槽，暂时接不到。
    */
   COVER_BLOCK_RATE: 0.3,
+  FIELD_COVER_HP: 700,               // 场地掩体：构造物装甲（全属性 ×0.5），等效耐久 1400
+  FIELD_COVER_POSITIONS: [0, 3],     // 内部 0-based；对外即每方固定在 1、4 号位
   SECOND_BONUS: 2,                   // 后手方开局补偿；2000 局压测先手胜率约 51.4%
   /**
    * 支援把自己的基础面板按比例转给每个主力（官方编成加成，不是 buff）。
@@ -3865,7 +3867,7 @@ export const ROSTER = [
       "effects": [
         {
           "type": "heal",
-          "scope": "circle_ally",
+          "scope": "mirror_ally",
           "scale": 1.0145,
           "source": "heal"
         }
@@ -3876,8 +3878,7 @@ export const ROSTER = [
       ],
       "hitBlocks": [
         false
-      ],
-      "circle": true
+      ]
     }
   },
   {
@@ -5145,15 +5146,15 @@ export function combatRoleOf(x) {
 }
 
 /**
- * 按角色名或内部代号查角色。**不认编号** —— 配队和出招一律写名字，
- * 记「星野ex打白子」比记「ex 1>3」容易得多，角色也不再对外暴露序号。
+ * 按角色名或内部代号查角色。**不认编号** —— 配队和出招一律写名字；
+ * 出招只需写「星野ex」，角色也不再对外暴露序号。
  */
 export function findUnit(token) {
   const s = String(token).trim()
   return BY_ID[s.toUpperCase()] || ROSTER.find((t) => t.name === s) || null
 }
 
-/** 召唤物按名字查，供「伊织ex打佩洛洛人偶」这种指令定位。允许省略「人偶」等后缀 */
+/** 召唤物按名字查；允许省略「人偶」等后缀。 */
 export function findSummon(token) {
   const s = String(token).trim()
   if (!s) return null

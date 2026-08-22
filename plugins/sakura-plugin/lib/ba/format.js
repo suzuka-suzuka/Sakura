@@ -200,15 +200,15 @@ export function renderResult(state) {
 // ---------------- 技能描述 ----------------
 
 const TARGET_TEXT = {
-  enemy_single: "指定单体",
-  enemy_adjacent: "指定目标+相邻",
+  enemy_single: "自动单体",
+  enemy_adjacent: "自动目标+相邻",
   enemy_all: "敌方全体",
   enemy_random: "随机敌人",
   enemy_chain: "连发逐枪重锁",
-  enemy_cycle: "从自己对位起按号位循环点名",
+  enemy_cycle: "从自己对位起按号位循环",
   ally_all: "己方全体",
-  ally_adjacent: "指定友方+相邻",
-  ally_single: "指定友方",
+  ally_adjacent: "位置目标+相邻",
+  ally_single: "按位置选友方",
   ally_lowest: "己方最残",
   ally_hurt: "己方受伤的（就近）",
   ally_maxhp: "己方生命上限最高",
@@ -265,9 +265,6 @@ export function describeEffect(sk) {
   const tg = sk.target === "ally_lowest" && (sk.count || 1) > 1
     ? `己方最残 ${sk.count} 人`
     : (TARGET_TEXT[sk.target] || sk.target)
-  // 小春：一个圈丢出去，圈里是敌人就只有伤害、是队友就只有治疗。这条得排在倍率前面，
-  // 不然卡面读起来像是「炸完还顺手奶一口」——那正是原来搞错的地方
-  if (sk.circle) parts.push("一个圈，砸哪边就只有那边生效，指令里中间那个字选边")
   // 柚子 / 切里诺：「攻击力最高」只写在描述里。有伤害时这条是索敌，没伤害时是集火的选人条件
   if (sk.pick === "max_atk") {
     parts.push("以攻击力最高的敌人为目标（无视战场分割、身位和挡刀）")
@@ -283,15 +280,13 @@ export function describeEffect(sk) {
       : tg
     // 连发是「N 枪各锁各的目标」，写成「合计 X% 分 N 段」会让人以为全砸在一个人身上
     if (sk.target === "enemy_chain") {
-      parts.push(`连发 ${sk.hits.length} 枪，每枪 ${(total / sk.hits.length).toFixed(0)}%攻击力；只有第一枪听指挥，之后按普攻规则重锁（人偶/前排会吃掉后几枪）`)
+      parts.push(`连发 ${sk.hits.length} 枪，每枪 ${(total / sk.hits.length).toFixed(0)}%攻击力；第一枪按固定索敌，之后按普攻规则重锁（人偶/前排会吃掉后几枪）`)
     } else if (sk.target === "enemy_cycle") {
       // 循环点名的落点由她自己的号位定死，玩家指不了 —— 这条比倍率更需要说清楚
       parts.push(`点名 ${sk.hits.length} 次，每次 ${(total / sk.hits.length).toFixed(0)}%攻击力；` +
         `从跟自己对位的号位起按号位循环（4 人时有一个吃两下，只剩 1 人就全落他身上），无法指定目标`)
     } else {
-      // 小春的两半是互斥的，各挂一个「砸敌方 →」「砸己方 →」才读得出是二选一而不是一发两收。
-      // 写「砸哪边」而不是写某个动词 —— 认的是意思，打/攻/揍… 八个字都是敌方
-      parts.push(`${sk.circle ? "砸敌方 → " : ""}${scope} ${total.toFixed(0)}%攻击力${sk.hits.length > 1 ? ` 分${sk.hits.length}段` : ""}`)
+      parts.push(`${scope} ${total.toFixed(0)}%攻击力${sk.hits.length > 1 ? ` 分${sk.hits.length}段` : ""}`)
     }
     // 条件追伤：不写的话卡面上只有最低那一档，玩家看不出这个 EX 为什么值这个费
     for (const a of sk.altHits || []) {
@@ -325,7 +320,7 @@ export function describeEffect(sk) {
     const who = e.scope === "self" ? "自身"
       : e.scope === "ally_all" ? "己方全体"
         : e.scope === "ally_named" ? `${BY_ID[e.ally]?.name || e.ally}（不在场则不生效）`
-          : e.scope === "circle_ally" ? "砸己方 → 同战场同身位 2 人"
+          : e.scope === "mirror_ally" ? "攻击主目标对位的己方主力（无存活对位则不生效）"
             : e.scope === "ally_target"
               ? (sk.target === "ally_adjacent" && (sk.count || 1) > 1 ? `同战场同身位 ${sk.count} 人`
                 : sk.target === "ally_lowest" && (sk.count || 1) > 1 ? `最残 ${sk.count} 人`
@@ -348,7 +343,7 @@ export function describeEffect(sk) {
       case "dot":
         // 场地是地上的圈，不是贴在人身上的减益，别写成「灼烧 / 减益」
         if (e.icon === "Zone") {
-          parts.push(`场地持续伤害 ${pct(e.scale)}攻击力（${e.turns}回合，盖住同战场两路，不问身位；每段判命中与暴击）`)
+          parts.push(`场地持续伤害 ${pct(e.scale)}攻击力（${e.turns}回合，盖住同战场两路，不问身位；每回合重扫当前号位，每段判命中与暴击）`)
         } else {
           parts.push(`${who}${DOT_TEXT[e.icon] || "持续伤害"} ${pct(e.scale)}攻击力（${e.turns}回合，固定命中且不暴击）`)
         }
@@ -380,10 +375,15 @@ export function describeEffect(sk) {
             ? `下次 EX 的追伤概率 +${(e.step * 100).toFixed(1)}%（最多叠到 +${(e.max * 100).toFixed(1)}%，放完 EX 清零）`
             : e.step ? `能量充能 +${e.step} 档（最高 ${e.max} 档）` : "能量充能清空")
         break
-      // 位移换来的是战场分割与对位，不是一段距离 —— 说成「移动」玩家会以为有坐标
       case "reposition":
-        parts.push(`与相邻${e.range > 1 ? `${e.range} 格内` : "一格"}的队友交换站位`
-          + `（指令写「ex换<队友名>」，不指定就不动；站在中间两格时这一跳能跨过战场分界）`)
+        parts.push(`朝自动攻击目标移动${e.range > 1 ? `最多 ${e.range} 格` : "一格"}`
+          + `（相邻位置即使已经阵亡也会移动；从中间两格可能跨过战场分界）`)
+        break
+      case "summon":
+        if (e.cover) {
+          parts.push(`在自动选择的己方号位部署掩体（生命为自身生命的 ${pct(e.hpRate || 0)}，` +
+            `与场地掩体共用逐段 30% 承伤规则；同路已有掩体则替换）`)
+        }
         break
       // 嘲讽和集火是两个机制，说法不能混：一个是把敌人拉过来，一个是把火力锁在某个敌人身上
       case "taunt":
