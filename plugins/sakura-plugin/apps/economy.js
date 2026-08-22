@@ -202,7 +202,6 @@ export default class Economy extends plugin {
   }
 
   addCoinsToOther = Command(/^\s*#?(添加|增加|给予)[樱桜]花币\s*(\d+)$/i, "master",  async (e) => {
-    if (!this.checkWhitelist(e)) return false;
 
     const targetId = e.at;
     if (!targetId) {
