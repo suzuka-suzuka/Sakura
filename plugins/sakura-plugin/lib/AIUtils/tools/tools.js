@@ -5,7 +5,6 @@ import fs from "fs";
 import { watch } from "chokidar";
 import { GroupAdminTool } from "./GroupAdminTool.js";
 import { MessageContentAnalyzerTool } from "./MessageContentAnalyzerTool.js";
-import { MessageImageAnalyzerTool } from "./MessageImageAnalyzerTool.js";
 import { SearchMusicTool } from "./SearchMusicTool.js";
 import { ImageGeneratorTool } from "./ImageGeneratorTool.js";
 import { SendMusicTool } from "./SendMusicTool.js";
@@ -35,8 +34,6 @@ const __dirname = dirname(__filename);
 const availableTools = [
   new GroupAdminTool(),
   new MessageContentAnalyzerTool(),
-  // 内部兜底工具：不进入配置面板，只能通过 additionalToolNames 动态暴露。
-  new MessageImageAnalyzerTool(),
   new SearchMusicTool(),
   new ImageGeneratorTool(),
   new SendMusicTool(),
@@ -248,30 +245,18 @@ export function toolGroupHasTool(toolGroupName, toolKey) {
   return resolveToolGroup(toolGroupName).allowedTools.has(toolKey);
 }
 
-export async function getToolsSchema(e, toolGroupName, options = {}) {
-  const additionalToolNames = new Set(
-    Array.isArray(options.additionalToolNames)
-      ? options.additionalToolNames.filter(
-        (name) => typeof name === "string" && name.trim()
-      )
-      : []
-  );
-  const { allowedTools, allowedMcpServerIds } = toolGroupName
-    ? resolveToolGroup(toolGroupName)
-    : { allowedTools: new Set(), allowedMcpServerIds: [] };
-  if (allowedTools.size === 0 && additionalToolNames.size === 0) {
-    return { localTools: [], allowedMcpServerIds: [] };
-  }
+export async function getToolsSchema(e, toolGroupName) {
+  if (!toolGroupName) return { localTools: [], allowedMcpServerIds: [] };
+
+  const { allowedTools, allowedMcpServerIds } = resolveToolGroup(toolGroupName);
+  if (allowedTools.size === 0) return { localTools: [], allowedMcpServerIds: [] };
 
   const isMaster = Boolean(e?.isMaster);
   const localTools = availableTools
     .filter(tool => {
       if (OWNER_ONLY_TOOLS.has(tool.name) && !isMaster) return false;
       const configKey = TOOL_CONFIG_KEYS[tool.name];
-      return (
-        (configKey && allowedTools.has(configKey)) ||
-        additionalToolNames.has(tool.name)
-      );
+      return configKey && allowedTools.has(configKey);
     })
     .map(tool => tool.function());
 
@@ -436,7 +421,7 @@ async function sendToolStartVisual(e, functionCalls = []) {
 /**
  * 执行单个工具调用
  */
-async function executeSingleTool(functionCall, e, pluginInstance, executionContext = {}) {
+async function executeSingleTool(functionCall, e, pluginInstance) {
   const { name: toolName, args: toolArgs, id: toolCallId } = functionCall;
 
   let toolResultData = null;
@@ -479,7 +464,7 @@ async function executeSingleTool(functionCall, e, pluginInstance, executionConte
   if (toolToExecute) {
     logger.info(`正在执行工具："${toolName}" ${JSON.stringify(toolArgs)}`);
     try {
-      const rawResult = await toolToExecute.func(toolArgs, e, executionContext);
+      const rawResult = await toolToExecute.func(toolArgs, e);
       const splitResult = splitToolFollowUpResult(rawResult);
       const resultForResponse = splitResult.response;
 
@@ -535,8 +520,7 @@ async function executeSingleTool(functionCall, e, pluginInstance, executionConte
 export async function executeToolCalls(
   e,
   initialFunctionCalls,
-  pluginInstance = null,
-  executionContext = {}
+  pluginInstance = null
 ) {
   if (!initialFunctionCalls || initialFunctionCalls.length === 0) {
     return { historyContents: [], queryParts: [] };
@@ -554,13 +538,13 @@ export async function executeToolCalls(
     toolExecutionResults = [];
     for (const fc of initialFunctionCalls) {
       toolExecutionResults.push(
-        await executeSingleTool(fc, e, pluginInstance, executionContext)
+        await executeSingleTool(fc, e, pluginInstance)
       );
     }
   } else {
     toolExecutionResults = await Promise.all(
       initialFunctionCalls.map((fc) =>
-        executeSingleTool(fc, e, pluginInstance, executionContext)
+        executeSingleTool(fc, e, pluginInstance)
       )
     );
   }

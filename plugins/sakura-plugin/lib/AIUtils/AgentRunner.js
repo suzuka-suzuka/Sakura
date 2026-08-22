@@ -1,14 +1,7 @@
 import Setting from "../setting.js";
 import { getAI } from "./getAI.js";
-import { modelSupportsDirectImageInput } from "./providerRouter.js";
 import { ensureToolCallIds } from "./toolCallProtocol.js";
 import { executeToolCalls, toolGroupHasTool } from "./tools/tools.js";
-import {
-  hasMessageImageReference,
-  MESSAGE_IMAGE_ANALYZER_TOOL_NAME,
-  prepareImagePartsForModel,
-  shouldExposeMessageImageAnalyzer,
-} from "./messageImageToolRouting.js";
 import { buildMemoryContext } from "./memoryContext.js";
 import { finalizeStoppedConversationTurn } from "./ConversationHistory.js";
 import {
@@ -69,45 +62,10 @@ export async function runAgentLoop({
   const currentFullHistory = history;
   const turnStartIndex = currentFullHistory.length;
   const taskId = startAiTask(e);
-  const hasCurrentImages = hasMessageImageReference(queryParts);
-  const hasMessageContentAnalyzer = toolGroupHasTool(
-    toolGroup,
-    "MessageContentAnalyzer"
-  );
-  const routingContext = {
-    prepareQueryPartsForAttempt: async (parts, config) =>
-      prepareImagePartsForModel(
-        parts,
-        modelSupportsDirectImageInput(config?.model)
-      ),
-    getAdditionalToolNamesForAttempt: (config) =>
-      shouldExposeMessageImageAnalyzer({
-        hasCurrentImages,
-        supportsImageInput: modelSupportsDirectImageInput(config?.model),
-        hasMessageContentAnalyzer,
-      })
-        ? [MESSAGE_IMAGE_ANALYZER_TOOL_NAME]
-        : [],
-  };
+  const routingContext = {};
   let toolCallCount = 0;
   let finalText = "";
   let effectivePrompt = prompt;
-
-  const analyzeImagesWithToolRoute = async (parts) => {
-    const toolsRoute = Setting.getConfig("AI", { selfId: e?.self_id })?.toolsRoute;
-    if (!toolsRoute) {
-      return "未配置用于识图的 toolsRoute。";
-    }
-
-    return getAI(
-      toolsRoute,
-      e,
-      parts,
-      "",
-      false,
-      false
-    );
-  };
 
   try {
     if (toolGroupHasTool(toolGroup, "Memory")) {
@@ -142,11 +100,8 @@ export async function runAgentLoop({
       };
     }
 
-    const initialRequestParts = Array.isArray(currentResponse.requestQueryParts)
-      ? currentResponse.requestQueryParts
-      : queryParts;
-    if (Array.isArray(initialRequestParts) && initialRequestParts.length > 0) {
-      currentFullHistory.push({ role: "user", parts: initialRequestParts });
+    if (Array.isArray(queryParts) && queryParts.length > 0) {
+      currentFullHistory.push({ role: "user", parts: queryParts });
     }
 
     while (true) {
@@ -205,16 +160,7 @@ export async function runAgentLoop({
         const toolCallback = await executeToolCalls(
           e,
           functionCalls,
-          pluginInstance,
-          {
-            supportsImageInput: currentResponse.supportsImageInput === true,
-            analyzeImages: analyzeImagesWithToolRoute,
-            allowMessageImageAnalyzer: shouldExposeMessageImageAnalyzer({
-              hasCurrentImages,
-              supportsImageInput: currentResponse.supportsImageInput === true,
-              hasMessageContentAnalyzer,
-            }),
-          }
+          pluginInstance
         );
         currentFullHistory.push(...toolCallback.historyContents);
         const newToolQueryParts = filterNewInlineDataParts(
@@ -242,13 +188,10 @@ export async function runAgentLoop({
             toolCallCount,
           };
         }
-        if (
-          Array.isArray(currentResponse.requestQueryParts) &&
-          currentResponse.requestQueryParts.length > 0
-        ) {
+        if (newToolQueryParts.length > 0) {
           currentFullHistory.push({
             role: "user",
-            parts: currentResponse.requestQueryParts,
+            parts: newToolQueryParts,
           });
         }
         continue;

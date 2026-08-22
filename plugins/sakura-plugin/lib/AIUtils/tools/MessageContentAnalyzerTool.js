@@ -211,7 +211,7 @@ export class MessageContentAnalyzerTool extends AbstractTool {
       query: {
         type: "string",
         description:
-          "可选。分析图片时用于指定关注的问题，省略时使用通用图片描述；分析视频时必填",
+          "可选。分析图片时用于指定关注的问题；分析视频时必填",
       },
     },
     required: ["type"],
@@ -219,9 +219,9 @@ export class MessageContentAnalyzerTool extends AbstractTool {
 
   description =
     "提取或分析图片、分析视频，或通过seq下载文件/撤回/加精/取消加精消息。"
-      + "调用image时提供seq或url即可，query可选；系统会自动选择将图片放入下一次AI输入或在工具内识图";
+      + "调用image时提供seq或url即可，query可选；图片会作为临时多模态输入放入下一次AI请求";
 
-  func = async function (opts, e, executionContext = {}) {
+  func = async function (opts, e) {
     let { seq, url, type, query } = opts;
 
     if (!seq && !url) return "需提供seq或url。";
@@ -242,7 +242,7 @@ export class MessageContentAnalyzerTool extends AbstractTool {
 
     if (url && url.length > 0) {
       if (type === "image") {
-        return await this.processImages(url, query, executionContext);
+        return await this.processImages(url);
       } else if (type === "video") {
         return await this.processVideo(url[0], query, e);
       } else {
@@ -351,7 +351,7 @@ export class MessageContentAnalyzerTool extends AbstractTool {
 
     if (type === "image") {
       if (imgUrls.length > 0)
-        return await this.processImages(imgUrls, query, executionContext);
+        return await this.processImages(imgUrls);
       return "未找到图片。";
     }
 
@@ -465,14 +465,8 @@ export class MessageContentAnalyzerTool extends AbstractTool {
     return resultLines.join("\n\n");
   }
 
-  async processImages(imgUrls, question, executionContext = {}) {
+  async processImages(imgUrls) {
     try {
-      const normalizedQuestion = typeof question === "string"
-        ? question.trim()
-        : "";
-      const analysisQuestion = normalizedQuestion
-        || "请详细描述图片内容，并提取对当前对话可能有用的关键信息。";
-
       const imageParts = [];
 
       for (const imgUrl of imgUrls) {
@@ -495,21 +489,6 @@ export class MessageContentAnalyzerTool extends AbstractTool {
 
       if (imageParts.length === 0) {
         return "获取图片失败。";
-      }
-
-      if (executionContext.supportsImageInput === false) {
-        if (typeof executionContext.analyzeImages !== "function") {
-          return "当前模型不支持图片输入，且未配置可用的工具识图回调。";
-        }
-
-        const analysisResult = await executionContext.analyzeImages([
-          { text: analysisQuestion },
-          ...imageParts,
-        ]);
-        if (typeof analysisResult === "object" && analysisResult?.text) {
-          return analysisResult.text;
-        }
-        return analysisResult;
       }
 
       return createToolFollowUpResult(

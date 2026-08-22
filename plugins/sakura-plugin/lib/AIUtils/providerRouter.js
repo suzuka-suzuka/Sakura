@@ -186,11 +186,6 @@ export function resolveGenerationSettings(route, target) {
   };
 }
 
-export function modelSupportsDirectImageInput(model) {
-  const normalized = String(model || "").trim().toLowerCase();
-  return Boolean(normalized) && !normalized.includes("deepseek");
-}
-
 function buildRequestConfig(route, target, provider, credential) {
   return {
     name: `${route.id}/${target.id}`,
