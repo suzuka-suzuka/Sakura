@@ -4,6 +4,7 @@ import { connect } from 'puppeteer-real-browser'
 import { plugindata } from '../path.js'
 import { SEARCH_CHANNELS } from './constants.js'
 import { delay, dedupeBy, sanitizeGoogleAiText } from './helpers.js'
+import { resolveGoogleSearchRedirects } from './googleRedirect.js'
 
 const LENS_ENTRY_LABELS = [
   'Search by image',
@@ -211,7 +212,8 @@ export async function searchGoogleLens(imagePath, options = {}) {
 
     try {
       await page.waitForFunction(
-        () => document.querySelectorAll('a[href]:not([href*="google.com"])').length > 3,
+        () => document.querySelectorAll('a[href]:not([href*="google.com"])').length > 3 ||
+          Boolean(document.querySelector('a[href*="/goto"]')),
         { timeout: 15000 }
       )
     } catch {
@@ -258,6 +260,11 @@ export async function searchGoogleLens(imagePath, options = {}) {
                   return nested
                 }
               }
+            }
+
+            const normalizedPath = url.pathname.replace(/\/+$/, '') || '/'
+            if (normalizedPath === '/goto' && url.searchParams.get('url')) {
+              return url.href
             }
 
             return allowGoogleLink ? url.href : ''
@@ -404,6 +411,7 @@ export async function searchGoogleLens(imagePath, options = {}) {
       }
 
       let aiText = ''
+      let aiLinks = []
       try {
         const possibleHeaders = Array.from(document.querySelectorAll('h1, h2, h3, span, div')).filter(el => {
           if (!el.innerText) return false
@@ -417,7 +425,9 @@ export async function searchGoogleLens(imagePath, options = {}) {
 
           for (let index = 0; index < 6; index += 1) {
             if (container && container.innerText && container.innerText.length > header.innerText.length + 30) {
-              aiText = applyMarkdownLinks(container.innerText, collectLinks(container, true))
+              const collectedLinks = collectLinks(container, true)
+              aiLinks = collectedLinks.map(link => link.url)
+              aiText = applyMarkdownLinks(container.innerText, collectedLinks)
               break
             }
             if (container) container = container.parentElement
@@ -456,13 +466,27 @@ export async function searchGoogleLens(imagePath, options = {}) {
         }
       }).filter(item => item.thumb)
 
-      return { aiText, results }
+      return { aiText, aiLinks, results }
+    })
+
+    const googleCookies = await page.cookies('https://www.google.com/').catch(() => [])
+    const userAgent = await page.evaluate(() => navigator.userAgent).catch(() => '')
+    const redirectHeaders = {
+      'Accept-Language': GOOGLE_LENS_ACCEPT_LANGUAGE,
+    }
+    if (userAgent) redirectHeaders['User-Agent'] = userAgent
+    if (googleCookies.length > 0) {
+      redirectHeaders.Cookie = googleCookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ')
+    }
+
+    const resolvedData = await resolveGoogleSearchRedirects(scrapedData, {
+      headers: redirectHeaders,
     })
 
     return {
       channel: SEARCH_CHANNELS.GOOGLE,
-      aiText: sanitizeGoogleAiText(scrapedData.aiText),
-      items: dedupeBy(scrapedData.results, item => `${item.url}|${item.title}`),
+      aiText: sanitizeGoogleAiText(resolvedData.aiText),
+      items: dedupeBy(resolvedData.results, item => `${item.url}|${item.title}`),
     }
   } catch (error) {
     logger.error('[ImageSearch][GoogleLens] 执行过程遭遇异常:', error)
