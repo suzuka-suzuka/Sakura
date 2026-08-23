@@ -449,6 +449,25 @@ check("爱丽丝站 1 位但佩洛洛在敌 3 位嘲讽：整条直线改到 3·
     [4, true, [3, 4]])
 }
 {
+  const st = setup(["千世", "伊织", "伊织", "伊织"], ["千世", "白子", "野宫", "野宫"])
+  st.sides[1].units[1].taunt = 2
+  st.sides[1].units[1].tauntKind = "provoke"
+  const r = playerTurn(st, { type: "pass" })
+  const ev = r.events.find((e) =>
+    e.type === "action" && e.action === "normal" && e.source?.side === 0 && e.source?.pos === 0)
+  check("同身位普攻被嘲讽改到敌 2 位：仍以新主目标的中排身位溅射到同为中排的敌 1 位",
+    targetLabels(ev), [2, 1])
+}
+{
+  const st = setup(["千世", "伊织", "伊织", "伊织"], ["星野", "白子", "野宫", "野宫"])
+  st.sides[1].units[1].focus = 2
+  const r = playerTurn(st, { type: "pass" })
+  const ev = r.events.find((e) =>
+    e.type === "action" && e.action === "normal" && e.source?.side === 0 && e.source?.pos === 0)
+  check("同身位普攻集火到敌 2 位：敌 1 位虽在同战场但属于前排，不跨身位溅射",
+    targetLabels(ev), [2])
+}
+{
   const st = setup(["桃", "伊织", "伊织", "伊织"], FOE)
   st.sides[1].units[3].focus = 2
   const r = playerTurn(st, { type: "ex", casts: [{ pos: 0 }] })

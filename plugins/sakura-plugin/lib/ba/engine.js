@@ -1076,7 +1076,8 @@ function resolveTargets(state, u, skill, foes, allies) {
   // 佩洛洛抢到主目标后，普通同身位圆扇只打它；贯穿仍按号位窗口继续覆盖，
   // 佩洛洛是窗口中额外的一名单位。场地则可用单一圆心在 fieldLanes 铺出完整地面范围。
   if (primary.summon && !instMode && !tg.endsWith("adjacent")) return [primary]
-  // Provoke / Focus 只替换 primary（主目标 / 范围中心），绝不改技能原本的形状与目标数。
+  // Provoke / Focus 只替换 primary（主目标 / 范围中心），绝不改技能原本的范围形状。
+  // 同身位圆 / 扇仍以替换后的 primary 身位筛溅射；只有 depth=through 才无视身位。
   // 例如爱丽丝直线永远贯穿主目标所在整个战场；桃 / 纯子仍以新主目标为中心铺三路。
   // 支援不吃 Provoke、但会执行 Focus，tauntTargetOf 的 noProvoke 分支已在 laneTarget 区分两者。
   /**
