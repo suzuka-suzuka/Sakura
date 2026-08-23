@@ -25,7 +25,7 @@ export const menuGroups = [
     items: [
       { name: "AI聊天", command: "角色前缀 + 内容", desc: "使用 AI 设置中配置的角色前缀触发对话。", costCommand: charge("AIChat.Chat"), examples: ["~ 今天有什么建议"] },
       { name: "停止生成", command: "#停止 / #强制停止", desc: "停止当前用户正在进行的对话或生成任务。" },
-      { name: "清空单个对话", command: "#清空对话 <角色或前缀>", desc: "清空指定角色的当前对话历史，填「拟态」可清空拟态对话。", examples: ["#清空对话 拟态"] },
+      { name: "清空单个对话", command: "#清空对话 <角色或前缀>", desc: "清空指定角色的当前对话历史。" },
       { name: "撤销对话", command: "#撤销对话 <角色或前缀>", desc: "回滚指定角色最近一轮对话。" },
       { name: "篡改对话", command: "#篡改对话 <内容>", desc: "手动写入一条对话上下文，用于修正角色短期走向。" },
       { name: "列出对话", command: "#列出对话 <角色或前缀>", desc: "导出指定角色当前对话记录。" },

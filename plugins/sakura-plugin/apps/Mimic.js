@@ -16,7 +16,7 @@ import { getMessageIdentifier } from "../lib/AIUtils/messageIdentifiers.js";
 import { getImg, randomReact, smartReplyMsg } from "../lib/utils.js";
 
 const MIMIC_HISTORY_PREFIX = "Mimic";
-const MIMIC_HISTORY_MAX_ROUNDS = 10;
+const MIMIC_HISTORY_MAX_ROUNDS = 1;
 
 function trimMimicHistory(history) {
   return trimConversationHistoryByRounds(

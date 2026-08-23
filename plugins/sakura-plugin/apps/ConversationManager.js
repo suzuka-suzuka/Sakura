@@ -21,22 +21,6 @@ import {
   getPrimaryPrefix,
 } from "../lib/AIUtils/profileTriggers.js";
 
-// 拟态这类内置对话不在 AI 设定的 profiles 里，需要按别名单独映射到历史前缀
-const SPECIAL_HISTORY_TARGETS = [
-  { historyPrefix: "Mimic", name: "拟态", aliases: ["拟态", "mimic"] },
-];
-
-function findSpecialHistoryTarget(input) {
-  if (typeof input !== "string") return null;
-  const key = input.trim().toLowerCase();
-  if (!key) return null;
-  return (
-    SPECIAL_HISTORY_TARGETS.find((target) =>
-      target.aliases.some((alias) => alias.toLowerCase() === key)
-    ) || null
-  );
-}
-
 export class Conversationmanagement extends plugin {
   constructor() {
     super({
@@ -66,11 +50,6 @@ export class Conversationmanagement extends plugin {
         historyPrefix: getPrimaryPrefix(profile),
         name: profile.name || prefix,
       };
-    }
-
-    const special = findSpecialHistoryTarget(prefix);
-    if (special) {
-      return { historyPrefix: special.historyPrefix, name: special.name };
     }
 
     return null;
