@@ -1009,6 +1009,12 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
   // 这是技能描述自带的索敌，优先于通用位置规则。
   if (/攻击力最高的敌方单位/.test(desc) && String(out.target || "").startsWith("enemy")) out.pick = "max_atk"
 
+  // 响普技：「以 1 名生命值百分比最低的敌方单位为中心」。同样只写在描述里；
+  // 必须先锁定最残者，再从她身上铺圆，不能让支援位默认的后 → 中 → 前覆盖掉。
+  if (/生命值百分比最低的敌方单位/.test(desc) && String(out.target || "").startsWith("enemy")) {
+    out.pick = "lowest_hp_rate"
+  }
+
   // 纯子 EX 的「失去25.7%的当前生命值」。跟艾米的 ExtraStatSource 一样是**全数据唯一一处**，
   // 没有结构化效果，也不会有第二个用例 —— 但漏了她就成了一个没有代价的 746% 直线 AoE。
   const hpCost = /失去\s*([\d.]+)\s*%\s*的当前生命值/.exec(desc)

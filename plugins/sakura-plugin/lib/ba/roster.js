@@ -3936,7 +3936,8 @@ export const ROSTER = [
         "hi": 1,
         "atLo": 2,
         "atHi": 1
-      }
+      },
+      "pick": "lowest_hp_rate"
     },
     "ex": {
       "name": "会痛的概率很高哦",

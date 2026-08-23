@@ -1077,6 +1077,67 @@ console.log("\n=== 29. 柚子：技能自带的「攻击力最高」索敌 ===")
   })()), [2])
 }
 
+console.log("\n=== 29b. 支援自带索敌优先于支援位默认规则 ===")
+{
+  const of = (name) => ROSTER.find((t) => t.name === name)
+  check("支援角色原文里的锁定条件全部保留在角色表",
+    [
+      ["响", of("响").skill.target, of("响").skill.pick],
+      ["风香", of("风香").skill.target, of("风香").skill.pick],
+      ["花江", of("花江").skill.target, of("花江").skill.pick],
+      ["花子", of("花子").skill.target, of("花子").skill.pick],
+      ["千夏", of("千夏").skill.target, of("千夏").skill.pick],
+      ["朱莉", of("朱莉").skill.target, of("朱莉").skill.pick],
+      ["芹娜", of("芹娜").skill.target, of("芹娜").skill.pick],
+      ["志美子", of("志美子").skill.target, of("志美子").skill.pick],
+    ],
+    [
+      ["响", "enemy_adjacent", "lowest_hp_rate"],
+      ["风香", "ally_maxhp", undefined],
+      ["花江", "ally_lowest", undefined],
+      ["花子", "ally_lowest", undefined],
+      ["千夏", "ally_lowest", undefined],
+      ["朱莉", "enemy_single", "max_atk"],
+      ["芹娜", "ally_lowest", undefined],
+      ["志美子", "ally_lowest", undefined],
+    ])
+
+  const supportSkillTargets = (support, red, mutate) => {
+    const st = setup(["星野", "椿", "野宫", "伊织", support, "真白"], red)
+    for (const u of st.sides[0].units) u.skillUses = 99
+    for (const u of st.sides[0].supports) u.skillCd = 9999
+    st.sides[0].supports[0].skillCd = 0
+    mutate?.(st)
+    const r = playerTurn(st, { type: "pass" })
+    const ev = r.events.find((e) =>
+      e.type === "action" && e.action === "skill" && e.source?.side === 0 && e.source?.pos === 4)
+    return (ev?.targets || []).map((t) => t.pos + 1).sort((a, b) => a - b)
+  }
+
+  check("芹娜普技仍奶生命百分比最低的 4 位，不走防御技能的前排兜底", supportSkillTargets(
+    "芹娜", ["伊织", "伊织", "伊织", "伊织"], (st) => {
+      for (const u of st.sides[0].units) u.hp = Math.round(u.maxhp * 0.9)
+      st.sides[0].units[3].hp = Math.round(st.sides[0].units[3].maxhp * 0.1)
+    }), [4])
+
+  check("响普技以生命百分比最低的前排 1 位为圆心，不走进攻支援的后排兜底", supportSkillTargets(
+    "响", ["星野", "野宫", "白子", "伊织"], (st) => {
+      for (const u of st.sides[1].units) u.hp = u.maxhp
+      st.sides[1].units[0].hp = Math.round(st.sides[1].units[0].maxhp * 0.1)
+    }), [1])
+
+  check("响普技从最低血量圆心向同战场同身位扩散，后排 1·2 位都命中", supportSkillTargets(
+    "响", ["野宫", "伊织", "星野", "白子"], (st) => {
+      for (const u of st.sides[1].units) u.hp = u.maxhp
+      st.sides[1].units[1].hp = Math.round(st.sides[1].units[1].maxhp * 0.1)
+    }), [1, 2])
+
+  check("朱莉普技仍锁全场攻击力最高的前排鹤城，不走后排兜底",
+    supportSkillTargets("朱莉", ["鹤城", "野宫", "白子", "伊织"]), [1])
+  check("响的图鉴文案会公开最低血量索敌",
+    describeEffect(of("响").skill).includes("生命值百分比最低"), true)
+}
+
 console.log("\n=== 30. 泉奈：「每 6 次普通攻击」数的是枪，不是回合 ===")
 {
   // 全场血量拉满，谁都死不掉，只看技能在第几个己方回合被打出来

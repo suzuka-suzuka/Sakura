@@ -269,6 +269,9 @@ export function describeEffect(sk) {
   if (sk.pick === "max_atk") {
     parts.push("以攻击力最高的敌人为目标（无视战场分割、身位和挡刀）")
   }
+  if (sk.pick === "lowest_hp_rate") {
+    parts.push("以生命值百分比最低的敌人为主目标（优先于默认位置规则）")
+  }
   if (sk.hits?.length) {
     const total = sk.hits.reduce((a, b) => a + b, 0)
     const scope = sk.target === "enemy_adjacent"

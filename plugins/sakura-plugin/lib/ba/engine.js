@@ -754,6 +754,15 @@ function maxAtkTarget(u, alive, forced = false) {
   return alive.reduce((m, f) => (atkOf(f) > atkOf(m) ? f : m))
 }
 
+/** 技能原文指定「生命值百分比最低」；并列时取号位小者。 */
+function lowestHpRateTarget(alive) {
+  if (!alive.length) return null
+  return alive.reduce((m, f) => {
+    const a = f.hp / f.maxhp, b = m.hp / m.maxhp
+    return a < b - 1e-9 || (Math.abs(a - b) < 1e-9 && f.idx < m.idx) ? f : m
+  })
+}
+
 /**
  * 普攻 / 普通技能的对线锁定，按优先级：
  *   1. 嘲讽（Provoke）—— 最高，直接无视战场分割。**开火的是支援位时这一档整个跳过**
@@ -763,10 +772,10 @@ function maxAtkTarget(u, alive, forced = false) {
  *   5. 同战场的前排 → 中排 → 后排。不是职业，是角色自己的 Front/Middle/Back
  *   6. 本战场空了才越界，跨过去还是前 → 中 → 后
  *   7. 同一层里：对位 → |位置差| 最小 → 编号小
- * @param {boolean} maxAtk 技能自带的「攻击力最高」索敌（skill.pick），与瞬的形态索敌同档
+ * @param {string|null} pick 技能描述自带的索敌（最高攻击 / 最低血量等）；null 时仍可读取瞬的强化形态
  * @param {{ignoreTaunt?: boolean}} [opts] 切里诺普技的集火是**选人条件**，嘲讽改不了落点
  */
-function laneTarget(u, foes, maxAtk = false, opts = {}) {
+function laneTarget(u, foes, pick = null, opts = {}) {
   // 嘲讽 > 集火，无视目标选择层 —— 战场分割、前排、人偶挡刀、瞬的强化索敌统统让路。
   // 掩体不在目标选择层；被嘲讽者同路的掩体仍可对 Block=1 分段掷 30%。
   // 嘲讽同槽只留一个（人偶入场 Provoke 和椿的 EX 会互相顶掉）；集火另开一槽，见 setTaunt。
@@ -778,9 +787,11 @@ function laneTarget(u, foes, maxAtk = false, opts = {}) {
   // `Block=1` 分段掷 30%，成功才承受那一段伤害。
   const decoys = summonsOf(foes).filter((s) => !s.cover)
   const alive = aliveOf(foes)
-  const topAtk = maxAtkTarget(u, alive, maxAtk)
+  const describedTarget = pick === "lowest_hp_rate"
+    ? lowestHpRateTarget(alive)
+    : maxAtkTarget(u, alive, pick === "max_atk")
 
-  if (topAtk) return topAtk
+  if (describedTarget) return describedTarget
 
   /**
    * **支援位没有对位**，`zoneOf(u.idx)` 对它们没有意义（它们不站在任何一个战场里）。
@@ -1002,7 +1013,7 @@ function resolveTargets(state, u, skill, foes, allies) {
       && (skill.effects || []).some((e) => e.type === "taunt" && e.kind === "focus")
     primary = tg.startsWith("ally")
       ? allyLaneTarget(u, allies, skill)
-      : laneTarget(u, foes, skill.pick === "max_atk", { ignoreTaunt: markFocus })
+      : laneTarget(u, foes, skill.pick || null, { ignoreTaunt: markFocus })
   }
   if (!primary) return []
   // 召唤物不在 pool.units 里，扩散算不出邻居；打到它就只打它
