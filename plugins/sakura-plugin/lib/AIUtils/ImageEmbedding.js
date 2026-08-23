@@ -1,5 +1,4 @@
 import { LocalIndex } from "vectra";
-import Setting from "../setting.js";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
@@ -9,9 +8,10 @@ import sharp from "sharp";
 import db from "../Database.js";
 import { ensureVertexAdcDirectory } from "./vertexAuth.js";
 import {
-  createEmbeddingClient,
+  generateContentEmbedding,
   generateTextEmbedding as embedText,
 } from "./embeddingProvider.js";
+import { resolveGeminiCapabilityPlan } from "./geminiCapabilityRoute.js";
 
 const EMOJI_DATA_DIR = path.join(plugindata, "emoji_embeddings");
 const VECTRA_INDEX_DIR = path.join(EMOJI_DATA_DIR, "vectra_index");
@@ -58,10 +58,6 @@ class ImageEmbeddingManager {
     if (!(await this.index.isIndexCreated())) {
       await this.index.createIndex();
     }
-  }
-
-  createClient(purpose) {
-    return createEmbeddingClient(null, purpose);
   }
 
   getMimeTypeFromFormat(format, fallback = "image/png") {
@@ -231,8 +227,6 @@ class ImageEmbeddingManager {
    * @returns {Promise<number[]>} 嵌入向量
    */
   async generateImageEmbedding(imageBuffer, mimeType = "image/png", description = "") {
-    const client = this.createClient("表情入库");
-
     // Convert GIF to PNG before sending it to the embedding model.
     let processedBuffer = imageBuffer;
     let processedMimeType = await this.detectImageMimeType(imageBuffer, mimeType);
@@ -263,17 +257,16 @@ class ImageEmbeddingManager {
       parts.push({ text: description });
     }
 
-    const result = await client.models.embedContent({
-      model: this.embeddingModel,
-      contents: {
+    return generateContentEmbedding(
+      {
         parts: parts,
       },
-      config: {
+      {
+        model: this.embeddingModel,
+        purpose: "表情入库",
         outputDimensionality: 768,
-      },
-    });
-
-    return result.embeddings[0].values;
+      }
+    );
   }
 
   /**
@@ -311,8 +304,17 @@ class ImageEmbeddingManager {
       },
     ];
 
-    const route = Setting.getConfig("AI").toolsRoute;
-    const aiResult = await getAI(route, null, queryParts, "", false, false);
+    const { routeId, plan } = resolveGeminiCapabilityPlan(null, "表情识图");
+    const aiResult = await getAI(
+      routeId,
+      null,
+      queryParts,
+      "",
+      false,
+      false,
+      [],
+      { plan }
+    );
 
     if (typeof aiResult === "object" && aiResult.text) {
       return aiResult.text;

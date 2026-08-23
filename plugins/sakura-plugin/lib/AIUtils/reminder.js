@@ -19,7 +19,7 @@ export async function renderReminderContentWithAI(content, context = {}) {
 
   try {
     const aiConfig = Setting.getConfig('AI') || {};
-    const routeId = aiConfig.appsRoute;
+    const routeId = aiConfig.utilityRoute;
     if (!routeId) return raw;
 
     const query = `原始提醒内容：${raw}\n请输出改写后的提醒文本。`;

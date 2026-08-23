@@ -106,14 +106,30 @@ const ToolGroupSchema = z.object({
     tools: z.array(z.string()).default([]).describe('工具列表|#toolMultiSelect|选择此组包含的工具'),
 });
 
-export const AISchema = z.object({
+export function migrateAIRoutesConfig(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+
+    const config = { ...value };
+    if (!Object.hasOwn(config, 'utilityRoute') && Object.hasOwn(config, 'appsRoute')) {
+        config.utilityRoute = config.appsRoute;
+    }
+    if (!Object.hasOwn(config, 'geminiRoute') && Object.hasOwn(config, 'toolsRoute')) {
+        config.geminiRoute = config.toolsRoute;
+    }
+
+    delete config.appsRoute;
+    delete config.toolsRoute;
+    return config;
+}
+
+const AIObjectSchema = z.object({
     profiles: z.array(ProfileSchema).default([]).describe('AI角色列表|#nameField:name|配置多个AI角色，每个角色可以有多个触发前缀'),
     toolGroups: z.array(ToolGroupSchema).default([]).describe('工具组|#nameField:name|自定义工具组合，每个角色可绑定一个工具组'),
     groupContextLength: z.number().default(20).describe('群上下文长度|群聊上下文记忆的消息条数'),
     chatHistoryLength: z.number().default(20).describe('对话历史长度|保留的对话历史消息条数'),
     enableUserLock: z.boolean().default(false).describe('单人锁|统一控制 AI 聊天与拟态回复；每个功能同一用户在同一群内只处理一条消息'),
-    toolsRoute: z.string().default('default').describe('工具路由|#routeSelect'),
-    appsRoute: z.string().default('default').describe('应用路由|#routeSelect'),
+    utilityRoute: z.string().default('default').describe('通用辅助路由|#routeSelect|用于应用文案、结构化分析和记忆整理等后台 AI 任务'),
+    geminiRoute: z.string().default('').describe('Gemini 能力路由|#routeSelect|用于向量、视频分析和表情识图；留空时这些功能不可用，选定路由中至少需要一个 Gemini 或 Vertex 目标'),
     gcsBucket: z.string().default('').describe('GCS Bucket|Vertex 视频分析上传的 Cloud Storage bucket'),
     gcsPrefix: z.string().default('sakura-message-videos').describe('GCS Prefix|Vertex 视频分析临时文件目录'),
     maxToolCalls: z.number().default(20).describe('最大工具调用次数|每次对话允许AI连续调用工具的最大次数，超过后将强制结束'),
@@ -136,6 +152,11 @@ export const AISchema = z.object({
         });
     });
 }).describe('AI 对话设定');
+
+export const AISchema = z.preprocess(migrateAIRoutesConfig, AIObjectSchema);
+Object.defineProperty(AISchema, 'configInputMigration', {
+    value: migrateAIRoutesConfig,
+});
 
 export const TavilyMCPSchema = z.object({
     apiKey: z.string().default('').describe('API Key|Tavily Remote MCP API Key'),

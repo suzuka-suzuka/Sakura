@@ -118,7 +118,7 @@ export class poke extends plugin {
     }
 
     const queryParts = [{ text: promptText }];
-    const route = Setting.getConfig("AI").appsRoute;
+    const route = Setting.getConfig("AI").utilityRoute;
     try {
       const result = await getAI(
         route,
@@ -227,7 +227,7 @@ export class poke extends plugin {
             text: `请把"${Name}"这个名字变得更中二病一些，请只输出一个新名字。`,
           },
         ];
-        const route = Setting.getConfig("AI").appsRoute;
+        const route = Setting.getConfig("AI").utilityRoute;
         try {
           const result = await getAI(
             route,
@@ -353,7 +353,7 @@ export class poke extends plugin {
                 text: `请把"${currentName}"这个名字变得更笨、更傻、更蠢一些，要带有贬义和嘲讽意味，请只输出一个新名字。`,
               },
             ];
-            const route = Setting.getConfig("AI").appsRoute;
+            const route = Setting.getConfig("AI").utilityRoute;
             try {
               const result = await getAI(
                 route,

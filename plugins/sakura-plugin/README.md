@@ -94,6 +94,12 @@ config/sakura-plugin/
 4. 在 `AI.profiles` 中配置角色触发前缀列表、角色名和模型路由。
 5. 群内发送任一角色前缀加内容即可触发对话；多个前缀同时匹配时使用最长前缀。
 
+`AI.utilityRoute` 是通用辅助路由，用于应用文案、结构化分析和记忆整理等后台任务。`AI.geminiRoute` 是 Gemini 能力路由，用于向量、消息视频分析和表情识图，留空时这些功能不可用；选定的路由中至少需要一个 `protocol: gemini` 的 Gemini 或 Vertex 目标。主对话、工具执行和工具回传后的续答仍沿角色或拟态各自的模型路由执行；只有上述 Gemini 子任务使用 `geminiRoute`。
+
+旧配置中的 `appsRoute` 会自动迁移到 `utilityRoute`，`toolsRoute` 会自动迁移到 `geminiRoute`。
+
+Gemini/Vertex 生图仍由 `ImageChannels` 管理，Gemini 视频生成仍由 `CliProxyMedia` 管理；这些媒体生成渠道不受 `AI.geminiRoute` 影响。
+
 路由和凭据均支持 `round_robin`、`weighted_round_robin`、`priority`、`priority_weighted`。同一个逻辑路由可以配置多个使用相同模型名的供应商目标。
 
 生成参数放在路由和目标层：路由的 `temperature`、`topP`、`reasoningLevel` 是统一默认值；目标可通过 `temperatureOverride`、`topPOverride` 覆盖采样参数，并使用 `openaiReasoningEffort` 或 `geminiThinkingLevel` / `geminiThinkingBudget` 设置供应商原生思考参数。Provider 只管理连接和凭据，不承载生成参数。

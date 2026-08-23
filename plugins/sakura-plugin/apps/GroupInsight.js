@@ -73,7 +73,7 @@ async function buildAIAnalysis(e, date, stats, aiInput) {
     return normalizeGroupInsightAnalysis(null, { aiInput, stats });
   }
 
-  const route = Setting.getConfig("AI", { selfId: e.self_id })?.appsRoute
+  const route = Setting.getConfig("AI", { selfId: e.self_id })?.utilityRoute
     || "default";
   const prompt = buildGroupInsightPrompt({ date, stats, aiInput });
   const result = await getAI(

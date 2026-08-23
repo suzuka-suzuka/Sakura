@@ -254,7 +254,16 @@ class PluginConfigManager {
     }
 
     _normalizeModuleData(schema, rawData) {
-        const result = schema.safeParse(rawData);
+        let migratedRawData = rawData;
+        if (typeof schema?.configInputMigration === 'function') {
+            try {
+                migratedRawData = schema.configInputMigration(rawData);
+            } catch (error) {
+                logger.warn(`[插件配置] 配置输入迁移失败，继续使用原始数据: ${error.message}`);
+            }
+        }
+
+        const result = schema.safeParse(migratedRawData);
         if (result.success) {
             return result.data;
         }
@@ -265,7 +274,7 @@ class PluginConfigManager {
         }
 
         const defaults = this._getDefaults(schema);
-        return this._mergeObjects(defaults, rawData || {});
+        return this._mergeObjects(defaults, migratedRawData || {});
     }
 
     _getDefaults(schema) {

@@ -1,6 +1,5 @@
 import { AbstractTool } from "./AbstractTool.js";
 import { fetchMessageByIdentifier } from "../messageLookup.js";
-import Setting from "../../setting.js";
 import { urlToBase64 } from "../../utils.js";
 import { createToolFollowUpResult } from "../toolResultProtocol.js";
 import fs from "node:fs";
@@ -16,9 +15,11 @@ import {
   createUserContent,
   createPartFromUri,
 } from "@google/genai";
-import { resolveRouteTarget } from "../providerRouter.js";
 import {
-  createGeminiClient,
+  executeGeminiCapability,
+  resolveGeminiCapabilityPlan,
+} from "../geminiCapabilityRoute.js";
+import {
   getVertexAdcFilePath,
   readJsonCredentialFile,
 } from "../vertexAuth.js";
@@ -506,27 +507,14 @@ export class MessageContentAnalyzerTool extends AbstractTool {
   }
 
   async processVideo(videoTarget, query, e) {
-    const aiConfig = Setting.getConfig("AI") || {};
-    const resolved = resolveRouteTarget(aiConfig.toolsRoute, {
-      selfId: e?.self_id,
-      protocol: "gemini",
-    });
-    const Config = resolved?.requestConfig;
-
-    if (!Config || Config.channelType !== "gemini" || !Config.model) {
-      throw new Error(
-        "配置错误：toolsRoute 必须解析到有效的 Gemini 目标。"
-      );
-    }
-
-    const GEMINI_MODEL = Config.model;
-    const ai = createGeminiClient(Config);
-
     let localVideoPath = null;
-    let uploadedGcsFile = null;
     let isTempFile = false;
 
     try {
+      const capabilityContext = resolveGeminiCapabilityPlan(
+        e?.self_id,
+        "消息视频分析"
+      );
       const downloadDir = path.join(plugindata, "video");
       if (!fs.existsSync(downloadDir)) {
         fs.mkdirSync(downloadDir, { recursive: true });
@@ -550,37 +538,48 @@ export class MessageContentAnalyzerTool extends AbstractTool {
       });
       isTempFile = true;
 
-      let videoPart;
+      return await executeGeminiCapability({
+        selfId: e?.self_id,
+        purpose: "消息视频分析",
+        context: capabilityContext,
+        operation: async ({ client: ai, config, aiConfig }) => {
+          let uploadedGcsFile = null;
+          try {
+            let videoPart;
+            if (config.vertex === true) {
+              uploadedGcsFile = await uploadVideoToGcs(localVideoPath, {
+                ...config,
+                gcsBucket: aiConfig.gcsBucket,
+                gcsPrefix: aiConfig.gcsPrefix,
+              });
+              videoPart = createPartFromUri(uploadedGcsFile.uri, "video/mp4");
+            } else {
+              const uploadedFile = await ai.files.upload({
+                file: localVideoPath,
+                config: { mimeType: "video/mp4" },
+              });
+              await new Promise((resolve) => setTimeout(resolve, 10000));
+              videoPart = createPartFromUri(uploadedFile.uri, uploadedFile.mimeType);
+            }
 
-      if (Config.vertex === true) {
-        uploadedGcsFile = await uploadVideoToGcs(localVideoPath, {
-          ...Config,
-          gcsBucket: aiConfig.gcsBucket,
-          gcsPrefix: aiConfig.gcsPrefix,
-        });
-        videoPart = createPartFromUri(uploadedGcsFile.uri, "video/mp4");
-      } else {
-        const myfile = await ai.files.upload({
-          file: localVideoPath,
-          config: { mimeType: "video/mp4" },
-        });
-
-        await new Promise((resolve) => setTimeout(resolve, 10000));
-        videoPart = createPartFromUri(myfile.uri, myfile.mimeType);
-      }
-
-      const aiResponse = await ai.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: createUserContent([videoPart, query]),
+            const aiResponse = await ai.models.generateContent({
+              model: config.model,
+              contents: createUserContent([videoPart, query]),
+            });
+            const description = String(aiResponse?.text || "").trim();
+            if (!description) {
+              throw new Error("视频分析模型未返回描述。");
+            }
+            return description;
+          } finally {
+            await deleteGcsUpload(uploadedGcsFile);
+          }
+        },
       });
-
-      const description = aiResponse.text;
-      return description ? description : "未获取到描述。";
     } catch (error) {
       logger.error("Video analysis error:", error);
       return `视频分析失败: ${error.message}`;
     } finally {
-      await deleteGcsUpload(uploadedGcsFile);
       if (isTempFile && localVideoPath && fs.existsSync(localVideoPath)) {
         fs.unlinkSync(localVideoPath);
       }

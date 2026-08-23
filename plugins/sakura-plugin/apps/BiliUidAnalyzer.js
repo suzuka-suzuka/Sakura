@@ -111,7 +111,7 @@ export class BiliUidAnalyzer extends plugin {
 
     const aiInput = buildAiInput(report, AI_COMMENT_CHAR_LIMIT);
     const prompt = buildAiPrompt(report, aiInput.text);
-    const route = Setting.getConfig("AI")?.appsRoute || "default";
+    const route = Setting.getConfig("AI")?.utilityRoute || "default";
 
     try {
       const result = await getAI(

@@ -33,7 +33,9 @@ async function generateMemoryOrganization(snapshot, e, title) {
   }
 
   const aiConfig = Setting.getConfig("AI", { selfId: e?.self_id }) || {};
-  if (!aiConfig.toolsRoute) throw new Error("未配置 toolsRoute，无法整理记忆");
+  if (!aiConfig.utilityRoute) {
+    throw new Error("未配置通用辅助路由，无法整理记忆");
+  }
   const { getAI } = await import("./getAI.js");
   const memoryData = snapshot.memories.map((memory, index) => ({
     id: memory.id,
@@ -43,7 +45,7 @@ async function generateMemoryOrganization(snapshot, e, title) {
     order: index,
   }));
   const result = await getAI(
-    aiConfig.toolsRoute,
+    aiConfig.utilityRoute,
     e,
     [{
       text: [

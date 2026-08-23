@@ -79,7 +79,7 @@ ${rawChatHistory}`;
 
     try {
       const queryParts = [{ text: aiPrompt }];
-      const route = Setting.getConfig("AI").appsRoute;
+      const route = Setting.getConfig("AI").utilityRoute;
       const result = await getAI(
         route,
         e,
