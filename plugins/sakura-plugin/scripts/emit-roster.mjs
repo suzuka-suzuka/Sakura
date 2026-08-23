@@ -35,6 +35,18 @@ const TRANS = [[0, 1000, 1200, 1400, 1700], [0, 500, 700, 900, 1400], [0, 750, 1
 const AOE_T1 = 126000, AOE_T2 = 300000
 
 /**
+ * 池内直线贯穿技能的冻结人数口径。矩形面积只表示原作空间范围，不能直接换算成本项目人数：
+ * 爱丽丝的 200×2000 光束会被面积阈值误判成全体，但这里与晴奈一样固定覆盖同战场两路。
+ * 纯子与桃则覆盖以主目标为中心的三路。佩洛洛由引擎按「范围内额外单位」另行加入。
+ */
+const THROUGH_COUNTS = new Map([
+  ["10002:ex", 2], // 晴奈 EX
+  ["13007:ex", 3], // 纯子 EX
+  ["10015:ex", 2], // 爱丽丝 EX
+  ["13011:ex", 3], // 桃 EX（窄锥按直线处理）
+])
+
+/**
  * 角色池。按**上线顺序**（SchaleDB 的 `DefaultOrder`）取可生成的前 15 位，再加芹香。
  *
  * 可生成 = EX 与普通技能都不含 Summon / Special / Accumulation（那几类要手写逻辑），
@@ -579,9 +591,17 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
   const desc = descOf(sk)
   const dmgs = (sk.Effects || []).filter((e) => e.Type === "Damage")
   const allTargets = (sk.Effects || []).flatMap((e) => (Array.isArray(e.Target) ? e.Target : e.Target ? [e.Target] : []))
+  // 直线是伤害形状，不是 EX 专属属性；以后普通技能出现同类描述也必须跳过同身位削层。
+  // 桃只有 EX 按用户口径把窄扇视为贯穿，不能顺带改掉她的普通技能。
+  const through = /对直线范围内/.test(desc) || (isEx && student?.Id === 13011)
+  const throughKind = isEx ? "ex" : "skill"
+  const throughCount = through ? THROUGH_COUNTS.get(`${student?.Id}:${throughKind}`) : null
   // 描述里的「对 N 名我方」优先于几何判定 ——
   // 没有 Radius 的己方技能不能一律判成 ally_all，有 Radius 的「1 名」也不能按圈收成全体
-  const tg = allyPickOf(desc) || resolveTarget(sk, allTargets)
+  const inferredTarget = allyPickOf(desc) || resolveTarget(sk, allTargets)
+  const tg = throughCount
+    ? { ...inferredTarget, target: "enemy_adjacent", count: throughCount }
+    : inferredTarget
   const out = { name: sk.Name, ...tg, effects: [] }
   if (isEx) out.cost = sk.Cost[SKILL_LV]
   else out.trigger = parseTrigger(desc)
@@ -643,10 +663,10 @@ function buildSkill(sk, { isEx, student, codeOf, publicDesc }) {
     // 只在 AoE 上成立：弹射（enemy_random）逐段抽目标，没有「第几个」的概念
     const fo = parseFalloff(desc)
     if (fo && /adjacent|all/.test(out.target)) out.falloff = fo
-    // 直线贯穿（晴奈、纯子）不问前中后，圈到谁打谁。横向圆/扇才锁同层。
+    // 直线贯穿（晴奈、纯子、爱丽丝）不问前中后，圈到谁打谁。横向圆/扇才锁同层。
     // 桃的 EX 原文是扇形，但那是个 850 长 / 45° 的窄锥，几何上就是一条线，
     // 按纯子那套走贯穿（用户口径，跟堇「原文是扇、口径按伊织」同类）。
-    if (/对直线范围内/.test(desc) || student?.Id === 13011) out.depth = "through"
+    if (through) out.depth = "through"
   }
   /**
    * **这一段挡不挡得住掩体**，原数据里是结构化字段（`Damage.Block`），不用按槽位猜。
@@ -1110,8 +1130,8 @@ const units = IDS.map(([sid, code]) => {
     healPower: interp(c.HealPower1, c.HealPower100, LEVEL, m.heal),
     acc: c.AccuracyPoint, dodge: c.DodgePoint, crit: c.CriticalPoint,
     critDmg: c.CriticalDamageRate, critRes: 100, critDmgRes: 5000, stability: c.StabilityPoint,
-    // 普攻也可能是范围的（全 272 人里 11 个带 Radius，池内只有千世）——
-    // 只取 hits 不看 Radius 的话，她的圆形普攻会被当成单体
+    // 普攻也可能是范围的（全 272 人里 11 个带 Radius；当前池内有千世、柚子、爱丽丝）——
+    // 只取 hits 不看 Radius 会被当成单体；爱丽丝的 Obb 光束还必须标成直线贯穿，不能按身位削层。
     // 支援位**没有 `Skills.Normal`**（19 个无一例外），所以它们根本没有普攻这回事。
     // 以前那个 `: [1]` 的兜底会给它们造一个 1% 倍率的假普攻 —— 那本身就是「它们不该走
     // 普攻循环」的信号。这里直接给 null，引擎的 ③-b 也不遍历支援。
@@ -1121,6 +1141,7 @@ const units = IDS.map(([sid, code]) => {
       // 普攻同样按原数据认挡不挡得住：池内 35 个可挡，千世 / 柚子 / 爱丽丝那三个不可挡
       ...(nd?.Block === 1 ? { block: true } : {}),
       ...(na?.Radius ? (({ target, count }) => ({ target, count }))(resolveTarget(na, [])) : {}),
+      ...(na?.Radius?.some((r) => r.Type === "Obb") ? { depth: "through" } : {}),
     },
     gearSkill: pub.gear,
     skill: buildSkill(pub.sk, { isEx: false, student: c, codeOf }),
@@ -1225,8 +1246,8 @@ export const CFG = {
 }
 
 /**
- * 召唤物模板。它们**不进 ROSTER**，也不占号位——只作为 side.summons 里的挡刀物存在，
- * 所以 aliveOf / sideDead / settle / EX 冷却全都天然不把它们算进去。
+ * 召唤物模板。它们**不进 ROSTER**，也不占学生号位，而是单独放在 side.summons；
+ * 所以 aliveOf / sideDead / settle / EX 冷却不把它们算进去，但佩洛洛仍会进入正式攻击目标池。
  */
 export const SUMMONS = ${JSON.stringify(Object.fromEntries(usedSummons), null, 2)}
 

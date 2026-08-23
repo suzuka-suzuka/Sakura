@@ -55,6 +55,21 @@ function setup(bluePicks, redPicks, kills = [], { fieldCovers = false } = {}) {
   return st
 }
 
+/** 注入一个敌方佩洛洛；既可测入场 Provoke，也可测过期后的常规攻击目标规则。 */
+function putEnemyPeroro(st, idx = 0, hpRate = 1, taunt = 0) {
+  const maxhp = 1000000
+  st.sides[1].summons = [{
+    summon: true, id: 40002, side: 1, idx, blockIdx: idx,
+    hp: Math.round(maxhp * hpRate), maxhp,
+    shield: 0, shieldMax: 0, shieldTurns: 0,
+    buffs: [], regens: [], dots: [], stun: 0,
+    taunt, tauntSt: -1, tauntKind: taunt > 0 ? "provoke" : null,
+    focus: 0, focusSt: -1,
+    turns: 6, turnsMax: 6, st: -1, sourceKey: "test:enemy-peroro", alive: true,
+  }]
+  return st.sides[1].summons[0]
+}
+
 /** 把一步打完：EX 之后若还停着，自动「过」把技能/普攻收掉。测对线/技能落点要用完整回合。 */
 function run(st, action) {
   let r = playerTurn(st, action)
@@ -207,10 +222,44 @@ function exHits(who, red, pos = 0) {
   return (r.events.find((e) => e.type === "action" && e.action === "ex")?.targets || [])
     .map((t) => (t.summon ? "偶" : t.pos + 1))
 }
+const throughSkills = ROSTER.flatMap((u) => ["autoAttack", "skill", "ex"].flatMap((kind) => {
+  const sk = u[kind]
+  return sk?.depth === "through"
+    ? [[`${u.name}${kind === "ex" ? "EX" : kind === "skill" ? "普技" : "普攻"}`, sk.target, sk.count]]
+    : []
+}))
+check("当前池内全部直线贯穿技能及冻结人数口径",
+  throughSkills, [
+    ["晴奈EX", "enemy_adjacent", 2],
+    ["纯子EX", "enemy_adjacent", 3],
+    ["爱丽丝普攻", "enemy_adjacent", 2],
+    ["爱丽丝EX", "enemy_adjacent", 2],
+    ["桃EX", "enemy_adjacent", 3],
+  ])
 check("晴奈直线 · 自动锁前排后贯穿同战场两人",
   exHits("晴奈", ["星野", "白子", "野宫", "野宫"]).sort(), [1, 2])
 check("纯子站 2 位 · 自动锁 2 位前排 → 固定窗口贯穿三人",
   exHits("纯子", ["白子", "星野", "鹤城", "野宫"], 1).sort(), [1, 2, 3])
+check("爱丽丝直线 · 无视前中后但只覆盖同战场两路",
+  exHits("爱丽丝", ["星野", "白子", "野宫", "野宫"]).sort(), [1, 2])
+check("桃站 2 位 · 窄锥按直线固定贯穿三路",
+  exHits("桃", ["白子", "星野", "鹤城", "野宫"], 1).sort(), [1, 2, 3])
+for (const who of ["桃", "纯子"]) {
+  check(`${who}站 1 位 · 敌方本战场前排在 2 位 → 窗口仍以敌方主目标 2 位为中心`,
+    exHits(who, ["白子", "星野", "野宫", "野宫"], 0).sort(), [1, 2, 3])
+}
+function normalHits(who, red, pos = 0, doll = null, taunt = 0) {
+  const picks = ["野宫", "野宫", "野宫", "野宫"]
+  picks[pos] = who
+  const st = setup(picks, red)
+  if (doll != null) putEnemyPeroro(st, doll, 1, taunt)
+  const r = playerTurn(st, { type: "pass" })
+  const ev = r.events.find((e) =>
+    e.type === "action" && e.action === "normal" && e.source?.side === 0 && e.source?.pos === pos)
+  return (ev?.targets || []).map((t) => (t.summon ? "偶" : t.pos + 1))
+}
+check("爱丽丝直线普攻 · 无视前中后覆盖同战场两路",
+  normalHits("爱丽丝", ["星野", "白子", "野宫", "野宫"]), [1, 2])
 check("爱露二段 · 前+中自动锁前排 → 不同层吃不到溅射",
   exHits("爱露", ["星野", "白子", "野宫", "野宫"]).sort(), [1])
 check("爱露二段 · 两个前排 → 第二人吃溅射",
@@ -271,7 +320,7 @@ check("嘲讽过后扔进 3·4 战场：红3 红4 都打人偶", withDoll(2, tru
     ["1→偶", "2→偶", "3→3", "4→4"])
 }
 
-console.log("\n=== 9. 范围技撞上人偶：整发被接走，覆盖面按各自的规则算 ===")
+console.log("\n=== 9. 佩洛洛是比前排更前的独立身位：普通同身位范围会退化 ===")
 const FOE = ["爱露", "伊织", "日奈", "真纪"] // 全后排，测范围铺开时不被前/中排削层
 /** who 站 pos 位放普通技能，敌方在 doll 号位有人偶；返回命中列表 */
 function skillVsDoll(who, pos, doll) {
@@ -290,15 +339,188 @@ function skillVsDoll(who, pos, doll) {
   const ev = r.events.find((e) => e.type === "action" && e.action === "skill" && e.source.pos === pos)
   return (ev?.targets || []).map((t) => (t.summon ? "偶" : t.pos + 1))
 }
-// 睦月在 2 位 → 主目标 2、窗口 {1,2,3}，横跨两个战场：任一边有墙都接得住
+// 睦月在 2 位 → 主目标 2、窗口 {1,2,3}。同战场佩洛洛先成为主目标，但它的「超前」层没有第二人。
 check("睦月 3 目标 · 无人偶", skillVsDoll("睦月", 1, null).sort(), [1, 2, 3])
-check("睦月 3 目标 · 人偶在 1·2 战场", skillVsDoll("睦月", 1, 0), ["偶"])
-check("睦月 3 目标 · 人偶在 3·4 战场（窗口伸到了 3 位）", skillVsDoll("睦月", 1, 3), ["偶"])
+check("睦月 3 目标 · 人偶成为主目标后因独立超前身位退化成单体",
+  skillVsDoll("睦月", 1, 0), ["偶"])
+const mutsukiDollInWindow = skillVsDoll("睦月", 1, 2)
+check("睦月 3 目标 · 异战场人偶虽在横向窗口内，但不同身位不会混进学生范围",
+  [mutsukiDollInWindow.includes("偶"), mutsukiDollInWindow], [false, [2, 1, 3]])
+check("睦月 3 目标 · 4 位人偶在固定窗口外，不会隔着战场凭空吃到",
+  skillVsDoll("睦月", 1, 3).sort(), [1, 2, 3])
 // 睦月位于 4 位 → 自动目标窗口 {3,4} 只在 3·4 战场，1·2 那边的墙够不着
-check("睦月 3 目标 · 位于 4 位、人偶在 1·2 战场 → 拦不住", skillVsDoll("睦月", 3, 0).sort(), [3, 4])
-// 白子在 1 位 → 2 目标，覆盖面就是主目标那个战场
-check("白子 2 目标 · 人偶挡 2 位（同战场）", skillVsDoll("白子", 0, 1), ["偶"])
-check("白子 2 目标 · 人偶挡 3 位（另一战场）", skillVsDoll("白子", 0, 2).sort(), [1, 2])
+check("睦月 3 目标 · 位于 4 位、人偶在 1·2 战场 → 不在范围", skillVsDoll("睦月", 3, 0).sort(), [3, 4])
+// 白子在 1 位 → 2 目标同身位扩散；人偶是独立超前身位，所以同战场也只打它。
+check("白子 2 目标 · 同战场人偶成为主目标后退化成单体", skillVsDoll("白子", 0, 1), ["偶"])
+check("白子 2 目标 · 另一战场人偶不在范围", skillVsDoll("白子", 0, 2).sort(), [1, 2])
+
+console.log("\n=== 9b. 佩洛洛进入响 / 绿 / 敌方全体的正式目标池 ===")
+const targetLabels = (ev) => (ev?.targets || []).map((t) => (t.summon ? "偶" : t.pos + 1))
+const cycleShotLabels = (events, pos) => events
+  .filter((e) => (e.type === "damage" || e.type === "miss")
+    && e.source?.side === 0 && e.source?.pos === pos && !e.dot)
+  .map((e) => (e.target.summon ? "偶" : e.target.pos + 1))
+{
+  const st = setup(["野宫", "伊织", "伊织", "伊织"], FOE)
+  putEnemyPeroro(st, 0)
+  const r = playerTurn(st, { type: "ex", casts: [{ pos: 0 }] })
+  const ev = r.events.find((e) => e.type === "action" && e.action === "ex" && e.source?.pos === 0)
+  check("敌方全体攻击把佩洛洛与四名学生一并列为目标", targetLabels(ev), ["偶", 1, 2, 3, 4])
+}
+{
+  const st = setup(["绿", "桃", "伊织", "伊织"], FOE)
+  putEnemyPeroro(st, 0)
+  for (const u of st.sides[1].units) u.hp = u.maxhp = 1e6
+  const r = playerTurn(st, { type: "ex", casts: [{ pos: 0 }] })
+  const ev = r.events.find((e) => e.type === "action" && e.action === "ex" && e.source?.pos === 0)
+  check("绿 EX 的 5 次顺序点名包含佩洛洛和四名学生", targetLabels(ev), ["偶", 1, 2, 3, 4])
+  check("绿在 1 号且佩洛洛与 1 号学生同位：先人偶，再按 1→2→3→4",
+    cycleShotLabels(r.events, 0), ["偶", 1, 2, 3, 4])
+  check("绿 EX 的中毒也实际挂到佩洛洛", r.state.sides[1].summons[0].dots.length > 0, true)
+}
+{
+  const st = setup(["绿", "桃", "伊织", "伊织"], FOE, [[1, 0]])
+  putEnemyPeroro(st, 0)
+  for (const u of st.sides[1].units) u.hp = u.maxhp = 1e6
+  const r = playerTurn(st, { type: "ex", casts: [{ pos: 0 }] })
+  check("绿在 1 号、敌方 1 号学生已倒但佩洛洛还在：第一发仍点佩洛洛",
+    cycleShotLabels(r.events, 0), ["偶", 2, 3, 4, "偶"])
+}
+{
+  const st = setup(["绿", "桃", "伊织", "伊织"], FOE, [[1, 0]])
+  putEnemyPeroro(st, 0, 0.000001)
+  for (const u of st.sides[1].units) u.hp = u.maxhp = 1e6
+  st.sides[0].units[0].buffs.push({
+    stat: "acc", value: 50, turns: 99, st: -1,
+    effectKind: "buff", sourceKey: "test:green-order", srcSide: 0, srcPos: 0,
+  })
+  const r = playerTurn(st, { type: "ex", casts: [{ pos: 0 }] })
+  check("绿第一发击倒 1 号佩洛洛后，下一发接 2 号而不是因目标池缩短跳到 3 号",
+    cycleShotLabels(r.events, 0), ["偶", 2, 3, 4, 2])
+}
+/** 直线技覆盖原有号位窗口；范围内佩洛洛是额外单位，不挤掉原本的学生。 */
+function throughVsPeroro(who, pos, doll, taunt = 0) {
+  const picks = ["伊织", "伊织", "伊织", "伊织"]
+  picks[pos] = who
+  const st = setup(picks, FOE)
+  putEnemyPeroro(st, doll, 1, taunt)
+  const r = playerTurn(st, { type: "ex", casts: [{ pos }] })
+  const ev = r.events.find((e) =>
+    e.type === "action" && e.action === "ex" && e.source?.side === 0 && e.source?.pos === pos)
+  return targetLabels(ev)
+}
+check("晴奈 EX 两路贯穿：佩洛洛是第 3 个目标，不挤掉 1·2 位学生",
+  throughVsPeroro("晴奈", 0, 0), ["偶", 1, 2])
+check("爱丽丝 EX 两路贯穿：佩洛洛是第 3 个目标，不挤掉 1·2 位学生",
+  throughVsPeroro("爱丽丝", 0, 0), ["偶", 1, 2])
+check("爱丽丝普通攻击两路贯穿：佩洛洛同样是额外第 3 个目标",
+  normalHits("爱丽丝", FOE, 0, 0), ["偶", 1, 2])
+check("纯子 EX 三路贯穿：佩洛洛是第 4 个目标，不挤掉 1·2·3 位学生",
+  throughVsPeroro("纯子", 1, 1), ["偶", 1, 2, 3])
+check("桃 EX 三路贯穿：佩洛洛是第 4 个目标，不挤掉 1·2·3 位学生",
+  throughVsPeroro("桃", 1, 1), ["偶", 1, 2, 3])
+for (const who of ["桃", "纯子"]) {
+  check(`${who}站 1 位、佩洛洛在敌 2 位：窗口仍以佩洛洛的敌方 2 位为中心`,
+    throughVsPeroro(who, 0, 1), ["偶", 1, 2, 3])
+}
+check("佩洛洛在敌 1 位嘲讽：爱丽丝仍贯穿目标所在战场的佩洛洛与 1·2 位学生",
+  normalHits("爱丽丝", FOE, 0, 0, 2), ["偶", 1, 2])
+check("爱丽丝站 1 位但佩洛洛在敌 3 位嘲讽：整条直线改到 3·4 战场且仍打满",
+  normalHits("爱丽丝", FOE, 0, 2, 2), ["偶", 3, 4])
+{
+  const st = setup(["爱丽丝", "伊织", "伊织", "伊织"], FOE)
+  st.sides[1].units[3].focus = 2
+  const r = playerTurn(st, { type: "pass" })
+  const ev = r.events.find((e) =>
+    e.type === "action" && e.action === "normal" && e.source?.side === 0 && e.source?.pos === 0)
+  check("爱丽丝普通攻击被集火改到敌 4 位时，仍贯穿该目标所在的 3·4 整个战场",
+    targetLabels(ev).sort((a, b) => a - b), [3, 4])
+}
+{
+  const st = setup(["爱丽丝", "伊织", "伊织", "伊织"], FOE)
+  putEnemyPeroro(st, 2)
+  st.sides[1].units[3].focus = 2
+  const r = playerTurn(st, { type: "pass" })
+  const ev = r.events.find((e) =>
+    e.type === "action" && e.action === "normal" && e.source?.side === 0 && e.source?.pos === 0)
+  const labels = targetLabels(ev)
+  check("爱丽丝集火到敌 4 位且同战场有佩洛洛：主目标为 4，仍命中佩洛洛与 3·4 两名学生",
+    [labels[0], labels.includes("偶"), labels.filter(Number.isFinite).sort((a, b) => a - b)],
+    [4, true, [3, 4]])
+}
+{
+  const st = setup(["桃", "伊织", "伊织", "伊织"], FOE)
+  st.sides[1].units[3].focus = 2
+  const r = playerTurn(st, { type: "ex", casts: [{ pos: 0 }] })
+  const ev = r.events.find((e) => e.type === "action" && e.action === "ex" && e.source?.pos === 0)
+  check("Focus 把桃 EX 的中心改到敌 4 位，但三路窗口不退化；越界一格后仍命中 3·4",
+    targetLabels(ev).sort((a, b) => a - b), [3, 4])
+}
+{
+  // 千夏在支援位，不受场上 Provoke 影响；她只净化自己实际治疗的桃。
+  // 随后的桃必须既能在同一指令阶段放 EX，又按「嘲讽已解除」后的正常贯穿窗口重新索敌。
+  const st = setup(["桃", "野宫", "野宫", "野宫", "千夏", "芹娜"], ["椿", "野宫", "野宫", "野宫"])
+  for (const u of st.sides[1].units) u.hp = u.maxhp = 1e9
+  putEnemyPeroro(st, 0, 1, 2)
+  check("净化前：桃 EX 被佩洛洛 Provoke 封锁",
+    /嘲讽/.test(validateAction(st, { type: "ex", casts: [{ pos: 0 }] }) || ""), true)
+
+  const cleansed = playerTurn(st, { type: "ex", casts: [{ pos: 4 }] })
+  const cleanseEv = cleansed.events.find((e) =>
+    e.type === "action" && e.action === "ex" && e.source?.side === 0 && e.source?.pos === 4)
+  check("千夏 EX 在四名同身位学生中按号位先净化桃", targetLabels(cleanseEv), [1])
+  check("单人净化只解除桃的 EX 封锁，另外三名主力仍被嘲讽",
+    cleansed.state.sides[0].units.map((u) => exLockedOf(cleansed.state, u)),
+    [null, "嘲讽", "嘲讽", "嘲讽"])
+  check("净化后同一指令阶段即可选择桃 EX",
+    validateAction(cleansed.state, { type: "ex", casts: [{ pos: 0 }] }), null)
+
+  const focusedState = structuredClone(cleansed.state)
+  focusedState.sides[1].units[3].focus = 2
+  const focusedCast = playerTurn(focusedState, { type: "ex", casts: [{ pos: 0 }] })
+  const focusedEv = focusedCast.events.find((e) =>
+    e.type === "action" && e.action === "ex" && e.source?.side === 0 && e.source?.pos === 0)
+  check("净化只解除 Provoke，不会免疫集火：桃 EX 改以敌 4 位为中心并保留三路窗口",
+    targetLabels(focusedEv).sort((a, b) => a - b), [3, 4])
+
+  const cast = playerTurn(cleansed.state, { type: "ex", casts: [{ pos: 0 }] })
+  const ev = cast.events.find((e) =>
+    e.type === "action" && e.action === "ex" && e.source?.side === 0 && e.source?.pos === 0)
+  check("净化后的桃恢复正常索敌：自动主目标在敌 1 位，所以边缘窗口为 1·2，佩洛洛只是额外目标",
+    targetLabels(ev), ["偶", 1, 2])
+
+  const redTurn = playerTurn(cast.state, { type: "pass" })
+  const retaunt = playerTurn(redTurn.state, { type: "ex", casts: [{ pos: 0 }] })
+  check("净化只豁免旧嘲讽：椿随后施加的新 Provoke 会重新封锁桃",
+    exLockedOf(retaunt.state, retaunt.state.sides[0].units[0]), "嘲讽")
+}
+{
+  const st = setup(["爱丽丝", "野宫", "野宫", "野宫", "千夏", "芹娜"], FOE)
+  putEnemyPeroro(st, 0, 1, 2)
+  const cleansed = playerTurn(st, { type: "ex", casts: [{ pos: 4 }] })
+  const auto = playerTurn(cleansed.state, { type: "pass" })
+  const ev = auto.events.find((e) =>
+    e.type === "action" && e.action === "normal" && e.source?.side === 0 && e.source?.pos === 0)
+  check("净化后普通攻击也恢复正常索敌：爱丽丝贯穿佩洛洛并保留 1·2 两路",
+    targetLabels(ev), ["偶", 1, 2])
+}
+{
+  const st = setup(["野宫", "野宫", "野宫", "野宫", "响", "芹娜"], FOE)
+  putEnemyPeroro(st, 2)
+  const r = playerTurn(st, { type: "ex", casts: [{ pos: 4 }] })
+  const ev = r.events.find((e) => e.type === "action" && e.action === "ex" && e.source?.pos === 4)
+  const labels = targetLabels(ev)
+  check("响 EX 把佩洛洛作为多圈目标，同时仍结算四名学生",
+    [labels.includes("偶"), new Set(labels.filter(Number.isInteger)).size], [true, 4])
+}
+{
+  const st = setup(["野宫", "野宫", "野宫", "野宫", "朱莉", "芹娜"], ["星野", "椿", "野宫", "野宫"])
+  putEnemyPeroro(st, 0)
+  const r = playerTurn(st, { type: "ex", casts: [{ pos: 4 }] })
+  const ev = r.events.find((e) => e.type === "action" && e.action === "ex" && e.source?.pos === 4)
+  check("支援范围减益锁到佩洛洛后也按独立身位退化成单体", targetLabels(ev), ["偶"])
+  check("支援范围减益也会把持续伤害挂到佩洛洛", r.state.sides[1].summons[0].dots.length > 0, true)
+}
 
 console.log("\n=== 10. 伊织 EX：第一发固定索敌，后两发按普攻规则重锁 ===")
 /** 伊织在 1 位；kill 是开局就打死的号位，doll 是人偶挡的号位 */
@@ -360,7 +582,7 @@ function chiseCast(kills = [], red = OUT) {
 }
 const zoneHits = (result) => result.events
   .filter((e) => (e.type === "damage" || e.type === "miss") && e.dotIcon === "Zone")
-  .map((e) => e.target.summon ? "掩体" : e.target.pos + 1)
+  .map((e) => e.target.summon ? (e.target.cover ? "掩体" : "偶") : e.target.pos + 1)
 const fieldShape = (side) => (side.fields || []).map((f) => [f.lo, f.hi, f.turns, f.tick])
 const kill = (st, idx) => {
   const u = st.sides[1].units[idx]
@@ -376,6 +598,21 @@ check("场地伤害存在 field 上，不给施放瞬间的人挂 Zone DoT",
 const firstTick = playerTurn(drop.state, { type: "pass" })
 check("第一次跳伤害重新扫描：当前 1·2 号位和圈内掩体挨烧", zoneHits(firstTick), [1, 2, "掩体"])
 check("另一战场的 3·4 不受伤", zoneHits(firstTick).some((p) => p === 3 || p === 4), false)
+
+{
+  const st = setup(["千世", "野宫", "野宫", "野宫"], OUT, [], { fieldCovers: true })
+  const covers = [...st.sides[1].summons]
+  const doll = putEnemyPeroro(st, 0)
+  st.sides[1].summons = [...covers, doll]
+  const cast = run(st, { type: "ex", casts: [{ pos: 0 }] })
+  const ev = cast.events.find((e) => e.type === "action" && e.action === "ex" && e.source?.pos === 0)
+  check("千世 EX 直接索敌先锁佩洛洛", targetLabels(ev), ["偶"])
+  check("千世 EX 以佩洛洛为圆心仍铺满 1·2 战场", fieldShape(cast.state.sides[1]).map((f) => f.slice(0, 2)), [[0, 1]])
+  const tick = zoneHits(playerTurn(cast.state, { type: "pass" }))
+  check("千世 EX 场地每跳同时扫描佩洛洛、1·2 学生和圈内掩体",
+    [tick.includes("偶"), tick.includes(1), tick.includes(2), tick.includes("掩体")], [true, true, true, true])
+  check("千世 EX 场地不会烧另一战场 3·4 学生", tick.some((p) => p === 3 || p === 4), false)
+}
 
 const emptyNeighbor = chiseCast([[1, 1]])
 check("红2 已死再打红1 → 圈仍盖 1·2（生效范围，不缩成单体）",
@@ -411,7 +648,7 @@ check("EX 不是 debuff：身上不加 buff", drop.state.sides[1].units.every((u
 check("EX 不是 debuff：不发 debuff 事件", drop.events.some((e) => e.type === "debuff"), false)
 check("EX 的场地对象标成 Zone，不是灼烧", drop.state.sides[1].fields.every((f) => f.icon === "Zone"), true)
 
-console.log("\n=== 12. 千世圆形普攻依旧被人偶挡 ===")
+console.log("\n=== 12. 千世 / 柚子圆形普攻：同身位范围与佩洛洛退化 ===")
 /** who 站 pos 位普攻，敌方 doll 号位有人偶；返回这一发普攻的命中 */
 function autoVsDoll(who, pos, doll) {
   const picks = ["野宫", "野宫", "野宫", "野宫"]
@@ -429,9 +666,12 @@ function autoVsDoll(who, pos, doll) {
   return (ev?.targets || []).map((t) => (t.summon ? "偶" : t.pos + 1))
 }
 check("千世普攻 · 无人偶 → 圆形盖住同战场 1·2", autoVsDoll("千世", 0, null).sort(), [1, 2])
-check("千世普攻 · 人偶挡 1 位（同路）→ 整发被接走", autoVsDoll("千世", 0, 0), ["偶"])
-check("千世普攻 · 人偶挡 2 位（同战场另一路）→ 整发被接走", autoVsDoll("千世", 0, 1), ["偶"])
+check("千世普攻 · 同路人偶成为主目标后只命中人偶", autoVsDoll("千世", 0, 0), ["偶"])
+check("千世普攻 · 同战场另一路人偶同样使同身位范围退化", autoVsDoll("千世", 0, 1), ["偶"])
 check("千世普攻 · 人偶挡 3 位（另一战场）→ 不拦，仍打 1·2", autoVsDoll("千世", 0, 2).sort(), [1, 2])
+check("柚子普攻 · 无人偶 → 圆形盖住同战场同身位 1·2", autoVsDoll("柚子", 0, null).sort(), [1, 2])
+check("柚子普攻 · 同战场人偶成为主目标后同样退化为单体", autoVsDoll("柚子", 0, 1), ["偶"])
+check("柚子普攻 · 另一战场的人偶不拦本战场范围", autoVsDoll("柚子", 0, 2).sort(), [1, 2])
 // 单体普攻也按战场拦：人偶在 1·2 里，野宫（1 位）的刀就归它接
 check("野宫单体普攻 · 人偶挡 2 位（同战场）→ 照样接走", autoVsDoll("野宫", 0, 1), ["偶"])
 check("野宫单体普攻 · 人偶挡 3 位（另一战场）→ 不接", autoVsDoll("野宫", 0, 2), [1])
@@ -813,7 +1053,8 @@ function redThenBlue(order, red = ["椿", "日富美", "野宫", "野宫"], blue
   check("椿的 EX 带自身嘲讽 1 回合（Provoke 从 CrowdControl 里分出来的）",
     t.ex.effects.find((e) => e.type === "taunt"), { type: "taunt", kind: "provoke", scope: "self", turns: 1 })
   check("Provoke 不能变成眩晕", t.ex.effects.some((e) => e.type === "cc"), false)
-  check("描述说清是「敌方全体只打自己」", /敌方全体只打自己/.test(describeEffect(t.ex)), true)
+  check("描述说清嘲讽只改攻击主目标、范围形状不变",
+    /以自己为攻击主目标（范围形状不变）/.test(describeEffect(t.ex)), true)
   check("描述也写了封 EX", /放不出 EX/.test(describeEffect(t.ex)), true)
 
   check("只放椿 → 蓝方四人全去打她（跨战场、无视坦克）", redThenBlue([0]), ["1", "1", "1", "1"])
@@ -1068,13 +1309,12 @@ console.log("\n=== 29. 柚子：技能自带的「攻击力最高」索敌 ===")
     skillTargets(setup(["梓", "茜", "茜", "茜"], ["茜", "茜", "茜", "晴奈"])), [1])
   check("柚子的普技越过战场分割，打全场攻击力最高的 4 位",
     skillTargets(setup(["柚子", "茜", "茜", "茜"], ["茜", "茜", "茜", "晴奈"])), [4])
-  // 圆形锁同层：晴奈是后排、3 位的茜是中排，所以只打到一个人
-  check("嘲讽仍然拉得走这套索敌", skillTargets((() => {
+  check("嘲讽拉走最高攻索敌，但只换中心：柚子范围仍命中同排的 2·1", skillTargets((() => {
     const st = setup(["柚子", "茜", "茜", "茜"], ["茜", "茜", "茜", "晴奈"])
     st.sides[1].units[1].taunt = 2
     st.sides[1].units[1].tauntKind = "provoke"
     return st
-  })()), [2])
+  })()), [2, 1])
 }
 
 console.log("\n=== 29b. 支援自带索敌优先于支援位默认规则 ===")
@@ -1111,7 +1351,8 @@ console.log("\n=== 29b. 支援自带索敌优先于支援位默认规则 ===")
     const r = playerTurn(st, { type: "pass" })
     const ev = r.events.find((e) =>
       e.type === "action" && e.action === "skill" && e.source?.side === 0 && e.source?.pos === 4)
-    return (ev?.targets || []).map((t) => t.pos + 1).sort((a, b) => a - b)
+    const targets = (ev?.targets || []).map((t) => (t.summon ? "偶" : t.pos + 1))
+    return targets.every(Number.isFinite) ? targets.sort((a, b) => a - b) : targets
   }
 
   check("芹娜普技仍奶生命百分比最低的 4 位，不走防御技能的前排兜底", supportSkillTargets(
@@ -1120,11 +1361,11 @@ console.log("\n=== 29b. 支援自带索敌优先于支援位默认规则 ===")
       st.sides[0].units[3].hp = Math.round(st.sides[0].units[3].maxhp * 0.1)
     }), [4])
 
-  check("响普技以生命百分比最低的前排 1 位为圆心，不走进攻支援的后排兜底", supportSkillTargets(
+  check("响普技以生命百分比最低的后排 4 位为圆心，不走对敌技能的前排兜底", supportSkillTargets(
     "响", ["星野", "野宫", "白子", "伊织"], (st) => {
       for (const u of st.sides[1].units) u.hp = u.maxhp
-      st.sides[1].units[0].hp = Math.round(st.sides[1].units[0].maxhp * 0.1)
-    }), [1])
+      st.sides[1].units[3].hp = Math.round(st.sides[1].units[3].maxhp * 0.1)
+    }), [4])
 
   check("响普技从最低血量圆心向同战场同身位扩散，后排 1·2 位都命中", supportSkillTargets(
     "响", ["野宫", "伊织", "星野", "白子"], (st) => {
@@ -1132,8 +1373,23 @@ console.log("\n=== 29b. 支援自带索敌优先于支援位默认规则 ===")
       st.sides[1].units[1].hp = Math.round(st.sides[1].units[1].maxhp * 0.1)
     }), [1, 2])
 
-  check("朱莉普技仍锁全场攻击力最高的前排鹤城，不走后排兜底",
-    supportSkillTargets("朱莉", ["鹤城", "野宫", "白子", "伊织"]), [1])
+  check("响普技原生最低血量会把佩洛洛放进判定池，锁到后因独立身位只打它", supportSkillTargets(
+    "响", ["星野", "野宫", "白子", "伊织"], (st) => {
+      for (const u of st.sides[1].units) u.hp = u.maxhp
+      putEnemyPeroro(st, 0, 0.1)
+    }), ["偶"])
+
+  check("响普技原生最低血量仍优先更残的学生，不会无条件撞佩洛洛", supportSkillTargets(
+    "响", ["星野", "野宫", "白子", "伊织"], (st) => {
+      for (const u of st.sides[1].units) u.hp = u.maxhp
+      st.sides[1].units[3].hp = Math.round(st.sides[1].units[3].maxhp * 0.1)
+      putEnemyPeroro(st, 0, 0.8)
+    }), [4])
+
+  check("朱莉普技仍锁全场攻击力最高的后排晴奈，不走前排兜底",
+    supportSkillTargets("朱莉", ["星野", "野宫", "白子", "晴奈"]), [4])
+  check("朱莉普技原生最高攻击会越过佩洛洛挡刀，仍锁后排晴奈", supportSkillTargets(
+    "朱莉", ["星野", "野宫", "白子", "晴奈"], (st) => putEnemyPeroro(st, 0)), [4])
   check("响的图鉴文案会公开最低血量索敌",
     describeEffect(of("响").skill).includes("生命值百分比最低"), true)
 }
@@ -2063,6 +2319,19 @@ console.log("\n=== 38. 场地掩体：Block=1 每段 30% 决定谁承伤 ===")
     const bypassResult = run(bypass, { type: "pass" })
     check("Block=0 光束直接穿过：打角色且掩体不掉血",
       [Boolean(shotOf(bypassResult)?.target?.summon), bypassCover.hp], [false, 700])
+
+    // 掩体判定不只服务技能：基础普攻也透传自己的 Normal.Damage.Block。
+    // 千世、柚子都是同身位圆形普攻且 Block=0，哪怕把格挡率强制到 100% 也不能替她们承伤。
+    for (const attacker of ["千世", "柚子"]) {
+      const aa = ROSTER.find((t) => t.name === attacker).autoAttack
+      check(`${attacker}普攻保留同身位 2 目标与 Block=0 元数据`,
+        [aa.target, aa.count, aa.hitBlocks], ["enemy_adjacent", 2, [false]])
+      const battle = fieldBattle(["星野", "白子", "千世", "芹香"], attacker)
+      const wall = battle.sides[0].summons.find((s) => s.fieldCover && s.blockIdx === 0)
+      const result = run(battle, { type: "pass" })
+      check(`${attacker} Block=0 范围普攻无视掩体：命中角色且掩体不掉耐久`,
+        [Boolean(shotOf(result)?.target?.summon), wall.hp], [false, 700])
+    }
   } finally {
     CFG.COVER_BLOCK_RATE = oldRate
   }
@@ -2374,11 +2643,19 @@ console.log("\n=== 43. 支援的刀不被嘲讽拉走，但照吃集火 ===")
     return out
   }
 
+  /** 在已经轮到蓝方指令阶段的状态里释放一个支援 EX，返回它的实际落点。 */
+  const castSupportEx = (st, pos) => {
+    st.sides[0].cost = 10
+    const r = playerTurn(st, { type: "ex", casts: [{ pos }] })
+    if (r.error) throw new Error(`蓝 ${pos + 1} 位放不出 EX：${r.error}`)
+    return shotsOf(r)[`${pos + 1}技`]
+  }
+
   /**
    * 蓝方四后排 + 爱理（单体）/ 真白（2 目标）。首轮把支援压住不放，
    * 红方按 exPos 放个 EX（null 就干过），再回到蓝方那一轮量支援的落点。
    */
-  const blueShots = (red, exPos = null) => {
+  const blueTurnAfter = (red, exPos = null) => {
     const st = setup(["野宫", "野宫", "野宫", "野宫", "爱理", "真白"], red)
     // 支援的普技冷却起始 = trigger.turns（爱理 5 / 真白 4），首轮先压住
     for (const u of st.sides[0].supports) u.skillCd = 9999
@@ -2391,43 +2668,210 @@ console.log("\n=== 43. 支援的刀不被嘲讽拉走，但照吃集火 ===")
     }
     // 红方收尾交回合（没放 EX 时这一口「过」就是他整个回合）
     while (cur.activeSide === 1 && cur.phase === "command") cur = playerTurn(cur, { type: "pass" }).state
+    return cur
+  }
+
+  const blueShots = (red, exPos = null) => {
+    const cur = blueTurnAfter(red, exPos)
     for (const u of cur.sides[0].supports) u.skillCd = 0 // 这一轮两个支援都出手
     return shotsOf(playerTurn(cur, { type: "pass" }))
   }
 
+  /** 隔离一个支援的普技或 EX，便于给目标层注入佩洛洛。 */
+  const supportTargets = (support, kind, red, mutate) => {
+    const st = setup(["野宫", "野宫", "野宫", "野宫", support, "芹娜"], red)
+    for (const u of st.sides[0].supports) u.skillCd = 9999
+    mutate?.(st)
+    let r
+    if (kind === "skill") {
+      st.sides[0].supports[0].skillCd = 0
+      r = playerTurn(st, { type: "pass" })
+    } else {
+      st.sides[0].cost = 10
+      r = playerTurn(st, { type: "ex", casts: [{ pos: 4 }] })
+    }
+    if (r.error) throw new Error(`${support}${kind === "skill" ? "普技" : "EX"} 无法执行：${r.error}`)
+    const ev = r.events.find((e) =>
+      e.type === "action" && e.action === kind && e.source?.side === 0 && e.source?.pos === 4)
+    if (!ev) throw new Error(`没有找到 ${support}${kind === "skill" ? "普技" : "EX"} 的行动事件`)
+    return (ev.targets || []).map((t) => (t.summon ? "偶" : t.pos + 1)).join("")
+  }
+
   // 红方：星野(前) 1 位、椿(前) 2 位、两个野宫(后) 3·4 位。
-  // 进攻支援默认后 → 中 → 前，同排号位小，因此先锁 3 位野宫；椿的场地嘲讽拉不走支援。
+  // 支援对敌技能默认前 → 中 → 后，同排号位小，因此先锁 1 位星野；椿的场地嘲讽拉不走支援。
   const RED = ["星野", "椿", "野宫", "野宫"]
   const calm = blueShots(RED)
   check("对照组·无嘲讽：主力各打各的战场", [calm["1普"], calm["2普"], calm["3普"], calm["4普"]],
     ["1", "2", "3", "4"])
-  check("对照组·无嘲讽：爱理按后排优先打 3 位", calm["5技"], "3")
-  check("对照组·无嘲讽：真白从后排主目标铺开打 3·4", calm["6技"], "34")
+  check("对照组·无嘲讽：爱理按前排优先打 1 位", calm["5技"], "1")
+  check("对照组·无嘲讽：真白从前排主目标铺开打 1·2", calm["6技"], "12")
+
+  const mashiroExTarget = (red) => {
+    const st = setup(["野宫", "野宫", "野宫", "野宫", "爱理", "真白"], red)
+    const r = playerTurn(st, { type: "ex", casts: [{ pos: 5 }] })
+    const ev = r.events.find((e) =>
+      e.type === "action" && e.action === "ex" && e.source?.side === 0 && e.source?.pos === 5)
+    return (ev?.targets || []).map((t) => t.pos + 1)
+  }
+  check("真白 EX 纯伤害：有前排时越过中后排打前排 3 位",
+    mashiroExTarget(["野宫", "白子", "星野", "伊织"]), [3])
+  check("真白 EX 纯伤害：没有前排时打中排，同排取较小的 2 位",
+    mashiroExTarget(["野宫", "白子", "芹香", "伊织"]), [2])
+  check("真白 EX 纯伤害：全后排时按号位打 1 位",
+    mashiroExTarget(["野宫", "伊织", "日奈", "晴奈"]), [1])
+
+  // 穷举当前 18 名支援里所有需要通用敌方主目标的普通技能 / EX。
+  // 阵容把唯一前排放在 3 位，确保断言测的是身位而不是「总取最小号位」。
+  const genericEnemyCases = []
+  const genericRed = ["野宫", "白子", "星野", "伊织"]
+  for (const support of ROSTER.filter((t) => t.squad === "支援")) {
+    for (const kind of ["skill", "ex"]) {
+      const sk = support[kind]
+      if (!sk?.target?.startsWith("enemy") || sk.pick
+        || ["enemy_all", "enemy_random", "enemy_cycle"].includes(sk.target)) continue
+      const st = setup(["野宫", "野宫", "野宫", "野宫", support.name, "芹娜"], genericRed)
+      let r
+      if (kind === "skill") {
+        for (const u of st.sides[0].supports) u.skillCd = 9999
+        st.sides[0].supports[0].skillCd = 0
+        r = playerTurn(st, { type: "pass" })
+      } else {
+        r = playerTurn(st, { type: "ex", casts: [{ pos: 4 }] })
+      }
+      const ev = r.events.find((e) =>
+        e.type === "action" && e.action === kind && e.source?.side === 0 && e.source?.pos === 4)
+      genericEnemyCases.push([`${support.name}${kind === "skill" ? "普技" : "EX"}`, ev?.targets?.[0]?.pos + 1])
+    }
+  }
+  const genericEnemyLabels = [
+    "响EX", "花凛普技", "花凛EX", "纱绫普技", "纱绫EX", "真白普技", "真白EX",
+    "爱理普技", "爱理EX", "晴普技", "晴EX", "静子普技", "小玉普技", "朱莉EX",
+    "好美普技", "好美EX", "和香普技",
+  ]
+  check("当前所有通用支援对敌技能均纳入前排索敌回归",
+    genericEnemyCases.map(([label]) => label), genericEnemyLabels)
+  check("当前所有通用支援对敌技能都先锁唯一前排 3 位",
+    genericEnemyCases, genericEnemyLabels.map((label) => [label, 3]))
+
+  {
+    // 小玉普技同时有伤害与减攻：分类看主伤害行为，不能因为附带 debuff 被当成后排进攻拐。
+    const st = setup(["野宫", "野宫", "野宫", "野宫", "小玉", "芹娜"], genericRed)
+    for (const u of st.sides[0].supports) u.skillCd = 9999
+    st.sides[0].supports[0].skillCd = 0
+    const r = playerTurn(st, { type: "pass" })
+    const ev = r.events.find((e) =>
+      e.type === "action" && e.action === "skill" && e.source?.side === 0 && e.source?.pos === 4)
+    const atkDown = r.state.sides[1].units
+      .filter((u) => u.buffs.some((b) => b.stat === "atk" && b.value < 0))
+      .map((u) => u.idx + 1)
+    check("小玉普技按伤害技能索敌：越过中后排先打唯一前排 3 位", targetLabels(ev), [3])
+    check("小玉普技的减攻跟随同一个受击目标，不另按拐的后排优先重选", atkDown, [3])
+  }
+
+  // 从角色表反向枚举全部对敌支援技能（含响 / 朱莉的原生选人），交互测试不能只抽两个代表。
+  const allEnemySupportCases = []
+  for (const support of ROSTER.filter((t) => t.squad === "支援")) {
+    for (const kind of ["skill", "ex"]) {
+      const skill = support[kind]
+      if (!skill?.target?.startsWith("enemy")) continue
+      allEnemySupportCases.push({
+        label: `${support.name}${kind === "skill" ? "普技" : "EX"}`,
+        support: support.name,
+        kind,
+        skill,
+      })
+    }
+  }
+  const allEnemySupportLabels = [
+    "响普技", "响EX", "花凛普技", "花凛EX", "纱绫普技", "纱绫EX", "真白普技", "真白EX",
+    "爱理普技", "爱理EX", "晴普技", "晴EX", "静子普技", "小玉普技", "朱莉普技", "朱莉EX",
+    "好美普技", "好美EX", "和香普技",
+  ]
+  check("支援对敌普通技能 / EX 交互矩阵覆盖当前全部 19 项",
+    allEnemySupportCases.map(({ label }) => label), allEnemySupportLabels)
+
+  const matrixRed = ["星野", "野宫", "野宫", "野宫"]
+  const targetMatrix = (mutate) => allEnemySupportCases.map(({ label, support, kind }) =>
+    [label, supportTargets(support, kind, matrixRed, mutate)])
+  const calmMatrix = targetMatrix()
+  check("全部支援对敌普通技能 / EX 都忽略异位 Provoke，不改原落点",
+    targetMatrix((st) => {
+      st.sides[1].units[3].taunt = 2
+      st.sides[1].units[3].tauntKind = "provoke"
+    }), calmMatrix)
+  check("全部支援对敌普通技能 / EX 都执行集火：以 4 位为新主目标，同时保留各自范围",
+    targetMatrix((st) => { st.sides[1].units[3].focus = 2 }), [
+      ["响普技", "43"], ["响EX", "431234"], ["花凛普技", "4"], ["花凛EX", "4"],
+      ["纱绫普技", "43"], ["纱绫EX", "43"], ["真白普技", "43"], ["真白EX", "4"],
+      ["爱理普技", "4"], ["爱理EX", "43"], ["晴普技", "4"], ["晴EX", "43"],
+      ["静子普技", "4"], ["小玉普技", "4"], ["朱莉普技", "4"], ["朱莉EX", "43"],
+      ["好美普技", "43"], ["好美EX", "43"], ["和香普技", "4"],
+    ])
+
+  const genericSupportCases = allEnemySupportCases.filter(({ skill }) =>
+    !skill.pick && !["enemy_all", "enemy_random", "enemy_cycle"].includes(skill.target))
+  const regularSupportCases = genericSupportCases.filter(({ skill }) => skill.target !== "enemy_instances")
+  check("通用支援对敌技能先锁同战场佩洛洛；同身位范围因超前层只有人偶而退化",
+    regularSupportCases.map(({ label, support, kind }) => [label,
+      supportTargets(support, kind, RED, (st) => putEnemyPeroro(st, 0))]),
+    regularSupportCases.map(({ label }) => [label, "偶"]))
+  const genericCalm = regularSupportCases.map(({ label, support, kind }) => [label,
+    supportTargets(support, kind, RED)])
+  check("不在范围内的异战场佩洛洛不会改写普通单体 / 范围技能落点",
+    regularSupportCases.map(({ label, support, kind }) => [label,
+      supportTargets(support, kind, RED, (st) => putEnemyPeroro(st, 2))]),
+    genericCalm)
+
+  // 单体 / 2 目标各取一个普技和 EX：都先锁同战场佩洛洛；2 目标再按独立超前身位退化。
+  const peroroCases = [
+    ["爱理普技（单体）", "爱理", "skill", "偶", "1"],
+    ["真白普技（2 目标）", "真白", "skill", "偶", "12"],
+    ["真白 EX（单体）", "真白", "ex", "偶", "1"],
+    ["爱理 EX（2 目标）", "爱理", "ex", "偶", "12"],
+  ]
+  check("佩洛洛同战场：单体先打人偶，同身位范围也退化为只打人偶",
+    peroroCases.map(([label, support, kind]) => [label,
+      supportTargets(support, kind, RED, (st) => putEnemyPeroro(st, 0))]),
+    peroroCases.map(([label, , , same]) => [label, same]))
+  check("佩洛洛异战场且仍有入场嘲讽：支援不被 Provoke 拉走，普通技能与 EX 都照常落点",
+    peroroCases.map(([label, support, kind]) => [label,
+      supportTargets(support, kind, RED, (st) => putEnemyPeroro(st, 2, 1, 2))]),
+    peroroCases.map(([label, , , , other]) => [label, other]))
+  const hibikiFarTargets = supportTargets("响", "ex", RED, (st) => putEnemyPeroro(st, 2))
+  check("响 EX 的多圈目标池同时包含异战场佩洛洛与学生",
+    [hibikiFarTargets.includes("偶"), /[1-4]/.test(hibikiFarTargets)], [true, true])
 
   const taunt = blueShots(RED, 1)
   check("四个主力被椿全拉走（说明这一轮嘲讽确实生效）",
     [taunt["1普"], taunt["2普"], taunt["3普"], taunt["4普"]], ["2", "2", "2", "2"])
-  check("爱理（单体）不被拉走，照打后排 3 位", taunt["5技"], "3")
-  // 「嘲讽把整发吸走」的前提是这一发本来就被拉过来了 —— 支援没被拉，范围技当然照常铺开
-  check("真白（2 目标）也不被吸成单体，后排 3·4 都吃到", taunt["6技"], "34")
+  check("爱理（单体）不被拉走，照常打前排 1 位", taunt["5技"], "1")
+  // 支援不接受 Provoke，因此主目标不变；范围形状在任何情况下也都不会被压成单体。
+  check("真白（2 目标）不被改中心，前排 1·2 都吃到", taunt["6技"], "12")
+  const tauntEx = blueTurnAfter(RED, 1)
+  check("椿嘲讽不改支援 EX：爱理范围 EX 仍打前排 1·2，真白单体 EX 仍打 1 位",
+    [castSupportEx(structuredClone(tauntEx), 4), castSupportEx(structuredClone(tauntEx), 5)],
+    ["12", "1"])
 
   /**
-   * 集火：切里诺的普技把标记打在**攻击力最高**的红方身上（星野 213 < 野宫 321 → 2 位），
-   * 而支援默认打的是后排 3 位野宫 —— 集火落 2 位，两者岔开，才量得出支援是否跟标记。
+   * 集火：红方全是后排，支援默认先打 1 位野宫；2 位晴奈攻击最高，被切里诺标记。
+   * 两者岔开后既能量出支援是否跟标记，也能量出 2 目标范围是否以新中心继续铺开。
    * ③-a 是先锁目标再一起结算，所以标记要在**上一轮**打出去。
    */
   {
-    const st = setup(["切里诺", "野宫", "野宫", "野宫", "爱理", "真白"], ["星野", "野宫", "野宫", "野宫"])
+    const st = setup(["切里诺", "野宫", "野宫", "野宫", "爱理", "真白"], ["野宫", "晴奈", "野宫", "野宫"])
     for (const u of st.sides[0].supports) u.skillCd = 9999
     st.sides[0].units[0].skillCd = 0 // 切里诺首轮就标出去（她的普技只标记，不带伤害）
     let cur = run(st, { type: "pass" }).state
     cur = run(cur, { type: "pass" }).state // 红方过
-    check("切里诺的标记落在攻击力最高的 2 位身上（不是最前面的星野）",
+    check("切里诺的标记落在攻击力最高的 2 位晴奈身上（不是默认的 1 位）",
       cur.sides[1].units.map((u) => focusedOf(u)), [false, true, false, false])
+    check("支援 EX 吃集火：爱理范围 EX 以 2 位为中心保留 2·1，真白单体 EX 只打 2 位",
+      [castSupportEx(structuredClone(cur), 4), castSupportEx(structuredClone(cur), 5)],
+      ["21", "2"])
     for (const u of cur.sides[0].supports) u.skillCd = 0
     const out = shotsOf(playerTurn(cur, { type: "pass" }))
     check("支援吃集火：爱理改打被点名的 2 位", out["5技"], "2")
-    check("真白也锁在被点名的人身上", out["6技"], "2")
+    check("真白范围普技以被点名的 2 位为中心，仍命中同排的 2·1", out["6技"], "21")
   }
 }
 
@@ -2540,12 +2984,15 @@ console.log("\n=== 38b. 爱露分段掩体：直击可挡、爆风无视 ===")
     // 支援先按位置选人，再由那个人同路的掩体判定；掩体本身不参与索敌。
     const karinOpen = cover(["星野", "野宫", "野宫", "野宫", "花凛", "真白"])
     skillCover(karinOpen).hp = skillCover(karinOpen).maxhp = 1e9
-    check("花凛 EX 先选中排 2 号：1 路掩体不会改写索敌",
-      shotEvents(playerTurn(karinOpen, { type: "ex", casts: [{ pos: 4 }] }), 4).map(landed), ["2"])
+    check("花凛 EX 先锁前排 1 号，再由 1 路掩体承伤",
+      shotEvents(playerTurn(karinOpen, { type: "ex", casts: [{ pos: 4 }] }), 4).map(landed), ["掩体"])
     const karinCovered = cover(["星野", "野宫", "野宫", "野宫", "花凛", "真白"], 1)
     skillCover(karinCovered).hp = skillCover(karinCovered).maxhp = 1e9
-    check("花凛 EX 锁定 2 号后，由 2 路掩体承伤",
-      shotEvents(playerTurn(karinCovered, { type: "ex", casts: [{ pos: 4 }] }), 4).map(landed), ["掩体"])
+    // 夹具默认保留 1、4 路场地掩体；这里移除 1 路那座，只留下 2 路技能掩体做隔离。
+    karinCovered.sides[0].summons = karinCovered.sides[0].summons.filter((s) =>
+      !(s.cover && s.blockIdx === 0))
+    check("2 路掩体不改花凛 EX 的前排 1 号索敌",
+      shotEvents(playerTurn(karinCovered, { type: "ex", casts: [{ pos: 4 }] }), 4).map(landed), ["1"])
 
     // 全体攻击逐个角色判本路掩体，不会被一堵墙吞成单体。
     const all = cover(["日奈", "野宫", "野宫", "野宫"])

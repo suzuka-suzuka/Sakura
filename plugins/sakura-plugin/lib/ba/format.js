@@ -392,7 +392,7 @@ export function describeEffect(sk) {
       case "taunt":
         parts.push(e.kind === "focus"
           ? `目标被集火 ${e.turns} 回合（己方攻击都锁它）`
-          : `嘲讽：${e.turns} 回合内敌方全体只打自己、且放不出 EX`)
+          : `嘲讽：${e.turns} 回合内敌方主力以自己为攻击主目标（范围形状不变）、且放不出 EX`)
         break
       case "cost": parts.push(`Cost ${e.value > 0 ? "+" : ""}${e.value}`); break
       case "immortal": parts.push(`${who}进入不死状态，生命掉不到 0（${e.turns}回合）`); break

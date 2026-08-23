@@ -111,7 +111,7 @@ body{width:${CARD_WIDTH}px;height:${CARD_HEIGHT}px;font-family:${FONT_STACK};-we
     <p>${esc(describeEffect(tmpl.ex))}</p>
     <p style="margin-top:8px;color:#8397AC;font-size:16px">${auto
       ? `普攻 ${autoPct.toFixed(0)}% 分 ${auto.hits.length} 段${auto.count > 1 ? ` · ${auto.depth === "through" ? "直线贯穿" : "同战场同身位"} ${auto.count} 人` : ""}`
-      : "支援位 · 不站场、无普攻；默认进攻先后排，治疗先佩洛洛再前排。基础生命/攻击的 10%、防御/治疗力的 5% 分给主力"}</p>
+      : "支援位 · 不站场、无普攻；对敌技能先前排，进攻拐先后排，治疗先佩洛洛再前排。基础生命/攻击的 10%、防御/治疗力的 5% 分给主力"}</p>
   </div>
   <div class="inner"></div>
 </div>

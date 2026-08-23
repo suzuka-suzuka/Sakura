@@ -64,9 +64,15 @@ const coverOf = (state, u) => (u && !u.summon && !u.support && u.alive
   ? summonsOf(state.sides[u.side]).find((s) => s.cover && s.blockIdx === u.idx) || null
   : null)
 const summonsOf = (side) => (side.summons || []).filter((s) => s.alive)
-/** 佩洛洛是可受治疗和生命值条件判定的友军；掩体仍只是场地物件，不进友军目标池。 */
+/** 佩洛洛是可受治疗和生命值条件判定的单位；掩体仍只是场地物件，不进生命判定池。 */
 const perorosOf = (side) => summonsOf(side).filter((s) => !s.cover)
-const healthAlliesOf = (side) => [...aliveOf(side), ...perorosOf(side)]
+const healthUnitsOf = (side) => [...aliveOf(side), ...perorosOf(side)]
+/**
+ * 能被敌方攻击 / 减益实际选中的单位。佩洛洛不计胜负与学生存活数，但在目标层就是正常单位；
+ * 同号位时把挡在前面的佩洛洛排在学生之前，供绿的顺序点名与多圆目标池稳定复现。
+ */
+const attackablesOf = (side) => [...aliveOf(side), ...perorosOf(side)]
+  .sort((a, b) => a.idx - b.idx || Number(Boolean(b.summon)) - Number(Boolean(a.summon)))
 
 const unitRef = (u) => (u
   ? {
@@ -457,6 +463,8 @@ function makeUnit(tmpl, idx, side) {
     // focus = ConcentratedTarget（切里诺）：被点名的人吃己方的刀。两套独立，见 setTaunt
     taunt: 0, tauntSt: -1, tauntKind: null,
     focus: 0, focusSt: -1,
+    // 净化只让「这个人」摆脱当前这一轮 Provoke；记录具体施法实例，下一次嘲讽会重新生效。
+    provokeCleanseKey: null,
     // 普通技能：「每 X 秒」是周期，第一次落在 X 秒而不是开局，所以起始压满冷却；
     // 条件型（血量阈值）与战斗开始时都用 99 表示「不靠冷却解锁」；
     // 普攻触发（泉 / 明里）第一次就能 roll，起始 0
@@ -547,6 +555,8 @@ export function createBattle(a, b, opts = {}) {
       cost: CFG.COST_START, regenAcc: 0,
       // 水位线只数主力 —— 支援不会死，拿 picks.length（6）当初值会让第一次减员判不出来
       exCasts: 0, lastAlive: s.picks.slice(0, 4).length,
+      // 每次 Provoke 都有独立编号；供单人净化区分「已解除的旧嘲讽」与后来新中的嘲讽。
+      provokeSeq: 0,
       // 每个战场靠外侧各放一个固定掩体：对外即 1、4 号位。技能掩体可以替换同路这一座。
       summons: CFG.FIELD_COVER_POSITIONS.map((idx) => makeFieldCover(side, idx)),
       // 场地是留在地上的区域，不是贴在人身上的状态。覆盖范围按技能规则算，
@@ -589,8 +599,9 @@ function applyBattleStart(state) {
  * 挡刀看的是角色自己的前/中/后排，不是职业，也不是 1~4 号位。
  */
 const zoneOf = (idx) => (idx < 2 ? 0 : 1)
-const LINE_RANK = { 前: 0, 中: 1, 后: 2 }
-const lineOf = (u) => tmplOf(u).line || "后"
+const LINE_RANK = { 超前: -1, 前: 0, 中: 1, 后: 2 }
+// 佩洛洛是比前排更靠前的独立身位，不与任何学生同层；同身位范围以它为主目标时自然退化成单体。
+const lineOf = (u) => (u.summon && !u.cover ? "超前" : tmplOf(u).line || "后")
 const lineRank = (u) => LINE_RANK[lineOf(u)] ?? 2
 
 /**
@@ -631,6 +642,8 @@ function pickInLayer(cands, fromIdx) {
  * 多目标只在自动主目标那一层横着铺。一层里凑不够人数就退化成单体。
  */
 function sameLineHits(cands, primary, count) {
+  // 佩洛洛属于独立的「超前」层。它虽然在正式目标池里，但不是前排学生：
+  // 白子这类同身位范围锁到它后，层内只有它自己，因此按既有规则退化成单体。
   const layer = cands.filter((u) => lineOf(u) === lineOf(primary))
   if (!layer.includes(primary)) return layer.slice(0, count)
   return [primary, ...layer.filter((u) => u !== primary)].slice(0, count)
@@ -674,10 +687,33 @@ function setTaunt(side, target, turns, turnId, kind = "provoke") {
   target.taunt = turns
   target.tauntSt = turnId
   target.tauntKind = "provoke"
+  side.provokeSeq = (side.provokeSeq || 0) + 1
+  target.provokeId = side.provokeSeq
 }
 
 const isProvoke = (u) => u.alive && u.taunt > 0 && (u.tauntKind || "provoke") === "provoke"
 const isFocus = (u) => u.alive && (u.focus > 0 || (u.taunt > 0 && u.tauntKind === "focus"))
+
+/** 当前有效的 Provoke 源；人偶与学生共用一个槽，后放者已由 setTaunt 顶掉前者。 */
+const provokeTargetOf = (side) => {
+  const sm = side.summons || []
+  return sm.find(isProvoke) || side.units.find(isProvoke) || null
+}
+
+/**
+ * 单人净化必须绑定到一次具体的 Provoke，不能把施法者身上的全局 taunt 清零：
+ * 否则千夏只奶一个人，却会让其余三名主力也一起脱离嘲讽。
+ * legacy 分支让更新前已经进行中的对局也能被净化；下一次 setTaunt 会写入新编号。
+ */
+const provokeKeyOf = (u) => {
+  if (!u) return null
+  if (u.provokeId != null) return `provoke:${u.side}:${u.provokeId}`
+  const source = u.summon ? (u.sourceKey || `${u.id}:${u.idx}`) : `${u.id}:${u.idx}`
+  return `legacy-provoke:${u.side}:${source}:${u.tauntSt ?? u.st ?? -1}`
+}
+const provokeCleansedFor = (u, provoke) => Boolean(
+  u?.provokeCleanseKey && provoke && u.provokeCleanseKey === provokeKeyOf(provoke),
+)
 
 /**
  * 这一方当前把对面刀吸过来的目标。嘲讽优先于集火；召唤物也算。
@@ -686,11 +722,12 @@ const isFocus = (u) => u.alive && (u.focus > 0 || (u.taunt > 0 && u.tauntKind ==
  *   - Provoke 是**场地性的**，拉的是站在场上的人 —— 支援不在场上，拉不动（跟 `provokedBy` 同一条理由）
  *   - 集火是**给己方下的索敌指令**，标在敌人头上、由自己这边全员执行 —— 支援照样跟着打
  */
-const tauntTargetOf = (side, noProvoke = false) => {
+const tauntTargetOf = (side, noProvoke = false, actor = null) => {
   const sm = side.summons || []
   const focused = side.units.find(isFocus) || sm.find(isFocus) || null
   if (noProvoke) return focused
-  return sm.find(isProvoke) || side.units.find(isProvoke) || focused
+  const provoke = provokeTargetOf(side)
+  return provoke && !provokeCleansedFor(actor, provoke) ? provoke : focused
 }
 
 /** 这个单位现在是不是被集火（蓝底靶心画在他自己头上） */
@@ -714,7 +751,8 @@ export function provokedBy(state, u) {
   if (u.support) return null
   const foe = state.sides[1 - u.side]
   // 只认 Provoke。tauntTargetOf 还会返回集火目标，集火不封 EX
-  return (foe.summons || []).find(isProvoke) || foe.units.find(isProvoke) || null
+  const provoke = provokeTargetOf(foe)
+  return provokeCleansedFor(u, provoke) ? null : provoke
 }
 
 /**
@@ -780,37 +818,43 @@ function laneTarget(u, foes, pick = null, opts = {}) {
   // 掩体不在目标选择层；被嘲讽者同路的掩体仍可对 Block=1 分段掷 30%。
   // 嘲讽同槽只留一个（人偶入场 Provoke 和椿的 EX 会互相顶掉）；集火另开一槽，见 setTaunt。
   // **支援位的刀不被嘲讽拉走**：椿把场上四个人全拽过去的那一轮，5、6 号该打谁还打谁。
-  const taunting = tauntTargetOf(foes, Boolean(u.support))
+  const taunting = tauntTargetOf(foes, Boolean(u.support), u)
   if (taunting && !opts.ignoreTaunt) return taunting
 
-  // **人偶按战场拦一切；掩体不参与索敌**。掩体只在 strike 里对被护者的
+  // **人偶参与目标选择；掩体不参与索敌**。没有特殊索敌时，人偶会抢到同战场的主目标；
+  // 普通同身位范围随后因它独占超前层而退化，直线 / 多圆 / 场地仍按自己的形状展开。
+  // 掩体只在 strike 里对被护者的
   // `Block=1` 分段掷 30%，成功才承受那一段伤害。
   const decoys = summonsOf(foes).filter((s) => !s.cover)
   const alive = aliveOf(foes)
   const describedTarget = pick === "lowest_hp_rate"
-    ? lowestHpRateTarget(alive)
+    // 响这类写明「生命值百分比最低」的技能也要把佩洛洛放进同一个生命池；
+    // 若最低的是学生，原生索敌仍然越过不够残的人偶，不能退回默认挡刀。
+    ? lowestHpRateTarget(healthUnitsOf(foes))
     : maxAtkTarget(u, alive, pick === "max_atk")
 
   if (describedTarget) return describedTarget
 
   /**
    * **支援位没有对位**，`zoneOf(u.idx)` 对它们没有意义（它们不站在任何一个战场里）。
-   * 进攻型支援从战线后方落刀：**后排 → 中排 → 前排**，
-   * 同排就打号位更小的。技能自带索敌（`skill.pick`）
-   * 在上面就返回了，所以这里只管默认情况。
+   * 对敌技能仍服从前排挡刀：**前排 → 中排 → 后排**，同排打号位更小的。
+   * 这里只有敌方目标；给队友的进攻 Buff 后排优先由 `allyLaneTarget` 单独处理，
+   * 不能因为两者都叫「进攻」就把真白这类纯伤害技能也送去切后排。
+   * 技能自带索敌（`skill.pick`）在上面已经返回，所以这里只管默认情况。
    *
-   * 墙照挡：先按这条挑出人，再看**那个人所在的半边**有没有墙 —— 支援的刀一样绕不过去。
+   * 默认主目标仍先按这条挑出人，再看**那个人所在的半边**有没有佩洛洛；
+   * 单体只打人偶，普通同身位范围也会因人偶独占超前层而退化成单体。
    */
   if (u.support) {
     if (!alive.length) return decoys[0] || null
-    const best = Math.max(...alive.map(lineRank))
+    const best = Math.min(...alive.map(lineRank))
     const aim = alive.filter((f) => lineRank(f) === best).reduce((m, f) => (f.idx < m.idx ? f : m))
     return decoys.find((s) => zoneOf(s.blockIdx) === zoneOf(aim.idx)) || aim
   }
 
   const zoneAlive = alive.filter((f) => zoneOf(f.idx) === zoneOf(u.idx))
-  // **人偶**按战场拦，不是按号位：它挡在那半边最前面，比前排还靠前一格。
-  // 日富美的人偶落在自动主目标的战场，那一整边的刀都归它接。
+  // **人偶**按战场抢默认主目标，不是按号位：它挡在那半边最前面，比前排还靠前一格。
+  // 单体与直接范围因此只打它；地面场地只拿它当圆心，铺地范围仍照原 shape 计算。
   const blocking = decoys.find((s) => zoneOf(s.blockIdx) === zoneOf(u.idx))
     // 本战场打空后，仍先处理敌方人偶；无人躲在后面的掩体不会被主动索敌。
     || (zoneAlive.length === 0 ? decoys[0] : null)
@@ -832,6 +876,7 @@ function expandAdjacent(pool, primary, count) {
   // count≥3 是「以主目标为中心向两边炸开」（睦月的三连雷、日富美的圆），
   // 走**固定窗口** [idx−half, idx+half] 而不是贪心找邻居：越界的那一发就是浪费掉，
   // 不能往另一边多抓一个来凑满。自动目标在 1 号位只炸 {1,2}，在 2 号位才炸满 {1,2,3}。
+  // 这里的中心是敌方 primary.idx，与施放者自己站在几号位无关。
   //
   // 战场分割也在这里放开 —— 一个战场只有 2 个人，不跨就永远达不到设计的目标数。
   // 那条限制的本意是「别为了凑人数跑到另一边」，而固定窗口根本不凑人数。
@@ -855,16 +900,26 @@ function expandAdjacent(pool, primary, count) {
 }
 
 /**
+ * 贯穿按覆盖的号位窗口取**所有单位**，不按单位数截断：佩洛洛与学生共用号位时是额外目标。
+ * count=2 覆盖主目标所在整个战场；count>=3 沿用固定号位窗口。
+ */
+function expandThrough(pool, primary, count) {
+  if (count >= 3) return expandAdjacent(pool, primary, count)
+  const hit = pool.filter((u) => u.alive && zoneOf(u.idx) === zoneOf(primary.idx))
+  return [primary, ...hit.filter((u) => u !== primary)]
+}
+
+/**
  * 场地技的覆盖范围：按技能自己的规则算，不是按「当时打中了谁」。
  *
  * 千世是 2 目标圆，盖住主目标所在的整个战场；邻居空着或已经死了，圈也还是那两路。
  * 3 目标走固定窗口（跟 expandAdjacent 同一套）；全体就是 1~4。
- * 人偶把整发接走时退化成它挡的那一路。
+ * 场地是地面范围而非同身位直击：即使佩洛洛是唯一直接目标，场地仍照原 count / shape 铺地。
  */
 function fieldLanes(skill, targets) {
-  const primary = targets.find((t) => !t.summon) || targets[0]
+  // targets[0] 永远是自动主目标；佩洛洛也能当场地圆心，不能跳过它另找学生。
+  const primary = targets[0]
   if (!primary) return null
-  if (primary.summon) return { lo: primary.idx, hi: primary.idx }
   const count = skill.count || 1
   const tg = skill.target || ""
   if (tg === "enemy_all" || tg === "ally_all" || count >= 4) return { lo: 0, hi: 3 }
@@ -966,7 +1021,7 @@ function resolveTargets(state, u, skill, foes, allies) {
   if (tg === "ally_lowest" || tg === "ally_hurt" || tg === "ally_maxhp") {
     // 佩洛洛有完整的 hp / maxhp，必须和主力一起接受「最低血量 / 生命阈值 / 最高生命」判定。
     // 掩体不是角色，仍然排除。
-    let al = healthAlliesOf(allies)
+    let al = healthUnitsOf(allies)
     if (skill.exceptSelf) al = al.filter((a) => a !== u)
     if (skill.hpMax != null) al = al.filter((a) => a.hp / a.maxhp <= skill.hpMax)
     if (!al.length) return []
@@ -991,14 +1046,15 @@ function resolveTargets(state, u, skill, foes, allies) {
     })
     return ranked.slice(0, Math.min(skill.count || 1, ranked.length))
   }
-  if (tg === "enemy_all") return aliveOf(foes)
+  // 佩洛洛不进 aliveOf（不计胜负），但全体 / 指定多单位 / 随机攻击都必须把它当正常敌方目标。
+  if (tg === "enemy_all") return attackablesOf(foes)
   // 循环点名（绿）：落点由**她自己的号位**定死，玩家指不了 —— 逐发在 execute 里算
-  if (tg === "enemy_cycle") return aliveOf(foes)
+  if (tg === "enemy_cycle") return attackablesOf(foes)
 
   const pool = tg.startsWith("ally") ? allies : foes
   let primary = null
 
-  if (tg === "enemy_random") return aliveOf(foes) // 逐段随机，在 strike 里再抽
+  if (tg === "enemy_random") return attackablesOf(foes) // 逐段随机，在 strike 里再抽
   // 连发第一发也按固定索敌，后续各段仍在 execute 里重新锁定。
   if (tg === "enemy_chain") {
     primary = laneTarget(u, foes)
@@ -1016,57 +1072,40 @@ function resolveTargets(state, u, skill, foes, allies) {
       : laneTarget(u, foes, skill.pick || null, { ignoreTaunt: markFocus })
   }
   if (!primary) return []
-  // 召唤物不在 pool.units 里，扩散算不出邻居；打到它就只打它
-  if (primary.summon) return [primary]
-
-  // 范围技的落点只要碰到召唤物所在的**战场**，整发就被它接走 —— 它是挡在那半边前面的墙，
-  // 跟 laneTarget 里的挡刀同一条口径（按战场，不按号位）。
-  // 2 目标的覆盖面本来就是主目标那个战场；3 目标是中心窗口，跨到哪半边就被哪半边的墙接。
-  // 只处理敌方目标；己方增益和治疗不会被自家召唤物拦截。
   const instMode = tg === "enemy_instances"
-  if (tg.startsWith("enemy") && (instMode || tg.endsWith("adjacent")) && count > 1) {
-    const half = count >= 3 ? Math.floor((count - 1) / 2) : 0
-    // 多圈技（响）的圈心逐个落在不同的人身上，覆盖面就是整条战线：哪半边有墙都接得住
-    const lanes = instMode
-      ? [0, 3]
-      : count >= 3
-        ? [primary.idx - half, primary.idx + half]
-        : (zoneOf(primary.idx) === 0 ? [0, 1] : [2, 3])
-    // **人偶**：覆盖面碰到它那半场就整发被接走，不问 Block
-    const decoy = summonsOf(pool).find((s) => !s.cover
-      && [0, 1, 2, 3].some((i) => i >= lanes[0] && i <= lanes[1] && zoneOf(i) === zoneOf(s.blockIdx)))
-    if (decoy) return [decoy]
-  }
-  // 嘲讽把整发吸走，不往后排溅。跟人偶同一档。
-  // 支援不吃嘲讽，所以它的范围技照常铺开 —— 吸走整发的前提是这一发本来就被拉过来了。
-  if (tg.startsWith("enemy") && count > 1
-    && primary === tauntTargetOf(foes, Boolean(u.support)) && !primary.summon) {
-    return [primary]
-  }
+  // 佩洛洛抢到主目标后，普通同身位圆扇只打它；贯穿仍按号位窗口继续覆盖，
+  // 佩洛洛是窗口中额外的一名单位。场地则可用单一圆心在 fieldLanes 铺出完整地面范围。
+  if (primary.summon && !instMode && !tg.endsWith("adjacent")) return [primary]
+  // Provoke / Focus 只替换 primary（主目标 / 范围中心），绝不改技能原本的形状与目标数。
+  // 例如爱丽丝直线永远贯穿主目标所在整个战场；桃 / 纯子仍以新主目标为中心铺三路。
+  // 支援不吃 Provoke、但会执行 Focus，tauntTargetOf 的 noProvoke 分支已在 laneTarget 区分两者。
   /**
-   * **圈数跟着人数走**（响，全 272 人只有她）。`instances` 是原文写死的圈数（5），
-   * 而战场上最多 4 个人 —— 写死 5 会让第 5 发凭空浪费掉。
+   * **圈数跟着正式目标数走**（响，全 272 人只有她）。`instances` 是原文写死的圈数（5）；
+   * 平时四名学生只落 4 圈，有佩洛洛时它也成为圈心，正好可以落满 5 圈。
    *
-   * 圈数取 `min(instances, 存活敌人数)`，**每个圈的伤害不变**；圈心从自动主目标起
+   * 圈数取 `min(instances, attackablesOf(foes).length)`，**每个圈的伤害不变**；圈心从自动主目标起
    * 按号位绕圈，一人一个。每个圈仍按自己的半径铺（响是半径 150 → 同战场同身位 2 人），
    * 所以同一个人可能被相邻的两个圈盖到 —— 那是圆形范围重叠的自然结果，不是重复计算。
    */
   if (instMode) {
-    const al = aliveOf(foes)
+    const al = attackablesOf(foes)
     const from = Math.max(0, al.indexOf(primary))
     const out = []
     for (let k = 0; k < Math.min(skill.instances || 1, al.length); k++) {
       const center = al[(from + k) % al.length]
       out.push(...(count > 1
-        ? sameLineHits(expandAdjacent(pool.units, center, count), center, count)
+        ? sameLineHits(expandAdjacent(al, center, count), center, count)
         : [center]))
     }
     return out
   }
 
   if (tg.endsWith("adjacent")) {
-    const hits = expandAdjacent(pool.units, primary, count)
-    // 横向圆/扇锁同层（睦月、白子、千世普攻…）。直线贯穿（晴奈、纯子）圈到谁打谁。
+    const candidates = tg.startsWith("enemy") ? attackablesOf(pool) : pool.units
+    const hits = skill.depth === "through"
+      ? expandThrough(candidates, primary, count)
+      : expandAdjacent(candidates, primary, count)
+    // 横向圆/扇锁同层（睦月、白子、千世普攻…）。直线贯穿（晴奈、爱丽丝、纯子、桃）圈到谁打谁。
     // 己方的 ally_adjacent 也按同样的层与窗口扩散。
     if (count > 1 && skill.depth !== "through") {
       return sameLineHits(hits, primary, count)
@@ -1512,7 +1551,8 @@ function applyEffects(ctx, u, skill, dmgTargets, allies, actionKind) {
           hp, maxhp: hp, shield: 0, shieldMax: 0, shieldTurns: 0,
           /**
            * **抛出型（人偶）和布置型（掩体）是两套挡刀口径**，别再合成一条：
-           *   人偶 `cover=false` —— 扔到敌方半场的诱饵，那**一整个战场**打过来的刀全归它接
+           *   人偶 `cover=false` —— 扔到敌方半场的诱饵，抢走那**一整个战场**的默认主目标；
+           *                        单体与直接范围只打它；全体 / 随机 / 顺序点名 / 多圆另走正式目标池
            *   掩体 `cover=true`  —— 架在自己这边的掩护，只管**自己那一路**；
            *                        `Block=1` 分段掷中 30% 后才由它承伤
            */
@@ -1552,6 +1592,9 @@ function applyEffects(ctx, u, skill, dmgTargets, allies, actionKind) {
       case "cleanse":
         for (const t of targets) {
           t.buffs = t.buffs.filter((s) => s.effectKind !== "debuff")
+          // Provoke 存在施法者/人偶一侧，不能清它本体；只给当前受治疗者豁免这一次实例。
+          const provoke = provokeTargetOf(state.sides[1 - t.side])
+          if (provoke) t.provokeCleanseKey = provokeKeyOf(provoke)
           ctx.log(`  ${nameOf(t)} 减益被清除`)
         }
         break
@@ -1756,15 +1799,21 @@ function execute(ctx, u, skill, label, actionKind, lockedPlan) {
        * 她站 1 号位就是 1→2→3→4→1，站 2 号位就是 2→3→4→1→2；
        * 只剩 1 个人时 5 发全落他身上。不随机、也不重新对线，玩家指不了目标。
        *
-       * 每发结算完重新取存活名单，所以打死人会自动跳过他。
+       * 开火时固定一圈顺序；每发前跳过其中已阵亡的目标。这样前一发击杀目标后，
+       * 下一发会落到原顺序里的下一名存活者，不会因为数组缩短而额外跳过一人。
        */
+      const ring = [...attackablesOf(foes)].sort((a, b) =>
+        ((a.idx - u.idx + 4) % 4) - ((b.idx - u.idx + 4) % 4))
+      let cursor = 0
       for (let i = 0; i < hits.length; i++) {
-        const al = aliveOf(foes)
-        if (!al.length) break
-        // 从自己号位开始排一圈：idx 大于等于自己的排前面，小的接在后面
-        const ring = [...al].sort((a, b) =>
-          ((a.idx - u.idx + 4) % 4) - ((b.idx - u.idx + 4) % 4))
-        const aim = ring[i % ring.length]
+        let skipped = 0
+        while (skipped < ring.length && !ring[cursor].alive) {
+          cursor = (cursor + 1) % ring.length
+          skipped++
+        }
+        if (!ring.length || skipped >= ring.length) break
+        const aim = ring[cursor]
+        cursor = (cursor + 1) % ring.length
         // 每一发都是一个新的主目标；掩体只在 strike 内按该段 Block 独立掷 30%。
         strike(ctx, u, aim, [hits[i]], actionKind, skill, [blockAt(skill, hitBlocks, i)])
         if (!hit.includes(aim)) hit.push(aim)
@@ -1787,7 +1836,7 @@ function execute(ctx, u, skill, label, actionKind, lockedPlan) {
     } else if (!locked && skill.target === "enemy_random") {
       // 弹射：每一段单独抽目标
       for (const [i, pct] of hits.entries()) {
-        const al = aliveOf(foes)
+        const al = attackablesOf(foes)
         if (!al.length) break
         const t = randPick(state, al)
         strike(ctx, u, t, [pct], actionKind, skill, [blockAt(skill, hitBlocks, i)])
@@ -1838,7 +1887,8 @@ function execute(ctx, u, skill, label, actionKind, lockedPlan) {
 }
 
 /**
- * 这一发普攻用哪套参数。强化形态抄 `u.charge`（鹤城扇形 / 瞬改索敌），否则抄模板。
+ * 这一发普攻用哪套参数。强化形态抄 `u.charge`（鹤城扇形 / 瞬改索敌），否则抄模板；
+ * 基础范围普攻的 target / count / depth 必须一起透传，爱丽丝的直线光束靠 depth 跳过同层削减。
  * ③-b 同时锁定时先拿这个去 resolveTargets，再交给 autoAttack 结算。
  */
 function autoSkillOf(u) {
@@ -1860,6 +1910,7 @@ function autoSkillOf(u) {
   return {
     target: tmpl.autoAttack.target || "enemy_single",
     count: tmpl.autoAttack.count || 1,
+    depth: tmpl.autoAttack.depth,
     hits, effects: [], block,
     hitBlocks: tmpl.autoAttack.hitBlocks || hits.map(() => block),
   }
@@ -1884,7 +1935,7 @@ function autoAttack(ctx, u, lockedPlan) {
   execute(ctx, u, {
     // `block` / `hitBlocks` 不能漏：这里重新拼了一个技能对象交给 execute，漏掉后 strike
     // 就不知道每个普攻分段能否触发掩体的 30% 承伤判定。
-    target: sk.target, count: sk.count, hits: sk.hits, effects: [],
+    target: sk.target, count: sk.count, depth: sk.depth, hits: sk.hits, effects: [],
     block: sk.block, hitBlocks: sk.hitBlocks,
   }, sk.charged ? "强化普攻" : "普攻", "normal", lockedPlan)
   // 打完最后一发才清：清早了这一发就读不到 charge.targeting，瞬的最后一枪会打回对位

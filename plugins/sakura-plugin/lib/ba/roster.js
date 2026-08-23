@@ -100,7 +100,7 @@ export const CFG = {
   EX_COOLDOWN_SLACK: 3,              // EX 冷却长度 = 存活总人数（含支援）− 这个值，满编 6 人 = 3
   /**
    * 掩体的**格挡率**。原作公式是 `30 + 攻击方遮蔽成功值 − 防御方遮蔽贯通率`，
-   * 地形适应每升一级 +15，基础就是 30%。每个 `Block=1` 伤害段独立判定；成功时由
+   * 地形适应每升一级 +15，基础就是 30%。每个 Damage.Block=1 伤害段独立判定；成功时由
    * 掩体承伤并扣耐久，失败才继续攻击角色。它不并入命中/闪避公式。
    * 遮蔽成功值（`BlockRate_Base`）全 272 人只有优香的武器被动带，生成器不读那个槽，暂时接不到。
    */
@@ -129,8 +129,8 @@ export const CFG = {
 }
 
 /**
- * 召唤物模板。它们**不进 ROSTER**，也不占号位——只作为 side.summons 里的挡刀物存在，
- * 所以 aliveOf / sideDead / settle / EX 冷却全都天然不把它们算进去。
+ * 召唤物模板。它们**不进 ROSTER**，也不占学生号位，而是单独放在 side.summons；
+ * 所以 aliveOf / sideDead / settle / EX 冷却不把它们算进去，但佩洛洛仍会进入正式攻击目标池。
  */
 export const SUMMONS = {
   "40002": {
@@ -3423,7 +3423,8 @@ export const ROSTER = [
         false
       ],
       "target": "enemy_adjacent",
-      "count": 2
+      "count": 2,
+      "depth": "through"
     },
     "gearSkill": true,
     "skill": {
@@ -3466,8 +3467,8 @@ export const ROSTER = [
     },
     "ex": {
       "name": "平衡崩坏！",
-      "target": "enemy_all",
-      "count": 4,
+      "target": "enemy_adjacent",
+      "count": 2,
       "area": 400000,
       "effects": [
         {
