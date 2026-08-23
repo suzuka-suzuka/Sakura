@@ -168,6 +168,15 @@ const DEFENSIVE_STATS = new Set([
   "crit_dmg_res",
 ])
 
+/**
+ * 支援位给己方自动选目标时，只有明确提升输出的 Buff 才算「进攻拐」并优先后排。
+ * 奶、盾、加防 / 闪避 / 减伤，以及尚未明确归为进攻的功能性效果，都继续优先前排。
+ */
+const OFFENSIVE_BUFF_STATS = new Set([
+  "atk", "atk_flat", "aa", "acc", "crit", "crit_dmg", "crit_dmg_flat", "dmg_deal",
+])
+const isOffensiveBuffStat = (stat) => OFFENSIVE_BUFF_STATS.has(stat) || String(stat || "").startsWith("enh_")
+
 /** 控制类效果的中文名。原数据只给英文 Icon，写死一张表比逐个判断可靠 */
 const CC_TEXT = {
   Stunned: "眩晕", Fear: "恐惧", Provoke: "嘲讽", Slow: "减速",
@@ -903,7 +912,14 @@ function allyLaneTarget(u, allies, skill) {
       if (doll) return doll
     }
     if (!alive.length) return null
-    return [...alive].sort((a, b) => lineRank(a) - lineRank(b) || a.idx - b.idx)[0]
+    // 攻击 / 攻速 / 命中 / 暴击 / 增伤等进攻拐优先后排；奶、盾、加防、闪避等防御技能优先前排。
+    // 同排永远取号位小者。没有明确归为进攻 Buff 的新效果默认留在前排侧，避免误拐后排。
+    const offensiveBuff = (skill?.effects || []).some((e) =>
+      e.type === "buff" && e.scope === "ally_target" && isOffensiveBuffStat(e.stat))
+    const lineOrder = offensiveBuff
+      ? (a, b) => lineRank(b) - lineRank(a)
+      : (a, b) => lineRank(a) - lineRank(b)
+    return [...alive].sort((a, b) => lineOrder(a, b) || a.idx - b.idx)[0]
   }
 
   // 非支援位若技能明确是给「一名队友」加增益，不能再默认把 Buff 塞给自己：

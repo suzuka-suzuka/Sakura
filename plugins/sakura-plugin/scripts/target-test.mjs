@@ -2012,7 +2012,7 @@ console.log("\n=== 38. 场地掩体：Block=1 每段 30% 决定谁承伤 ===")
     "EX 不能指定目标，只能选择释放者")
 }
 
-console.log("\n=== 39. 支援位治疗：人数以描述为准，不是有圈就是全体 ===")
+console.log("\n=== 39. 支援位友方目标：治疗人数与进攻 / 防御优先级 ===")
 {
   const of = (n) => ROSTER.find((t) => t.name === n)
   check("花江 EX 是单体持续治疗", [of("花江").ex.target, of("花江").ex.count], ["ally_single", 1])
@@ -2057,6 +2057,19 @@ console.log("\n=== 39. 支援位治疗：人数以描述为准，不是有圈就
   positioned.sides[0].cost = 10
   check("支援治疗按前排 → 中排 → 后排，而不是最低血量/最高攻击",
     heals(playerTurn(positioned, { type: "ex", casts: [{ pos: 4 }] }), 4), [2])
+
+  const buffed = (mains, support, stat) => {
+    const st = setup([...mains, support, "真白"], ["伊织", "伊织", "伊织", "伊织"])
+    st.sides[0].cost = 10
+    const r = playerTurn(st, { type: "ex", casts: [{ pos: 4 }] })
+    return r.state.sides[0].units
+      .filter((u) => u.buffs.some((b) => b.stat === stat))
+      .map((u) => u.idx)
+  }
+  check("小玉进攻拐按后排 → 中排 → 前排，同排先取小号位",
+    buffed(["野宫", "伊织", "白子", "星野"], "小玉", "atk"), [0, 1])
+  check("志美子加防仍按前排 → 中排 → 后排，同排先取小号位",
+    buffed(["野宫", "伊织", "星野", "春香"], "志美子", "dfs"), [2, 3])
 
   const fuuka = setup([...mains, "风香", "真白"], ["伊织", "伊织", "伊织", "伊织"])
   hurt(fuuka)
