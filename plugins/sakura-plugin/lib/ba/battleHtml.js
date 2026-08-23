@@ -53,8 +53,17 @@ const SUP_X = [ARENA_W / 4, (ARENA_W * 3) / 4]
 const supportY = (side) => (side === 1 ? RED_Y - SUPPORT_GAP : BLUE_Y + SUPPORT_GAP)
 /** 前排往交战线迈一个身位，中排半步，后排不动。深度是角色属性，不是格子。 */
 const LINE_SHIFT = { 前: 96, 中: 48, 后: 0 }
-/** 抛出型召唤物站在敌方前排再往前一个身位 */
-const SUMMON_AHEAD = 200
+/**
+ * 掩体靠近受保护者，佩洛洛再往交战线前压。两者同号位时纵向错开，
+ * 同时由 z-index 保证佩洛洛始终在掩体前面。
+ */
+const COVER_AHEAD = 140
+const PERORO_AHEAD = 280
+/**
+ * 双方佩洛洛落在同一号位时，纵向只隔 48px，会让 104px 立绘和 130px 状态条互相覆盖。
+ * 只在这种成对冲突里左右各让 72px；单独一只仍严格居中，不改变玩家对号位的判断。
+ */
+const PERORO_PAIR_SHIFT = 72
 function lineShiftOf(side, u) {
   const step = LINE_SHIFT[tmplOf(u).line] ?? 0
   return side === 1 ? step : -step
@@ -65,10 +74,26 @@ function lineShiftOf(side, u) {
  *   **布置型**（场地 / 静子掩体）—— 架在**自己**半场，只护同号位的角色
  * 两者都走 summons 渲染，但人偶按战场截获，掩体只在 `Block=1` 分段的 30% 判定成功时承伤。
  */
+const summonHalfOf = (sm) => (sm.onAlly ? sm.side : 1 - sm.side)
+
 function summonStandY(sm) {
-  const half = sm.onAlly ? sm.side : 1 - sm.side
+  const half = summonHalfOf(sm)
   const front = half === 1 ? RED_Y + LINE_SHIFT.前 : BLUE_Y - LINE_SHIFT.前
-  return front + (half === 1 ? SUMMON_AHEAD : -SUMMON_AHEAD)
+  const ahead = sm.cover ? COVER_AHEAD : PERORO_AHEAD
+  return front + (half === 1 ? ahead : -ahead)
+}
+
+/**
+ * 同号位只有一只佩洛洛时仍落在列中心；双方各有一只时按所在半场左右拆开。
+ * 这个坐标同时供 DOM 和攻击线使用，避免立绘避让后线还指向旧位置。
+ */
+function summonStandX(state, sm) {
+  const center = LANE_X[sm.idx]
+  if (sm.cover || !sm.alive) return center
+  const half = summonHalfOf(sm)
+  const paired = (state.sides || []).some((side) => (side.summons || []).some((other) =>
+    other !== sm && other.alive && !other.cover && other.idx === sm.idx && summonHalfOf(other) !== half))
+  return center + (paired ? (half === 1 ? -PERORO_PAIR_SHIFT : PERORO_PAIR_SHIFT) : 0)
 }
 
 /** 同号位可能同时有场地掩体和佩洛洛，事件必须用 sourceKey 精确挂到实际承伤物。 */
@@ -348,7 +373,7 @@ function arrowLayer(state, events) {
       const pool = state.sides[ref.side]?.summons || []
       const sm = (ref.summonKey ? pool.find((s) => s.sourceKey === ref.summonKey) : null)
         || pool.find((s) => s.alive && s.idx === ref.pos)
-      return { x: LANE_X[ref.pos], y: sm ? summonStandY(sm) : ARENA_H / 2 }
+      return { x: sm ? summonStandX(state, sm) : LANE_X[ref.pos], y: sm ? summonStandY(sm) : ARENA_H / 2 }
     }
     // 支援站在自己半场的最外侧，只占中间两列。身位偏移对它们不成立（它们不在前中后排里）
     if (ref.pos >= 4) return { x: SUP_X[ref.pos - 4] ?? ARENA_W / 2, y: supportY(ref.side) }
@@ -457,7 +482,7 @@ function fxByUnit(events) {
   for (const ev of events) {
     // cost 事件不出标签：目前没有靠技能回费的角色，真加了也只落在文字日志里
     if (!["damage", "miss", "heal", "block"].includes(ev.type) || !ev.target) continue
-    // 掩体的实际耐久变化已经由血条表达，所有直接 / 转移到掩体的伤害都不再单独冒数字。
+    // 掩体的实际耐久变化由完整 / 半损 / 全损外观表达，所有直接 / 转移到掩体的伤害都不再单独冒数字。
     if (ev.target.cover) continue
     // 召唤物与同号位角色、同号位的不同召唤物都必须分开挂。
     const key = ev.target.summon
@@ -605,9 +630,8 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 .supRow{position:absolute;left:0;right:0;z-index:1;display:grid;grid-template-columns:repeat(2,1fr)}
 .supRow.red{top:0}
 .supRow.blue{bottom:0}
-/* 支援不画血条：它们打不到，血量维度对玩家没有意义。名字挪到脚下，跟主力区分开 */
+/* 支援不画血条和名字：它们打不到，也不占 1~4 号位。 */
 .unit.sup>.bars{height:26px}
-.supnm{font-size:19px;color:#41586E;letter-spacing:.04em}
 .unit{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px}
 /* 变灰只作用到角色本体，不能套在 .unit 上 —— 数字是 .unit 的子元素，
    一起淡掉会让「打死这一下」正好最看不清 */
@@ -665,33 +689,31 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
   paint-order:stroke;stroke:#fff;stroke-width:4.5px}
 .zones .fading{opacity:.45}
 
-/* 召唤物：人偶在敌方半场；场地/技能掩体在己方半场。列仍是其所在号位 */
+/* 召唤物：人偶在敌方半场；场地/技能掩体在己方半场。列仍是其所在号位。
+   双方佩洛洛撞在同一列时，再在列内横向拆开，不能让立绘或头顶条组互盖。 */
 .smRow{position:absolute;left:0;right:0;top:0;bottom:0;z-index:2;
   display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:1fr;align-items:center;pointer-events:none}
 /* 红蓝双方会在相同号位各有一座掩体。没有显式 grid-row 时，CSS Grid 会把同列后出现的
    召唤物塞进隐式第二行，后续基于整张战场中心计算的 translateY 就会把它压到角色身上。 */
 .sm{position:relative;grid-row:1;display:flex;flex-direction:column;align-items:center;gap:4px}
+.sm.cover{z-index:1}
+.sm.peroro{z-index:2}
 /* 站在红半场（挡红方）时数字往交战线甩；站在蓝半场同理 */
 .sm.foe-red .fxstack{top:auto;bottom:118px}
-/* 站在蓝方半场时数字往下甩，要让开血条下面那行名字（掩体架在自己这边，正好撞上） */
+/* 站在蓝方半场时数字往下甩，要让开人偶的血条与时间条。 */
 .sm.foe-blue .fxstack{top:158px;bottom:auto}
 .smart{position:relative;width:104px;height:104px;display:flex;align-items:center;justify-content:center}
 .smart img{width:104px;height:104px;object-fit:contain;
   filter:drop-shadow(0 4px 8px rgba(40,80,125,.28))}
-/* 召唤物的血条**直接复用 .hpbar**，只改宽度：一样的高度、圆角、装甲色填充、四段白线。
+/* 人偶的生命条与时间条合成一组，统一放在立绘头顶；掩体完全不生成这一组。 */
+.smbars{width:130px;display:flex;flex-direction:column;gap:3px}
+/* 人偶的血条**直接复用 .hpbar**，只改宽度：一样的高度、圆角、装甲色填充、四段白线。
    它照吃属性克制，凭什么用一条自成一派的细紫条 —— 玩家得能一眼看出拆墙该带什么属性。
-   只有宽度收窄，因为它到底不是第 5 个队员 */
+   掩体不画血条，场地掩体改用三态图，静子掩体被打碎后直接隐藏。 */
 .smhp{width:130px}
 /* 持续时间：血条下面一条橙色，按剩余回合缩，不再用数字 */
 .smdur{width:130px;height:5px;border-radius:3px;background:rgba(40,80,125,.16);overflow:hidden}
 .smdur s{display:block;height:100%;background:linear-gradient(90deg,#F3B14A,#E07A22)}
-/* **必须是直接子选择器**：血条里的四段分隔线 .seg 也是 <b>，被这条命中就会顶着
-   8px 圆角和 1px 8px 内边距变成三坨白药丸 —— 跟 .arrows path{fill:none} 干掉箭头
-   是同一种错法：拿元素名当选择器，顺手把别人的元素也改了。
-   （这段 CSS 整个活在模板字符串里，注释里也不能出现反引号） */
-.sm > b{font-size:13px;color:#22384F;font-weight:600;
-  background:rgba(255,255,255,.86);border-radius:8px;padding:1px 8px}
-
 /* 特效层 */
 .arrows{position:absolute;inset:0;width:100%;height:100%;z-index:3;pointer-events:none;overflow:visible}
 /* 亮底上箭头比深底抢眼得多，压细压淡；白色外发光把它和角色分开 */
@@ -860,28 +882,35 @@ function summonBand(state, fx) {
   const cells = []
   for (const side of [0, 1]) {
     for (const sm of state.sides[side].summons || []) {
-      if (!sm.alive) continue
+      // 被破坏的场地掩体留下全损残骸；静子掩体和佩洛洛仍在失效后直接隐藏。
+      if (!sm.alive && !sm.fieldCover) continue
       const t = tmplOf(sm)
-      const pct = Math.max(0, Math.min(100, (sm.hp / sm.maxhp) * 100))
-      // 掩体是**永久**的（`turns == null`）：不画橙色时间条，它的存续就是血条本身。
-      // 不判的话 null / null 会算出 NaN，条子直接不见
-      const dur = sm.turns == null
+      const pct = sm.cover ? null : Math.max(0, Math.min(100, (sm.hp / sm.maxhp) * 100))
+      // 掩体不画血条或时间条；佩洛洛仍靠两条分别表达生命与剩余回合。
+      const dur = sm.cover || sm.turns == null
         ? null
         : Math.max(0, Math.min(100, (sm.turns / (sm.turnsMax || sm.turns || 6)) * 100))
-      // 99999 是静子系技能召唤物的百夜堂摊位；开局固定掩体必须走独立的通用路障素材。
-      const art = sm.fieldCover ? fieldCoverArtOf() : summonArtOf(sm.id)
+      const coverState = sm.fieldCover
+        ? (!sm.alive || sm.hp <= 0 ? "destroyed" : sm.hp / sm.maxhp < 0.5 ? "damaged" : "full")
+        : null
+      // 99999 静子掩体永远只用百夜堂摊位；只有固定场地掩体切换三态路障素材。
+      const art = sm.fieldCover ? fieldCoverArtOf(coverState) : summonArtOf(sm.id)
       // 伤害数字往哪一侧甩，看它站在哪半场 —— 掩体在自己这边，人偶在对面
       const half = sm.onAlly ? sm.side : 1 - sm.side
       const dy = summonStandY(sm) - ARENA_H / 2
+      const dx = Math.round(summonStandX(state, sm) - LANE_X[sm.idx])
+      const transform = dx ? `translate(${dx}px,${dy}px)` : `translateY(${dy}px)`
       const smFx = fx.get(summonFxKey(side, sm.idx, sm.sourceKey))
         || fx.get(summonFxKey(side, sm.idx)) || ""
-      cells.push(`<div class="sm foe-${half === 1 ? "red" : "blue"}" style="grid-column:${sm.idx + 1};transform:translateY(${dy}px)">
+      const kind = sm.cover ? `cover ${sm.fieldCover ? `field-cover ${coverState}` : "skill-cover"}` : "peroro"
+      cells.push(`<div class="sm ${kind} foe-${half === 1 ? "red" : "blue"}" style="grid-column:${sm.idx + 1};transform:${transform}">
+        ${sm.cover ? "" : `<div class="smbars">
+          <div class="hpbar smhp"><div class="hp" style="width:${pct}%;background:${ARMOR[t.defType] || "#8AA"}"></div>${SEGS}</div>
+          ${dur == null ? "" : `<div class="smdur"><s style="width:${dur.toFixed(1)}%"></s></div>`}
+        </div>`}
         <div class="smart">
           ${art ? `<img src="${art}" alt="">` : ""}
         </div>
-        <div class="hpbar smhp"><div class="hp" style="width:${pct}%;background:${ARMOR[t.defType] || "#8AA"}"></div>${SEGS}</div>
-        ${dur == null ? "" : `<div class="smdur"><s style="width:${dur.toFixed(1)}%"></s></div>`}
-        <b>${esc(t.name)}</b>
         ${smFx}
       </div>`)
     }
@@ -914,7 +943,6 @@ function supportBand(state, side) {
         ${art ? `<img src="${art}" alt="">` : `<div class="ph" style="background:${ATTACK[t.atkType]}">${esc(t.name[0])}</div>`}
         <div class="shadow"></div>
       </div>
-      <b class="supnm">${esc(t.name)}</b>
     </div>`
   }).join("")
   return `<div class="supRow ${side === 1 ? "red" : "blue"}">${cells}</div>`

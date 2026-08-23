@@ -1078,7 +1078,7 @@ function applyDamage(ctx, src, tgt, dmg, meta = {}) {
     affinity: affinityMark(meta.aff ?? 1),
     attackType: src ? tmplOf(src).atkType : "持续",
     hits: meta.hits, landed: meta.landed,
-    // 掩体承伤事件仍保留真实伤害供结算 / 测试读取，但战场图不再给掩体单独冒数字。
+    // 掩体承伤事件仍保留真实伤害供结算 / 测试读取；战场图只切换场地掩体三态图，不再单独冒数字。
     ...(meta.blocked ? { blocked: meta.blocked } : {}),
     // 部分分段被挡时，把玩家可见的 BLOCK 信息并回原角色的伤害标签；不改实际承伤事件语义。
     ...(meta.visualBlocked ? {
@@ -1115,7 +1115,7 @@ function applyDamage(ctx, src, tgt, dmg, meta = {}) {
 
 /**
  * 对单个目标打出一组分段攻击。每段独立判定掩体、命中与暴击；底层仍按实际承伤方分别
- * 产生事件，战场图则只在原角色处显示最终承伤与 BLOCK，掩体只靠血条反馈耐久变化。
+ * 产生事件，战场图则只在原角色处显示最终承伤与 BLOCK；场地掩体靠三态图片反馈耐久。
  */
 /**
  * 按目标当前血量改这一发的倍率（`TargetHpRateModifier`）。
@@ -1474,9 +1474,10 @@ function applyEffects(ctx, u, skill, dmgTargets, allies, actionKind) {
         // 同一施法者重复使用时清掉旧召唤；掩体还要保证同一路只有一个，技能掩体会替换
         // 该路原有的场地掩体或别的技能掩体，而不是叠出两次 30% 判定。
         const replacedCover = eff.cover
-          ? summonsOf(me).find((s) => s.cover && s.blockIdx === blockIdx) || null
+          ? (me.summons || []).find((s) => s.cover && s.blockIdx === blockIdx) || null
           : null
-        me.summons = summonsOf(me).filter((s) => s.sourceKey !== key
+        me.summons = (me.summons || []).filter((s) => (s.alive || s.fieldCover)
+          && s.sourceKey !== key
           && !(eff.cover && s.cover && s.blockIdx === blockIdx))
         const hp = Math.round(tpl.hp + tmplOf(u).hp * (eff.hpRate || 0))
         const doll = {
@@ -2134,7 +2135,9 @@ function endTurn(ctx, side) {
         ctx.log(`  ${tmplOf(sm).name} 消失了`)
       }
     }
-    s.summons = (s.summons || []).filter((x) => x.alive)
+    // 死亡场地掩体保留为纯视觉残骸；佩洛洛与技能掩体仍按原规则从状态里清掉。
+    // `summonsOf()` 只返回 alive，对索敌、场地伤害与格挡结算都没有影响。
+    s.summons = (s.summons || []).filter((x) => x.alive || x.fieldCover)
   }
 
   // 持续治疗在状态层更新之后、伤害性状态之前结算。

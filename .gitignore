@@ -78,7 +78,9 @@ plugins/sakura-plugin/resources/ba/summons/99999/*
 plugins/sakura-plugin/resources/ba/characters/KOTAMA/*
 !plugins/sakura-plugin/resources/ba/characters/KOTAMA/chibi.png
 
-# 原创场地掩体，不是游戏官方素材；固定跟随项目，且只放行这一张成品。
+# 原创场地掩体，不是游戏官方素材；固定跟随项目，只放行完整 / 半损 / 全损三张成品。
 !plugins/sakura-plugin/resources/ba/summons/field/
 plugins/sakura-plugin/resources/ba/summons/field/*
 !plugins/sakura-plugin/resources/ba/summons/field/chibi.png
+!plugins/sakura-plugin/resources/ba/summons/field/damaged.png
+!plugins/sakura-plugin/resources/ba/summons/field/destroyed.png

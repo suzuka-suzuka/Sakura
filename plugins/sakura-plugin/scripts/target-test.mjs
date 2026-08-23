@@ -1733,12 +1733,34 @@ console.log("\n=== 36. 支援位：不站在场上、5/6 只是结算编号 ==="
   check("开局双方都在 1、4 号位生成场地掩体",
     sup.sides.map((s) => s.summons.filter((sm) => sm.fieldCover).map((sm) => [sm.blockIdx, sm.maxhp])),
     [[[0, 700], [3, 700]], [[0, 700], [3, 700]]])
-  check("场地掩体不复用静子 99999 的百夜堂摊位素材",
-    [Boolean(fieldCoverArtOf()), Boolean(summonArtOf(99999)), fieldCoverArtOf() !== summonArtOf(99999)],
-    [true, true, true])
+  const fieldArts = ["full", "damaged", "destroyed"].map((state) => fieldCoverArtOf(state))
+  check("场地掩体完整 / 半损 / 全损三张图齐全，且不复用静子百夜堂摊位",
+    [fieldArts.every(Boolean), new Set(fieldArts).size, fieldArts.includes(summonArtOf(99999))],
+    [true, 3, false])
   const fieldHtml = buildBattleHtml(sup)
   check("红蓝同号位掩体固定共用一行坐标系，不被 Grid 挤到人物行",
     /grid-template-rows:1fr/.test(fieldHtml) && /\.sm\{[^}]*grid-row:1/.test(fieldHtml), true)
+  check("战场图不再显示支援位或掩体名称",
+    [/class="supnm"/.test(fieldHtml), />掩体<\/b>/.test(fieldHtml)], [false, false])
+  check("掩体不再生成生命条", (fieldHtml.match(/class="hpbar smhp"/g) || []).length, 0)
+
+  const coverStates = structuredClone(sup)
+  const damagedCover = coverStates.sides[0].summons.find((sm) => sm.fieldCover && sm.blockIdx === 0)
+  const halfCover = coverStates.sides[0].summons.find((sm) => sm.fieldCover && sm.blockIdx === 3)
+  const destroyedCover = coverStates.sides[1].summons.find((sm) => sm.fieldCover && sm.blockIdx === 0)
+  damagedCover.hp = 349
+  halfCover.hp = 350
+  destroyedCover.hp = 0
+  destroyedCover.alive = false
+  const coverStateHtml = buildBattleHtml(coverStates)
+  check("场地掩体低于 50% 切半损图，正好 50% 仍是完整图",
+    [/class="sm cover field-cover damaged foe-blue" style="grid-column:1;/.test(coverStateHtml),
+      /class="sm cover field-cover full foe-blue" style="grid-column:4;/.test(coverStateHtml)],
+    [true, true])
+  check("场地掩体被破坏后保留全损残骸且仍不画血条",
+    [/class="sm cover field-cover destroyed foe-red" style="grid-column:1;/.test(coverStateHtml),
+      (coverStateHtml.match(/class="hpbar smhp"/g) || []).length],
+    [true, 0])
 
   // 打不到：敌方任何索敌都不该选中支援。伊织的连发会逐发重锁，最容易漏
   const shot = run(sup, { type: "pass" })
@@ -1758,6 +1780,83 @@ console.log("\n=== 36. 支援位：不站在场上、5/6 只是结算编号 ==="
   check("静子部署到 1 路时替换场地掩体，同路不叠加",
     cast.state.sides[0].summons.filter((sm) => sm.cover).map((sm) => [sm.blockIdx, Boolean(sm.fieldCover)]).sort((a, b) => a[0] - b[0]),
     [[0, false], [3, true]])
+  const castHtml = buildBattleHtml(cast.state)
+  check("静子掩体存活时只显示单张图，不显示血条",
+    [/class="sm cover skill-cover foe-blue"/.test(castHtml),
+      (castHtml.match(/class="hpbar smhp"/g) || []).length], [true, 0])
+  const brokenSkillCover = structuredClone(cast.state)
+  const brokenPlaced = brokenSkillCover.sides[0].summons.find((sm) => sm.cover && !sm.fieldCover)
+  brokenPlaced.hp = 0
+  brokenPlaced.alive = false
+  const brokenSkillHtml = buildBattleHtml(brokenSkillCover)
+  check("静子掩体被打碎后隐藏，且被它替换的场地掩体不会回来",
+    [/class="sm cover skill-cover foe-blue"/.test(brokenSkillHtml),
+      /class="sm cover field-cover [^"]+ foe-blue" style="grid-column:1;/.test(brokenSkillHtml)],
+    [false, false])
+
+  const replaceResidue = structuredClone(sup)
+  const oldResidue = replaceResidue.sides[0].summons.find((sm) => sm.fieldCover && sm.blockIdx === 0)
+  oldResidue.hp = 0
+  oldResidue.alive = false
+  replaceResidue.sides[0].cost = 10
+  const residueReplaced = playerTurn(replaceResidue, { type: "ex", casts: [{ pos: 4 }] })
+  check("静子部署到全损残骸所在号位时同样彻底覆盖原场地掩体",
+    [residueReplaced.state.sides[0].summons
+      .filter((sm) => sm.cover && sm.blockIdx === 0)
+      .map((sm) => [Boolean(sm.fieldCover), sm.alive]),
+      residueReplaced.events.some((e) => e.type === "summon" && e.replaced)],
+    [[[false, true]], true])
+
+  const together = setup(["日富美", "白子", "野宫", "星野", "芹娜", "静子"],
+    ["椿", "芹香", "日奈", "优香", "真白", "花子"], [], { fieldCovers: true })
+  for (const side of together.sides) for (const u of side.supports) u.skillCd = 9999
+  together.sides[0].cost = 10
+  const summoned = playerTurn(together, { type: "ex", casts: [{ pos: 0 }] })
+  const togetherHtml = buildBattleHtml(summoned.state, summoned.events)
+  const coverDy = Number(togetherHtml.match(/class="sm cover field-cover full foe-red" style="grid-column:1;transform:translateY\((-?\d+)px\)/)?.[1])
+  const peroroDy = Number(togetherHtml.match(/class="sm peroro foe-red" style="grid-column:1;transform:translateY\((-?\d+)px\)/)?.[1])
+  check("同号位佩洛洛比掩体更靠近中线，并在更高绘制层",
+    [Number.isFinite(coverDy) && Number.isFinite(peroroDy) && peroroDy > coverDy,
+      /\.sm\.cover\{z-index:1\}/.test(togetherHtml) && /\.sm\.peroro\{z-index:2\}/.test(togetherHtml)],
+    [true, true])
+  check("佩洛洛保留血条和时间条，但不再显示召唤物名字",
+    [(togetherHtml.match(/class="hpbar smhp"/g) || []).length,
+      (togetherHtml.match(/class="smdur"/g) || []).length,
+      />佩洛洛人偶<\/b>/.test(togetherHtml)], [1, 1, false])
+  const peroroStart = togetherHtml.indexOf('<div class="sm peroro')
+  const peroroBars = togetherHtml.indexOf('class="smbars"', peroroStart)
+  const peroroArt = togetherHtml.indexOf('class="smart"', peroroStart)
+  check("佩洛洛的生命条和时间条统一排在召唤物头顶",
+    peroroStart >= 0 && peroroBars > peroroStart && peroroBars < peroroArt, true)
+
+  // 双方佩洛洛若落在同一号位，原纵坐标只差 48px，104px 立绘与 130px 条组都会重叠。
+  // 构造对侧同号位人偶，确认两边只在冲突时各横移 72px，条组仍各自跟随本体。
+  const pairedPeroroState = structuredClone(summoned.state)
+  const firstPeroro = pairedPeroroState.sides[0].summons.find((sm) => !sm.cover)
+  const opposingPeroro = structuredClone(firstPeroro)
+  opposingPeroro.side = 1
+  opposingPeroro.sourceKey = "test:opposing-peroro"
+  pairedPeroroState.sides[1].summons.push(opposingPeroro)
+  const pairedPeroroHtml = buildBattleHtml(pairedPeroroState)
+  const redPeroroOffset = Number(pairedPeroroHtml.match(
+    /class="sm peroro foe-red" style="grid-column:1;transform:translate\((-?\d+)px,-?\d+px\)"/)?.[1])
+  const bluePeroroOffset = Number(pairedPeroroHtml.match(
+    /class="sm peroro foe-blue" style="grid-column:1;transform:translate\((-?\d+)px,-?\d+px\)"/)?.[1])
+  check("双方同号位佩洛洛左右分开，立绘和头顶状态条不再重叠",
+    [redPeroroOffset, bluePeroroOffset,
+      (pairedPeroroHtml.match(/class="smbars"/g) || []).length],
+    [-72, 72, 2])
+  const peroroArrowEvent = [{
+    type: "action", action: "normal", source: { side: 1, pos: 0 },
+    targets: [{ side: 0, pos: firstPeroro.idx, summon: true, summonKey: firstPeroro.sourceKey }],
+  }]
+  const singlePeroroArrow = buildBattleHtml(summoned.state, peroroArrowEvent)
+    .match(/<path class="auto" d="([^"]+)"/)?.[1]
+  const pairedPeroroArrow = buildBattleHtml(pairedPeroroState, peroroArrowEvent)
+    .match(/<path class="auto" d="([^"]+)"/)?.[1]
+  check("双佩洛洛避让后，攻击线终点同步跟随实际立绘",
+    [Boolean(singlePeroroArrow), Boolean(pairedPeroroArrow), pairedPeroroArrow !== singlePeroroArrow],
+    [true, true, true])
 
   // Cost 回复算支援：4 主力 + 2 支援 = 6 × 0.5 = 3
   const fresh = setup(["野宫", "野宫", "野宫", "野宫"], OUT)
@@ -1873,6 +1972,17 @@ console.log("\n=== 38. 场地掩体：Block=1 每段 30% 决定谁承伤 ===")
     const action = r.events.find((e) => e.type === "action" && e.action === "normal" && e.source?.side === 1)
     check("掩体不改索敌：出手线仍指向自动选中的 1 号角色",
       action?.targets.map((t) => [t.pos, Boolean(t.summon)]), [[0, false]])
+
+    const broken = fieldBattle(["星野", "白子", "千世", "芹香"], "伊织")
+    const fragileCover = broken.sides[0].summons.find((s) => s.fieldCover && s.blockIdx === 0)
+    fragileCover.hp = 1
+    const brokenResult = run(broken, { type: "pass" })
+    const residue = brokenResult.state.sides[0].summons.find((s) => s.sourceKey === fragileCover.sourceKey)
+    const residueHtml = buildBattleHtml(brokenResult.state, brokenResult.events)
+    check("场地掩体在真实回合末被打碎后仍保留全损残骸，但机械上已经失效",
+      [Boolean(residue), residue?.alive,
+        /class="sm cover field-cover destroyed foe-blue" style="grid-column:1;/.test(residueHtml)],
+      [true, false, true])
 
     CFG.COVER_BLOCK_RATE = 0
     const failed = fieldBattle(["星野", "白子", "千世", "芹香"], "伊织")
