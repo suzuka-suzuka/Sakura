@@ -15,6 +15,7 @@ const DEFAULT_SCOPE_KEY = '__default__';
 const cache = new Map();
 const listeners = new Set();
 const EMPTY_OPTIONS = [];
+const EMPTY_DETAILS = {};
 
 function normalizeSelfId(value) {
     if (value == null) return null;
@@ -75,22 +76,41 @@ function readState(selfId, uiType) {
     const entry = cache.get(scopeKeyOf(selfId));
 
     if (!entry || (!entry.data && !entry.error)) {
-        return { loading: true, isDynamic: true, options: EMPTY_OPTIONS, label: '' };
+        return {
+            loading: true,
+            isDynamic: true,
+            options: EMPTY_OPTIONS,
+            details: EMPTY_DETAILS,
+            label: '',
+        };
     }
     // 请求失败或该 uiType 未在 dynamicOptionsConfig 中声明 → 回退成普通文本输入
     if (entry.error) {
-        return { loading: false, isDynamic: false, options: EMPTY_OPTIONS, label: '' };
+        return {
+            loading: false,
+            isDynamic: false,
+            options: EMPTY_OPTIONS,
+            details: EMPTY_DETAILS,
+            label: '',
+        };
     }
 
     const config = entry.data.config?.[uiType];
     if (!config) {
-        return { loading: false, isDynamic: false, options: EMPTY_OPTIONS, label: '' };
+        return {
+            loading: false,
+            isDynamic: false,
+            options: EMPTY_OPTIONS,
+            details: EMPTY_DETAILS,
+            label: '',
+        };
     }
 
     return {
         loading: false,
         isDynamic: true,
         options: entry.data.options?.[uiType] || EMPTY_OPTIONS,
+        details: entry.data.details?.[uiType] || EMPTY_DETAILS,
         label: config.label || '',
     };
 }
@@ -99,7 +119,8 @@ function sameState(a, b) {
     return a.loading === b.loading
         && a.isDynamic === b.isDynamic
         && a.label === b.label
-        && a.options === b.options;
+        && a.options === b.options
+        && a.details === b.details;
 }
 
 /**
@@ -113,7 +134,7 @@ export function invalidateDynamicOptions() {
 
 /**
  * 订阅某个 uiType 的动态选项
- * @returns {{ options: string[], label: string, loading: boolean, isDynamic: boolean }}
+ * @returns {{ options: string[], details: object, label: string, loading: boolean, isDynamic: boolean }}
  */
 export function useDynamicOptions(scopeSelfId, uiType) {
     const selfId = normalizeSelfId(scopeSelfId);

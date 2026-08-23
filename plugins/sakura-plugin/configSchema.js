@@ -10,9 +10,8 @@ import {
     normalizeTavilyRawContent,
 } from './lib/AIUtils/tavilyConfig.js';
 
-const COMMON_REASONING_LEVELS = ['default', 'off', 'minimal', 'low', 'medium', 'high'];
-const OPENAI_REASONING_EFFORT_OPTIONS = ['inherit', 'default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
-const GEMINI_THINKING_LEVEL_OPTIONS = ['inherit', 'default', 'off', 'minimal', 'low', 'medium', 'high'];
+const OPENAI_REASONING_EFFORT_OPTIONS = ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+const GEMINI_THINKING_LEVEL_OPTIONS = ['default', 'off', 'minimal', 'low', 'medium', 'high'];
 const ROUTING_STRATEGIES = ['round_robin', 'weighted_round_robin', 'priority', 'priority_weighted'];
 const ROUTING_STRATEGY_LABELS = [
     'round_robin=轮询',
@@ -348,6 +347,85 @@ export const ProvidersSchema = z.object({
     addUniqueFieldIssues(config.providers, 'id', ctx, ['providers']);
 }).describe('AI 供应商管理');
 
+function configuredTargetNumber(value) {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0
+        ? value
+        : null;
+}
+
+function migrateOpenAIReasoningLevel(value) {
+    if (value === 'off') return 'none';
+    if (['minimal', 'low', 'medium', 'high'].includes(value)) return value;
+    return 'default';
+}
+
+function migrateGeminiThinkingLevel(value) {
+    if (['off', 'minimal', 'low', 'medium', 'high'].includes(value)) return value;
+    return 'default';
+}
+
+export function migrateRoutesConfig(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+
+    const config = { ...value };
+    if (!Array.isArray(config.routes)) return config;
+
+    config.routes = config.routes.map((rawRoute) => {
+        if (!rawRoute || typeof rawRoute !== 'object' || Array.isArray(rawRoute)) {
+            return rawRoute;
+        }
+
+        const route = { ...rawRoute };
+        const routeTemperature = configuredTargetNumber(route.temperature);
+        const routeTopP = configuredTargetNumber(route.topP);
+        const hasLegacyReasoningLevel = Object.hasOwn(route, 'reasoningLevel');
+
+        if (Array.isArray(route.targets)) {
+            route.targets = route.targets.map((rawTarget) => {
+                if (!rawTarget || typeof rawTarget !== 'object' || Array.isArray(rawTarget)) {
+                    return rawTarget;
+                }
+
+                const target = { ...rawTarget };
+                if (!Object.hasOwn(target, 'temperature')) {
+                    target.temperature = configuredTargetNumber(target.temperatureOverride)
+                        ?? routeTemperature
+                        ?? -1;
+                }
+                if (!Object.hasOwn(target, 'topP')) {
+                    target.topP = configuredTargetNumber(target.topPOverride)
+                        ?? routeTopP
+                        ?? -1;
+                }
+
+                if (
+                    target.openaiReasoningEffort === 'inherit'
+                    || (!Object.hasOwn(target, 'openaiReasoningEffort') && hasLegacyReasoningLevel)
+                ) {
+                    target.openaiReasoningEffort = migrateOpenAIReasoningLevel(route.reasoningLevel);
+                }
+                if (
+                    target.geminiThinkingLevel === 'inherit'
+                    || (!Object.hasOwn(target, 'geminiThinkingLevel') && hasLegacyReasoningLevel)
+                ) {
+                    target.geminiThinkingLevel = migrateGeminiThinkingLevel(route.reasoningLevel);
+                }
+
+                delete target.temperatureOverride;
+                delete target.topPOverride;
+                return target;
+            });
+        }
+
+        delete route.temperature;
+        delete route.topP;
+        delete route.reasoningLevel;
+        return route;
+    });
+
+    return config;
+}
+
 const RouteTargetSchema = z.object({
     id: nonEmptyString('目标 ID').describe('目标 ID|路由内唯一'),
     provider: nonEmptyString('供应商').describe('供应商|#providerSelect'),
@@ -355,35 +433,37 @@ const RouteTargetSchema = z.object({
     enabled: z.boolean().default(true).describe('启用'),
     priority: z.number().int().default(0).describe('优先级|数值越大越优先'),
     weight: z.number().int().min(1).default(1).describe('权重|同优先级轮询权重'),
-    temperatureOverride: z.number().min(-1).max(2).default(-1).describe('温度覆盖|设为 -1 继承路由；建议不要和 Top-P 同时调整'),
-    topPOverride: z.number().min(-1).max(1).default(-1).describe('Top-P 覆盖|设为 -1 继承路由；建议不要和温度同时调整'),
+    temperature: z.number().min(-1).max(2).default(-1).describe('温度|-1 使用模型默认值；建议不要和 Top-P 同时调整'),
+    topP: z.number().min(-1).max(1).default(-1).describe('Top-P|-1 使用模型默认值；建议不要和温度同时调整'),
     openaiEnableThinking: z.boolean().default(false).describe('OpenAI 兼容思考开关|向兼容端点传入非标准 enable_thinking'),
-    openaiReasoningEffort: z.enum(OPENAI_REASONING_EFFORT_OPTIONS).default('inherit').describe('OpenAI 思考等级|inherit 使用路由统一等级；default 不传 reasoning_effort'),
+    openaiReasoningEffort: z.enum(OPENAI_REASONING_EFFORT_OPTIONS).default('default').describe('OpenAI 思考等级|default 不传 reasoning_effort'),
     stream: z.boolean().default(false).describe('流式响应|OpenAI 兼容端点使用 SSE，Gemini/Vertex 使用 generateContentStream；服务端拼接完成后再回复，并记录不含正文的时序诊断'),
-    geminiThinkingLevel: z.enum(GEMINI_THINKING_LEVEL_OPTIONS).default('inherit').describe('Gemini 思考等级|inherit 使用路由统一等级；default 不传 thinkingConfig'),
-    geminiThinkingBudget: z.number().int().min(-2).default(-2).describe('Gemini 思考预算|-2 忽略固定预算，改用 Gemini 思考等级；等级为 inherit 时继承路由统一思考等级。-1 由模型动态决定；0 关闭；正数为固定 token 预算'),
+    geminiThinkingLevel: z.enum(GEMINI_THINKING_LEVEL_OPTIONS).default('default').describe('Gemini 思考等级|default 不传 thinkingConfig'),
+    geminiThinkingBudget: z.number().int().min(-2).default(-2).describe('Gemini 思考预算|-2 忽略固定预算，改用当前目标的 Gemini 思考等级；-1 由模型动态决定；0 关闭；正数为固定 token 预算'),
     nativeWebSearch: z.boolean().default(false).describe('原生联网搜索|OpenAI 兼容端点传入 web_search；Gemini 3 / Vertex AI 传入 Google Search，并可与自定义工具混用'),
 });
 
 const RouteSchema = z.object({
     id: nonEmptyString('路由 ID').describe('路由 ID'),
     strategy: routingStrategy('供应商目标调度策略'),
-    temperature: z.number().min(-1).max(2).default(-1).describe('默认温度|-1 使用模型默认值；建议不要和 Top-P 同时调整'),
-    topP: z.number().min(-1).max(1).default(-1).describe('默认 Top-P|-1 使用模型默认值；建议不要和温度同时调整'),
-    reasoningLevel: z.enum(COMMON_REASONING_LEVELS).default('default').describe('统一思考等级|Target 可转换或覆盖为供应商原生参数'),
     maxAttempts: z.number().int().min(1).default(3).describe('最大尝试次数|一次请求最多尝试的目标与 Key 组合数'),
     retryDelayMs: z.number().int().min(0).default(1000).describe('重试间隔|毫秒'),
     timeoutMs: z.number().int().min(1000).default(300000).describe('单目标请求超时|毫秒；超时后由路由尝试下一个目标或 Key'),
-    targets: z.array(RouteTargetSchema).min(1, '至少配置一个路由目标').describe('路由目标|#nameField:id'),
+    targets: z.array(RouteTargetSchema).min(1, '至少配置一个路由目标').describe('路由目标|#routeTargets|#nameField:id'),
 }).superRefine((route, ctx) => {
     addUniqueFieldIssues(route.targets, 'id', ctx, ['targets']);
 });
 
-export const RoutesSchema = z.object({
+const RoutesObjectSchema = z.object({
     routes: z.array(RouteSchema).default([]).describe('逻辑模型路由|#nameField:id'),
 }).superRefine((config, ctx) => {
     addUniqueFieldIssues(config.routes, 'id', ctx, ['routes']);
 }).describe('AI 路由管理');
+
+export const RoutesSchema = z.preprocess(migrateRoutesConfig, RoutesObjectSchema);
+Object.defineProperty(RoutesSchema, 'configInputMigration', {
+    value: migrateRoutesConfig,
+});
 
 const ImageChannelsObjectSchema = z.object({
     openai: z.array(ImageOpenAIChannelSchema).default([ImageOpenAIChannelSchema.parse({})]).describe('OpenAI 生图渠道|配置 OpenAI 图片生成渠道'),
@@ -814,7 +894,12 @@ export const dynamicOptionsConfig = {
     providerSelect: {
         label: '供应商',
         sources: [
-            { module: 'Providers', path: 'providers', valueKey: 'id' },
+            {
+                module: 'Providers',
+                path: 'providers',
+                valueKey: 'id',
+                detailKeys: ['protocol', 'vertex'],
+            },
         ],
     },
     imageChannelSelect: {

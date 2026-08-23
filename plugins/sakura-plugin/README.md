@@ -102,10 +102,9 @@ Gemini/Vertex 生图仍由 `ImageChannels` 管理，Gemini 视频生成仍由 `C
 
 路由和凭据均支持 `round_robin`、`weighted_round_robin`、`priority`、`priority_weighted`。同一个逻辑路由可以配置多个使用相同模型名的供应商目标。
 
-生成参数放在路由和目标层：路由的 `temperature`、`topP`、`reasoningLevel` 是统一默认值；目标可通过 `temperatureOverride`、`topPOverride` 覆盖采样参数，并使用 `openaiReasoningEffort` 或 `geminiThinkingLevel` / `geminiThinkingBudget` 设置供应商原生思考参数。Provider 只管理连接和凭据，不承载生成参数。
+生成参数全部放在路由目标层：每个目标独立配置 `temperature`、`topP` 和对应协议的原生思考参数。Provider 只管理连接和凭据，不承载生成参数；网页会根据目标所选供应商的协议，仅显示 OpenAI 或 Gemini 对应的配置项。
 
 - `temperature` / `topP` 为 `-1` 时不发送，使用模型默认值。
-- `reasoningLevel: off` 会映射为 OpenAI `none`、Gemini `thinkingBudget: 0`。
 - Gemini `geminiThinkingBudget: -2` 表示使用思考等级，`-1` 表示自动预算，`0` 表示关闭。
 - 一般只调整 temperature 或 Top-P 其中一个。
 

@@ -150,11 +150,11 @@ function configuredNumber(override, fallback) {
 }
 
 export function resolveGenerationSettings(route, target) {
-  const commonLevel = route.reasoningLevel || "default";
+  const legacyCommonLevel = route.reasoningLevel || "default";
 
-  let openaiReasoningEffort = target.openaiReasoningEffort || "inherit";
+  let openaiReasoningEffort = target.openaiReasoningEffort || "default";
   if (openaiReasoningEffort === "inherit") {
-    openaiReasoningEffort = commonLevel === "off" ? "none" : commonLevel;
+    openaiReasoningEffort = legacyCommonLevel === "off" ? "none" : legacyCommonLevel;
   }
   if (openaiReasoningEffort === "default") {
     openaiReasoningEffort = undefined;
@@ -166,8 +166,8 @@ export function resolveGenerationSettings(route, target) {
   if (Number.isInteger(explicitBudget) && explicitBudget >= -1) {
     geminiThinkingBudget = explicitBudget;
   } else {
-    const targetLevel = target.geminiThinkingLevel || "inherit";
-    const resolvedLevel = targetLevel === "inherit" ? commonLevel : targetLevel;
+    const targetLevel = target.geminiThinkingLevel || "default";
+    const resolvedLevel = targetLevel === "inherit" ? legacyCommonLevel : targetLevel;
     if (resolvedLevel === "off") {
       geminiThinkingBudget = 0;
     } else if (resolvedLevel !== "default") {
@@ -176,8 +176,14 @@ export function resolveGenerationSettings(route, target) {
   }
 
   return {
-    temperature: configuredNumber(target.temperatureOverride, route.temperature),
-    topP: configuredNumber(target.topPOverride, route.topP),
+    temperature: configuredNumber(
+      target.temperature,
+      configuredNumber(target.temperatureOverride, route.temperature)
+    ),
+    topP: configuredNumber(
+      target.topP,
+      configuredNumber(target.topPOverride, route.topP)
+    ),
     openaiEnableThinking: target.openaiEnableThinking === true,
     openaiReasoningEffort,
     stream: target.stream === true,

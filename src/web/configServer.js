@@ -907,10 +907,12 @@ async function handleApi(req, res) {
             }
 
             const options = {};
+            const details = {};
 
 
             for (const [uiType, config] of Object.entries(dynamicConfig)) {
                 const values = [];
+                const valueDetails = {};
 
                 for (const source of config.sources || []) {
                     const moduleConfig = pluginConfigManager.getConfig('sakura-plugin', source.module, { selfId });
@@ -924,10 +926,27 @@ async function handleApi(req, res) {
                         if (value && !values.includes(value)) {
                             values.push(value);
                         }
+                        if (value && Array.isArray(source.detailKeys)) {
+                            const selectedDetails = {};
+                            for (const key of source.detailKeys) {
+                                const detailValue = item?.[key];
+                                if (
+                                    detailValue == null
+                                    || ['string', 'number', 'boolean'].includes(typeof detailValue)
+                                ) {
+                                    selectedDetails[key] = detailValue;
+                                }
+                            }
+                            valueDetails[value] = {
+                                ...(valueDetails[value] || {}),
+                                ...selectedDetails,
+                            };
+                        }
                     }
                 }
 
                 options[uiType] = values;
+                details[uiType] = valueDetails;
             }
 
             sendJson(res, {
@@ -935,6 +954,7 @@ async function handleApi(req, res) {
                 data: {
                     config: dynamicConfig,
                     options,
+                    details,
                 },
             });
         } catch (e) {

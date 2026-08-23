@@ -108,6 +108,19 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
                 />
             );
         }
+        if (uiType === 'routeTargets' && meta.items?.type === 'object') {
+            return (
+                <RouteTargetsField
+                    name={name}
+                    displayName={displayName}
+                    help={help}
+                    value={value}
+                    onChange={onChange}
+                    itemMeta={meta.items}
+                    scopeSelfId={scopeSelfId}
+                />
+            );
+        }
         // Array of objects → ObjectArrayField
         if (meta.items?.type === 'object' && meta.items?.children) {
             return (
@@ -710,7 +723,18 @@ function SingleGroupSelectField({ name, displayName, help, value, onChange, scop
  * fixed: 是否为固定长度数组（不能添加/删除）
  * nameField: 指定用于显示标题的字段名
  */
-function ObjectArrayField({ name, displayName, help, value, onChange, itemMeta, fixed, nameField, scopeSelfId = null }) {
+function ObjectArrayField({
+    name,
+    displayName,
+    help,
+    value,
+    onChange,
+    itemMeta,
+    fixed,
+    nameField,
+    scopeSelfId = null,
+    resolveItemMeta = null,
+}) {
     const [showAddModal, setShowAddModal] = useState(false);
     const [editIndex, setEditIndex] = useState(-1);
     const items = Array.isArray(value) ? value : [];
@@ -799,6 +823,7 @@ function ObjectArrayField({ name, displayName, help, value, onChange, itemMeta, 
                 <AddObjectModal
                     title={`添加 ${displayName}`}
                     itemMeta={itemMeta}
+                    resolveItemMeta={resolveItemMeta}
                     nextIndex={items.length}
                     onConfirm={handleAddItem}
                     onCancel={() => setShowAddModal(false)}
@@ -820,6 +845,7 @@ function ObjectArrayField({ name, displayName, help, value, onChange, itemMeta, 
                         </>
                     }
                     itemMeta={itemMeta}
+                    resolveItemMeta={resolveItemMeta}
                     initialData={items[editIndex]}
                     onConfirm={handleEditItem}
                     onCancel={() => setEditIndex(-1)}
@@ -871,8 +897,17 @@ function buildEmptyObjectItem(itemMeta, nextIndex) {
     return item;
 }
 
-function AddObjectModal({ title, itemMeta, nextIndex = 0, onConfirm, onCancel, scopeSelfId = null }) {
+function AddObjectModal({
+    title,
+    itemMeta,
+    resolveItemMeta = null,
+    nextIndex = 0,
+    onConfirm,
+    onCancel,
+    scopeSelfId = null,
+}) {
     const [draft, setDraft] = useState(() => buildEmptyObjectItem(itemMeta, nextIndex));
+    const visibleItemMeta = resolveItemMeta?.(itemMeta, draft) || itemMeta;
 
     const handleFieldChange = useCallback((key, val) => {
         setDraft(prev => ({ ...prev, [key]: val }));
@@ -893,7 +928,7 @@ function AddObjectModal({ title, itemMeta, nextIndex = 0, onConfirm, onCancel, s
                 </div>
                 <form onSubmit={handleSubmit}>
                     <div className="modal-body">
-                        {itemMeta.children && Object.entries(itemMeta.children).map(([childKey, childMeta]) => (
+                        {visibleItemMeta.children && Object.entries(visibleItemMeta.children).map(([childKey, childMeta]) => (
                             <ConfigField
                                 key={childKey}
                                 name={childKey}
@@ -925,8 +960,18 @@ function AddObjectModal({ title, itemMeta, nextIndex = 0, onConfirm, onCancel, s
  * 所有字段预填充当前值
  * readOnlyFields: 只读字段列表（固定数组中的标识字段）
  */
-function EditObjectModal({ title, itemMeta, initialData, onConfirm, onCancel, readOnlyFields = [], scopeSelfId = null }) {
+function EditObjectModal({
+    title,
+    itemMeta,
+    resolveItemMeta = null,
+    initialData,
+    onConfirm,
+    onCancel,
+    readOnlyFields = [],
+    scopeSelfId = null,
+}) {
     const [draft, setDraft] = useState(() => structuredClone(initialData));
+    const visibleItemMeta = resolveItemMeta?.(itemMeta, draft) || itemMeta;
 
     const handleFieldChange = useCallback((key, val) => {
         setDraft(prev => ({ ...prev, [key]: val }));
@@ -947,7 +992,7 @@ function EditObjectModal({ title, itemMeta, initialData, onConfirm, onCancel, re
                 </div>
                 <form onSubmit={handleSubmit}>
                     <div className="modal-body">
-                        {itemMeta.children && Object.entries(itemMeta.children).map(([childKey, childMeta]) => {
+                        {visibleItemMeta.children && Object.entries(visibleItemMeta.children).map(([childKey, childMeta]) => {
                             const isReadOnly = readOnlyFields.includes(childKey);
                             if (isReadOnly) {
                                 // 只读字段显示为禁用状态
@@ -1383,6 +1428,85 @@ function ModelSelectField({ name, displayName, help, value, onChange, providerId
                 </div>
             )}
         </div>
+    );
+}
+
+const OPENAI_ROUTE_TARGET_FIELDS = new Set([
+    'openaiEnableThinking',
+    'openaiReasoningEffort',
+]);
+const GEMINI_ROUTE_TARGET_FIELDS = new Set([
+    'geminiThinkingLevel',
+    'geminiThinkingBudget',
+]);
+
+function RouteTargetsField({
+    name,
+    displayName,
+    help,
+    value,
+    onChange,
+    itemMeta,
+    scopeSelfId = null,
+}) {
+    const {
+        details: providerDetails,
+        loading: providerDetailsLoading,
+    } = useDynamicOptions(scopeSelfId, 'providerSelect');
+
+    const resolveItemMeta = useCallback((baseMeta, targetDraft) => {
+        const providerId = targetDraft?.provider;
+        const protocol = providerDetails?.[providerId]?.protocol;
+        const hiddenFields = new Set();
+
+        if (!providerId || providerDetailsLoading) {
+            for (const field of OPENAI_ROUTE_TARGET_FIELDS) hiddenFields.add(field);
+            for (const field of GEMINI_ROUTE_TARGET_FIELDS) hiddenFields.add(field);
+        } else if (protocol === 'openai') {
+            for (const field of GEMINI_ROUTE_TARGET_FIELDS) hiddenFields.add(field);
+        } else if (protocol === 'gemini') {
+            for (const field of OPENAI_ROUTE_TARGET_FIELDS) hiddenFields.add(field);
+        }
+
+        const visibleChildren = Object.fromEntries(
+            Object.entries(baseMeta.children || {}).filter(([field]) => !hiddenFields.has(field))
+        );
+        return { ...baseMeta, children: visibleChildren };
+    }, [providerDetails, providerDetailsLoading]);
+
+    const handleChange = useCallback((targets) => {
+        onChange(targets.map((target) => {
+            const protocol = providerDetails?.[target?.provider]?.protocol;
+            if (protocol === 'openai') {
+                return {
+                    ...target,
+                    geminiThinkingLevel: 'default',
+                    geminiThinkingBudget: -2,
+                };
+            }
+            if (protocol === 'gemini') {
+                return {
+                    ...target,
+                    openaiEnableThinking: false,
+                    openaiReasoningEffort: 'default',
+                };
+            }
+            return target;
+        }));
+    }, [onChange, providerDetails]);
+
+    return (
+        <ObjectArrayField
+            name={name}
+            displayName={displayName}
+            help={help}
+            value={value}
+            onChange={handleChange}
+            itemMeta={itemMeta}
+            nameField="id"
+            scopeSelfId={scopeSelfId}
+            resolveItemMeta={resolveItemMeta}
+        />
     );
 }
 
