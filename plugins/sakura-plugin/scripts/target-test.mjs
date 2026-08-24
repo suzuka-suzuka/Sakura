@@ -246,6 +246,14 @@ check("蓝1 的普攻目标（同战场还有红1）", autoPairs(setup(OUT, OUT,
 const deadMapHtml = buildBattleHtml(setup(OUT, OUT, [[1, 1], [1, 2]]))
 check("阵亡角色仍变灰，但战场图不再显示 KO 字样",
   [/class="unit dead"/.test(deadMapHtml), /class="ko"|\.ko\{/.test(deadMapHtml)], [true, false])
+const roundMapState = setup(OUT, OUT)
+roundMapState.round = 8
+const roundMapHtml = buildBattleHtml(roundMapState)
+check("战场图最上方居中显示当前轮数", [
+  /<div class="roundTitle">第 8 轮<\/div>/.test(roundMapHtml)
+    && roundMapHtml.indexOf('class="roundTitle"') < roundMapHtml.indexOf('class="head"'),
+  /\.roundTitle\{[^}]*text-align:center/.test(roundMapHtml),
+], [true, true])
 
 console.log("\n=== 3. 红方 1、2 全灭，蓝 1、2 才越界 ===")
 const cross = autoPairs(setup(OUT, OUT, [[1, 0], [1, 1]]))

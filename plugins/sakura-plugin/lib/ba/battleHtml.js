@@ -25,8 +25,10 @@ const HUD_HEIGHT = 510
 const SUPPORT_GAP = 300
 /** 阵列加高：前/中/后三层 + 抛出召唤物在敌方前排前面那一格 + 双方各一条支援带 */
 const ARENA_H = 1200 + SUPPORT_GAP * 2
-// 顶栏 130（含上下外边距）+ 阵列 + HUD；HUD 贴底绝对定位，三段正好接上
-export const MAP_HEIGHT = 130 + ARENA_H + HUD_HEIGHT
+/** 轮数标题 + 双方总血条顶栏（含上下外边距） */
+const TOP_HEIGHT = 164
+// 顶栏 + 阵列 + HUD；HUD 贴底绝对定位，三段正好接上
+export const MAP_HEIGHT = TOP_HEIGHT + ARENA_H + HUD_HEIGHT
 
 const pctOf = (u) => Math.max(0, Math.min(100, (u.hp / u.maxhp) * 100))
 
@@ -565,7 +567,7 @@ function hud(state) {
 
 // ---------------- 顶栏 ----------------
 
-/** 一行：红方血条 vs 蓝方血条，各自下面写群昵称。其余一概不放 */
+/** 最上方居中显示当前轮数，下面一行是红方血条 vs 蓝方血条与群昵称。 */
 function header(state) {
   const ratio = (i) => {
     const s = state.sides[i]
@@ -578,7 +580,9 @@ function header(state) {
       <div class="bar"><s style="width:${ratio(i)}%"></s><em>${ratio(i).toFixed(0)}%</em></div>
       <div class="nm">${esc(state.sides[i].name)}</div>
     </div>`
-  return `<div class="head">${team(1)}<span class="vs">VS</span>${team(0)}</div>`
+  const round = Math.max(1, Math.floor(Number(state.round) || 1))
+  return `<div class="roundTitle">第 ${round} 轮</div>
+  <div class="head">${team(1)}<span class="vs">VS</span>${team(0)}</div>`
 }
 
 // ---------------- 样式 ----------------
@@ -595,8 +599,11 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 #map::before{content:"";position:absolute;inset:0;opacity:.5;
   background:repeating-linear-gradient(115deg,rgba(78,147,232,.09) 0 2px,transparent 2px 74px)}
 
-/* 顶栏：红条 VS 蓝条，昵称写在条下面，别的都不要 */
-.head{display:flex;align-items:flex-start;gap:22px;margin:22px 34px 14px;padding:16px 28px;
+/* 顶栏：轮数独占最上方一行；下面是红条 VS 蓝条，昵称仍写在条下面。 */
+.roundTitle{position:relative;margin:14px 34px 8px;text-align:center;
+  font-size:30px;line-height:34px;font-weight:700;letter-spacing:4px;color:#1E3348;
+  font-variant-numeric:tabular-nums}
+.head{display:flex;align-items:flex-start;gap:22px;margin:0 34px 14px;padding:16px 28px;
   border-radius:18px;background:rgba(255,255,255,.94);border:1px solid rgba(70,120,175,.2);
   box-shadow:0 4px 14px rgba(40,80,125,.1)}
 .head .team{flex:1;min-width:0}
