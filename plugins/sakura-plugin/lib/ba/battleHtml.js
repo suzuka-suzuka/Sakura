@@ -343,7 +343,6 @@ function unitCell(state, side, u, fx) {
       ${chibi ? `<img src="${chibi}" alt="">` : `<div class="ph" style="background:${ATTACK[t.atkType]}">${esc(t.name[0])}</div>`}
       <div class="shadow"></div>
     </div>
-    ${u.alive ? "" : `<div class="ko">KO</div>`}
   </div>`
 }
 
@@ -635,7 +634,7 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 .unit{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px}
 /* 变灰只作用到角色本体，不能套在 .unit 上 —— 数字是 .unit 的子元素，
    一起淡掉会让「打死这一下」正好最看不清 */
-.unit.dead>.bars,.unit.dead>.art,.unit.dead>.ko{opacity:.46;filter:grayscale(1)}
+.unit.dead>.bars,.unit.dead>.art{opacity:.46;filter:grayscale(1)}
 /* 固定高度 + 底对齐：状态格和盾条时有时无，靠这个保证血条在所有格子里都齐平 */
 .bars{width:210px;height:50px;display:flex;flex-direction:column;justify-content:flex-end;gap:3px}
 .marks{display:flex;gap:3px;margin-bottom:1px}
@@ -665,8 +664,6 @@ body{width:${MAP_WIDTH}px;height:${MAP_HEIGHT}px;font-family:${FONT_STACK};
 .shieldbar{position:relative;height:6px;border-radius:3px;overflow:hidden}
 .shieldbar s{display:block;height:100%;border-radius:3px;background:#2A46D2}
 .seg{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:rgba(255,255,255,.9)}
-.ko{margin-top:2px;padding:2px 10px;border-radius:6px;font-size:12px;letter-spacing:1px;
-  background:rgba(60,80,100,.16);color:#3E5468}
 .art{position:relative;width:250px;height:270px;display:flex;align-items:flex-end;justify-content:center}
 .art img{max-width:100%;max-height:100%;object-fit:contain;filter:drop-shadow(0 8px 11px rgba(35,70,110,.28))}
 .art .ph{width:150px;height:150px;border-radius:50%;display:flex;align-items:center;justify-content:center;

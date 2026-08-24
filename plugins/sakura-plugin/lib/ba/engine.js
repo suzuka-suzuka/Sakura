@@ -639,7 +639,7 @@ function pickInLayer(cands, fromIdx) {
 }
 
 /**
- * 多目标只在自动主目标那一层横着铺。一层里凑不够人数就退化成单体。
+ * 多目标只在主目标那一层横着铺。一层里凑不够人数就退化成单体。
  */
 function sameLineHits(cands, primary, count) {
   // 佩洛洛属于独立的「超前」层。它虽然在正式目标池里，但不是前排学生：
@@ -867,7 +867,7 @@ function laneTarget(u, foes, pick = null, opts = {}) {
 }
 
 /**
- * 从自动主目标向外扩散选人。
+ * 从主目标向外扩散选人（EX 可由玩家点名，普通技能 / 普攻走自动索敌）。
  *
  * 2 目标扩散不跨战场：主目标在 3 位就只可能波及 4 位，
  * 同战场只剩一人时当场退化成单体。
@@ -875,7 +875,7 @@ function laneTarget(u, foes, pick = null, opts = {}) {
 function expandAdjacent(pool, primary, count) {
   // count≥3 是「以主目标为中心向两边炸开」（睦月的三连雷、日富美的圆），
   // 走**固定窗口** [idx−half, idx+half] 而不是贪心找邻居：越界的那一发就是浪费掉，
-  // 不能往另一边多抓一个来凑满。自动目标在 1 号位只炸 {1,2}，在 2 号位才炸满 {1,2,3}。
+  // 不能往另一边多抓一个来凑满。主目标在 1 号位只炸 {1,2}，在 2 号位才炸满 {1,2,3}。
   // 这里的中心是敌方 primary.idx，与施放者自己站在几号位无关。
   //
   // 战场分割也在这里放开 —— 一个战场只有 2 个人，不跨就永远达不到设计的目标数。
@@ -1000,17 +1000,60 @@ function allyLaneTarget(u, allies, skill) {
   return u.alive ? u : null
 }
 
+const MANUAL_ENEMY_EX_TARGETS = new Set([
+  "enemy_single", "enemy_adjacent", "enemy_chain", "enemy_instances",
+])
+const MANUAL_ALLY_EX_TARGETS = new Set(["ally_single", "ally_adjacent"])
+
 /**
+ * EX 是否需要玩家点一个角色作为落点。
+ *
+ * 全体 / 随机 / 循环 / 自身技本身没有单一落点，直接释放；单体、范围中心、连发首目标与
+ * 单体友方技必须点名。泉奈和小春的模板目标不足以表达交互，按效果单独覆盖。
+ */
+export function exTargetRuleOf(ex) {
+  if (!ex) return null
+  if ((ex.effects || []).some((e) => e.type === "reposition")) {
+    return { scope: "ally", mode: "reposition", allowDead: true, studentOnly: true }
+  }
+  if ((ex.effects || []).some((e) => e.scope === "mirror_ally")) {
+    // 小春既能用「打」点敌方，也能用「奶 / 给」点友方；两边都合法，但不能省略动词让引擎猜。
+    return { scopes: ["foe", "ally"], mode: "mirror_ally", requireExplicitScope: true }
+  }
+  const tg = ex.target || "enemy_single"
+  if (MANUAL_ENEMY_EX_TARGETS.has(tg)) return { scope: "foe", mode: "primary" }
+  if (MANUAL_ALLY_EX_TARGETS.has(tg)) return { scope: "ally", mode: "primary" }
+  return null
+}
+
+/** 单阵营规则继续用 `scope`；小春这种双阵营规则用 `scopes`。 */
+const exTargetScopesOf = (rule) => rule?.scopes || (rule?.scope ? [rule.scope] : [])
+
+/** 把已经解析到阵营和号位的点名还原成当前战场对象；掩体不是正式目标。 */
+function targetFromPick(side, pick, { allowDead = false } = {}) {
+  if (!pick || !side) return null
+  if (pick.summon) {
+    return perorosOf(side).find((s) =>
+      (!pick.summonKey || s.sourceKey === pick.summonKey)
+      && (pick.summonId == null || s.id === pick.summonId)
+      && (pick.idx == null || s.idx === pick.idx)) || null
+  }
+  const target = side.units[pick.idx]
+  return target && (allowDead || target.alive) ? target : null
+}
+
+/**
+ * @param {object} [pick] EX 点名；普通技能 / 普攻不传，继续使用当前自动索敌。
  * @returns {Array<object>} 命中的单位列表（AoE 无衰减，每个目标吃全额）
  */
-function resolveTargets(state, u, skill, foes, allies) {
+function resolveTargets(state, u, skill, foes, allies, pick) {
   const tg = skill.target || "enemy_single"
   const count = skill.count || 1
 
   if (tg === "self") return [u]
   if (tg === "ally_all") return aliveOf(allies)
   /**
-   * 点名奶。人数和挑法以原文措辞为准，玩家指不了（跟绿 / 小春同一条）：
+   * 普通技能的自动单奶。人数和挑法以原文措辞为准（绿 / 花子等）：
    *   `ally_lowest`（绿 / 花子普技）「生命值百分比**最低**」→ 按血量挑，并列再按站位就近；
    *     count 可以 > 1（花子爱用品是 2 名最残）
    *   `ally_hurt`（小春）原文只写「不高于 50%」，**没说最低** → 够格的人里按站位就近喂
@@ -1054,14 +1097,30 @@ function resolveTargets(state, u, skill, foes, allies) {
   const pool = tg.startsWith("ally") ? allies : foes
   let primary = null
 
+  // 小春「奶」：玩家点己方落点，伤害只从该号位正对面的存活目标起算；对面空着时不自动换人。
+  // 小春「打」：玩家直接点敌方伤害中心，治疗则由 mirror_ally 取该敌方正对位的存活友方。
+  // 伤害中心一旦存在，仍走当前 enemy_adjacent 展开，因此佩洛洛、同身位和范围形状规则都保留。
+  const mirrorAlly = (skill.effects || []).some((e) => e.scope === "mirror_ally")
+  if (mirrorAlly && pick?.scope === "ally") {
+    const mate = targetFromPick(allies, pick)
+    if (!mate) return []
+    primary = attackablesOf(foes).find((t) => t.idx === mate.idx) || null
+    if (!primary) return []
+  } else if (pick) {
+    const pickedSide = pick.scope === "ally" ? allies : foes
+    primary = targetFromPick(pickedSide, pick)
+    // 点名失效绝不退回自动索敌；validateAction 会在扣费前给出具体原因。
+    if (!primary) return []
+  }
+
   if (tg === "enemy_random") return attackablesOf(foes) // 逐段随机，在 strike 里再抽
-  // 连发第一发也按固定索敌，后续各段仍在 execute 里重新锁定。
+  // 连发第一发使用玩家点名；后续各段仍在 execute 里按普通索敌重新锁定。
   if (tg === "enemy_chain") {
-    primary = laneTarget(u, foes)
+    if (!primary) primary = laneTarget(u, foes)
     return primary ? [primary] : []
   }
 
-  // 玩家只选释放者；落点先服从技能自带索敌，再走位置规则。
+  // 普通技能 / 普攻以及不需要点名的 EX 仍服从技能自带索敌和位置规则。
   if (!primary) {
     // 切里诺普技的「攻击力最高」是选人条件，不是开火：嘲讽拉得走柚子那种带伤害的最高攻索敌，
     // 但改不了集火标记落在谁头上。过期之后火力还得锁回那个最高攻的人。
@@ -1079,12 +1138,12 @@ function resolveTargets(state, u, skill, foes, allies) {
   // Provoke / Focus 只替换 primary（主目标 / 范围中心），绝不改技能原本的范围形状。
   // 同身位圆 / 扇仍以替换后的 primary 身位筛溅射；只有 depth=through 才无视身位。
   // 例如爱丽丝直线永远贯穿主目标所在整个战场；桃 / 纯子仍以新主目标为中心铺三路。
-  // 支援不吃 Provoke、但会执行 Focus，tauntTargetOf 的 noProvoke 分支已在 laneTarget 区分两者。
+  // 自动行动中的支援不吃 Provoke、但会执行 Focus；玩家点名的 EX 已在上面直接确定 primary。
   /**
    * **圈数跟着正式目标数走**（响，全 272 人只有她）。`instances` 是原文写死的圈数（5）；
    * 平时四名学生只落 4 圈，有佩洛洛时它也成为圈心，正好可以落满 5 圈。
    *
-   * 圈数取 `min(instances, attackablesOf(foes).length)`，**每个圈的伤害不变**；圈心从自动主目标起
+   * 圈数取 `min(instances, attackablesOf(foes).length)`，**每个圈的伤害不变**；圈心从玩家点名的主目标起
    * 按号位绕圈，一人一个。每个圈仍按自己的半径铺（响是半径 150 → 同战场同身位 2 人），
    * 所以同一个人可能被相邻的两个圈盖到 —— 那是圆形范围重叠的自然结果，不是重复计算。
    */
@@ -1116,11 +1175,23 @@ function resolveTargets(state, u, skill, foes, allies) {
   return [primary]
 }
 
-function resolveTargetPlan(state, u, skill, foes, allies) {
-  return { targets: resolveTargets(state, u, skill, foes, allies) }
+function resolveTargetPlan(state, u, skill, foes, allies, pick) {
+  return { targets: resolveTargets(state, u, skill, foes, allies, pick) }
 }
 
 // ---------------- 伤害 ----------------
+
+/**
+ * 开局伤害保护：1~3 轮 50%，之后每轮 +10%，第 8 轮起恢复 100%。
+ * 只缩放伤害；治疗、护盾和纯子的当前生命自损都不属于「角色造成的伤害」。
+ */
+export function roundDamageScale(round) {
+  const r = Math.max(1, Math.floor(Number(round) || 1))
+  if (r >= CFG.OPENING_DAMAGE_FULL_ROUND) return 1
+  if (r <= CFG.OPENING_DAMAGE_HOLD_ROUNDS) return CFG.OPENING_DAMAGE_RATE
+  return Math.min(1, Number((CFG.OPENING_DAMAGE_RATE
+    + (r - CFG.OPENING_DAMAGE_HOLD_ROUNDS) * CFG.OPENING_DAMAGE_STEP).toFixed(10)))
+}
 
 function applyDamage(ctx, src, tgt, dmg, meta = {}) {
   const total = dmg
@@ -1262,6 +1333,7 @@ function strike(ctx, src, tgt, hits, actionKind, skill, hitBlocks) {
     let d = atk * (pct / 100) * profile.aff * profile.dm * profile.dealF * profile.takeF
     d *= randRange(state, floor, 1)
     if (crit) d *= profile.critMul
+    d *= roundDamageScale(state.round)
     d = Math.max(1, d)
     out.total += d
     if (intercepted) projectedCoverHp -= d
@@ -1341,9 +1413,9 @@ function heal(ctx, src, tgt, amount) {
  * - `ally_target` 自动选择的己方目标（绿 / 花江 / 芹娜）。跟默认分支同义，
  *   但名字不同才读得出「这是我方那一个」而不是「打到的敌人」
  * - `ally_named`  指名给某个队友，人不在场就整条不生效（绿 ⇄ 桃 的联动）
- * - `mirror_ally` 小春 EX：治疗自动攻击主目标对位的己方主力；该号位阵亡则落空
+ * - `mirror_ally` 小春 EX：奶友方时治疗所点友方；打敌方时治疗该敌方正对位的存活友方
  */
-function scopeTargets(scope, u, allies, dmgTargets, eff) {
+function scopeTargets(scope, u, allies, dmgTargets, eff, pick) {
   if (scope === "self") return [u]
   if (scope === "ally_all") return aliveOf(allies)
   if (scope === "ally_named") {
@@ -1351,6 +1423,8 @@ function scopeTargets(scope, u, allies, dmgTargets, eff) {
     return t ? [t] : []
   }
   if (scope === "mirror_ally") {
+    const picked = pick?.scope === "ally" ? targetFromPick(allies, pick) : null
+    if (picked) return [picked]
     const primary = dmgTargets[0]
     const mate = primary ? allies.units[primary.idx] : null
     return mate?.alive ? [mate] : []
@@ -1373,7 +1447,7 @@ function altHitsOf(u, skill) {
 /**
  * @param {"ex"|"skill"|"normal"} [actionKind] 决定自身进攻向增益是不是「从下个己方回合才跳」
  */
-function applyEffects(ctx, u, skill, dmgTargets, allies, actionKind) {
+function applyEffects(ctx, u, skill, dmgTargets, allies, actionKind, pick) {
   const { state } = ctx
   const T = state.turnId
   const me = state.sides[u.side]
@@ -1393,7 +1467,7 @@ function applyEffects(ctx, u, skill, dmgTargets, allies, actionKind) {
     if (eff.inactive) continue // 技能 1 级时数值为 0，别占一层 buff
     // 编队条件（绿 ⇄ 桃）：那位队友没同时上场，这条效果整条不生效
     if (eff.ifAlly && !me.units.some((a) => a.id === eff.ifAlly)) continue
-    const targets = scopeTargets(eff.scope, u, allies, dmgTargets, eff)
+    const targets = scopeTargets(eff.scope, u, allies, dmgTargets, eff, pick)
     switch (eff.type) {
       case "buff": {
         // 暴击伤害系的固定值单位是万分比，印原始数字玩家读不懂
@@ -1601,21 +1675,17 @@ function applyEffects(ctx, u, skill, dmgTargets, allies, actionKind) {
         break
 
       /**
-       * 位移（泉奈）：朝本次自动攻击主目标的号位移动一格。
-       * 四格模型里仍用 swapPos 保持「一格一人」，但这在规则上是泉奈移动，不要求邻位队友存活：
-       * 邻位已经阵亡时，她照样进入那个空出的号位，阵亡单位对象退到她原来的格子。
+       * 位移（泉奈）：和玩家点名的相邻队友交换号位。
+       * 四格模型里仍用 swapPos 保持「一格一人」；邻位队友已经阵亡时也能进入空位，
+       * 阵亡单位对象退到泉奈原来的格子。
        */
       case "reposition": {
-        const aim = dmgTargets.find((t) => t.side !== u.side)
-          || laneTarget(u, state.sides[1 - u.side])
-        if (!aim || aim.idx === u.idx) { ctx.log(`  ${nameOf(u)} 已与目标对位，留在原位`); break }
-        const next = u.idx + Math.sign(aim.idx - u.idx)
-        const dest = me.units[next]
-        if (!dest) { ctx.log(`  ${nameOf(u)} 已在战线边缘，留在原位`); break }
+        const dest = pick?.scope === "ally" && !pick.summon ? me.units[pick.idx] : null
+        if (!dest || dest === u) { ctx.log(`  ${nameOf(u)} 没有可交换的相邻目标，留在原位`); break }
         const destWasAlive = dest.alive
         const crossed = zoneOf(u.idx) !== zoneOf(dest.idx)
         swapPos(state, me, u, dest)
-        ctx.log(`  ${nameOf(u)} 朝 ${nameOf(aim)} 移动一格` +
+        ctx.log(`  ${nameOf(u)} 与 ${nameOf(dest)} 交换站位` +
           `${destWasAlive ? `（${nameOf(dest)} 调整到她原来的位置）` : `（进入 ${nameOf(dest)} 的阵亡位置）`}` +
           `${crossed ? "，跨过战场分界" : ""}`)
         break
@@ -1760,17 +1830,23 @@ function blockAt(skill, hitBlocks, i) {
  * @param {string} label 日志抬头，含技能名
  * @param {"ex"|"skill"|"normal"} actionKind 供渲染层区分动作类型
  * @param {{targets:Array<object>}} [lockedPlan] ③-a 同时锁定的落点计划，传入后不再重算、打死也不换人
+ * @param {object} [pick] 玩家为 EX 点名的角色；普通技能 / 普攻不传
  */
-function execute(ctx, u, skill, label, actionKind, lockedPlan) {
+function execute(ctx, u, skill, label, actionKind, lockedPlan, pick) {
   const { state } = ctx
   const me = state.sides[u.side]
   const foes = state.sides[1 - u.side]
   const locked = Boolean(lockedPlan)
-  const plan = lockedPlan || resolveTargetPlan(state, u, skill, foes, me)
+  const plan = lockedPlan || resolveTargetPlan(state, u, skill, foes, me, pick)
   const { targets } = plan
   // 一个合法目标都没有 = 这一发根本没出去。返回 false 让调用方决定要不要算「出手过」——
   // 小春的「我来治疗！」要求队友血量 ≤50%，全队满血时她不该白白扣掉冷却和普攻
-  if (!targets.length && skill.target !== "self") return false
+  const pickedEffectTarget = (skill.effects || []).some((e) => e.scope === "mirror_ally")
+    && pick?.scope === "ally" ? targetFromPick(me, pick) : null
+  if (!targets.length && skill.target !== "self" && !pickedEffectTarget) return false
+
+  // 小春正对面的格子为空时仍然正常治疗，只是没有伤害对象。
+  const shownTargets = targets.length ? targets : [pickedEffectTarget]
 
   ctx.log(`[${u.side === 0 ? "蓝" : "红"}] ${nameOf(u)} ${label}`)
   // action.targets 是「这一发实际打到谁」，战场图按它画连线。
@@ -1779,10 +1855,10 @@ function execute(ctx, u, skill, label, actionKind, lockedPlan) {
     type: "action", source: unitRef(u),
     action: actionKind,
     skillName: skill.name || null,
-    kind: skill.hits ? "damage" : "support",
-    targetType: skill.target || "enemy_single",
+    kind: skill.hits && targets.length ? "damage" : "support",
+    targetType: targets.length ? (skill.target || "enemy_single") : "ally_single",
     // 掩体只改变底层承伤对象；箭头和玩家可见的伤害反馈始终留在技能自动选中的人身上。
-    targets: targets.map(unitRef),
+    targets: shownTargets.map(unitRef),
   }
   emitEvent(ctx, actionEv)
 
@@ -1820,13 +1896,13 @@ function execute(ctx, u, skill, label, actionKind, lockedPlan) {
         if (!hit.includes(aim)) hit.push(aim)
       }
     } else if (!locked && skill.target === "enemy_chain") {
-      // 连发：第一发沿用本技能的固定索敌，后面每一发都照普攻的规则重锁一次
+      // 连发：第一发沿用玩家点名，后面每一发都照普攻的规则重锁一次
       //（人偶 → 前排 → 中排 → 后排），不再有「不能和上一发相同」那条 ——
       // 有前排就后两发全打前排，有人偶就全打人偶，这才是「视作普攻索敌」。
       // 每发都在结算之后重算，所以打死人会自动换目标（本战场清空就越界）。
       const first = targets[0]
       for (const [i, pct] of hits.entries()) {
-        // 第一枪沿用初始固定索敌；后续每枪按普攻规则重锁，Block 跟着该枪交给 strike。
+        // 第一枪沿用点名目标；后续每枪按普攻规则重锁，Block 跟着该枪交给 strike。
         const t = i === 0 && first?.alive
           ? first
           : laneTarget(u, foes)
@@ -1883,7 +1959,7 @@ function execute(ctx, u, skill, label, actionKind, lockedPlan) {
   // 只有连发 / 循环 / 弹射这类未锁定技能，才用结算过程中实际换到的人回填。
   if (hit.length && !locked) actionEv.targets = hit.map(unitRef)
 
-  applyEffects(ctx, u, skill, hit.length ? hit : targets, me, actionKind)
+  applyEffects(ctx, u, skill, hit.length ? hit : targets, me, actionKind, pick)
   return true
 }
 
@@ -2103,7 +2179,7 @@ function tickPeriodicDamage(ctx, tgt, d) {
 
   // 老存档兼容：以前在施放时把 `atk × scale` 算死，既没有来源也没有倍率。
   if (!hits?.length) {
-    const hurt = Math.max(1, d.amount || 0)
+    const hurt = Math.max(1, (d.amount || 0) * roundDamageScale(state.round))
     applyPeriodicDamage(ctx, tgt, hurt, {
       icon: d.icon, hits: 1, landed: 1, critHits: 0,
       aff: 1, attackType: d.attackType || "持续",
@@ -2143,6 +2219,7 @@ function tickPeriodicDamage(ctx, tgt, d) {
     let amount = atk * (pct / 100) * aff * dm * Math.max(0.1, dealF) * takeF
     amount *= randRange(state, floor, 1)
     if (isCrit) amount *= cm
+    amount *= roundDamageScale(state.round)
     total += Math.max(1, amount)
   }
 
@@ -2335,28 +2412,99 @@ export function turnCostOf(side) {
   return Math.min(CFG.COST_MAX, Math.floor(side.cost))
 }
 
+function exTargetHint(u, rule) {
+  const name = nameOf(u)
+  if (rule?.mode === "reposition") {
+    return `${name}的 EX 需要指定相邻友方，例：${name}ex换<相邻角色>`
+  }
+  if (rule?.mode === "mirror_ally") {
+    return `${name}的 EX 需要明确写“打”或“奶”：${name}ex打<敌方角色> / ${name}ex奶<友方角色>`
+  }
+  const side = rule?.scope === "ally" ? "友方" : "敌方"
+  const verb = rule?.scope === "ally" ? "给" : "打"
+  return `${name}的 EX 需要指定${side}目标，例：${name}ex${verb}<${side}角色>`
+}
+
+function exWrongScopeHint(u, rule) {
+  const name = nameOf(u)
+  if (rule?.mode === "reposition") return `${name}只能和相邻友方换位，例：${name}ex换<相邻角色>`
+  if (rule?.mode === "mirror_ally") {
+    return `${name}要用“打”指定敌方、用“奶 / 给”指定友方：${name}ex打<敌方角色> / ${name}ex奶<友方角色>`
+  }
+  const side = rule?.scope === "ally" ? "友方" : "敌方"
+  const verb = rule?.scope === "ally" ? "给" : "打"
+  return `${name}的 EX 要指定${side}目标，请写「${name}ex${verb}<${side}角色>」`
+}
+
 /**
- * 把指令里的角色名换算成号位。
- * 同队不允许重名，所以名字能唯一定位——战场图上也就不用再标号位了。
+ * 把指令里的施放者与点名对象换算成号位。
+ * 支援可以施放 EX，但不站场、不能成为点名目标；佩洛洛是正式目标，掩体不是。
  * @returns {{casts:Array}|{error:string}}
  */
 function resolveCasts(state, action) {
   if (action.type !== "ex") return { casts: [] }
-  // 支援也能放 EX，所以按名字找人要在 4 主力 + 2 支援里找
-  const mine = castersOf(state.sides[state.activeSide])
+  const active = state.activeSide
+  const mySide = state.sides[active]
+  const mine = castersOf(mySide)
   const pick = (units, id) => units.find((u) => u.id === id)
   const label = (id) => BY_ID[id]?.name || id
 
   const casts = []
   for (const c of action.casts) {
-    if (c.target != null) return { error: "EX 不能指定目标，只能选择释放者" }
     let pos = c.pos
     if (pos == null) {
       const u = pick(mine, c.id)
       if (!u) return { error: `你的队伍里没有${label(c.id)}` }
       pos = u.idx
     }
-    casts.push({ pos })
+
+    const caster = casterAt(mySide, pos)
+    if (!caster) return { error: `没有 ${pos + 1} 号位` }
+    const out = { pos }
+    const requested = c.target
+    if (!requested) { casts.push(out); continue }
+
+    const rule = exTargetRuleOf(tmplOf(caster).ex)
+    if (!rule) return { error: `${nameOf(caster)}的 EX 不需要指定目标，直接发「${nameOf(caster)}ex」` }
+    if (requested.scope != null && !["ally", "foe"].includes(requested.scope)) {
+      return { error: "看不懂目标属于哪一方，请用「打」指定敌方、用「给」指定友方" }
+    }
+    if (rule.requireExplicitScope && !requested.scope) {
+      return { error: exTargetHint(caster, rule) }
+    }
+    const allowedScopes = exTargetScopesOf(rule)
+    if (requested.scope && !allowedScopes.includes(requested.scope)) {
+      return { error: exWrongScopeHint(caster, rule) }
+    }
+
+    const scope = requested.scope || rule.scope
+    const targetSide = scope === "ally" ? mySide : state.sides[1 - active]
+    const wantsSummon = requested.summon || requested.summonId != null || requested.summonKey
+    if (wantsSummon) {
+      if (rule.studentOnly) return { error: `${nameOf(caster)}只能和相邻角色换位，不能选择召唤物` }
+      const sm = perorosOf(targetSide).find((s) =>
+        (!requested.summonKey || s.sourceKey === requested.summonKey)
+        && (requested.summonId == null || s.id === requested.summonId)
+        && (requested.idx == null || s.idx === requested.idx))
+      if (!sm) return { error: `场上没有可点名的${SUMMONS[requested.summonId]?.name || "那个召唤物"}` }
+      out.target = {
+        scope, idx: sm.idx, summon: true, summonId: sm.id,
+        ...(sm.sourceKey ? { summonKey: sm.sourceKey } : {}),
+      }
+      casts.push(out)
+      continue
+    }
+
+    const target = requested.idx != null
+      ? targetSide.units[requested.idx]
+      : pick(targetSide.units, requested.id)
+    if (!target) {
+      const offField = requested.id && pick(supportsOf(targetSide), requested.id)
+      if (offField) return { error: `${nameOf(offField)}是支援，不在场上，不能作为 EX 目标` }
+      return { error: `${scope === "ally" ? "你的场上" : "对方场上"}没有${label(requested.id) || "那个目标"}` }
+    }
+    out.target = { scope, idx: target.idx }
+    casts.push(out)
   }
   return { casts }
 }
@@ -2379,6 +2527,28 @@ export function validateAction(state, action) {
   const u = casterAt(side, cast.pos)
   if (!u) return `没有 ${cast.pos + 1} 号位`
   if (!u.alive) return `${nameOf(u)} 已经倒下了`
+
+  const ex = tmplOf(u).ex
+  const targetRule = exTargetRuleOf(ex)
+  if (targetRule && !cast.target) return exTargetHint(u, targetRule)
+  if (!targetRule && cast.target) return `${nameOf(u)}的 EX 不需要指定目标，直接发「${nameOf(u)}ex」`
+  if (cast.target) {
+    if (!exTargetScopesOf(targetRule).includes(cast.target.scope)) return exWrongScopeHint(u, targetRule)
+    const targetSide = cast.target.scope === "ally" ? side : draft.sides[1 - draft.activeSide]
+    const target = targetFromPick(targetSide, cast.target, { allowDead: true })
+    if (!target) return "那个目标不在场上，不能作为 EX 目标"
+    if (!target.alive && !targetRule.allowDead) return `${nameOf(target)} 已经倒下了，不能作为 EX 目标`
+
+    if (targetRule.mode === "reposition") {
+      if (target.summon) return `${nameOf(u)}只能和相邻角色换位，不能选择召唤物`
+      if (target === u) return `${nameOf(u)}不能跟自己换站位`
+      const rep = ex.effects.find((e) => e.type === "reposition")
+      if (Math.abs(target.idx - u.idx) > (rep?.range ?? 1)) {
+        return `${nameOf(target)}不在${nameOf(u)}隔壁，位移只能跟相邻的一格换`
+      }
+    }
+  }
+
   const wait = exWaitOf(side, u)
   if (wait > 0) return `${nameOf(u)} 的 EX 还在冷却，还需本方再放出 ${wait} 个 EX`
   const lock = exLockedOf(draft, u)
@@ -2396,7 +2566,7 @@ export function validateAction(state, action) {
  * 发「过」或放不出下一发时，才跑普通技能 → 普攻 → 收回合。
  *
  * @param {object} prev 战斗状态（不会被修改）
- * @param {{type:'pass'}|{type:'ex', casts:Array<{pos?:number,id?:string}>}} action
+ * @param {{type:'pass'}|{type:'ex', casts:Array<{pos?:number,id?:string,target?:object}>}} action
  * @returns {{state, log, events, round, error?}}
  */
 export function playerTurn(prev, action) {
@@ -2474,7 +2644,7 @@ export function playerTurn(prev, action) {
         consumeExDiscount(u)
         markExCast(side, u)
         state.turnEx = [...(state.turnEx || []), u.idx]
-        execute(ctx, u, ex, `EX「${ex.name}」(-${cost})`, "ex")
+        execute(ctx, u, ex, `EX「${ex.name}」(-${cost})`, "ex", undefined, cast.target)
         // 「立即换弹」不是把普攻塞进 EX 里：EX 只上形态 / 增益，普攻留到 ③-b。
         // 鹤城、芹香都是这种。瞬没有这条，施放回合就不普攻。
         if (checkEnd(state)) {

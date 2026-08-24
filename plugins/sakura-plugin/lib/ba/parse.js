@@ -3,14 +3,17 @@
  *
  *   配队（私聊）  星野 白子 野宫 芹香     顺序即左起 1~4 号位（决定对位）
  *   出招（群内）  过
- *                星野ex          星野放 EX，目标由技能描述和战场位置自动决定
+ *                星野ex打白子     星野放 EX，以敌方白子为主目标
+ *                芹娜ex给椿       芹娜放 EX，以己方椿为目标
+ *                日奈ex           全体、自身等不需要点名的 EX 直接释放
  *                过                结束本回合的 EX，结算技能和普攻
  *
- *   玩家只决定「谁放 EX」，不能点名目标；具体落点由技能自带索敌优先，
- *   没有特殊索敌时再按站位规则自动决定。
+ *   需要角色落点的 EX 必须点名；中间的「打 / 给」用于区分敌我，不写时由技能类型推断。
+ *   小春同时支持敌我两侧，必须明确写「打」或「奶 / 给」，不能让引擎猜。
+ *   全体、随机、循环、自身等不需要角色落点的 EX 不收目标。
  */
 
-import { findUnit } from "./roster.js"
+import { findUnit, findSummon } from "./roster.js"
 
 /**
  * 解析配队。
@@ -49,6 +52,9 @@ export function parseDraft(text) {
 
 const PASS_RE = /^(过|pass|p)$/i
 const EX_MARK = /ex|技|大/i
+/** 中间那个字：打人还是帮人。换 / 跳留给泉奈换位。 */
+const FOE_VERB = "打攻揍轰砸捶秒锤"
+const ALLY_VERB = "给帮为治奶助换跳"
 
 /**
  * 找到紧跟在一个已知角色名后的 EX 标记。
@@ -79,10 +85,23 @@ export function parseAction(text) {
     }
     return null
   }
-  if (spec.tail.trim()) {
-    return { ok: false, error: "EX 不能指定目标，只需选择释放者，例：星野ex" }
+  const tail = spec.tail.trim()
+  const cast = { ...spec.who }
+  if (tail) {
+    const verb = FOE_VERB.includes(tail[0]) || ALLY_VERB.includes(tail[0]) ? tail[0] : null
+    const targetText = (verb ? tail.slice(1) : tail).trim()
+    if (!targetText) return { ok: false, error: "要写出 EX 的目标，例：星野ex打白子" }
+
+    const scope = verb ? (ALLY_VERB.includes(verb) ? "ally" : "foe") : null
+    const sm = findSummon(targetText)
+    if (sm) cast.target = { scope, summonId: sm.id }
+    else {
+      const target = refOf(targetText)
+      if (!target) return { ok: false, error: `找不到目标「${targetText}」，例：星野ex打白子` }
+      cast.target = { scope, id: target.id }
+    }
   }
-  return { ok: true, action: { type: "ex", casts: [spec.who] } }
+  return { ok: true, action: { type: "ex", casts: [cast] } }
 }
 
 /**

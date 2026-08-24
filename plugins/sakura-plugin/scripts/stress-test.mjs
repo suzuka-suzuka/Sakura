@@ -21,7 +21,10 @@
  *
  * 用法：node scripts/stress-test.mjs [局数]
  */
-import { createBattle, playerTurn, validateAction, exAvailableOf, exCastableOf, exWaitOf, exLockLenOf } from "../lib/ba/engine.js"
+import {
+  createBattle, playerTurn, validateAction, exAvailableOf, exCastableOf, exWaitOf, exLockLenOf,
+  exTargetRuleOf, tmplOf,
+} from "../lib/ba/engine.js"
 import { ROSTER, CFG } from "../lib/ba/roster.js"
 
 const GAMES = Number(process.argv[2]) || 500
@@ -37,6 +40,35 @@ let games = 0, errors = 0, turnsTotal = 0
 const winner = { first: 0, second: 0, draw: 0 }
 const endRound = []
 const fail = (msg) => { errors++; console.log("  ✗ " + msg) }
+
+/** 给需要角色落点的 EX 随机挑一个合法目标；全体 / 随机 / 自身等技能返回 null。 */
+function randomExTarget(state, caster, R) {
+  const rule = exTargetRuleOf(tmplOf(caster).ex)
+  if (!rule) return null
+  const own = state.sides[caster.side]
+  const other = state.sides[1 - caster.side]
+  const scopes = rule.scopes || [rule.scope]
+  const scope = scopes[Math.floor(R() * scopes.length)]
+
+  let pool
+  if (rule.mode === "reposition") {
+    pool = own.units.filter((u) => u !== caster && Math.abs(u.idx - caster.idx) <= 1)
+  } else {
+    const side = scope === "ally" ? own : other
+    pool = [
+      ...side.units.filter((u) => u.alive),
+      ...(side.summons || []).filter((u) => u.alive && !u.cover && !rule.studentOnly),
+    ]
+  }
+  if (!pool.length) return undefined
+  const target = pool[Math.floor(R() * pool.length)]
+  return target.summon
+    ? {
+        scope, idx: target.idx, summon: true, summonId: target.id,
+        ...(target.sourceKey ? { summonKey: target.sourceKey } : {}),
+      }
+    : { scope, idx: target.idx }
+}
 
 for (let seed = 1; seed <= GAMES; seed++) {
   const R = rnd(seed)
@@ -63,9 +95,15 @@ for (let seed = 1; seed <= GAMES; seed++) {
 
     if (R() < 0.75 && hand.length) {
       const p = hand[Math.floor(R() * hand.length)]
-      // 玩家只选择释放者；目标始终由技能描述和站位规则自动决定。
-      action = { type: "ex", casts: [{ pos: p }] }
-      if (validateAction(st, action)) action = { type: "pass" }
+      const caster = p < 4 ? side.units[p] : side.supports[p - 4]
+      const target = randomExTarget(st, caster, R)
+      // 需要角色落点的 EX 必须显式点名；没有单一落点的技能保持裸指令。
+      action = { type: "ex", casts: [{ pos: p, ...(target ? { target } : {}) }] }
+      const error = validateAction(st, action)
+      if (error) {
+        fail(`seed ${seed} 生成了非法 EX 指令（${tmplOf(caster).name}）：${error}`)
+        action = { type: "pass" }
+      }
     }
 
     let r

@@ -97,6 +97,10 @@ export const CFG = {
   COST_START: 0,
   COST_REGEN_PER_UNIT: 0.5,          // 每人 0.5，**支援也算**：满编 4 主力 + 2 支援 = 3/回合
   COST_MAX: 10,                      // 与 BA 的 Cost 上限一致
+  OPENING_DAMAGE_RATE: 0.5,          // 第 1~3 轮伤害为 50%
+  OPENING_DAMAGE_HOLD_ROUNDS: 3,
+  OPENING_DAMAGE_STEP: 0.1,          // 第 4~7 轮每轮 +10%，第 8 轮起恢复 100%
+  OPENING_DAMAGE_FULL_ROUND: 8,
   EX_COOLDOWN_SLACK: 3,              // EX 冷却长度 = 存活总人数（含支援）− 这个值，满编 6 人 = 3
   /**
    * 掩体的**格挡率**。原作公式是 `30 + 攻击方遮蔽成功值 − 防御方遮蔽贯通率`，
@@ -5149,7 +5153,7 @@ export function combatRoleOf(x) {
 
 /**
  * 按角色名或内部代号查角色。**不认编号** —— 配队和出招一律写名字；
- * 出招只需写「星野ex」，角色也不再对外暴露序号。
+ * 出招按技能写「星野ex打白子」或「日奈ex」，角色不再对外暴露序号。
  */
 export function findUnit(token) {
   const s = String(token).trim()
