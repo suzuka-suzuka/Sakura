@@ -202,16 +202,15 @@ export function renderResult(state) {
 // ---------------- 技能描述 ----------------
 
 const TARGET_TEXT = {
-  enemy_single: "单个敌人",
-  enemy_adjacent: "主目标+相邻",
+  enemy_single: "自动单体",
+  enemy_adjacent: "自动目标+相邻",
   enemy_all: "敌方全体",
   enemy_random: "随机敌人",
   enemy_chain: "连发逐枪重锁",
   enemy_cycle: "从自己对位起按号位循环",
-  enemy_instances: "以主目标起多圈",
   ally_all: "己方全体",
-  ally_adjacent: "友方主目标+相邻",
-  ally_single: "单个友方",
+  ally_adjacent: "位置目标+相邻",
+  ally_single: "按位置选友方",
   ally_lowest: "己方最残",
   ally_hurt: "己方受伤的（就近）",
   ally_maxhp: "己方生命上限最高",
@@ -257,7 +256,6 @@ const TRIGGER_TEXT = (tr) => {
 export function describeEffect(sk) {
   if (!sk) return "无"
   const parts = []
-  const mirrorAlly = (sk.effects || []).some((e) => e.scope === "mirror_ally")
   if (sk.trigger?.type === "on_auto") {
     parts.push(sk.trigger.every
       ? `每 ${sk.trigger.every} 次普攻`
@@ -278,18 +276,16 @@ export function describeEffect(sk) {
   }
   if (sk.hits?.length) {
     const total = sk.hits.reduce((a, b) => a + b, 0)
-    const scope = mirrorAlly
-      ? `打敌方：以所点敌方为中心；奶友方：以所点友方正对面为中心，同战场共${sk.count || 1}人（须同身位；正对面为空则无伤害）`
-      : sk.target === "enemy_adjacent"
-        ? (sk.depth === "through"
+    const scope = sk.target === "enemy_adjacent"
+      ? (sk.depth === "through"
         ? (sk.count >= 3 ? `中间扩散共${sk.count}人（直线贯穿，不问身位）` : `同战场共${sk.count}人（直线贯穿，不问身位）`)
         : sk.count >= 3 ? `横向共${sk.count}人（同身位）`
           : sk.count > 1 ? `同战场共${sk.count}人（须同身位）`
             : tg)
-        : tg
+      : tg
     // 连发是「N 枪各锁各的目标」，写成「合计 X% 分 N 段」会让人以为全砸在一个人身上
     if (sk.target === "enemy_chain") {
-      parts.push(`连发 ${sk.hits.length} 枪，每枪 ${(total / sk.hits.length).toFixed(0)}%攻击力；第一枪攻击所点目标，之后按普攻规则重锁（人偶/前排会吃掉后几枪）`)
+      parts.push(`连发 ${sk.hits.length} 枪，每枪 ${(total / sk.hits.length).toFixed(0)}%攻击力；第一枪按固定索敌，之后按普攻规则重锁（人偶/前排会吃掉后几枪）`)
     } else if (sk.target === "enemy_cycle") {
       // 循环点名的落点由她自己的号位定死，玩家指不了 —— 这条比倍率更需要说清楚
       parts.push(`点名 ${sk.hits.length} 次，每次 ${(total / sk.hits.length).toFixed(0)}%攻击力；` +
@@ -329,7 +325,7 @@ export function describeEffect(sk) {
     const who = e.scope === "self" ? "自身"
       : e.scope === "ally_all" ? "己方全体"
         : e.scope === "ally_named" ? `${BY_ID[e.ally]?.name || e.ally}（不在场则不生效）`
-          : e.scope === "mirror_ally" ? "所点友方"
+          : e.scope === "mirror_ally" ? "攻击主目标对位的己方主力（无存活对位则不生效）"
             : e.scope === "ally_target"
               ? (sk.target === "ally_adjacent" && (sk.count || 1) > 1 ? `同战场同身位 ${sk.count} 人`
                 : sk.target === "ally_lowest" && (sk.count || 1) > 1 ? `最残 ${sk.count} 人`
@@ -339,11 +335,7 @@ export function describeEffect(sk) {
       case "buff":
         parts.push(`${who}${STAT_TEXT[e.stat] || e.stat} ${e.value > 0 ? "+" : ""}${/_flat$/.test(e.stat) ? flatText(e.stat, e.value) : pct(e.value)}（${e.turns}回合）`)
         break
-      case "heal":
-        parts.push(e.scope === "mirror_ally"
-          ? `打敌方时治疗其正对位存活友方，奶友方时治疗所点友方：${pct(e.scale)}治疗力（无存活友方对位则不治疗）`
-          : `${who}治疗 ${pct(e.scale)}治疗力`)
-        break
+      case "heal": parts.push(`${who}治疗 ${pct(e.scale)}治疗力`); break
       case "ward":
         parts.push(`${who}获得急救（生命≤${Math.round(e.hpMax * 100)}%时消耗，治疗 ${pct(e.scale)}治疗力${e.once ? "，每场限 1 次" : ""}）`)
         break
@@ -389,8 +381,8 @@ export function describeEffect(sk) {
             : e.step ? `能量充能 +${e.step} 档（最高 ${e.max} 档）` : "能量充能清空")
         break
       case "reposition":
-        parts.push(`与指定的${e.range > 1 ? `最多相隔 ${e.range} 格的` : "相邻"}友方换位`
-          + `（可以选择已经阵亡的角色；从中间两格可能跨过战场分界）`)
+        parts.push(`朝自动攻击目标移动${e.range > 1 ? `最多 ${e.range} 格` : "一格"}`
+          + `（相邻位置即使已经阵亡也会移动；从中间两格可能跨过战场分界）`)
         break
       case "summon":
         if (e.cover) {

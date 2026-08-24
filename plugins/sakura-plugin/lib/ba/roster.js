@@ -5153,7 +5153,7 @@ export function combatRoleOf(x) {
 
 /**
  * 按角色名或内部代号查角色。**不认编号** —— 配队和出招一律写名字；
- * 出招按技能写「星野ex打白子」或「日奈ex」，角色不再对外暴露序号。
+ * 出招只需写「星野ex」，角色也不再对外暴露序号。
  */
 export function findUnit(token) {
   const s = String(token).trim()

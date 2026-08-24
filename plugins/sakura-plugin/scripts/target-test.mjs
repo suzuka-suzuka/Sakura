@@ -7,11 +7,9 @@
  *   node scripts/target-test.mjs
  */
 import {
-  createBattle,
-  playerTurn as enginePlayerTurn,
-  validateAction as engineValidateAction,
+  createBattle, playerTurn, validateAction,
   exCastableOf, exWaitOf, exCostOf, exLockLenOf, regenOf, tmplOf, atkOf, dfsOf, healOf,
-  provokedBy, focusedOf, exLockedOf, exSealedOf, autoProcChance, exTargetRuleOf, roundDamageScale,
+  provokedBy, focusedOf, exLockedOf, exSealedOf, autoProcChance, roundDamageScale,
 } from "../lib/ba/engine.js"
 import { ROSTER, CFG } from "../lib/ba/roster.js"
 import { describeEffect, mergeTurnLog } from "../lib/ba/format.js"
@@ -60,121 +58,6 @@ function setup(bluePicks, redPicks, kills = [], { fieldCovers = false } = {}) {
   st.sides[0].cost = 10; st.sides[1].cost = 10
   return st
 }
-
-/**
- * 老用例只关心伤害形状、冷却或状态，并未写 EX 目标。现在由测试夹具把它补成一条真正的
- * 显式点名指令；生产接口绝不会走这里。点名交互本身的用例直接调用 enginePlayerTurn /
- * engineValidateAction，确保裸 EX 仍会被拦截。
- */
-function pointTestEx(state, action) {
-  if (action?.type !== "ex") return action
-  const side = state.sides[state.activeSide]
-  const foe = state.sides[1 - state.activeSide]
-  const casts = (action.casts || []).map((cast) => {
-    if (cast.target) return cast
-    const u = cast.pos == null
-      ? [...side.units, ...(side.supports || [])].find((x) => x.id === cast.id)
-      : (cast.pos < 4 ? side.units[cast.pos] : side.supports?.[cast.pos - 4])
-    if (!u) return cast
-    const rule = exTargetRuleOf(tmplOf(u)?.ex)
-    if (!rule) return cast
-
-    const target = suggestedTestTarget(state, u, rule)
-    if (!target) return cast
-    // 小春的夹具固定走「奶友方」；专门的第 36 组再分别覆盖打 / 奶两条真实入口。
-    const scope = rule.mode === "mirror_ally" ? "ally" : rule.scope
-    return {
-      ...cast,
-      target: target.summon
-        ? {
-            scope, idx: target.idx, summon: true, summonId: target.id,
-            ...(target.sourceKey ? { summonKey: target.sourceKey } : {}),
-          }
-        : { scope, idx: target.idx },
-    }
-  })
-  return { ...action, casts }
-}
-
-const TEST_LINE_RANK = { 前: 0, 中: 1, 后: 2 }
-const testLineRank = (u) => u.summon ? -1 : (TEST_LINE_RANK[tmplOf(u).line] ?? 2)
-const testZone = (idx) => idx < 2 ? 0 : 1
-const testPeroros = (side) => (side.summons || []).filter((s) => s.alive && !s.cover)
-const testPickedInLayer = (pool, u) => [...pool].sort((a, b) =>
-  Math.abs(a.idx - u.idx) - Math.abs(b.idx - u.idx) || a.idx - b.idx)[0]
-
-/** 复现改动前的默认主目标，只用于把旧回归场景翻译成一条显式点名指令。 */
-function suggestedEnemyTarget(state, u, ex) {
-  const foes = state.sides[1 - u.side]
-  const students = foes.units.filter((x) => x.alive)
-  const dolls = testPeroros(foes)
-  const provoke = [...dolls, ...foes.units].find((x) =>
-    x.alive && x.taunt > 0 && (x.tauntKind || "provoke") === "provoke")
-  const focus = [...foes.units, ...dolls].find((x) =>
-    x.alive && (x.focus > 0 || (x.taunt > 0 && x.tauntKind === "focus")))
-  if (!u.support && provoke) return provoke
-  if (focus) return focus
-
-  if (ex.pick === "lowest_hp_rate") {
-    return [...students, ...dolls].sort((a, b) =>
-      a.hp / a.maxhp - b.hp / b.maxhp || a.idx - b.idx)[0]
-  }
-  if (ex.pick === "max_atk") {
-    return [...students].sort((a, b) => atkOf(b) - atkOf(a) || a.idx - b.idx)[0]
-  }
-
-  if (u.support) {
-    if (!students.length) return dolls[0] || null
-    const best = Math.min(...students.map(testLineRank))
-    const aim = students.filter((x) => testLineRank(x) === best).sort((a, b) => a.idx - b.idx)[0]
-    return dolls.find((x) => testZone(x.idx) === testZone(aim.idx)) || aim
-  }
-
-  const sameZone = students.filter((x) => testZone(x.idx) === testZone(u.idx))
-  const blocker = dolls.find((x) => testZone(x.idx) === testZone(u.idx))
-    || (!sameZone.length ? dolls[0] : null)
-  if (blocker) return blocker
-  const pool = sameZone.length ? sameZone : students
-  if (!pool.length) return null
-  const best = Math.min(...pool.map(testLineRank))
-  return testPickedInLayer(pool.filter((x) => testLineRank(x) === best), u)
-}
-
-function suggestedAllyTarget(state, u, ex) {
-  const side = state.sides[u.side]
-  const students = side.units.filter((x) => x.alive)
-  if (u.support) {
-    const healing = (ex.effects || []).some((e) => ["heal", "regen", "ward"].includes(e.type))
-    if (healing) {
-      const doll = testPeroros(side).sort((a, b) => a.idx - b.idx)[0]
-      if (doll) return doll
-    }
-    const offensive = (ex.effects || []).some((e) =>
-      e.type === "buff" && ["atk", "aa", "acc", "crit", "crit_dmg", "dmg_deal"].includes(e.stat))
-    return [...students].sort((a, b) =>
-      (offensive ? testLineRank(b) - testLineRank(a) : testLineRank(a) - testLineRank(b)) || a.idx - b.idx)[0]
-  }
-  return students.find((x) => x === u) || students[0] || null
-}
-
-function suggestedTestTarget(state, u, rule) {
-  const ex = tmplOf(u).ex
-  if (rule.mode === "mirror_ally") {
-    const foe = suggestedEnemyTarget(state, u, ex)
-    return state.sides[u.side].units[foe?.idx] || state.sides[u.side].units.find((x) => x.alive)
-  }
-  if (rule.mode === "reposition") {
-    const foe = suggestedEnemyTarget(state, u, ex)
-    const step = foe && foe.idx !== u.idx ? Math.sign(foe.idx - u.idx) : (u.idx < 3 ? 1 : -1)
-    return state.sides[u.side].units[u.idx + step]
-  }
-  return rule.scope === "ally"
-    ? suggestedAllyTarget(state, u, ex)
-    : suggestedEnemyTarget(state, u, ex)
-}
-
-const playerTurn = (state, action) => enginePlayerTurn(state, pointTestEx(state, action))
-const validateAction = (state, action) => engineValidateAction(state, pointTestEx(state, action))
 
 /** 注入一个敌方佩洛洛；既可测入场 Provoke，也可测过期后的常规攻击目标规则。 */
 function putEnemyPeroro(st, idx = 0, hpRate = 1, taunt = 0) {
@@ -612,12 +495,10 @@ check("爱丽丝站 1 位但佩洛洛在敌 3 位嘲讽：整条直线改到 3·
 {
   const st = setup(["桃", "伊织", "伊织", "伊织"], FOE)
   st.sides[1].units[3].focus = 2
-  const r = enginePlayerTurn(st, {
-    type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }],
-  })
+  const r = playerTurn(st, { type: "ex", casts: [{ pos: 0 }] })
   const ev = r.events.find((e) => e.type === "action" && e.action === "ex" && e.source?.pos === 0)
-  check("EX 显式点名优先于 Focus：桃点敌 1 后仍以 1 为中心铺窗口",
-    targetLabels(ev).sort((a, b) => a - b), [1, 2])
+  check("Focus 把桃 EX 的中心改到敌 4 位，但三路窗口不退化；越界一格后仍命中 3·4",
+    targetLabels(ev).sort((a, b) => a - b), [3, 4])
 }
 {
   // 千夏在支援位，不受场上 Provoke 影响；她只净化自己实际治疗的桃。
@@ -635,29 +516,21 @@ check("爱丽丝站 1 位但佩洛洛在敌 3 位嘲讽：整条直线改到 3·
   check("单人净化只解除桃的 EX 封锁，另外三名主力仍被嘲讽",
     cleansed.state.sides[0].units.map((u) => exLockedOf(cleansed.state, u)),
     [null, "嘲讽", "嘲讽", "嘲讽"])
-  const pointFirst = { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] }
-  check("净化后同一指令阶段即可点名释放桃 EX",
-    engineValidateAction(cleansed.state, pointFirst), null)
+  check("净化后同一指令阶段即可选择桃 EX",
+    validateAction(cleansed.state, { type: "ex", casts: [{ pos: 0 }] }), null)
 
   const focusedState = structuredClone(cleansed.state)
   focusedState.sides[1].units[3].focus = 2
-  const focusedCast = enginePlayerTurn(focusedState, pointFirst)
+  const focusedCast = playerTurn(focusedState, { type: "ex", casts: [{ pos: 0 }] })
   const focusedEv = focusedCast.events.find((e) =>
     e.type === "action" && e.action === "ex" && e.source?.side === 0 && e.source?.pos === 0)
-  check("净化后显式点名仍优先于集火：敌 4 有 Focus，也按所点敌 1 展开",
-    targetLabels(focusedEv), [1, "偶", 2])
+  check("净化只解除 Provoke，不会免疫集火：桃 EX 改以敌 4 位为中心并保留三路窗口",
+    targetLabels(focusedEv).sort((a, b) => a - b), [3, 4])
 
-  const doll = cleansed.state.sides[1].summons[0]
-  const cast = enginePlayerTurn(cleansed.state, {
-    type: "ex",
-    casts: [{
-      pos: 0,
-      target: { scope: "foe", idx: doll.idx, summon: true, summonId: doll.id, summonKey: doll.sourceKey },
-    }],
-  })
+  const cast = playerTurn(cleansed.state, { type: "ex", casts: [{ pos: 0 }] })
   const ev = cast.events.find((e) =>
     e.type === "action" && e.action === "ex" && e.source?.side === 0 && e.source?.pos === 0)
-  check("桃可直接点佩洛洛作为三路 EX 的范围中心，且保留当前贯穿窗口",
+  check("净化后的桃恢复正常索敌：自动主目标在敌 1 位，所以边缘窗口为 1·2，佩洛洛只是额外目标",
     targetLabels(ev), ["偶", 1, 2])
 
   const redTurn = playerTurn(cast.state, { type: "pass" })
@@ -717,8 +590,8 @@ check("人偶挡同战场另一路 → 一样从第一发接走", iori([], 1), [
 check("人偶在另一战场 → 本战场还有人时不接", iori([], 2), [1, 1, 1])
 check("本战场打空 + 人偶在本战场 → 三发全打人偶", iori([0, 1], 0), ["偶", "偶", "偶"])
 check("本战场打空 + 人偶在另一战场 → 越界前先拆墙", iori([0, 1], 2), ["偶", "偶", "偶"])
-// 手动点红 1，后两发仍按普攻重锁；开局 50% 伤害下星野没倒，三发继续落在她身上。
-check("手动点前排且未击倒 → 后两发普攻索敌仍打该前排", (() => {
+// 首轮伤害为 50%，对位前排不会被第一发打死，三发都落在同一目标上
+check("同战场有前排 → 后两发都打前排", (() => {
   const st = setup(["伊织", "日富美", "野宫", "芹香"], TANK1)
   st.sides[0].cost = 10
   const r = run(st, { type: "ex", casts: [{ pos: 0 }] })
@@ -847,40 +720,17 @@ check("柚子普攻 · 另一战场的人偶不拦本战场范围", autoVsDoll("
 check("野宫单体普攻 · 人偶挡 2 位（同战场）→ 照样接走", autoVsDoll("野宫", 0, 1), ["偶"])
 check("野宫单体普攻 · 人偶挡 3 位（另一战场）→ 不接", autoVsDoll("野宫", 0, 2), [1])
 
-console.log("\n=== 13. EX 点名：需要落点的必填，不需要落点的拒绝多余目标 ===")
+console.log("\n=== 13. EX 只能选择释放者，任何 target 注入都拒绝 ===")
 {
   const st = setup(["真纪", "野宫", "野宫", "茜"], ["白子", "星野", "日奈", "爱露"])
-  const aimed = { type: "ex", casts: [{ pos: 3, target: { scope: "foe", idx: 0 } }] }
-  check("需要落点的 EX 接受合法敌方点名", engineValidateAction(st, aimed), null)
-  const cast = enginePlayerTurn(st, aimed)
-  check("合法点名实际结算 EX", cast.events.some((e) => e.type === "action" && e.action === "ex"), true)
-  check("合法点名正常扣费", cast.state.sides[0].cost < st.sides[0].cost, true)
-
-  const bare = { type: "ex", casts: [{ pos: 3 }] }
-  check("需要落点的裸 EX 被拦并提示点名", /需要指定敌方目标/.test(engineValidateAction(st, bare) || ""), true)
-  const rejectedBare = enginePlayerTurn(st, bare)
-  check("缺少点名不产生事件", rejectedBare.events?.length || 0, 0)
-  check("缺少点名不改变 Cost", rejectedBare.state.sides[0].cost, st.sides[0].cost)
-
-  const wrongSide = { type: "ex", casts: [{ pos: 3, target: { scope: "ally", idx: 0 } }] }
-  check("敌方技不能用『给』点己方", /敌方目标/.test(engineValidateAction(st, wrongSide) || ""), true)
-  check("解析器恢复敌方点名", parseAction("真纪ex打白子")?.ok, true)
-  check("解析器恢复友方点名语法（阵营是否合法由引擎判断）", parseAction("茜ex给野宫")?.ok, true)
-  check("裸 EX 仍能解析，是否缺目标交给技能规则判断",
-    parseAction("茜ex"), { ok: true, action: { type: "ex", casts: [{ id: id("茜") }] } })
-
-  const noTarget = { type: "ex", casts: [{ pos: 1 }] } // 野宫：敌方全体
-  check("全体 EX 无需点名即可释放", engineValidateAction(st, noTarget), null)
-  const redundant = {
-    type: "ex", casts: [{ pos: 1, target: { scope: "foe", idx: 0 } }],
-  }
-  check("全体 EX 携带多余目标会被拒绝",
-    /不需要指定目标/.test(engineValidateAction(st, redundant) || ""), true)
-  check("玩家字符串『野宫ex打白子』同样会被拦截",
-    /不需要指定目标/.test(engineValidateAction(st, parseAction("野宫ex打白子").action) || ""), true)
-  const rejectedRedundant = enginePlayerTurn(st, redundant)
-  check("无落点 EX 多写目标时不产生事件", rejectedRedundant.events?.length || 0, 0)
-  check("无落点 EX 多写目标时不扣 Cost", rejectedRedundant.state.sides[0].cost, st.sides[0].cost)
+  const injected = { type: "ex", casts: [{ pos: 3, target: { scope: "foe", idx: 0 } }] }
+  check("引擎校验拒绝 target 字段", validateAction(st, injected), "EX 不能指定目标，只能选择释放者")
+  const rejectedTarget = playerTurn(st, injected)
+  check("非法目标不产生事件", rejectedTarget.events?.length || 0, 0)
+  check("非法目标不改变 Cost", rejectedTarget.state.sides[0].cost, st.sides[0].cost)
+  check("裸 EX 仍可用", parseAction("茜ex"), { ok: true, action: { type: "ex", casts: [{ id: id("茜") }] } })
+  check("旧敌方点名写法被解析器拒绝", parseAction("茜ex打白子")?.ok, false)
+  check("旧友方点名写法被解析器拒绝", parseAction("茜ex给野宫")?.ok, false)
 }
 
 const two = setup(["真纪", "野宫", "野宫", "茜"], ["白子", "星野", "日奈", "爱露"])
@@ -1599,10 +1449,9 @@ console.log("\n=== 30. 泉奈：「每 6 次普通攻击」数的是枪，不是
     const fired = []
     for (let t = 1; t <= 8; t++) {
       cur.sides[0].cost = 10
-      const izunaPos = cur.sides[0].units.findIndex((u) => u.id === id("泉奈"))
-      const r = run(cur, t === exOnTurn ? { type: "ex", casts: [{ pos: izunaPos }] } : { type: "pass" })
+      const r = run(cur, t === exOnTurn ? { type: "ex", casts: [{ pos: 0 }] } : { type: "pass" })
       if (r.events.some((e) =>
-        e.type === "action" && e.action === "skill" && e.source?.side === 0 && e.source?.pos === izunaPos)) fired.push(t)
+        e.type === "action" && e.action === "skill" && e.source?.side === 0 && e.source?.pos === 0)) fired.push(t)
       cur = run(r.state, { type: "pass" }).state
     }
     return fired
@@ -1681,58 +1530,41 @@ console.log("\n=== 31. 菲娜：无视开火间隔折成普攻增伤，与攻击
   check("走的是普攻增伤，不是造成伤害", /攻速|普攻/.test(describeEffect(pina.ex)), true)
 }
 
-console.log("\n=== 32. 泉奈的位移：点名相邻友方，阵亡邻位也能进入 ===")
+console.log("\n=== 32. 泉奈的位移：朝自动攻击目标移动，阵亡邻位也能进入 ===")
 {
-  // 四格实现仍通过交换数组槽保持 units[i].idx === i；目标必须由玩家明确指定。
+  // 四格实现仍通过交换数组槽保持 units[i].idx === i，但规则语义是泉奈移动。
   const order = (st) => st.sides[0].units.map((u) => tmplOf(u).name)
   const idxOk = (st) => st.sides[0].units.every((u, i) => u.idx === i)
-  const cast = (st, targetIdx) => run(st, {
-    type: "ex",
-    casts: [{
-      pos: st.sides[0].units.findIndex((u) => u.id === id("泉奈")),
-      target: { scope: "ally", idx: targetIdx },
-    }],
-  })
+  const cast = (st) => run(st, { type: "ex", casts: [{ pos: st.sides[0].units.findIndex((u) => u.id === id("泉奈")) }] })
 
+  // 红 2 是前排，泉奈站 1 位时会自动锁它，因此向右移动一格。
   const base = () => setup(["泉奈", "椿", "野宫", "茜"], ["野宫", "星野", "茜", "茜"])
 
-  const a = cast(base(), 1)
-  check("点名 2 位：泉奈从 1 位与椿交换", order(a.state), ["椿", "泉奈", "野宫", "茜"])
+  const a = cast(base())
+  check("自动目标在 2 位：泉奈从 1 位向右移动一格", order(a.state), ["椿", "泉奈", "野宫", "茜"])
   check("units[i].idx === i 仍成立", idxOk(a.state), true)
   check("同战场内移动后仍保持四格唯一占位", a.state.sides[0].units.map((u) => u.idx), [0, 1, 2, 3])
 
+  // 泉奈站 2 位，本战场敌人已空，自动越界锁 3 位，因此跨到 3 位。
   const st2 = setup(["椿", "泉奈", "野宫", "茜"], ["茜", "茜", "茜", "茜"], [[1, 0], [1, 1]])
-  const b = cast(st2, 2)
-  check("站 2 位点名 3 位：交换并跨过战场分界", order(b.state), ["椿", "野宫", "泉奈", "茜"])
+  const b = cast(st2)
+  check("站 2 位且本战场已空：朝 3 位移动并跨界", order(b.state), ["椿", "野宫", "泉奈", "茜"])
   check("日志写明跨了战场", b.log.some((l) => /跨过战场分界/.test(l)), true)
 
   // 邻位已经阵亡也不是障碍：泉奈进入空位，阵亡对象退到她原来的数组槽。
   const deadNeighbor = base()
   deadNeighbor.sides[0].units[1].alive = false
   deadNeighbor.sides[0].units[1].hp = 0
-  const d = cast(deadNeighbor, 1)
+  const d = cast(deadNeighbor)
   check("相邻队友阵亡仍会进入其位置", [order(d.state), d.state.sides[0].units[1].id],
     [["椿", "泉奈", "野宫", "茜"], id("泉奈")])
   check("日志写明进入阵亡位置", d.log.some((l) => /阵亡位置/.test(l)), true)
 
-  const invalid = base()
-  check("泉奈裸 EX 会提示选择相邻友方",
-    /需要指定相邻友方/.test(engineValidateAction(invalid, { type: "ex", casts: [{ pos: 0 }] }) || ""), true)
-  check("泉奈角色卡同步说明点名相邻友方换位",
-    describeEffect(ROSTER.find((t) => t.name === "泉奈").ex).includes("指定的相邻友方换位"), true)
-  check("不能点自己换位",
-    /不能跟自己/.test(engineValidateAction(invalid, {
-      type: "ex", casts: [{ pos: 0, target: { scope: "ally", idx: 0 } }],
-    }) || ""), true)
-  check("不能跨过一格直接交换",
-    /相邻/.test(engineValidateAction(invalid, {
-      type: "ex", casts: [{ pos: 0, target: { scope: "ally", idx: 2 } }],
-    }) || ""), true)
+  const aligned = setup(["泉奈", "椿", "野宫", "茜"], ["茜", "茜", "茜", "茜"])
+  check("已经与自动目标对位时留在原位", order(cast(aligned).state), ["泉奈", "椿", "野宫", "茜"])
 
   // turnEx 是按号位记的：不跟着换的话，换完位的泉奈会被当成没放过 EX 而多打一枪
-  const c = enginePlayerTurn(base(), {
-    type: "ex", casts: [{ pos: 0, target: { scope: "ally", idx: 1 } }],
-  })
+  const c = playerTurn(base(), { type: "ex", casts: [{ pos: 0 }] })
   const izunaIdx = c.state.sides[0].units.findIndex((u) => u.id === id("泉奈"))
   check("turnEx 跟着换位一起改号位", [izunaIdx, c.state.turnEx], [1, [1]])
   const done = run(c.state, { type: "pass" })
@@ -1771,10 +1603,9 @@ console.log("\n=== 33. 绿：按号位循环点名 5 次，玩家指不了目标
   check("剩 3 个：1→2→3→1→2",
     cyclePairs(["绿", "椿", "椿", "椿"], FOUR, [[1, 3]]), [1, 2, 3, 1, 2])
   const injected = setup(["椿", "绿", "椿", "椿"], FOUR)
-  check("循环技能不需要点名，额外 target 字段会提示直接释放",
-    /不需要指定目标/.test(engineValidateAction(injected, {
-      type: "ex", casts: [{ pos: 1, target: { scope: "foe", idx: 3 } }],
-    }) || ""), true)
+  check("即使循环目标固定，额外 target 字段仍被统一拒绝",
+    validateAction(injected, { type: "ex", casts: [{ pos: 1, target: { scope: "foe", idx: 3 } }] }),
+    "EX 不能指定目标，只能选择释放者")
 }
 
 console.log("\n=== 34. 绿 ⇄ 桃：编队条件，同时上场才有 DoT ===")
@@ -1819,9 +1650,9 @@ console.log("\n=== 34. 绿 ⇄ 桃：编队条件，同时上场才有 DoT ===")
     return a ? dmg(true) / a : 0
   }
   // 绿是贯通：打重装是克制 ×2、打特殊是普通 ×1、打轻装是被抵抗 ×0.5
-  check("被克制的目标（轻装）：增幅仍约为 ×2", Math.abs(enhRatio("野宫") - 2) < 0.03, true)
-  check("普通的目标（特殊）：增幅仍约为 ×2", Math.abs(enhRatio("椿") - 2) < 0.03, true)
-  check("克制的目标（重装）：增幅仍约为 ×2", Math.abs(enhRatio("日奈") - 2) < 0.03, true)
+  check("被克制的目标（轻装）：增幅仍是 ×2", Math.abs(enhRatio("野宫") - 2) < 0.03, true)
+  check("普通的目标（特殊）：增幅仍是 ×2", Math.abs(enhRatio("椿") - 2) < 0.03, true)
+  check("克制的目标（重装）：增幅仍是 ×2", Math.abs(enhRatio("日奈") - 2) < 0.03, true)
 
   check("绿的贯通增伤真的乘进伤害", (() => {
     const st = setup(["绿", "椿", "椿", "椿"], ["椿", "椿", "椿", "椿"])
@@ -1875,78 +1706,41 @@ console.log("\n=== 35. 妮露的 Fury / 爱丽丝的能量充能：条件追伤 
   })(), 0)
 }
 
-console.log("\n=== 36. 小春：用打 / 奶明确选择敌我落点，对位效果同步结算 ===")
+console.log("\n=== 36. 小春：伤害自动目标，同时治疗其对位友军 ===")
 {
-  const cast = (scope, targetIdx, { blueKills = [], redKills = [] } = {}) => {
-    const blue = ["小春", "野宫", "伊织", "茜"]
-    const red = ["野宫", "伊织", "野宫", "伊织"]
-    const kills = [
-      ...blueKills.map((idx) => [0, idx]),
-      ...redKills.map((idx) => [1, idx]),
-    ]
+  const cast = (blue, red, kills = []) => {
     const st = setup(blue, red, kills)
     for (const u of st.sides[0].units) if (u.alive) u.hp = Math.round(u.maxhp / 2)
-    for (const u of st.sides[1].units) if (u.alive) { u.maxhp = 9e6; u.hp = 9e6 }
-    noMiss(st.sides[0].units[0])
+    for (const u of st.sides[1].units) { u.maxhp = 9e6; u.hp = 9e6 }
+    const pos = st.sides[0].units.findIndex((u) => u.id === id("小春"))
+    noMiss(st.sides[0].units[pos])
     st.sides[0].cost = 10
-    const r = enginePlayerTurn(st, {
-      type: "ex", casts: [{ pos: 0, target: { scope, idx: targetIdx } }],
-    })
-    const at = (type, side) => (r.events || [])
-      .filter((e) => e.type === type && e.target?.side === side).map((e) => e.target.pos + 1)
+    const r = playerTurn(st, { type: "ex", casts: [{ pos }] })
+    const at = (type, side) => r.events
+      .filter((e) => e.type === type && e.target.side === side).map((e) => e.target.pos + 1)
     return { r, dmg: at("damage", 1), heal: at("heal", 0), selfDmg: at("damage", 0) }
   }
 
-  const healMode = cast("ally", 2)
-  check("奶蓝 3 时只治疗蓝 3", healMode.heal, [3])
-  check("奶蓝 3 时以正对面的红 3 为中心，保留当前 2 目标范围", healMode.dmg, [3, 4])
-  check("奶友方模式不会对己方造成伤害", healMode.selfDmg, [])
+  // 小春站 2 位；红 1 是本战场唯一前排，所以自动主目标是红 1，治疗蓝 1。
+  const mirrored = cast(["野宫", "小春", "野宫", "野宫"], ["星野", "野宫", "野宫", "野宫"])
+  check("伤害照常落在自动攻击目标", mirrored.dmg, [1])
+  check("同时只治疗攻击主目标对位的蓝 1", mirrored.heal, [1])
+  check("不会对己方造成伤害", mirrored.selfDmg, [])
 
-  const missing = cast("ally", 2, { redKills: [2] })
-  check("红 3 已倒、红 4 仍活：对面空位不会自动改打红 4", missing.dmg, [])
-  check("友方正对面没人不影响治疗所奶的蓝 3", missing.heal, [3])
-  check("无伤害目标时仍正常结算并扣 EX Cost", missing.r.spent, 3)
+  const missing = cast(["野宫", "小春", "野宫", "野宫"],
+    ["星野", "野宫", "野宫", "野宫"], [[0, 0]])
+  check("攻击主目标没有存活对位友军时不治疗", missing.heal, [])
 
-  const attackMode = cast("foe", 2)
-  check("打红 3 时以所点红 3 为伤害中心", attackMode.dmg, [3, 4])
-  check("打红 3 时只治疗其正对位的蓝 3", attackMode.heal, [3])
-
-  const noMate = cast("foe", 2, { blueKills: [2] })
-  check("打红 3 时即使蓝 3 已倒，伤害仍正常结算", noMate.dmg, [3, 4])
-  check("所点敌方没有存活友方对位时不向旁边补治疗目标", noMate.heal, [])
+  // 红 2 是本战场唯一前排，主目标改成 2 位，治疗也跟着落在蓝 2（小春自己）。
+  const shifted = cast(["野宫", "小春", "野宫", "野宫"], ["野宫", "星野", "野宫", "野宫"])
+  check("自动主目标改变时，对位治疗同步改变", [shifted.dmg, shifted.heal], [[2], [2]])
 
   const koharu = ROSTER.find((t) => t.name === "小春")
-  check("小春技能组保持 enemy_adjacent ×2 + mirror_ally",
-    [koharu.ex.target, koharu.ex.count, koharu.ex.effects[0].scope, Boolean(koharu.ex.circle)],
-    ["enemy_adjacent", 2, "mirror_ally", false])
-  check("小春目标规则同时接受敌我，但要求明确写阵营动词",
-    exTargetRuleOf(koharu.ex), { scopes: ["foe", "ally"], mode: "mirror_ally", requireExplicitScope: true })
-  check("小春角色卡同时说明打敌方 / 奶友方及两边落空规则",
-    ["打敌方", "奶友方", "正对面为空则无伤害", "无存活友方对位则不治疗"]
-      .every((s) => describeEffect(koharu.ex).includes(s)), true)
-
-  const command = setup(["小春", "野宫", "伊织", "茜"], ["野宫", "伊织", "野宫", "伊织"])
-  check("小春裸 EX 会提示明确写打或奶",
-    /明确写.*打.*奶/.test(engineValidateAction(command, { type: "ex", casts: [{ pos: 0 }] }) || ""), true)
-
-  const healCommand = parseAction("小春ex奶野宫")
-  check("解析器用『奶』把小春目标标为友方", healCommand?.action?.casts[0]?.target?.scope, "ally")
-  check("小春奶友方指令通过引擎校验", engineValidateAction(command, healCommand.action), null)
-  check("『给』也是小春友方模式，不会误判成敌方",
-    parseAction("小春ex给野宫")?.action?.casts[0]?.target?.scope, "ally")
-  const attackCommand = parseAction("小春ex打野宫")
-  check("解析器用『打』把小春目标标为敌方", attackCommand?.action?.casts[0]?.target?.scope, "foe")
-  check("小春打敌方指令通过引擎校验", engineValidateAction(command, attackCommand.action), null)
-
-  const ambiguous = parseAction("小春ex野宫")
-  check("小春写了目标却没写打 / 奶时不替玩家猜阵营",
-    /明确写.*打.*奶/.test(engineValidateAction(command, ambiguous.action) || ""), true)
-
-  const dead = setup(["小春", "野宫", "伊织", "茜"], ["野宫", "伊织", "野宫", "伊织"], [[0, 2]])
-  check("小春不能治疗已阵亡友方",
-    /已经倒下/.test(engineValidateAction(dead, {
-      type: "ex", casts: [{ pos: 0, target: { scope: "ally", idx: 2 } }],
-    }) || ""), true)
+  check("EX 治疗效果生成成 mirror_ally，不再带 circle 分支",
+    [koharu.ex.effects[0].scope, Boolean(koharu.ex.circle)], ["mirror_ally", false])
+  check("裸指令可用", parseAction("小春ex")?.ok, true)
+  check("带敌方目标的旧写法被拒绝", parseAction("小春ex打白子")?.ok, false)
+  check("带友方目标的旧写法被拒绝", parseAction("小春ex奶桃")?.ok, false)
 
   // 她的普通技能仍服从原文：排除自己、只选血量 ≤50% 的，不被通用位置规则改成最低血量。
   check("普技仍是 ally_hurt，不被改写成 ally_lowest",
@@ -2587,9 +2381,9 @@ console.log("\n=== 38. 场地掩体：Block=1 每段 30% 决定谁承伤 ===")
   }
 
   const aimed = { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] }
-  check("有掩体时仍可点名角色；掩体只在伤害段里继续判格挡",
+  check("有掩体也不能靠玩家点名绕过固定索敌",
     validateAction(fieldBattle(["星野", "白子", "千世", "芹香"], "伊织"), aimed),
-    null)
+    "EX 不能指定目标，只能选择释放者")
 }
 
 console.log("\n=== 39. 支援位友方目标：治疗人数与进攻 / 防御优先级 ===")
@@ -2622,9 +2416,9 @@ console.log("\n=== 39. 支援位友方目标：治疗人数与进攻 / 防御优
   const named = setup([...mains, "芹娜", "真白"], ["伊织", "伊织", "伊织", "伊织"])
   hurt(named)
   named.sides[0].cost = 10
-  check("芹娜 EX 接受玩家指定的友方目标",
+  check("芹娜 EX 不接受点名字段",
     validateAction(named, { type: "ex", casts: [{ pos: 4, target: { scope: "ally", idx: 2 } }] }),
-    null)
+    "EX 不能指定目标，只能选择释放者")
 
   const def = setup([...mains, "芹娜", "真白"], ["伊织", "伊织", "伊织", "伊织"])
   hurt(def)
@@ -2893,12 +2687,10 @@ console.log("\n=== 43. 支援的刀不被嘲讽拉走，但照吃集火 ===")
     return out
   }
 
-  /** 在已经轮到蓝方指令阶段的状态里点名释放一个支援 EX，返回它的实际落点。 */
-  const castSupportEx = (st, pos, targetIdx = 0) => {
+  /** 在已经轮到蓝方指令阶段的状态里释放一个支援 EX，返回它的实际落点。 */
+  const castSupportEx = (st, pos) => {
     st.sides[0].cost = 10
-    const r = playerTurn(st, {
-      type: "ex", casts: [{ pos, target: { scope: "foe", idx: targetIdx } }],
-    })
+    const r = playerTurn(st, { type: "ex", casts: [{ pos }] })
     if (r.error) throw new Error(`蓝 ${pos + 1} 位放不出 EX：${r.error}`)
     return shotsOf(r)[`${pos + 1}技`]
   }
@@ -2958,21 +2750,19 @@ console.log("\n=== 43. 支援的刀不被嘲讽拉走，但照吃集火 ===")
   check("对照组·无嘲讽：爱理按前排优先打 1 位", calm["5技"], "1")
   check("对照组·无嘲讽：真白从前排主目标铺开打 1·2", calm["6技"], "12")
 
-  const mashiroExTarget = (red, targetIdx) => {
+  const mashiroExTarget = (red) => {
     const st = setup(["野宫", "野宫", "野宫", "野宫", "爱理", "真白"], red)
-    const r = playerTurn(st, {
-      type: "ex", casts: [{ pos: 5, target: { scope: "foe", idx: targetIdx } }],
-    })
+    const r = playerTurn(st, { type: "ex", casts: [{ pos: 5 }] })
     const ev = r.events.find((e) =>
       e.type === "action" && e.action === "ex" && e.source?.side === 0 && e.source?.pos === 5)
     return (ev?.targets || []).map((t) => t.pos + 1)
   }
-  check("真白 EX 可直接点名前排 3 位，不受前面中后排阻挡",
-    mashiroExTarget(["野宫", "白子", "星野", "伊织"], 2), [3])
-  check("真白 EX 可直接点名中排 2 位",
-    mashiroExTarget(["野宫", "白子", "芹香", "伊织"], 1), [2])
-  check("真白 EX 可直接点名后排 1 位",
-    mashiroExTarget(["野宫", "伊织", "日奈", "晴奈"], 0), [1])
+  check("真白 EX 纯伤害：有前排时越过中后排打前排 3 位",
+    mashiroExTarget(["野宫", "白子", "星野", "伊织"]), [3])
+  check("真白 EX 纯伤害：没有前排时打中排，同排取较小的 2 位",
+    mashiroExTarget(["野宫", "白子", "芹香", "伊织"]), [2])
+  check("真白 EX 纯伤害：全后排时按号位打 1 位",
+    mashiroExTarget(["野宫", "伊织", "日奈", "晴奈"]), [1])
 
   // 穷举当前 18 名支援里所有需要通用敌方主目标的普通技能 / EX。
   // 阵容把唯一前排放在 3 位，确保断言测的是身位而不是「总取最小号位」。
@@ -3004,7 +2794,7 @@ console.log("\n=== 43. 支援的刀不被嘲讽拉走，但照吃集火 ===")
   ]
   check("当前所有通用支援对敌技能均纳入前排索敌回归",
     genericEnemyCases.map(([label]) => label), genericEnemyLabels)
-  check("普通技能自动索敌；EX 测试夹具显式点名唯一前排 3 位",
+  check("当前所有通用支援对敌技能都先锁唯一前排 3 位",
     genericEnemyCases, genericEnemyLabels.map((label) => [label, 3]))
 
   {
@@ -3053,15 +2843,13 @@ console.log("\n=== 43. 支援的刀不被嘲讽拉走，但照吃集火 ===")
       st.sides[1].units[3].taunt = 2
       st.sides[1].units[3].tauntKind = "provoke"
     }), calmMatrix)
-  const enemySupportSkillCases = allEnemySupportCases.filter(({ kind }) => kind === "skill")
-  const skillTargetMatrix = (mutate) => enemySupportSkillCases.map(({ label, support, kind }) =>
-    [label, supportTargets(support, kind, matrixRed, mutate)])
-  check("全部支援对敌普通技能都执行集火：以 4 位为新主目标，同时保留各自范围",
-    skillTargetMatrix((st) => { st.sides[1].units[3].focus = 2 }), [
-      ["响普技", "43"], ["花凛普技", "4"], ["纱绫普技", "43"],
-      ["真白普技", "43"], ["爱理普技", "4"], ["晴普技", "4"],
-      ["静子普技", "4"], ["小玉普技", "4"], ["朱莉普技", "4"],
-      ["好美普技", "43"], ["和香普技", "4"],
+  check("全部支援对敌普通技能 / EX 都执行集火：以 4 位为新主目标，同时保留各自范围",
+    targetMatrix((st) => { st.sides[1].units[3].focus = 2 }), [
+      ["响普技", "43"], ["响EX", "431234"], ["花凛普技", "4"], ["花凛EX", "4"],
+      ["纱绫普技", "43"], ["纱绫EX", "43"], ["真白普技", "43"], ["真白EX", "4"],
+      ["爱理普技", "4"], ["爱理EX", "43"], ["晴普技", "4"], ["晴EX", "43"],
+      ["静子普技", "4"], ["小玉普技", "4"], ["朱莉普技", "4"], ["朱莉EX", "43"],
+      ["好美普技", "43"], ["好美EX", "43"], ["和香普技", "4"],
     ])
 
   const genericSupportCases = allEnemySupportCases.filter(({ skill }) =>
@@ -3085,7 +2873,7 @@ console.log("\n=== 43. 支援的刀不被嘲讽拉走，但照吃集火 ===")
     ["真白 EX（单体）", "真白", "ex", "偶", "1"],
     ["爱理 EX（2 目标）", "爱理", "ex", "偶", "12"],
   ]
-  check("佩洛洛同战场：普通技能自动锁人偶；EX 夹具显式点人偶后仍按当前范围退化",
+  check("佩洛洛同战场：单体先打人偶，同身位范围也退化为只打人偶",
     peroroCases.map(([label, support, kind]) => [label,
       supportTargets(support, kind, RED, (st) => putEnemyPeroro(st, 0))]),
     peroroCases.map(([label, , , same]) => [label, same]))
@@ -3121,9 +2909,9 @@ console.log("\n=== 43. 支援的刀不被嘲讽拉走，但照吃集火 ===")
     cur = run(cur, { type: "pass" }).state // 红方过
     check("切里诺的标记落在攻击力最高的 2 位晴奈身上（不是默认的 1 位）",
       cur.sides[1].units.map((u) => focusedOf(u)), [false, true, false, false])
-    check("支援 EX 显式点名不吃集火：仍按所点 1 位结算各自范围",
+    check("支援 EX 吃集火：爱理范围 EX 以 2 位为中心保留 2·1，真白单体 EX 只打 2 位",
       [castSupportEx(structuredClone(cur), 4), castSupportEx(structuredClone(cur), 5)],
-      ["12", "1"])
+      ["21", "2"])
     for (const u of cur.sides[0].supports) u.skillCd = 0
     const out = shotsOf(playerTurn(cur, { type: "pass" }))
     check("支援吃集火：爱理改打被点名的 2 位", out["5技"], "2")
@@ -3182,16 +2970,14 @@ console.log("\n=== 38b. 爱露分段掩体：直击可挡、爆风无视 ===")
     check("随机格挡不改索敌记录：战场图出手线只指向自动目标",
       actionEv.targets.map((t) => t.summon ? "掩体" : String(t.pos + 1)), ["1"])
 
-    // 点名已经倒下的角色必须在扣费前被拒绝，不能静默重锁到别人。
+    // 所有 EX 共用同一条输入边界：即使目标已倒下，也先因携带 target 字段被拒绝。
     const c = cover(["爱露", "野宫", "野宫", "野宫"], 1)
     c.sides[0].units[0].alive = false
     c.sides[0].units[0].hp = 0
     const action = { type: "ex", casts: [{ pos: 0, target: { scope: "foe", idx: 0 } }] }
-    check("爱露 EX 点名已倒角色：明确报目标已倒",
-      /已经倒下/.test(validateAction(c, action) || ""), true)
+    check("爱露 EX 携带目标字段：直接判非法", validateAction(c, action), "EX 不能指定目标，只能选择释放者")
     const invalid = playerTurn(c, action)
-    check("非法 EX 不扣费、不产生事件",
-      [invalid.state.sides[1].cost === c.sides[1].cost, invalid.events?.length || 0], [true, 0])
+    check("非法 EX 不扣费、不产生事件", [invalid.error?.includes("不能指定目标"), invalid.events?.length || 0], [true, 0])
 
     // 普技走 ③-a 同时锁定，也必须由 strike 按自己的 hitBlocks 分流承伤。
     const skillState = cover()
@@ -3286,7 +3072,7 @@ console.log("\n=== 44. 状态 → 持续治疗 → DoT/场地；场地判闪避�
     for (const side of st.sides) for (const u of side.units) { u.hp = u.maxhp = 1e9 }
     noMiss(st.sides[0].units[0])
     st.round = round
-    return enginePlayerTurn(st, { type: "pass" }).events.find((e) =>
+    return playerTurn(st, { type: "pass" }).events.find((e) =>
       e.type === "damage" && !e.dot && e.source?.side === 0 && e.source?.pos === 0)?.totalAmount
   }
   const protectedDirect = directDamageAt(1)
