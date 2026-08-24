@@ -214,16 +214,29 @@ export function createRouteExecutionPlan(routeId, options = {}) {
   const scope = options.selfId == null ? {} : { selfId: options.selfId };
   const scopeKey = options.selfId == null ? "default" : String(options.selfId);
   const protocol = String(options.protocol || "").trim().toLowerCase();
+  const routeModule = String(options.routeModule || "Routes").trim() || "Routes";
+  const routeLabel = String(
+    options.routeLabel || (routeModule === "Routes" ? "AI" : routeModule)
+  ).trim();
   const providers = Setting.getConfig("Providers", scope)?.providers || [];
-  const routes = Setting.getConfig("Routes", scope)?.routes || [];
+  const routes = Setting.getConfig(routeModule, scope)?.routes || [];
   const route = routes.find((item) => item.id === routeId);
-  if (!route) throw new Error(`未找到 AI 路由：${routeId}`);
+  if (!route) {
+    const message = routeModule === "Routes"
+      ? `未找到 AI 路由：${routeId}`
+      : `未找到${routeLabel}路由：${routeId}`;
+    const error = new Error(message);
+    error.code = "ROUTE_NOT_FOUND";
+    error.routeId = routeId;
+    error.routeModule = routeModule;
+    throw error;
+  }
 
   const providerMap = new Map(providers.map((provider) => [provider.id, provider]));
   const targets = orderScheduledItems(
     route.targets || [],
     route.strategy,
-    `scope:${scopeKey}:route:${route.id}`
+    `scope:${scopeKey}:module:${routeModule}:route:${route.id}`
   );
   const resolvedTargets = [];
 
@@ -287,6 +300,28 @@ export function createRouteExecutionPlan(routeId, options = {}) {
 
   const maxAttempts = positiveInteger(route.maxAttempts, attempts.length || 1);
   return { route, attempts: attempts.slice(0, maxAttempts) };
+}
+
+export function resolveRouteReference(routeReference, options = {}) {
+  const reference = String(routeReference || "").trim();
+  if (!reference) return reference;
+
+  const scope = options.selfId == null ? {} : { selfId: options.selfId };
+  const routeModule = String(options.routeModule || "Routes").trim() || "Routes";
+  const routes = Setting.getConfig(routeModule, scope)?.routes || [];
+  if (routes.some((route) => route?.id === reference)) return reference;
+  if (typeof options.targetMatches !== "function") return reference;
+
+  const providers = Setting.getConfig("Providers", scope)?.providers || [];
+  const providerMap = new Map(providers.map((provider) => [provider.id, provider]));
+  const matchedRoute = routes.find((route) =>
+    (route?.targets || []).some((target) => {
+      if (target?.enabled === false) return false;
+      const provider = providerMap.get(target?.provider);
+      return provider && options.targetMatches({ route, target, provider });
+    })
+  );
+  return matchedRoute?.id || reference;
 }
 
 export function resolveRouteTarget(routeId, options = {}) {

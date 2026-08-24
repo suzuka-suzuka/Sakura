@@ -83,6 +83,7 @@ export function buildGeminiClientOptions(config = {}) {
   const options = {};
   const baseURL = String(config.baseURL || config.baseUrl || "").trim();
   const apiKey = String(config.apiKey || "").trim();
+  const timeout = Number(config.timeoutMs);
 
   if (config.vertex === true || config.vertexai === true) {
     options.vertexai = true;
@@ -100,7 +101,12 @@ export function buildGeminiClientOptions(config = {}) {
     options.apiKey = apiKey;
   }
 
-  if (baseURL) options.httpOptions = { baseUrl: baseURL };
+  if (baseURL || (Number.isFinite(timeout) && timeout > 0)) {
+    options.httpOptions = {
+      ...(baseURL && { baseUrl: baseURL }),
+      ...(Number.isFinite(timeout) && timeout > 0 && { timeout }),
+    };
+  }
   return options;
 }
 

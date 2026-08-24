@@ -2,12 +2,16 @@ import { GoogleGenAI } from "@google/genai";
 import OpenAI, { toFile } from "openai";
 import sharp from "sharp";
 import Setting from "../setting.js";
-import { generateGrokImage } from "./cliProxyMediaClient.js";
-import {
-  findImageChannel,
-  listImageChannelNames,
-} from "./imageChannelRouter.js";
 import { tagMediaError } from "./mediaErrorMessages.js";
+import {
+  createRouteExecutionPlan,
+  formatRouteAttemptFailure,
+  resolveRouteReference,
+} from "./providerRouter.js";
+import {
+  GROK_CPA_ASPECT_RATIOS,
+  nearestSupportedAspectRatio,
+} from "./mediaParameterCompatibility.js";
 import {
   buildGeminiClientOptions,
   DEFAULT_VERTEX_LOCATION,
@@ -15,16 +19,6 @@ import {
 
 const PORTRAIT_RATIOS = new Set(["2:3", "3:4", "4:5", "9:16"]);
 const LANDSCAPE_RATIOS = new Set(["3:2", "4:3", "5:4", "16:9", "21:9"]);
-const GROK_IMAGE_ASPECT_RATIOS = new Set([
-  "auto",
-  "1:1",
-  "2:3",
-  "3:2",
-  "3:4",
-  "4:3",
-  "9:16",
-  "16:9",
-]);
 const GPT_IMAGE_2_MAX_PIXELS = 8294400;
 const GPT_IMAGE_2_2K_MAX_PIXELS = 4194304;
 
@@ -34,7 +28,8 @@ function normalizeProvider(provider) {
   return provider || "gemini";
 }
 
-function imageProviderName(provider) {
+function imageProviderName(provider, modelName = "") {
+  if (isGrokImageModel(modelName)) return "Grok";
   if (provider === "openai") return "OpenAI";
   if (provider === "grok") return "Grok";
   if (provider === "vertex") return "Vertex";
@@ -48,6 +43,12 @@ function normalizeLegacyOpenAIAspectRatio(aspectRatio) {
   return "1:1";
 }
 
+function geminiImageReferenceLimit(model) {
+  if (model.includes("gemini-2.5-flash-image")) return 3;
+  if (model.includes("gemini-3") && model.includes("image")) return 14;
+  return null;
+}
+
 export function normalizeImageGenerationOptions(
   provider,
   modelName,
@@ -57,30 +58,20 @@ export function normalizeImageGenerationOptions(
   const normalized = { ...options };
   const warnings = [];
   const model = `${modelName || ""}`.toLowerCase();
-  const providerName = imageProviderName(provider);
+  const usesGrokImage = provider === "grok" || isGrokImageModel(model);
+  const providerName = imageProviderName(provider, model);
   let sourceImageLimit = sourceImageCount;
 
-  if (
-    provider === "openai" &&
-    model.includes("gpt-image-2") &&
-    normalized.aspectRatio === "auto" &&
-    normalized.imageSize
-  ) {
+  if (!normalized.aspectRatio || normalized.aspectRatio === "auto") {
     normalized.aspectRatio = null;
-    warnings.push(
-      `GPT Image 2 无法同时使用 auto 比例和 ${normalized.imageSize} 尺寸等级，已省略 auto 并按方形尺寸生成`
-    );
   }
+  if (!normalized.imageSize) normalized.imageSize = "1K";
+  if (!Number.isInteger(normalized.count)) normalized.count = 1;
 
   if (provider === "gemini" || provider === "vertex") {
-    if (normalized.aspectRatio === "auto") {
-      normalized.aspectRatio = null;
-      warnings.push(`${providerName} 生图不接受 auto 比例，已省略比例参数`);
-    }
-
     if (Number.isInteger(normalized.count) && normalized.count > 1) {
       normalized.count = 1;
-      warnings.push(`${providerName} 当前接口不支持 n=${options.count}，已改为生成 1 张`);
+      warnings.push(`${providerName} 当前接口最多生成 1 张，已将 n=${options.count} 降为 1`);
     }
 
     const onlySupports1K =
@@ -92,21 +83,32 @@ export function normalizeImageGenerationOptions(
       normalized.imageSize !== "1K"
     ) {
       warnings.push(
-        `${modelName} 不支持 ${normalized.imageSize}，已省略清晰度参数并使用模型默认值`
+        `${modelName} 最高支持 1K，已将 ${normalized.imageSize} 降为 1K`
       );
-      normalized.imageSize = null;
+      normalized.imageSize = "1K";
+    }
+
+    const referenceLimit = geminiImageReferenceLimit(model);
+    if (referenceLimit && sourceImageCount > referenceLimit) {
+      sourceImageLimit = referenceLimit;
+      warnings.push(
+        `${providerName} 当前模型最多支持 ${referenceLimit} 张参考图，已忽略其余 ${sourceImageCount - referenceLimit} 张`
+      );
     }
   }
 
-  if (provider === "grok") {
-    if (
-      normalized.aspectRatio &&
-      !GROK_IMAGE_ASPECT_RATIOS.has(normalized.aspectRatio)
-    ) {
-      warnings.push(
-        `Grok 生图不支持 ${normalized.aspectRatio} 比例，已省略并使用模型默认比例`
+  if (usesGrokImage) {
+    if (normalized.aspectRatio) {
+      const compatibleRatio = nearestSupportedAspectRatio(
+        normalized.aspectRatio,
+        GROK_CPA_ASPECT_RATIOS
       );
-      normalized.aspectRatio = null;
+      if (compatibleRatio !== normalized.aspectRatio) {
+        warnings.push(
+          `Grok 生图不支持 ${normalized.aspectRatio} 比例，已调整为同方向最接近的 ${compatibleRatio}`
+        );
+        normalized.aspectRatio = compatibleRatio;
+      }
     }
 
     if (normalized.imageSize === "4K") {
@@ -127,7 +129,7 @@ export function normalizeImageGenerationOptions(
     model.includes("gpt-image") &&
     !model.includes("gpt-image-2");
   if (legacyGptImage) {
-    if (normalized.aspectRatio && normalized.aspectRatio !== "auto") {
+    if (normalized.aspectRatio) {
       const supportedRatio = normalizeLegacyOpenAIAspectRatio(
         normalized.aspectRatio
       );
@@ -141,17 +143,14 @@ export function normalizeImageGenerationOptions(
 
     if (["2K", "4K"].includes(normalized.imageSize)) {
       warnings.push(
-        `${modelName} 不支持 ${normalized.imageSize} 清晰度参数，已省略并使用模型默认值`
+        `${modelName} 最高支持 1K，已将 ${normalized.imageSize} 降为 1K`
       );
-      normalized.imageSize = null;
+      normalized.imageSize = "1K";
     }
   }
 
   if (provider === "openai" && model.includes("dall-e-3")) {
-    if (normalized.aspectRatio === "auto") {
-      normalized.aspectRatio = null;
-      warnings.push("DALL·E 3 不支持 auto 比例，已省略比例参数");
-    } else if (normalized.aspectRatio) {
+    if (normalized.aspectRatio) {
       const supportedRatio = normalizeLegacyOpenAIAspectRatio(
         normalized.aspectRatio
       );
@@ -165,22 +164,19 @@ export function normalizeImageGenerationOptions(
 
     if (["2K", "4K"].includes(normalized.imageSize)) {
       warnings.push(
-        `DALL·E 3 不支持 ${normalized.imageSize} 清晰度参数，已省略并使用模型默认值`
+        `DALL·E 3 最高支持 1K，已将 ${normalized.imageSize} 降为 1K`
       );
-      normalized.imageSize = null;
+      normalized.imageSize = "1K";
     }
 
     if (Number.isInteger(normalized.count) && normalized.count > 1) {
       normalized.count = 1;
-      warnings.push(`DALL·E 3 单次只能生成 1 张，已忽略 n=${options.count}`);
+      warnings.push(`DALL·E 3 单次最多生成 1 张，已将 n=${options.count} 降为 1`);
     }
   }
 
   if (provider === "openai" && model.includes("dall-e-2")) {
-    if (normalized.aspectRatio === "auto") {
-      normalized.aspectRatio = null;
-      warnings.push("DALL·E 2 不支持 auto 比例，已省略比例参数");
-    } else if (normalized.aspectRatio && normalized.aspectRatio !== "1:1") {
+    if (normalized.aspectRatio && normalized.aspectRatio !== "1:1") {
       warnings.push(
         `DALL·E 2 不支持 ${normalized.aspectRatio}，已调整为 1:1`
       );
@@ -189,9 +185,9 @@ export function normalizeImageGenerationOptions(
 
     if (["2K", "4K"].includes(normalized.imageSize)) {
       warnings.push(
-        `DALL·E 2 不支持 ${normalized.imageSize} 清晰度参数，已省略并使用模型默认值`
+        `DALL·E 2 最高支持 1K，已将 ${normalized.imageSize} 降为 1K`
       );
-      normalized.imageSize = null;
+      normalized.imageSize = "1K";
     }
   }
 
@@ -204,24 +200,69 @@ async function notifyParameterWarnings(callback, warnings) {
   }
 }
 
-function resolveImageConfig(imageConfig = {}, requestedChannel = null) {
-  const channelName = `${requestedChannel || imageConfig.imageChannel || ""}`.trim();
+function resolveImageSelection(
+  imageConfig = {},
+  requestedRoute = null,
+  selfId = null
+) {
+  const scope = selfId == null ? {} : { selfId };
+  const featureConfig = selfId == null
+    ? imageConfig
+    : Setting.getConfig("EditImage", scope);
+  const routeReference = `${
+    requestedRoute ||
+    featureConfig.imageRoute ||
+    imageConfig.imageRoute ||
+    ""
+  }`.trim();
 
-  if (!channelName) {
-    throw new Error("未配置生图渠道，请在 EditImage.imageChannel 中选择一个 ImageChannels 渠道。");
+  if (!routeReference) {
+    throw new Error("未配置图片路由，请在 EditImage.imageRoute 中选择一个 ImageRoutes 路由。");
   }
 
-  const imageChannelsConfig = Setting.getConfig("ImageChannels");
-  const imageChannel = findImageChannel(imageChannelsConfig, channelName);
-  if (imageChannel) {
-    return imageChannel;
-  }
+  const alias = routeReference.toLowerCase();
+  const aliasMatchers = {
+    grok: ({ target, provider }) =>
+      provider.protocol === "openai" && isGrokImageModel(target.model),
+    gpt: ({ target, provider }) =>
+      provider.protocol === "openai" && /(?:gpt-image|dall-e)/i.test(target.model),
+    gemini: ({ provider }) =>
+      provider.protocol === "gemini" && provider.vertex !== true,
+    vertex: ({ provider }) =>
+      provider.protocol === "gemini" && provider.vertex === true,
+  };
+  const routeId = resolveRouteReference(routeReference, {
+    selfId,
+    routeModule: "ImageRoutes",
+    targetMatches: aliasMatchers[alias],
+  });
 
-  const availableChannels = listImageChannelNames(imageChannelsConfig);
-  const availableText = availableChannels.length > 0
-    ? ` 可用渠道：${availableChannels.join("、")}。`
-    : "";
-  throw new Error(`未找到名为 "${channelName}" 的生图渠道。${availableText}`);
+  const plan = createRouteExecutionPlan(routeId, {
+    selfId,
+    routeModule: "ImageRoutes",
+    routeLabel: "图片",
+  });
+  if (plan.attempts.length === 0) {
+    throw new Error(`图片路由 ${routeId} 没有可用的目标或凭据。`);
+  }
+  return { routeId, plan };
+}
+
+function imageConfigFromRouteAttempt(attempt) {
+  const config = attempt.requestConfig;
+  const provider = config.channelType === "gemini"
+    ? (config.vertex ? "vertex" : "gemini")
+    : "openai";
+
+  return {
+    name: config.name,
+    provider,
+    model: config.model,
+    baseURL: config.baseURL,
+    api: config.apiKey,
+    serviceAccountRef: config.serviceAccountRef,
+    timeoutMs: config.timeoutMs,
+  };
 }
 
 function pickApiKey(imageConfig) {
@@ -235,7 +276,7 @@ function pickApiKey(imageConfig) {
   }
 
   if (Array.isArray(apiKeys) && apiKeys.length > 0) {
-    const channelName = imageConfig.name || imageConfig.imageChannel || "image";
+    const channelName = imageConfig.name || "image";
     let currentIndex = channelApiKeyIndex.get(channelName) || 0;
 
     if (currentIndex >= apiKeys.length) {
@@ -544,10 +585,6 @@ function pickOpenAISize(modelName, aspectRatio, imageSize) {
     return null;
   }
 
-  if (aspectRatio === "auto" && !imageSize) {
-    return "auto";
-  }
-
   if (normalizedModel.includes("gpt-image-2")) {
     return pickGptImage2Size(aspectRatio, imageSize);
   }
@@ -663,10 +700,14 @@ async function callOpenAIImage(
   sourceImages,
   options
 ) {
+  const apiKey = pickApiKey(imageConfig);
   const client = new OpenAI({
-    apiKey: pickApiKey(imageConfig),
+    apiKey: apiKey || "not-required",
     baseURL: imageConfig.baseURL?.trim() || undefined,
     maxRetries: 0,
+    timeout: Number.isFinite(imageConfig.timeoutMs)
+      ? imageConfig.timeoutMs
+      : undefined,
   });
 
   const request = {
@@ -725,25 +766,54 @@ async function callOpenAIImage(
   return await extractOpenAIImageBuffers(response);
 }
 
-async function callGrokImage(imageConfig, promptText, sourceImages, options) {
-  const result = await generateGrokImage(
-    {
-      model: imageConfig.model,
-      prompt: promptText,
-      images: sourceImages,
-      aspectRatio: options.aspectRatio,
-      resolution: pickGrokImageResolution(options.imageSize),
-      n: options.count,
-      responseFormat: "b64_json",
-    },
-    {
-      baseURL: imageConfig.baseURL,
-      apiKey: pickApiKey(imageConfig),
-      imageModel: imageConfig.model,
-    }
-  );
+async function generateImagesOnce(
+  resolvedConfig,
+  promptText,
+  sourceImages,
+  options
+) {
+  const provider = normalizeProvider(resolvedConfig.provider);
+  try {
+    validateResolvedImageConfig(resolvedConfig, provider);
+    const normalized = normalizeImageGenerationOptions(
+      provider,
+      resolvedConfig.model,
+      options,
+      sourceImages.length
+    );
+    const compatibleImages = sourceImages.slice(0, normalized.sourceImageLimit);
+    const compatibleOptions = normalized.options;
 
-  return result.buffers;
+    if (provider === "openai" || provider === "grok") {
+      return {
+        buffers: await callOpenAIImage(
+          resolvedConfig,
+          promptText,
+          compatibleImages,
+          compatibleOptions
+        ),
+        warnings: normalized.warnings,
+      };
+    }
+
+    const isVertex = provider === "vertex";
+    return {
+      buffers: await callGeminiModel(
+        resolvedConfig,
+        promptText,
+        compatibleImages,
+        compatibleOptions,
+        isVertex ? "" : pickApiKey(resolvedConfig),
+        isVertex
+      ),
+      warnings: normalized.warnings,
+    };
+  } catch (error) {
+    const errorProvider = isGrokImageModel(resolvedConfig.model)
+      ? "grok"
+      : provider;
+    throw tagMediaError(error, errorProvider, "image");
+  }
 }
 
 export async function generateImagesWithProvider(
@@ -753,77 +823,68 @@ export async function generateImagesWithProvider(
   options = {},
   hooks = {}
 ) {
-  const resolvedConfig = resolveImageConfig(imageConfig, options.channel);
-  const provider = normalizeProvider(resolvedConfig.provider);
-  try {
-    validateResolvedImageConfig(resolvedConfig, provider);
-    const normalized = normalizeImageGenerationOptions(
-      provider,
-      resolvedConfig.model,
-      options,
-      sourceInputs.length
-    );
-    await notifyParameterWarnings(
-      hooks.onParameterWarnings,
-      normalized.warnings
-    );
-    const sourceImages = await normalizeImageInputs(
-      sourceInputs.slice(0, normalized.sourceImageLimit)
-    );
-    const compatibleOptions = normalized.options;
+  const selection = resolveImageSelection(
+    imageConfig,
+    options.channel,
+    options.selfId
+  );
+  const sourceImages = await normalizeImageInputs(sourceInputs);
 
-    if (provider === "openai") {
-      return await callOpenAIImage(
-        resolvedConfig,
+  let lastError = null;
+  const { plan, routeId } = selection;
+  for (let index = 0; index < plan.attempts.length; index++) {
+    const attempt = plan.attempts[index];
+    const nextAttempt = plan.attempts[index + 1] || null;
+    try {
+      const result = await generateImagesOnce(
+        imageConfigFromRouteAttempt(attempt),
         promptText,
         sourceImages,
-        compatibleOptions
+        options
       );
+      await notifyParameterWarnings(hooks.onParameterWarnings, result.warnings);
+      return result.buffers;
+    } catch (error) {
+      lastError = error;
+      logger.warn(formatRouteAttemptFailure({
+        routeId,
+        attempt,
+        error,
+        attemptNumber: index + 1,
+        totalAttempts: plan.attempts.length,
+        nextAttempt,
+        retryDelayMs: plan.route.retryDelayMs,
+      }));
     }
 
-    if (provider === "grok") {
-      return await callGrokImage(
-        resolvedConfig,
-        promptText,
-        sourceImages,
-        compatibleOptions
-      );
+    if (nextAttempt && plan.route.retryDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, plan.route.retryDelayMs));
     }
-
-    const isVertex = provider === "vertex";
-    return await callGeminiModel(
-      resolvedConfig,
-      promptText,
-      sourceImages,
-      compatibleOptions,
-      isVertex ? "" : pickApiKey(resolvedConfig),
-      isVertex
-    );
-  } catch (error) {
-    throw tagMediaError(error, provider, "image");
   }
+
+  throw lastError || new Error(`图片路由 ${routeId} 没有可用的目标。`);
 }
 
 function validateResolvedImageConfig(imageConfig, provider) {
   if (!imageConfig?.model) {
-    throw new Error("生图渠道未配置模型。");
+    throw new Error("图片路由目标未配置模型。");
   }
 
   if (provider === "vertex") {
     if (!imageConfig.serviceAccountRef) {
-      throw new Error("Vertex 生图渠道未选择服务账号凭证。");
+      throw new Error("Vertex 图片路由目标未选择服务账号凭证。");
     }
     return;
   }
 
   if (provider === "grok") {
     if (!imageConfig.baseURL) {
-      throw new Error("Grok 生图渠道未配置 API 地址。");
+      throw new Error("Grok 图片路由目标未配置 API 地址。");
     }
     return;
   }
 
   if (!imageConfig.api) {
-    throw new Error(`${provider === "openai" ? "OpenAI" : "Gemini"} 生图渠道未配置 API Key。`);
+    throw new Error(`${provider === "openai" ? "OpenAI" : "Gemini"} 图片路由目标未配置 API Key。`);
   }
 }

@@ -116,6 +116,40 @@ export function migrateAIRoutesConfig(value) {
         config.geminiRoute = config.toolsRoute;
     }
 
+    if (Array.isArray(config.profiles)) {
+        config.profiles = config.profiles.map((rawProfile) => {
+            if (!rawProfile || typeof rawProfile !== 'object' || Array.isArray(rawProfile)) {
+                return rawProfile;
+            }
+
+            const profile = { ...rawProfile };
+            if (!Object.hasOwn(profile, 'prefixes') && Object.hasOwn(profile, 'prefix')) {
+                profile.prefixes = Array.isArray(profile.prefix)
+                    ? profile.prefix
+                    : [profile.prefix];
+            }
+            if (!Object.hasOwn(profile, 'route') && Object.hasOwn(profile, 'Channel')) {
+                profile.route = profile.Channel;
+            }
+            if (!Object.hasOwn(profile, 'groupContext') && Object.hasOwn(profile, 'GroupContext')) {
+                profile.groupContext = profile.GroupContext;
+            }
+            if (!Object.hasOwn(profile, 'history') && Object.hasOwn(profile, 'History')) {
+                profile.history = profile.History;
+            }
+            if (!Object.hasOwn(profile, 'toolGroup') && Object.hasOwn(profile, 'Tool')) {
+                profile.toolGroup = typeof profile.Tool === 'string' ? profile.Tool : '';
+            }
+
+            delete profile.prefix;
+            delete profile.Channel;
+            delete profile.GroupContext;
+            delete profile.History;
+            delete profile.Tool;
+            return profile;
+        });
+    }
+
     delete config.appsRoute;
     delete config.toolsRoute;
     return config;
@@ -177,132 +211,6 @@ export const ActiveChatSchema = z.object({
 export const AutoCleanupSchema = z.object({
     groups: z.array(z.number()).default([]).describe('自动清理群号|#groupSelect|清除小于1级和半年未发言的人'),
 }).describe('自动清理');
-
-const ImageGeminiChannelSchema = z.object({
-    name: z.string().default('gemini-image').describe('渠道名称'),
-    model: z.string().default('gemini-3-pro-image-preview').describe('生图模型'),
-    api: z.string().default('').describe('API Key'),
-    baseURL: z.string().default('').describe('自定义URL|留空使用默认地址'),
-});
-
-const ImageOpenAIChannelSchema = z.object({
-    name: z.string().default('openai-image').describe('渠道名称'),
-    baseURL: z.string().default('https://api.openai.com/v1').describe('API地址'),
-    api: z.string().default('').describe('API Key'),
-    model: z.string().default('gpt-image-2').describe('生图模型'),
-});
-
-const ImageGrokChannelSchema = z.object({
-    name: z.string().default('grok-image').describe('渠道名称'),
-    baseURL: z.string().default('http://127.0.0.1:8317/v1').describe('API地址|Grok OpenAI 兼容媒体接口地址'),
-    api: z.string().default('').describe('API Key|接口未启用鉴权时可留空'),
-    model: z.string().default('grok-imagine-image-quality').describe('生图模型'),
-});
-
-const ImageVertexChannelSchema = z.object({
-    name: z.string().default('vertex-image').describe('渠道名称'),
-    model: z.string().default('gemini-3-pro-image-preview').describe('生图模型'),
-    serviceAccountRef: z.string().trim().default('').describe('服务账号|#vertexCredentialSelect|选择已导入并验证的 Vertex 服务账号 JSON'),
-    baseURL: z.string().default('').describe('自定义URL|留空使用 Vertex 默认地址'),
-});
-
-function migrateImageChannelsConfig(value) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-
-    const config = { ...value };
-    const hasGeminiChannels = Array.isArray(config.gemini);
-    const geminiChannels = hasGeminiChannels ? config.gemini : [];
-    const legacyVertexChannels = geminiChannels.filter((channel) => channel?.vertex === true);
-
-    if (hasGeminiChannels) {
-        config.gemini = geminiChannels.filter((channel) => channel?.vertex !== true);
-    }
-    if (!Array.isArray(config.vertex) && legacyVertexChannels.length > 0) {
-        config.vertex = legacyVertexChannels.map((channel) => ({
-            name: channel.name,
-            model: channel.model,
-            serviceAccountRef: channel.serviceAccountRef || channel.credentialRef || '',
-            baseURL: channel.baseURL || '',
-        }));
-    }
-
-    return config;
-}
-
-const VideoGrokChannelSchema = z.object({
-    name: z.string().default('grok-video').describe('渠道名称'),
-    baseURL: z.string().default('http://127.0.0.1:8317/v1').describe('Grok 网关地址|本地 Grok OAuth 网关的 /v1 接口地址'),
-    api: z.string().default('').describe('Grok 网关密钥|本地 Grok OAuth 网关的 Bearer API Key；网关未启用鉴权时可留空'),
-    model: z.string().default('grok-imagine-video').describe('视频生成模型|grok-imagine-video-1.5-preview 无参考图时会自动改用 grok-imagine-video'),
-    preferNativeVideo: z.boolean().default(true).describe('优先原生接口|开启后使用 /videos/generations，可透传 xAI 原生参数'),
-});
-
-const VideoGeminiChannelSchema = z.object({
-    name: z.string().default('gemini-video').describe('渠道名称'),
-    model: z.string().default('gemini-omni-flash-preview').describe('视频生成模型'),
-    serviceAccountRef: z.string().trim().default('').describe('服务账号|#vertexCredentialSelect|选择已导入并验证的 Vertex 服务账号 JSON'),
-    baseURL: z.string().default('').describe('自定义URL|留空使用 Vertex global 默认地址'),
-});
-
-function migrateVideoChannelsConfig(value) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-    if (Array.isArray(value.grok) || Array.isArray(value.gemini)) return value;
-
-    const hasLegacyGrokConfig = [
-        'baseURL',
-        'baseUrl',
-        'apiKey',
-        'api',
-        'videoModel',
-        'preferNativeVideo',
-    ].some((key) => Object.hasOwn(value, key));
-
-    if (!hasLegacyGrokConfig) return value;
-    return {
-        grok: [{
-            name: 'grok-video',
-            baseURL: value.baseURL || value.baseUrl,
-            api: value.apiKey || value.api,
-            model: value.videoModel,
-            preferNativeVideo: value.preferNativeVideo,
-        }],
-        gemini: [],
-    };
-}
-
-const VideoChannelsObjectSchema = z.object({
-    grok: z.array(VideoGrokChannelSchema).default([VideoGrokChannelSchema.parse({})]).describe('Grok 视频渠道|配置 Grok OpenAI 兼容视频生成渠道'),
-    gemini: z.array(VideoGeminiChannelSchema).default([]).describe('Gemini Omni 视频渠道|使用 Vertex 服务账号凭证'),
-}).superRefine((config, ctx) => {
-    const seen = new Map();
-    for (const type of ['grok', 'gemini']) {
-        config[type].forEach((channel, index) => {
-            const name = channel?.name?.trim();
-            if (!name) {
-                ctx.addIssue({
-                    code: 'custom',
-                    path: [type, index, 'name'],
-                    message: '渠道名称不能为空',
-                });
-                return;
-            }
-            if (seen.has(name)) {
-                ctx.addIssue({
-                    code: 'custom',
-                    path: [type, index, 'name'],
-                    message: `渠道名称“${name}”与 ${seen.get(name)} 重复`,
-                });
-                return;
-            }
-            seen.set(name, `${type} 渠道`);
-        });
-    }
-}).describe('视频渠道管理');
-
-export const CliProxyMediaSchema = z.preprocess(
-    migrateVideoChannelsConfig,
-    VideoChannelsObjectSchema
-);
 
 const CredentialSchema = z.object({
     id: nonEmptyString('凭据 ID').describe('凭据 ID|供应商内唯一'),
@@ -465,52 +373,49 @@ Object.defineProperty(RoutesSchema, 'configInputMigration', {
     value: migrateRoutesConfig,
 });
 
-const ImageChannelsObjectSchema = z.object({
-    openai: z.array(ImageOpenAIChannelSchema).default([ImageOpenAIChannelSchema.parse({})]).describe('OpenAI 生图渠道|配置 OpenAI 图片生成渠道'),
-    grok: z.array(ImageGrokChannelSchema).default([ImageGrokChannelSchema.parse({})]).describe('Grok 生图渠道|配置 Grok OpenAI 兼容图片生成渠道'),
-    gemini: z.array(ImageGeminiChannelSchema).default([ImageGeminiChannelSchema.parse({})]).describe('Gemini 生图渠道|使用 Gemini Developer API Key'),
-    vertex: z.array(ImageVertexChannelSchema).default([]).describe('Vertex 生图渠道|使用已导入的 Vertex 服务账号凭证'),
-}).superRefine((config, ctx) => {
-    const seen = new Map();
-    for (const type of ['openai', 'grok', 'gemini', 'vertex']) {
-        config[type].forEach((channel, index) => {
-            const name = channel?.name?.trim();
-            if (!name) {
-                ctx.addIssue({
-                    code: 'custom',
-                    path: [type, index, 'name'],
-                    message: '渠道名称不能为空',
-                });
-                return;
-            }
-            if (seen.has(name)) {
-                ctx.addIssue({
-                    code: 'custom',
-                    path: [type, index, 'name'],
-                    message: `渠道名称“${name}”与 ${seen.get(name)} 重复`,
-                });
-                return;
-            }
-            seen.set(name, `${type} 渠道`);
-        });
-    }
-}).describe('生图渠道管理');
+const MediaRouteTargetSchema = z.object({
+    id: nonEmptyString('目标 ID').describe('目标 ID|路由内唯一'),
+    provider: nonEmptyString('供应商').describe('供应商|#providerSelect'),
+    model: nonEmptyString('模型').describe('模型名称|#modelSelect|从所选供应商的模型端点返回列表中选择'),
+    enabled: z.boolean().default(true).describe('启用'),
+    priority: z.number().int().default(0).describe('优先级|数值越大越优先'),
+    weight: z.number().int().min(1).default(1).describe('权重|同优先级轮询权重'),
+});
 
-export const ImageChannelsSchema = z.preprocess(
-    migrateImageChannelsConfig,
-    ImageChannelsObjectSchema
-);
+function createMediaRoutesSchema(label, timeoutMs) {
+    const routeSchema = z.object({
+        id: nonEmptyString(`${label}路由 ID`).describe(`${label}路由 ID`),
+        strategy: routingStrategy('供应商目标调度策略'),
+        maxAttempts: z.number().int().min(1).default(3).describe('最大尝试次数|一次请求最多尝试的目标与 Key 组合数'),
+        retryDelayMs: z.number().int().min(0).default(1000).describe('重试间隔|毫秒'),
+        timeoutMs: z.number().int().min(1000).default(timeoutMs).describe('单目标请求超时|毫秒；超时后由路由尝试下一个目标或 Key'),
+        targets: z.array(MediaRouteTargetSchema).min(1, '至少配置一个路由目标').describe('路由目标|#routeTargets|#nameField:id'),
+    }).superRefine((route, ctx) => {
+        addUniqueFieldIssues(route.targets, 'id', ctx, ['targets']);
+    });
+
+    return z.object({
+        routes: z.array(routeSchema).default([]).describe(`${label}路由|#nameField:id`),
+    }).superRefine((config, ctx) => {
+        addUniqueFieldIssues(config.routes, 'id', ctx, ['routes']);
+    }).describe(`${label}路由管理`);
+}
+
+export const ImageRoutesSchema = createMediaRoutesSchema('图片', 300000);
+export const VideoRoutesSchema = createMediaRoutesSchema('视频', 900000);
 
 const EditTaskSchema = z.object({
     trigger: z.string().default('').describe('触发词|图片编辑触发词'),
     prompt: z.string().default('').describe('提示词|#textarea|图片编辑指令'),
 });
 
-export const EditImageSchema = z.object({
-    imageChannel: z.string().default('').describe('生图渠道|#imageChannelSelect|从生图渠道管理中选择'),
-    videoChannel: z.string().default('grok-video').describe('视频渠道|#videoChannelSelect|从视频渠道管理中选择'),
+const EditImageObjectSchema = z.object({
+    imageRoute: z.string().default('').describe('默认图片路由|#imageRouteSelect|未在命令中指定时使用'),
+    videoRoute: z.string().default('grok-video').describe('默认视频路由|#videoRouteSelect|未在命令中指定时使用'),
     tasks: z.array(EditTaskSchema).default([]).describe('编辑指令列表|配置自定义的图片编辑指令'),
 }).describe('图片与视频生成与编辑');
+
+export const EditImageSchema = EditImageObjectSchema;
 
 export const EmojiThiefSchema = z.object({
     Groups: z.array(z.number()).default([]).describe('启用群号|#groupSelect|在这些群中启用表情包学习'),
@@ -801,8 +706,8 @@ export const configSchema = {
     'AutoCleanup': AutoCleanupSchema,
     'Providers': ProvidersSchema,
     'Routes': RoutesSchema,
-    'CliProxyMedia': CliProxyMediaSchema,
-    'ImageChannels': ImageChannelsSchema,
+    'ImageRoutes': ImageRoutesSchema,
+    'VideoRoutes': VideoRoutesSchema,
     'EditImage': EditImageSchema,
     'EmojiThief': EmojiThiefSchema,
     'VoxCPMVoice': VoxCPMVoiceSchema,
@@ -828,11 +733,11 @@ export const configSchema = {
 
 export const schemaCategories = {
     '基础设定': ['bot'],
-    'AI路由': ['Providers', 'Routes'],
+    'AI路由': ['Providers', 'Routes', 'ImageRoutes', 'VideoRoutes'],
     'AI角色': ['roles'],
     'AI设定': ['AI', 'TavilyMCP', 'mimic', 'ActiveChat'],
     '戳一戳': ['poke'],
-    '图片功能': ['ImageChannels', 'CliProxyMedia', 'EditImage', 'nai', 'pixiv', 'r18', 'summary', 'SearchImage', 'cool', 'teatime', 'EmojiThief'],
+    '图片功能': ['EditImage', 'nai', 'pixiv', 'r18', 'summary', 'SearchImage', 'cool', 'teatime', 'EmojiThief'],
     '经济系统': ['economy'],
     '其他功能': ['60sNews', 'GroupInsight', 'AutoCleanup', 'forwardMessage', 'groupnotice', 'repeat', 'recall', 'bilicookie', 'VoxCPMVoice', 'reminderTask'],
 };
@@ -847,8 +752,8 @@ export const schemaLabels = {
     'AutoCleanup': '自动清理',
     'Providers': 'AI 供应商管理',
     'Routes': 'AI 路由管理',
-    'CliProxyMedia': '视频渠道管理',
-    'ImageChannels': '生图渠道管理',
+    'ImageRoutes': '图片路由管理',
+    'VideoRoutes': '视频路由管理',
     'EditImage': '图片生成与编辑',
     'EmojiThief': '表情偷取',
     'VoxCPMVoice': 'VoxCPM 语音生成',
@@ -902,20 +807,16 @@ export const dynamicOptionsConfig = {
             },
         ],
     },
-    imageChannelSelect: {
-        label: '生图渠道',
+    imageRouteSelect: {
+        label: '图片路由',
         sources: [
-            { module: 'ImageChannels', path: 'openai', valueKey: 'name' },
-            { module: 'ImageChannels', path: 'grok', valueKey: 'name' },
-            { module: 'ImageChannels', path: 'gemini', valueKey: 'name' },
-            { module: 'ImageChannels', path: 'vertex', valueKey: 'name' },
+            { module: 'ImageRoutes', path: 'routes', valueKey: 'id' },
         ],
     },
-    videoChannelSelect: {
-        label: '视频渠道',
+    videoRouteSelect: {
+        label: '视频路由',
         sources: [
-            { module: 'CliProxyMedia', path: 'grok', valueKey: 'name' },
-            { module: 'CliProxyMedia', path: 'gemini', valueKey: 'name' },
+            { module: 'VideoRoutes', path: 'routes', valueKey: 'id' },
         ],
     },
     toolGroupSelect: {

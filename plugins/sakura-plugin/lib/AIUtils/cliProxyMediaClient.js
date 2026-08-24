@@ -4,13 +4,18 @@ import {
   VIDEO_GENERATION_POLL_INTERVAL_MS,
   VIDEO_GENERATION_TIMEOUT_MS,
 } from "./videoGenerationConstants.js";
+import {
+  GROK_CPA_ASPECT_RATIOS,
+  GROK_CPA_MAX_VIDEO_RESOLUTION,
+  nearestSupportedAspectRatio,
+} from "./mediaParameterCompatibility.js";
 
 const DEFAULT_CONFIG = {
   baseURL: "http://127.0.0.1:8317/v1",
   apiKey: "",
   imageModel: "grok-imagine-image-quality",
   videoModel: "grok-imagine-video",
-  preferNativeVideo: true,
+  timeoutMs: VIDEO_GENERATION_TIMEOUT_MS,
 };
 
 const COMPLETE_STATUSES = new Set(["completed", "done", "succeeded", "success"]);
@@ -33,13 +38,16 @@ export function normalizeCliProxyConfig(raw = {}) {
   const baseURL = trimTrailingSlash(
     stringValue(raw.baseURL || raw.baseUrl, DEFAULT_CONFIG.baseURL)
   );
+  const timeoutMs = Number(raw.timeoutMs);
 
   return {
     baseURL,
     apiKey: stringValue(raw.apiKey || raw.api || raw.key, DEFAULT_CONFIG.apiKey),
     imageModel: stringValue(raw.imageModel, DEFAULT_CONFIG.imageModel),
     videoModel: stringValue(raw.videoModel, DEFAULT_CONFIG.videoModel),
-    preferNativeVideo: raw.preferNativeVideo !== false,
+    timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? timeoutMs
+      : DEFAULT_CONFIG.timeoutMs,
   };
 }
 
@@ -71,11 +79,23 @@ async function apiFetch(endpoint, { method = "POST", body = null } = {}, rawConf
     headers.Authorization = `Bearer ${config.apiKey}`;
   }
 
-  const response = await fetch(buildURL(config, endpoint), {
-    method,
-    headers,
-    body: body == null ? undefined : JSON.stringify(body),
-  });
+  let response;
+  try {
+    response = await fetch(buildURL(config, endpoint), {
+      method,
+      headers,
+      body: body == null ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(config.timeoutMs),
+    });
+  } catch (error) {
+    if (error?.name === "AbortError" || error?.name === "TimeoutError") {
+      throw new Error(
+        `${API_DISPLAY_NAME}请求超时：${method} ${endpoint} 超过 ${config.timeoutMs} 毫秒。`,
+        { cause: error }
+      );
+    }
+    throw error;
+  }
   const payload = await readResponseBody(response);
 
   if (!response.ok) {
@@ -95,11 +115,17 @@ function dataURLToBuffer(dataURL) {
   return Buffer.from(matched[1], "base64");
 }
 
-async function urlToBuffer(url, headers = {}) {
+async function urlToBuffer(url, headers = {}, timeoutMs = null) {
   const dataBuffer = dataURLToBuffer(url);
   if (dataBuffer) return dataBuffer;
 
-  const response = await fetch(url, { headers });
+  const timeout = Number(timeoutMs);
+  const response = await fetch(url, {
+    headers,
+    ...(Number.isFinite(timeout) && timeout > 0 && {
+      signal: AbortSignal.timeout(timeout),
+    }),
+  });
   if (!response.ok) {
     throw new Error(`媒体下载失败：HTTP ${response.status}`);
   }
@@ -107,8 +133,8 @@ async function urlToBuffer(url, headers = {}) {
   return Buffer.from(await response.arrayBuffer());
 }
 
-export async function downloadMedia(url, targetPath, headers = {}) {
-  const buffer = await urlToBuffer(url, headers);
+export async function downloadMedia(url, targetPath, headers = {}, timeoutMs = null) {
+  const buffer = await urlToBuffer(url, headers, timeoutMs);
   await fs.mkdir(path.dirname(targetPath), { recursive: true });
   await fs.writeFile(targetPath, buffer);
   return targetPath;
@@ -336,14 +362,9 @@ export async function createGrokVideo(options = {}, rawConfig = {}) {
     options.imageUrls || [],
     options.referenceImageUrls || []
   );
-  const native = options.native ?? config.preferNativeVideo;
 
   if (!prompt && refs.length === 0) {
     throw new Error("请提供提示词或参考图。");
-  }
-
-  if (!prompt && !native) {
-    throw new Error("使用 /videos 包装接口时需要输入提示词。");
   }
 
   const request = {
@@ -354,10 +375,15 @@ export async function createGrokVideo(options = {}, rawConfig = {}) {
 
   if (duration) request.duration = refs.length > 1 ? Math.min(duration, 10) : duration;
   if (options.aspectRatio && options.aspectRatio !== "auto") {
-    request.aspect_ratio = options.aspectRatio;
+    request.aspect_ratio = nearestSupportedAspectRatio(
+      options.aspectRatio,
+      GROK_CPA_ASPECT_RATIOS
+    );
   }
   if (options.resolution) {
-    request.resolution = options.resolution;
+    request.resolution = options.resolution === "480p"
+      ? "480p"
+      : GROK_CPA_MAX_VIDEO_RESOLUTION;
   }
 
   if (refs.length === 1) {
@@ -366,8 +392,7 @@ export async function createGrokVideo(options = {}, rawConfig = {}) {
     request.reference_images = refs.map((url) => ({ url }));
   }
 
-  const endpoint = native ? "/videos/generations" : "/videos";
-  const payload = await apiFetch(endpoint, { body: request }, config);
+  const payload = await apiFetch("/videos/generations", { body: request }, config);
   const requestId = extractVideoRequestId(payload);
 
   return {
@@ -395,11 +420,12 @@ export async function pollGrokVideo(requestId, rawConfig = {}) {
   const config = normalizeCliProxyConfig(rawConfig);
   const startedAt = Date.now();
 
-  while (Date.now() - startedAt < VIDEO_GENERATION_TIMEOUT_MS) {
+  while (Date.now() - startedAt < config.timeoutMs) {
+    const remainingMs = config.timeoutMs - (Date.now() - startedAt);
     const payload = await apiFetch(
       `/videos/${encodeURIComponent(requestId)}`,
       { method: "GET" },
-      config
+      { ...config, timeoutMs: remainingMs }
     );
     const status = normalizeStatus(payload);
     const videoURL = extractVideoURL(payload);
@@ -412,16 +438,22 @@ export async function pollGrokVideo(requestId, rawConfig = {}) {
       throw new Error(getPayloadError(payload) || `视频生成失败：${status}`);
     }
 
-    await wait(VIDEO_GENERATION_POLL_INTERVAL_MS);
+    const waitMs = Math.min(
+      VIDEO_GENERATION_POLL_INTERVAL_MS,
+      Math.max(0, config.timeoutMs - (Date.now() - startedAt))
+    );
+    if (waitMs > 0) await wait(waitMs);
   }
 
   throw new Error(
-    `视频生成超时：等待 ${Math.round(VIDEO_GENERATION_TIMEOUT_MS / 1000)} 秒后仍未完成。`
+    `视频生成超时：等待 ${Math.round(config.timeoutMs / 1000)} 秒后仍未完成。`
   );
 }
 
 export async function generateGrokVideoAndWait(options = {}, rawConfig = {}) {
-  const created = await createGrokVideo(options, rawConfig);
+  const config = normalizeCliProxyConfig(rawConfig);
+  const startedAt = Date.now();
+  const created = await createGrokVideo(options, config);
   const immediateURL = extractVideoURL(created.payload);
 
   if (immediateURL) {
@@ -437,7 +469,16 @@ export async function generateGrokVideoAndWait(options = {}, rawConfig = {}) {
     throw new Error(`${API_DISPLAY_NAME}没有返回视频任务 ID。`);
   }
 
-  const polled = await pollGrokVideo(created.requestId, rawConfig);
+  const remainingMs = config.timeoutMs - (Date.now() - startedAt);
+  if (remainingMs <= 0) {
+    throw new Error(
+      `视频生成超时：等待 ${Math.round(config.timeoutMs / 1000)} 秒后仍未完成。`
+    );
+  }
+  const polled = await pollGrokVideo(created.requestId, {
+    ...config,
+    timeoutMs: remainingMs,
+  });
   return {
     ...created,
     videoURL: polled.videoURL,

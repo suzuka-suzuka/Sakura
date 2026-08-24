@@ -31,6 +31,14 @@ function clampDuration(value) {
 }
 
 function extractChannel(text) {
+  const routeMatched = text.match(/(?:^|\s)(?:route|路由)=([^\s]+)/i);
+  if (routeMatched) {
+    return {
+      channel: routeMatched[1].trim(),
+      text: text.replace(routeMatched[0], " ").replace(/\s+/g, " ").trim(),
+    };
+  }
+
   const matched = text.match(/(?:^|\s)(grok|gemini)(?=\s|$)/i);
   if (!matched) {
     return { channel: null, text };
@@ -66,7 +74,7 @@ export function parseVideoCommandArgs(rawText) {
   text = extractedChannel.text;
 
   const options = {
-    aspectRatio: null,
+    aspectRatio: "auto",
     duration: 6,
     resolution: "720p",
     size: null,

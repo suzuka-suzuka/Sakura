@@ -7,11 +7,19 @@ import {
   downloadMedia,
   generateGrokVideoAndWait,
 } from "./cliProxyMediaClient.js";
-import {
-  findVideoChannel,
-  listVideoChannelNames,
-} from "./videoChannelRouter.js";
 import { tagMediaError } from "./mediaErrorMessages.js";
+import {
+  createRouteExecutionPlan,
+  formatRouteAttemptFailure,
+  resolveRouteReference,
+} from "./providerRouter.js";
+import {
+  clampInteger,
+  GROK_CPA_ASPECT_RATIOS,
+  GROK_CPA_MAX_VIDEO_RESOLUTION,
+  GROK_CPA_VIDEO_RESOLUTIONS,
+  nearestSupportedAspectRatio,
+} from "./mediaParameterCompatibility.js";
 import {
   buildGeminiClientOptions,
   DEFAULT_VERTEX_LOCATION,
@@ -25,20 +33,50 @@ const VIDEO_REFERENCE_LIMITS = {
   gemini: 10,
 };
 
-function resolveVideoConfig(requestedChannel = null) {
-  const featureConfig = Setting.getConfig("EditImage");
-  const channelName = `${
-    requestedChannel || featureConfig.videoChannel || "grok"
+function resolveVideoSelection(requestedRoute = null, selfId = null) {
+  const scope = selfId == null ? {} : { selfId };
+  const featureConfig = Setting.getConfig("EditImage", scope);
+  const routeReference = `${
+    requestedRoute || featureConfig.videoRoute || "grok-video"
   }`.trim();
-  const channelsConfig = Setting.getConfig("CliProxyMedia");
-  const channel = findVideoChannel(channelsConfig, channelName);
-  if (channel) return channel;
 
-  const availableChannels = listVideoChannelNames(channelsConfig);
-  const availableText = availableChannels.length > 0
-    ? ` 可用渠道：${availableChannels.join("、")}。`
-    : "";
-  throw new Error(`未找到名为 "${channelName}" 的视频渠道。${availableText}`);
+  const alias = routeReference.toLowerCase();
+  const aliasMatchers = {
+    grok: ({ target, provider }) =>
+      provider.protocol === "openai" && /grok/i.test(target.model),
+    gemini: ({ provider }) => provider.protocol === "gemini",
+  };
+  const routeId = resolveRouteReference(routeReference, {
+    selfId,
+    routeModule: "VideoRoutes",
+    targetMatches: aliasMatchers[alias],
+  });
+
+  const plan = createRouteExecutionPlan(routeId, {
+    selfId,
+    routeModule: "VideoRoutes",
+    routeLabel: "视频",
+  });
+  if (plan.attempts.length === 0) {
+    throw new Error(`视频路由 ${routeId} 没有可用的目标或凭据。`);
+  }
+  return { routeId, plan };
+}
+
+function videoConfigFromRouteAttempt(attempt) {
+  const config = attempt.requestConfig;
+  return {
+    name: config.name,
+    provider: config.channelType === "gemini" ? "gemini" : "grok",
+    vertex: config.vertex === true,
+    model: config.model,
+    baseURL: config.baseURL,
+    api: config.apiKey,
+    apiKey: config.apiKey,
+    serviceAccountRef: config.serviceAccountRef,
+    timeoutMs: config.timeoutMs,
+    routeTarget: true,
+  };
 }
 
 function dataUrlParts(value) {
@@ -117,12 +155,11 @@ export function normalizeVideoGenerationOptions(
   provider,
   options = {},
   imageCount = 0,
-  modelName = ""
+  _modelName = ""
 ) {
   const normalized = { ...options };
   const warnings = [];
   const referenceLimit = VIDEO_REFERENCE_LIMITS[provider];
-  const model = `${modelName || ""}`.toLowerCase();
   let imageLimit = referenceLimit || imageCount;
 
   if (referenceLimit && imageCount > referenceLimit) {
@@ -134,64 +171,79 @@ export function normalizeVideoGenerationOptions(
   if (provider === "gemini") {
     if (normalized.aspectRatio === "auto") {
       normalized.aspectRatio = null;
-      warnings.push("Gemini Omni 不支持 auto 比例，已省略并使用默认 16:9");
     } else if (
       normalized.aspectRatio &&
       !GEMINI_ASPECT_RATIOS.has(normalized.aspectRatio)
     ) {
-      warnings.push(
-        `Gemini Omni 不支持 ${normalized.aspectRatio} 比例，已省略并使用默认 16:9`
+      const compatibleRatio = nearestSupportedAspectRatio(
+        normalized.aspectRatio,
+        GEMINI_ASPECT_RATIOS
       );
-      normalized.aspectRatio = null;
+      warnings.push(
+        `Gemini Omni 不支持 ${normalized.aspectRatio} 比例，已调整为同方向最接近的 ${compatibleRatio}`
+      );
+      normalized.aspectRatio = compatibleRatio;
     }
 
     if (normalized.resolution && normalized.resolution !== "720p") {
       warnings.push(
-        `Gemini Omni 不支持 ${normalized.resolution}，已省略并使用固定的 720p`
+        `Gemini Omni 固定使用 720p，已将 ${normalized.resolution} 调整为 720p`
       );
-      normalized.resolution = null;
+      normalized.resolution = "720p";
     }
 
     const duration = Number.parseInt(normalized.duration, 10);
     if (Number.isFinite(duration) && (duration < 3 || duration > 10)) {
+      const compatibleDuration = clampInteger(duration, 3, 10);
       warnings.push(
-        `Gemini Omni 不支持 ${duration} 秒时长，已省略并使用模型默认时长`
+        `Gemini Omni 支持 3–10 秒时长，已将 ${duration} 秒调整为 ${compatibleDuration} 秒`
       );
-      normalized.duration = null;
+      normalized.duration = compatibleDuration;
     }
   }
 
   if (provider === "grok") {
     if (normalized.aspectRatio === "auto") {
       normalized.aspectRatio = null;
-      warnings.push("Grok 视频不接受 auto 比例，已省略并使用模型默认比例");
-    }
-
-    if (model.includes("video-1.5") && imageCount > 1) {
-      imageLimit = 1;
-      warnings.push(
-        `${modelName} 不支持多参考图模式，已仅保留第 1 张参考图`
+    } else if (normalized.aspectRatio) {
+      const compatibleRatio = nearestSupportedAspectRatio(
+        normalized.aspectRatio,
+        GROK_CPA_ASPECT_RATIOS
       );
+      if (compatibleRatio !== normalized.aspectRatio) {
+        warnings.push(
+          `Grok 视频不支持 ${normalized.aspectRatio} 比例，已调整为同方向最接近的 ${compatibleRatio}`
+        );
+        normalized.aspectRatio = compatibleRatio;
+      }
     }
 
     const usesMultipleReferences = Math.min(imageCount, imageLimit) > 1;
+    const requestedDuration = Number.parseInt(normalized.duration, 10);
+    const maximumDuration = usesMultipleReferences ? 10 : 15;
     if (
-      usesMultipleReferences &&
-      Number.parseInt(normalized.duration, 10) > 10
+      Number.isFinite(requestedDuration) &&
+      (requestedDuration < 1 || requestedDuration > maximumDuration)
     ) {
-      warnings.push(
-        `Grok 多参考图模式不支持 ${normalized.duration} 秒时长，已省略并使用模型默认时长`
+      const compatibleDuration = clampInteger(
+        requestedDuration,
+        1,
+        maximumDuration
       );
-      normalized.duration = null;
+      warnings.push(
+        `Grok ${usesMultipleReferences ? "多参考图模式" : "视频"}支持 1–${maximumDuration} 秒时长，已将 ${requestedDuration} 秒调整为 ${compatibleDuration} 秒`
+      );
+      normalized.duration = compatibleDuration;
     }
 
     if (
-      normalized.resolution === "1080p" &&
-      !(model.includes("video-1.5") && imageLimit === 1 && imageCount === 1)
+      normalized.resolution &&
+      !GROK_CPA_VIDEO_RESOLUTIONS.has(normalized.resolution)
     ) {
-      normalized.resolution = null;
+      const requestedResolution = normalized.resolution;
+      normalized.resolution = GROK_CPA_MAX_VIDEO_RESOLUTION;
       warnings.push(
-        "当前 Grok 模型或生成模式不支持 1080p，已省略并使用模型默认分辨率"
+        `Grok 经 CPA 最高支持 ${GROK_CPA_MAX_VIDEO_RESOLUTION}，已将 ${requestedResolution} 降为 ${GROK_CPA_MAX_VIDEO_RESOLUTION}`
       );
     }
   }
@@ -224,16 +276,21 @@ export async function generateGeminiOmniVideo(
   { prompt, images = [], options = {} },
   channelConfig = {}
 ) {
-  if (!channelConfig.serviceAccountRef) {
-    throw new Error("Gemini Omni 视频渠道未选择 Vertex 服务账号凭证。");
+  const usesVertex = channelConfig.vertex === true;
+  if (usesVertex && !channelConfig.serviceAccountRef) {
+    throw new Error("Gemini Omni Vertex 视频目标未选择服务账号凭证。");
+  }
+  if (!usesVertex && !(channelConfig.apiKey || channelConfig.api)) {
+    throw new Error("Gemini Omni 视频目标未配置 API Key。");
   }
 
   const { input, imageCount } = await buildGeminiInput(prompt, images);
   const ai = new GoogleGenAI(
     buildGeminiClientOptions({
       ...channelConfig,
-      vertex: true,
-      location: DEFAULT_VERTEX_LOCATION,
+      apiKey: channelConfig.apiKey || channelConfig.api,
+      vertex: usesVertex,
+      ...(usesVertex && { location: DEFAULT_VERTEX_LOCATION }),
     })
   );
 
@@ -267,7 +324,9 @@ export async function generateGeminiOmniVideo(
         stream: false,
       },
       {
-        timeout: VIDEO_GENERATION_TIMEOUT_MS,
+        timeout: Number.isFinite(channelConfig.timeoutMs)
+          ? channelConfig.timeoutMs
+          : VIDEO_GENERATION_TIMEOUT_MS,
         maxRetries: 0,
       }
     );
@@ -326,7 +385,6 @@ async function generateWithGrok(channel, prompt, images, options) {
       aspectRatio: options.aspectRatio,
       resolution: options.resolution,
       model: channel.model,
-      native: channel.preferNativeVideo,
     },
     channel
   );
@@ -338,11 +396,65 @@ async function generateWithGrok(channel, prompt, images, options) {
     `video_${Date.now()}.${extensionFromURL(result.videoURL)}`
   );
   try {
-    return await downloadMedia(result.videoURL, targetPath);
+    return await downloadMedia(result.videoURL, targetPath, {}, channel.timeoutMs);
   } catch (error) {
     logger.warn(`[VideoProvider] Grok 视频下载失败，返回原始链接：${error.message}`);
     return result.videoURL;
   }
+}
+
+async function generateVideoOnce(channel, prompt, images, options) {
+  const normalized = normalizeVideoGenerationOptions(
+    channel.provider,
+    options,
+    images.length,
+    channel.model
+  );
+  const compatibleImages = images.slice(0, normalized.imageLimit);
+  const compatibleOptions = normalized.options;
+
+  if (channel.provider === "grok") {
+    try {
+      return {
+        result: {
+          provider: "grok",
+          source: await generateWithGrok(
+            channel,
+            prompt,
+            compatibleImages,
+            compatibleOptions
+          ),
+        },
+        warnings: normalized.warnings,
+      };
+    } catch (error) {
+      throw tagMediaError(error, "grok", "video");
+    }
+  }
+
+  if (channel.provider === "gemini") {
+    try {
+      const result = await generateGeminiOmniVideo(
+        { prompt, images: compatibleImages, options: compatibleOptions },
+        channel
+      );
+      return {
+        result: {
+          provider: "gemini",
+          source: await saveVideoBuffer(
+            result.buffer,
+            "gemini",
+            extensionFromMimeType(result.mimeType)
+          ),
+        },
+        warnings: normalized.warnings,
+      };
+    } catch (error) {
+      throw tagMediaError(error, "gemini", "video");
+    }
+  }
+
+  throw new Error(`不支持的视频渠道类型：${channel.provider || "unknown"}`);
 }
 
 export async function generateVideoWithProvider({
@@ -351,51 +463,41 @@ export async function generateVideoWithProvider({
   images = [],
   options = {},
   onParameterWarnings = null,
+  selfId = null,
 }) {
-  const channel = resolveVideoConfig(requestedChannel);
-  const normalized = normalizeVideoGenerationOptions(
-    channel.provider,
-    options,
-    images.length,
-    channel.model
-  );
-  await notifyParameterWarnings(onParameterWarnings, normalized.warnings);
-  const compatibleImages = images.slice(0, normalized.imageLimit);
-  const compatibleOptions = normalized.options;
+  const selection = resolveVideoSelection(requestedChannel, selfId);
 
-  if (channel.provider === "grok") {
+  let lastError = null;
+  const { plan, routeId } = selection;
+  for (let index = 0; index < plan.attempts.length; index++) {
+    const attempt = plan.attempts[index];
+    const nextAttempt = plan.attempts[index + 1] || null;
     try {
-      return {
-        provider: "grok",
-        source: await generateWithGrok(
-          channel,
-          prompt,
-          compatibleImages,
-          compatibleOptions
-        ),
-      };
-    } catch (error) {
-      throw tagMediaError(error, "grok", "video");
-    }
-  }
-  if (channel.provider === "gemini") {
-    try {
-      const result = await generateGeminiOmniVideo(
-        { prompt, images: compatibleImages, options: compatibleOptions },
-        channel
+      const generated = await generateVideoOnce(
+        videoConfigFromRouteAttempt(attempt),
+        prompt,
+        images,
+        options
       );
-      return {
-        provider: "gemini",
-        source: await saveVideoBuffer(
-          result.buffer,
-          "gemini",
-          extensionFromMimeType(result.mimeType)
-        ),
-      };
+      await notifyParameterWarnings(onParameterWarnings, generated.warnings);
+      return generated.result;
     } catch (error) {
-      throw tagMediaError(error, "gemini", "video");
+      lastError = error;
+      logger.warn(formatRouteAttemptFailure({
+        routeId,
+        attempt,
+        error,
+        attemptNumber: index + 1,
+        totalAttempts: plan.attempts.length,
+        nextAttempt,
+        retryDelayMs: plan.route.retryDelayMs,
+      }));
+    }
+
+    if (nextAttempt && plan.route.retryDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, plan.route.retryDelayMs));
     }
   }
 
-  throw new Error(`不支持的视频渠道类型：${channel.provider || "unknown"}`);
+  throw lastError || new Error(`视频路由 ${routeId} 没有可用的目标。`);
 }

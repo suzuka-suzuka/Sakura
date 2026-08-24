@@ -3,6 +3,7 @@ import path from 'path';
 import yaml from 'js-yaml';
 import chokidar from 'chokidar';
 import { fileURLToPath } from 'url';
+import { isDeepStrictEqual } from 'node:util';
 import { logger } from '../utils/logger.js';
 import { getBots, getCurrentBotSelfId } from '../api/client.js';
 import { resolveRuntimeConfigSelfId } from './pluginScope.js';
@@ -57,6 +58,9 @@ class PluginConfigManager {
             logger.info(`[插件配置] 已创建配置目录 config/${pluginName}/`);
         }
 
+        this._removeUnregisteredConfigFiles(pluginName, schemaMap, pluginDir);
+        this._normalizeRegisteredConfigFiles(schemaMap, pluginDir);
+
         this._watchDir(pluginName, pluginDir);
 
         const moduleCount = Object.keys(schemaMap).length;
@@ -85,9 +89,17 @@ class PluginConfigManager {
             return { success: false, errors: [{ message: `Schema not found: ${pluginName}/${moduleName}` }] };
         }
 
-        const result = schema.safeParse(newData);
+        const migratedData = this._applyConfigInputMigration(schema, newData);
+        const result = schema.safeParse(migratedData);
         if (!result.success) {
             return { success: false, errors: result.error.issues };
+        }
+        const unusedPaths = this._findUnusedConfigPaths(migratedData, result.data);
+        if (unusedPaths.length > 0) {
+            logger.warn(`[插件配置] 保存 ${pluginName}/${moduleName} 时自动移除未定义或已废弃的配置项`);
+            for (const pathParts of unusedPaths) {
+                logger.warn(`  - ${this._formatConfigPath(pathParts)}`);
+            }
         }
 
         const selfId = this._resolveSelfId(options);
@@ -99,7 +111,11 @@ class PluginConfigManager {
         const configFile = this._getConfigFilePath(pluginName, moduleName, selfId);
         this._writeYaml(configFile, result.data);
 
-        return { success: true, selfId };
+        return {
+            success: true,
+            selfId,
+            removedFields: unusedPaths.map((pathParts) => this._formatConfigPath(pathParts)),
+        };
     }
 
     getSchema(pluginName, moduleName) {
@@ -241,7 +257,20 @@ class PluginConfigManager {
         try {
             const rawContent = fs.readFileSync(filePath, 'utf8');
             const rawData = yaml.load(rawContent);
-            return this._normalizeModuleData(schema, rawData || {});
+            const normalizationContext = { filePath };
+            const normalized = this._normalizeModuleData(
+                schema,
+                rawData || {},
+                normalizationContext
+            );
+            if (
+                normalizationContext.persistable === true &&
+                !isDeepStrictEqual(rawData || {}, normalized)
+            ) {
+                this._writeYaml(filePath, normalized);
+                logger.info(`[插件配置] 已按当前 schema 自动整理 ${filePath}`);
+            }
+            return normalized;
         } catch (error) {
             logger.error(`[插件配置] 读取 ${filePath} 失败: ${error}`);
             return this._getDefaults(schema);
@@ -253,7 +282,7 @@ class PluginConfigManager {
         this.configs[pluginName][scopeKey][moduleName] = nextConfig;
     }
 
-    _normalizeModuleData(schema, rawData) {
+    _applyConfigInputMigration(schema, rawData) {
         let migratedRawData = rawData;
         if (typeof schema?.configInputMigration === 'function') {
             try {
@@ -262,11 +291,27 @@ class PluginConfigManager {
                 logger.warn(`[插件配置] 配置输入迁移失败，继续使用原始数据: ${error.message}`);
             }
         }
+        return migratedRawData;
+    }
+
+    _normalizeModuleData(schema, rawData, context = {}) {
+        const migratedRawData = this._applyConfigInputMigration(schema, rawData);
 
         const result = schema.safeParse(migratedRawData);
         if (result.success) {
+            context.persistable = true;
+            const unusedPaths = this._findUnusedConfigPaths(migratedRawData, result.data);
+            if (unusedPaths.length > 0) {
+                const source = context.filePath ? ` ${context.filePath}` : '';
+                logger.warn(`[插件配置]${source} 包含未定义或已废弃的配置项，已自动移除`);
+                for (const pathParts of unusedPaths) {
+                    logger.warn(`  - ${this._formatConfigPath(pathParts)}`);
+                }
+            }
             return result.data;
         }
+
+        context.persistable = false;
 
         logger.warn('[插件配置] 配置文件验证失败，正在回退到默认值');
         for (const issue of result.error.issues) {
@@ -275,6 +320,112 @@ class PluginConfigManager {
 
         const defaults = this._getDefaults(schema);
         return this._mergeObjects(defaults, migratedRawData || {});
+    }
+
+    _findUnusedConfigPaths(input, normalized, pathParts = []) {
+        if (Array.isArray(input)) {
+            if (!Array.isArray(normalized)) return [];
+            return input.flatMap((item, index) => (
+                index < normalized.length
+                    ? this._findUnusedConfigPaths(item, normalized[index], [...pathParts, index])
+                    : []
+            ));
+        }
+
+        if (!input || typeof input !== 'object' || !normalized || typeof normalized !== 'object') {
+            return [];
+        }
+
+        const unusedPaths = [];
+        for (const key of Object.keys(input)) {
+            if (!Object.prototype.hasOwnProperty.call(normalized, key)) {
+                unusedPaths.push([...pathParts, key]);
+                continue;
+            }
+            unusedPaths.push(...this._findUnusedConfigPaths(
+                input[key],
+                normalized[key],
+                [...pathParts, key]
+            ));
+        }
+        return unusedPaths;
+    }
+
+    _formatConfigPath(pathParts) {
+        return pathParts.reduce((result, part) => (
+            typeof part === 'number'
+                ? `${result}[${part}]`
+                : result
+                    ? `${result}.${part}`
+                    : String(part)
+        ), '');
+    }
+
+    _removeUnregisteredConfigFile(pluginName, moduleName, filePath, pluginDir) {
+        const resolvedPluginDir = path.resolve(pluginDir);
+        const resolvedFilePath = path.resolve(filePath);
+        const relativePath = path.relative(resolvedPluginDir, resolvedFilePath);
+        if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+            logger.warn(`[插件配置] 拒绝删除配置目录外的废弃模块：${resolvedFilePath}`);
+            return false;
+        }
+        try {
+            fs.unlinkSync(resolvedFilePath);
+            logger.warn(
+                `[插件配置] 已删除未注册或废弃的配置模块：${pluginName}/${moduleName} (${resolvedFilePath})`
+            );
+            return true;
+        } catch (error) {
+            if (error.code !== 'ENOENT') {
+                logger.error(`[插件配置] 删除废弃配置模块失败 ${resolvedFilePath}: ${error.message}`);
+            }
+            return false;
+        }
+    }
+
+    _removeUnregisteredConfigFiles(pluginName, schemaMap, pluginDir) {
+        const registeredModules = new Set(Object.keys(schemaMap));
+        const inspectDirectory = (directory) => {
+            if (!fs.existsSync(directory)) return;
+            for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+                if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== '.yaml') continue;
+                const moduleName = path.basename(entry.name, path.extname(entry.name));
+                if (!registeredModules.has(moduleName)) {
+                    this._removeUnregisteredConfigFile(
+                        pluginName,
+                        moduleName,
+                        path.join(directory, entry.name),
+                        pluginDir
+                    );
+                }
+            }
+        };
+
+        inspectDirectory(pluginDir);
+        const accountsDir = path.join(pluginDir, ACCOUNT_SCOPE_DIR);
+        if (!fs.existsSync(accountsDir)) return;
+        for (const entry of fs.readdirSync(accountsDir, { withFileTypes: true })) {
+            if (entry.isDirectory()) inspectDirectory(path.join(accountsDir, entry.name));
+        }
+    }
+
+    _normalizeRegisteredConfigFiles(schemaMap, pluginDir) {
+        const inspectDirectory = (directory) => {
+            if (!fs.existsSync(directory)) return;
+            for (const [moduleName, schema] of Object.entries(schemaMap)) {
+                const filePath = path.join(directory, `${moduleName}.yaml`);
+                if (fs.existsSync(filePath)) {
+                    this._readAndNormalizeModule(schema, filePath);
+                }
+            }
+        };
+
+        inspectDirectory(pluginDir);
+        const accountsDir = path.join(pluginDir, ACCOUNT_SCOPE_DIR);
+        if (!fs.existsSync(accountsDir)) return;
+        for (const entry of fs.readdirSync(accountsDir, { withFileTypes: true })) {
+            if (entry.isDirectory()) inspectDirectory(path.join(accountsDir, entry.name));
+        }
     }
 
     _getDefaults(schema) {
@@ -450,12 +601,22 @@ class PluginConfigManager {
 
         watcher.on('all', (eventType, filePath) => {
             if (eventType !== 'add' && eventType !== 'change') return;
-            if (!filePath.endsWith('.yaml')) return;
+            if (path.extname(filePath).toLowerCase() !== '.yaml') return;
 
             const parsed = this._parseConfigFile(pluginName, filePath);
             if (!parsed) return;
 
             const { moduleName, selfId, scopeKey } = parsed;
+            const schema = this.schemas[pluginName]?.[moduleName];
+            if (!schema) {
+                this._removeUnregisteredConfigFile(
+                    pluginName,
+                    moduleName,
+                    filePath,
+                    this._getPluginDir(pluginName)
+                );
+                return;
+            }
             if (
                 selfId != null &&
                 resolveRuntimeConfigSelfId(
@@ -465,8 +626,6 @@ class PluginConfigManager {
             ) {
                 return;
             }
-            const schema = this.schemas[pluginName]?.[moduleName];
-            if (!schema) return;
 
             logger.info(`[插件配置] 检测到配置更改: ${pluginName}/${moduleName}${selfId != null ? ` (${selfId})` : ''}`);
             this.configs[pluginName] ||= {};
@@ -496,7 +655,7 @@ class PluginConfigManager {
         const parts = relativePath.split(path.sep);
         if (parts.length === 1) {
             return {
-                moduleName: path.basename(parts[0], '.yaml'),
+                moduleName: path.basename(parts[0], path.extname(parts[0])),
                 selfId: null,
                 scopeKey: DEFAULT_SCOPE_KEY,
             };
@@ -506,7 +665,7 @@ class PluginConfigManager {
             const selfId = normalizeSelfId(parts[1]);
             if (selfId == null) return null;
             return {
-                moduleName: path.basename(parts[2], '.yaml'),
+                moduleName: path.basename(parts[2], path.extname(parts[2])),
                 selfId,
                 scopeKey: toScopeKey(selfId),
             };

@@ -1052,43 +1052,18 @@ async function handleApi(req, res) {
         if (action === 'config' && moduleName && req.method === 'POST') {
             const body = await parseBody(req);
             const isProvidersConfig = pluginName === 'sakura-plugin' && moduleName === 'Providers';
-            const isImageChannelsConfig = pluginName === 'sakura-plugin' && moduleName === 'ImageChannels';
-            const isVideoChannelsConfig = pluginName === 'sakura-plugin' && moduleName === 'CliProxyMedia';
             const proposedConfig = body.data ?? body;
-            if (isProvidersConfig || isImageChannelsConfig || isVideoChannelsConfig) {
-                const providerReferences = isProvidersConfig
-                    ? (proposedConfig?.providers || []).flatMap((provider, providerIndex) =>
-                        provider?.protocol === 'gemini' && provider?.vertex === true
-                            ? (provider.credentials || [])
-                                .map((credential, credentialIndex) => ({
-                                    reference: credential?.serviceAccountRef,
-                                    path: ['providers', providerIndex, 'credentials', credentialIndex, 'serviceAccountRef'],
-                                }))
-                                .filter((item) => item.reference && !getManagedVertexCredentialPath(item.reference))
-                            : []
-                    )
-                    : [];
-                const imageChannelReferences = isImageChannelsConfig
-                    ? (proposedConfig?.vertex || [])
-                        .map((channel, channelIndex) => ({
-                            reference: channel?.serviceAccountRef,
-                            path: ['vertex', channelIndex, 'serviceAccountRef'],
-                        }))
-                        .filter((item) => !item.reference || !getManagedVertexCredentialPath(item.reference))
-                    : [];
-                const videoChannelReferences = isVideoChannelsConfig
-                    ? (proposedConfig?.gemini || [])
-                        .map((channel, channelIndex) => ({
-                            reference: channel?.serviceAccountRef,
-                            path: ['gemini', channelIndex, 'serviceAccountRef'],
-                        }))
-                        .filter((item) => !item.reference || !getManagedVertexCredentialPath(item.reference))
-                    : [];
-                const missingReferences = [
-                    ...providerReferences,
-                    ...imageChannelReferences,
-                    ...videoChannelReferences,
-                ];
+            if (isProvidersConfig) {
+                const missingReferences = (proposedConfig?.providers || []).flatMap((provider, providerIndex) =>
+                    provider?.protocol === 'gemini' && provider?.vertex === true
+                        ? (provider.credentials || [])
+                            .map((credential, credentialIndex) => ({
+                                reference: credential?.serviceAccountRef,
+                                path: ['providers', providerIndex, 'credentials', credentialIndex, 'serviceAccountRef'],
+                            }))
+                            .filter((item) => item.reference && !getManagedVertexCredentialPath(item.reference))
+                        : []
+                );
                 if (missingReferences.length > 0) {
                     sendJson(res, {
                         success: false,
@@ -1129,7 +1104,13 @@ async function handleApi(req, res) {
                     }
                 }
 
-                sendJson(res, { success: true, message: '保存成功' });
+                sendJson(res, {
+                    success: true,
+                    message: result.removedFields?.length > 0
+                        ? `保存成功，已移除 ${result.removedFields.length} 个废弃字段`
+                        : '保存成功',
+                    ...(result.removedFields?.length > 0 && { removedFields: result.removedFields }),
+                });
             } else {
                 sendJson(res, {
                     success: false,

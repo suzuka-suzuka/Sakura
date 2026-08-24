@@ -76,7 +76,7 @@ function inferProvider(message) {
   if (/Gemini Omni|gemini|aiplatform\.interactions/i.test(message)) {
     return "gemini";
   }
-  if (/Grok|CliProxyMedia|本地 OpenAI 兼容媒体接口/i.test(message)) {
+  if (/Grok|本地 OpenAI 兼容媒体接口/i.test(message)) {
     return "grok";
   }
   if (/Vertex/i.test(message)) return "vertex";
@@ -92,11 +92,18 @@ function providerName(provider, kind) {
 function isSafeConfigurationMessage(message) {
   return matches(message, [
     /^未配置生图渠道/,
+    /^未配置图片路由/,
     /^未找到名为/,
+    /^未找到(?:图片|视频)路由/,
     /^生图渠道未配置模型/,
+    /^图片路由目标未配置模型/,
+    /^(?:图片|视频)路由 .*没有可用/,
     /^(?:OpenAI|Gemini|Grok|Vertex) 生图渠道未配置/,
+    /^(?:OpenAI|Gemini|Grok|Vertex) 图片路由目标未配置/,
     /^Vertex 生图渠道未选择服务账号凭证/,
-    /^Gemini Omni 视频渠道未选择 Vertex 服务账号凭证/,
+    /^Vertex 图片路由目标未选择服务账号凭证/,
+    /^Gemini Omni Vertex 视频目标未选择服务账号凭证/,
+    /^Gemini Omni 视频目标未配置 API Key/,
     /^不支持的视频渠道类型/,
     /^请先输入提示词/,
     /^请提供提示词或参考图/,

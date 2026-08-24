@@ -69,13 +69,16 @@ config/sakura-plugin/
 - `bot.yaml`：机器人名称等基础信息。
 - `Providers.yaml`：AI 供应商、接口协议、端点和 Key 池。
 - `Routes.yaml`：逻辑模型路由、供应商目标和调度策略。
-- `ImageChannels.yaml`：生图渠道，包括 Gemini 图片和 OpenAI 图片。
+- `ImageRoutes.yaml`：图片模型路由和回退顺序。
+- `VideoRoutes.yaml`：视频模型路由和回退顺序。
 - `AI.yaml`：AI 对话、工具组、上下文、Markdown 处理等设置。
 - `roles.yaml`：AI 角色和人设。
-- `EditImage.yaml`：图片编辑触发词和生图渠道选择。
+- `EditImage.yaml`：图片编辑触发词及默认图片、视频路由。
 - `economy.yaml`：经济系统、启用群、指令消耗价格。
 - `pixiv.yaml`：Pixiv cookie、refresh token、订阅推送。
 - `nai.yaml`：NovelAI 绘图 token、模型和负面提示词。
+
+配置加载与网页保存校验通过后会按当前 schema 归一化并回写 YAML，自动移除已废弃字段；校验失败时保留原文件以避免丢失有效内容。插件启动扫描或运行中检测到未注册的 YAML 模块时会直接删除该文件（包括账号配置目录）。
 - `VoxCPMVoice.yaml`：语音角色和默认语音角色。
 - `mimic.yaml`：拟态回复配置。
 - `SearchImage.yaml`：搜图渠道和返回数量。
@@ -98,7 +101,7 @@ config/sakura-plugin/
 
 旧配置中的 `appsRoute` 会自动迁移到 `utilityRoute`，`toolsRoute` 会自动迁移到 `geminiRoute`。
 
-Gemini/Vertex 生图仍由 `ImageChannels` 管理，Gemini 视频生成仍由 `CliProxyMedia` 管理；这些媒体生成渠道不受 `AI.geminiRoute` 影响。
+图片和视频分别由 `ImageRoutes`、`VideoRoutes` 管理，共用 `Providers` 中的端点和凭据，但不受 `AI.geminiRoute` 影响。
 
 路由和凭据均支持 `round_robin`、`weighted_round_robin`、`priority`、`priority_weighted`。同一个逻辑路由可以配置多个使用相同模型名的供应商目标。
 
@@ -112,10 +115,11 @@ Gemini/Vertex 生图仍由 `ImageChannels` 管理，Gemini 视频生成仍由 `C
 
 ### 图片生成和图片编辑
 
-1. 在 `ImageChannels` 中配置 OpenAI、Grok、Gemini 或 Vertex 生图渠道；Vertex 渠道选择网页中已导入并验证的服务账号凭证。
-2. 在 `EditImage.imageChannel` 中选择一个生图渠道。
-3. 使用 `#i 提示词` 生图，或引用图片后使用 `#i 提示词` 改图；可在提示词前使用 `grok`、`gpt`、`gemini`、`vertex` 临时切换渠道类型。当前渠道不支持某个参数时，机器人会先提示忽略或调整的内容，再继续生成。
-4. 可在 `EditImage.tasks` 中配置自定义图片编辑触发词。
+1. 在 `Providers` 中配置 OpenAI-compatible、Gemini Developer API 或 Vertex 供应商。
+2. 在 `ImageRoutes` 中添加图片路由并选择供应商、模型；CPA 下的 GPT Image 与 Grok Image 都使用 OpenAI-compatible 图片接口，由模型名决定具体参数转换。
+3. 在 `EditImage.imageRoute` 中选择默认图片路由。
+4. 使用 `#i 提示词` 生图，或引用图片后使用 `#i 提示词` 改图；可用 `route=路由ID` 临时切换。未指定比例时按 `auto` 处理并静默省略比例参数；未指定清晰度时使用统一的 1K 语义，其中 Grok 使用 `resolution: 1k`，GPT 转换为像素尺寸和质量，Gemini 使用原生 `imageSize: 1K`。路由回退时会从原始参数重新适配目标模型：支持的参数原样传递，不支持的比例映射为同方向最接近值，超限尺寸和数量向下截断。
+5. 可在 `EditImage.tasks` 中配置自定义图片编辑触发词。
 
 ### 经济系统
 
@@ -134,13 +138,13 @@ Gemini/Vertex 生图仍由 `ImageChannels` 管理，Gemini 视频生成仍由 `C
 
 ### AI 视频
 
-视频渠道在“图片功能 > 视频渠道管理”中配置：
+视频路由在“AI路由 > 视频路由管理”中配置：
 
-- `CliProxyMedia.grok`：Grok OpenAI-compatible 媒体网关，可配置多个渠道。
-- `CliProxyMedia.gemini`：Gemini Omni Flash Vertex 渠道，凭据从已导入的 Vertex 服务账号中选择。
-- `EditImage.videoChannel`：不显式指定渠道时使用的默认视频渠道。
+- OpenAI-compatible 目标使用供应商的 `/videos/generations` 原生接口，当前用于 Grok 视频模型。
+- Gemini Omni Flash 视频目标可使用 Gemini Developer API Key，或使用 Vertex 供应商及已导入的服务账号凭据。
+- `EditImage.videoRoute`：不显式指定路由时使用的默认视频路由。
 
-使用 `#v grok <提示词>` 或 `#v gemini <提示词>` 选择渠道；省略渠道参数时使用默认视频渠道。Gemini Omni 当前仅支持 `16:9`/`9:16`、720p 和 3–10 秒视频。不兼容的参数会先提示并自动省略或调整，不会中断生成。
+使用 `#v route=路由ID <提示词>` 临时选择路由；省略时使用默认视频路由。未指定比例时按 `auto` 处理，并对 Grok、Gemini 都省略 `aspect_ratio`：Grok 文生视频使用模型默认比例、图生视频跟随输入图，Gemini Omni 使用默认 16:9。Gemini Omni 当前仅支持 `16:9`/`9:16`、720p 和 3–10 秒视频；显式的不兼容比例会保方向映射，分辨率和时长会截断到目标能力范围。Grok 视频经 CPA 最高使用 720p。实际发生调整时会先提示，不会中断生成。
 
 ### NovelAI
 
@@ -340,11 +344,11 @@ chmod +x plugins/sakura-plugin/github-mcp-server/github-mcp-server
 
 ### Grok 功能不可用
 
-检查 `CliProxyMedia.grok` 渠道中的 `baseURL`、API Key、模型名称和本地媒体网关进程是否可用。
+检查 `VideoRoutes` 的目标模型、对应 `Providers` 中的 API 地址与 Key，以及本地媒体网关进程是否可用。
 
-### 生图提示未配置渠道
+### 生图提示未配置路由
 
-检查 `ImageChannels` 是否有可用渠道，并在 `EditImage.imageChannel` 中选择对应名称。
+检查 `ImageRoutes` 是否有可用路由，并在 `EditImage.imageRoute` 中选择对应 ID。
 
 ## 更新
 

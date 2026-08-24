@@ -224,6 +224,7 @@ export class EditImage extends plugin {
           imageSize: options.imageSize,
           count: options.count,
           channel: options.channel,
+          selfId: e.self_id,
         },
         {
           onParameterWarnings: (warnings) =>

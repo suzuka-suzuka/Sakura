@@ -19,6 +19,14 @@ function clampImageCount(value) {
 }
 
 function extractChannel(text) {
+  const routeMatched = text.match(/(?:^|\s)(?:route|路由)=([^\s]+)/i);
+  if (routeMatched) {
+    return {
+      channel: routeMatched[1].trim(),
+      text: text.replace(routeMatched[0], " ").replace(/\s+/g, " ").trim(),
+    };
+  }
+
   const matched = text.match(/(?:^|\s)(grok|gpt|gemini|vertex)(?=\s|$)/i);
   if (!matched) {
     return { channel: null, text };

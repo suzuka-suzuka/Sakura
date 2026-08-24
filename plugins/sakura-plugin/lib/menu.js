@@ -42,13 +42,13 @@ export const menuGroups = [
   {
     id: "creation", title: "AI 创作", desc: "生图、绘图、视频和语音生成。",
     items: [
-      { name: "AI图片生成/编辑", command: "#i [grok|gpt|gemini|vertex] [比例] [1K/2K/4K] [n=1-6] <提示词>", desc: "统一使用 Grok、OpenAI、Gemini 或 Vertex 生图渠道；省略渠道参数时使用后台默认渠道，引用图片即可改图。", costCommand: charge("EditImage.dispatchHandler"), examples: ["#i 16:9 2K 赛博风格城市夜景", "#i grok n=4 二次元头像"] },
+      { name: "AI图片生成/编辑", command: "#i [route=路由ID|grok|gpt|gemini|vertex] [比例] [1K/2K/4K] [n=1-6] <提示词>", desc: "通过图片路由使用 Grok、OpenAI、Gemini 或 Vertex 生图；省略路由时使用后台默认路由，引用图片即可改图。回退时会按目标能力转换比例、尺寸和数量。", costCommand: charge("EditImage.dispatchHandler"), examples: ["#i 16:9 2K 赛博风格城市夜景", "#i route=image-main n=4 二次元头像"] },
       { name: "自定义图片指令", command: "配置的 EditImage 触发词", desc: "按后台配置的图片编辑触发词处理引用图片。", costCommand: charge("EditImage.dispatchHandler") },
       { name: "NAI绘图", command: "#绘图 <提示词>", desc: "使用 NovelAI 绘图，支持画风和附加提示词。", costCommand: charge("NaiPainting.naiParams") },
       { name: "添加画风", command: "#添加画风 <名称>", desc: "添加 NAI 画风预设。", permission: "主人" },
       { name: "删除画风", command: "#删除画风 <名称>", desc: "删除 NAI 画风预设。", permission: "主人" },
       { name: "画风列表", command: "#画风列表", desc: "查看可用 NAI 画风。" },
-      { name: "AI视频生成", command: "#v [grok|gemini] [比例/尺寸] [480p|720p|1080p] [1秒-15秒] <提示词>", desc: "统一使用 Grok 或 Gemini Omni（Vertex）进行文生视频或引用图生视频；省略渠道参数时使用后台默认渠道。不兼容参数会提示后自动忽略或调整。", costCommand: charge("VideoGeneration.generateVideo"), examples: ["#v gemini 16:9 6秒 镜头推进的樱花街道", "#v grok 9:16 480p 6秒 霓虹酒吧时装广告"] },
+      { name: "AI视频生成", command: "#v [route=路由ID|grok|gemini] [比例/尺寸] [480p|720p|1080p] [1秒-15秒] <提示词>", desc: "通过视频路由使用 Grok CPA 或 Gemini Omni（Developer API/Vertex）生成视频；省略路由时使用后台默认路由。回退时会保方向映射比例并截断分辨率、时长和参考图数量。", costCommand: charge("VideoGeneration.generateVideo"), examples: ["#v route=video-main 16:9 6秒 镜头推进的樱花街道", "#v grok 9:16 480p 6秒 霓虹酒吧时装广告"] },
       { name: "语音生成", command: "说 <内容> / <角色名> <内容>", desc: "使用 VoxCPM 根据文本生成语音。", costCommand: charge("VoxCPMVoice.generateVoice") },
       { name: "添加语音角色", command: "#添加语音角色 <角色名>", desc: "通过参考语音录入新的语音角色。" },
       { name: "删除语音角色", command: "#删除语音角色 <角色名>", desc: "删除指定语音角色。" },
