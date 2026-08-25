@@ -589,12 +589,15 @@ function getRankingConfig(config, modeKey) {
 }
 
 /**
- * 完整的排行榜刷新流程
+ * 拉取并按排行榜配置筛选候选作品。
+ *
+ * 这个函数只负责获取候选，不写 Redis、也不生成排行榜拼图，供定时工作流等
+ * 非交互场景复用，避免在上午 11 点前误用旧缓存。
  */
-async function refreshRanking(modeKey = "日榜") {
+async function fetchFilteredRanking(modeKey = "日榜") {
   const config = Setting.getConfig("pixiv")
-  if (!config.cookie) {
-    throw new Error("未配置 Pixiv Cookie")
+  if (!config.cookie || !config.refresh_token) {
+    throw new Error("未配置 Pixiv Cookie 或 RefreshToken")
   }
 
   const mode = RANKING_MODES[modeKey] || "daily"
@@ -638,16 +641,36 @@ async function refreshRanking(modeKey = "日榜") {
   // 5. 按点赞率排序
   const sorted = sortByLikeRate(bookmarkFiltered)
 
-  // 6. 存储到Redis
-  await saveRankingToRedis(mode, sorted, rankDate)
-
-  // 7. 生成一览图
-  const canvasImages = await generateRankingImages(sorted, config, modeKey, rankDate)
-
   return {
     total: sorted.length,
-    images: canvasImages,
     data: sorted,
+    rankDate,
+    mode,
+  }
+}
+
+/**
+ * 完整的排行榜刷新流程
+ */
+async function refreshRanking(modeKey = "日榜") {
+  const config = Setting.getConfig("pixiv")
+  const result = await fetchFilteredRanking(modeKey)
+
+  // 存储到 Redis
+  await saveRankingToRedis(result.mode, result.data, result.rankDate)
+
+  // 生成一览图
+  const canvasImages = await generateRankingImages(
+    result.data,
+    config,
+    modeKey,
+    result.rankDate
+  )
+
+  return {
+    total: result.total,
+    images: canvasImages,
+    data: result.data,
   }
 }
 
@@ -757,6 +780,7 @@ function buildRankingForwardParams(result, modeKey, botId) {
 
 export {
   RANKING_MODES,
+  fetchFilteredRanking,
   refreshRanking,
   getRankingFromRedis,
   getRankingItemFromRedis,

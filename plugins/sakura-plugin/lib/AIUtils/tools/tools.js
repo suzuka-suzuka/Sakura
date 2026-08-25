@@ -20,6 +20,7 @@ import { MemoryTool } from "./MemoryTool.js";
 import { ImageSearchTool } from "./ImageSearchTool.js";
 import { UploadFileTool } from "./UploadFileTool.js";
 import { VoxCPMVoiceTool } from "./VoxCPMVoiceTool.js";
+import { SkillGuideTool } from "./SkillGuideTool.js";
 import { mcpManager } from "../MCPManager.js";
 import Setting from "../../setting.js";
 import { plugindata } from "../../path.js";
@@ -49,6 +50,7 @@ const availableTools = [
   new ImageSearchTool(), // 统一搜图工具
   new UploadFileTool(),
   new VoxCPMVoiceTool(),
+  new SkillGuideTool(),
 ];
 
 const toolMap = new Map(availableTools.map((tool) => [tool.name, tool]));
@@ -72,9 +74,10 @@ const TOOL_CONFIG_KEYS = {
   "ImageSearch": "ImageSearch",
   "UploadFile": "UploadFile",
   "SendVoice": "VoxCPMVoice",
+  "SkillGuide": "SkillGuide",
 };
 
-const OWNER_ONLY_TOOLS = new Set(["RunCommand", "ReadLog", "UploadFile"]);
+const OWNER_ONLY_TOOLS = new Set(["RunCommand", "ReadLog", "UploadFile", "SkillGuide"]);
 
 // ─── 工具执行确认机制 ──────────────────────────────────────
 
@@ -217,6 +220,7 @@ export const AVAILABLE_TOOL_OPTIONS = [
   { key: "McpMemory", label: "知识图谱(MCP)" },
   { key: "UploadFile", label: "发送文件" },
   { key: "VoxCPMVoice", label: "语音发送" },
+  { key: "SkillGuide", label: "Skill指导" },
 ];
 
 /**
@@ -256,7 +260,10 @@ export async function getToolsSchema(e, toolGroupName) {
     .filter(tool => {
       if (OWNER_ONLY_TOOLS.has(tool.name) && !isMaster) return false;
       const configKey = TOOL_CONFIG_KEYS[tool.name];
-      return configKey && allowedTools.has(configKey);
+      if (!configKey) return false;
+      // RunCommand 工具组自动附带 SkillGuide：先加载短指导，再执行命令。
+      if (tool.name === "SkillGuide" && allowedTools.has("RunCommand")) return true;
+      return allowedTools.has(configKey);
     })
     .map(tool => tool.function());
 
