@@ -645,6 +645,22 @@ select.field-input {
   padding-right: 36px;
 }
 
+.server-directory-input {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.server-directory-input .field-input {
+  min-width: 0;
+}
+
+.server-directory-input .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding-inline: 16px;
+}
+
 /* ========== Toggle Switch ========== */
 
 .toggle-wrapper {
@@ -1180,6 +1196,100 @@ select.field-input {
   gap: 8px;
   padding: 14px 22px 18px;
   border-top: 1px solid var(--border-subtle);
+}
+
+.directory-browser-modal {
+  max-width: 720px;
+}
+
+.directory-browser-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 380px;
+}
+
+.directory-browser-path {
+  display: flex;
+  gap: 8px;
+}
+
+.directory-browser-path .field-input {
+  min-width: 0;
+}
+
+.directory-browser-path .btn {
+  flex-shrink: 0;
+}
+
+.directory-browser-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.directory-browser-toolbar .btn {
+  flex-shrink: 0;
+}
+
+.directory-browser-current {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.directory-browser-error {
+  padding: 9px 12px;
+  border: 1px solid rgba(229, 57, 53, 0.2);
+  border-radius: var(--radius-md);
+  background: var(--error-dim);
+  color: var(--error);
+  font-size: 13px;
+}
+
+.directory-browser-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 240px;
+  padding: 6px;
+  overflow-y: auto;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.directory-browser-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.directory-browser-item:hover {
+  background: var(--bg-card-hover);
+}
+
+.directory-browser-empty {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
 /* ========== Content Area ========== */

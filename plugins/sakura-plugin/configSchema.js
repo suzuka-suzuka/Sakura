@@ -105,6 +105,17 @@ const ToolGroupSchema = z.object({
     tools: z.array(z.string()).default([]).describe('工具列表|#toolMultiSelect|选择此组包含的工具'),
 });
 
+const RunCommandWorkspaceSchema = z.object({
+    name: z.string()
+        .trim()
+        .regex(/^[a-z0-9][a-z0-9._-]{0,63}$/, '工作区名称只能包含小写字母、数字、点、下划线和连字符')
+        .default('workspace')
+        .describe('工作区名称|作为 RunCommand 的 root 参数，例如 sakura-11'),
+    path: nonEmptyString('工作区路径')
+        .default('.')
+        .describe('工作区路径|#serverDirectory|命令进程的默认起点目录；不限制命令访问其他路径'),
+});
+
 export function migrateAIRoutesConfig(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
 
@@ -158,6 +169,13 @@ export function migrateAIRoutesConfig(value) {
 const AIObjectSchema = z.object({
     profiles: z.array(ProfileSchema).default([]).describe('AI角色列表|#nameField:name|配置多个AI角色，每个角色可以有多个触发前缀'),
     toolGroups: z.array(ToolGroupSchema).default([]).describe('工具组|#nameField:name|自定义工具组合，每个角色可绑定一个工具组'),
+    workspaces: z.array(RunCommandWorkspaceSchema)
+        .min(1, '至少配置一个命令工作区')
+        .default([{ name: 'sakura', path: '.' }])
+        .describe('命令工作区|#nameField:name|配置 RunCommand 可选择的命令起点，所有工作区均可读写'),
+    defaultWorkspace: z.string()
+        .default('sakura')
+        .describe('默认工作区|#workspaceSelect|RunCommand 未传 root 时使用；AI 传入 root 后会同步更新此项'),
     groupContextLength: z.number().default(20).describe('群上下文长度|群聊上下文记忆的消息条数'),
     chatHistoryLength: z.number().default(20).describe('对话历史长度|保留的对话历史消息条数'),
     enableUserLock: z.boolean().default(false).describe('单人锁|统一控制 AI 聊天与拟态回复；每个功能同一用户在同一群内只处理一条消息'),
@@ -171,6 +189,15 @@ const AIObjectSchema = z.object({
     markdownPlainTextLimit: z.number().int().min(0).default(300).describe('Markdown纯文本字数阈值|开启Markdown处理后，低于此字数的消息会去除Markdown格式以纯文本发送，超过则渲染为图片'),
     markdownSplitImageLimit: z.number().int().min(0).default(0).describe('Markdown分图阈值|大于0且Markdown长度达到此字数时，尝试拆成两张图片发送；0表示关闭'),
 }).superRefine((config, ctx) => {
+    addUniqueFieldIssues(config.workspaces, 'name', ctx, ['workspaces']);
+    if (!config.workspaces.some((workspace) => workspace.name === config.defaultWorkspace)) {
+        ctx.addIssue({
+            code: 'custom',
+            path: ['defaultWorkspace'],
+            message: `默认工作区“${config.defaultWorkspace}”不在工作区列表中`,
+        });
+    }
+
     const seen = new Set();
     config.profiles.forEach((profile, profileIndex) => {
         profile.prefixes.forEach((prefix, prefixIndex) => {

@@ -46,6 +46,7 @@ function RenderFields({ schema, data, pathPrefix, onChange, scopeSelfId = null }
                 value={data?.[key]}
                 onChange={(value) => onChange(fullPath, value)}
                 scopeSelfId={scopeSelfId}
+                formValue={data}
             />
         );
     });

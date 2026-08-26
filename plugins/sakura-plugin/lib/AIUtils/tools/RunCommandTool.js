@@ -3,9 +3,10 @@ import fs from "fs"
 import { spawn } from "child_process"
 import path from "path"
 import { projectRoot } from "../../path.js"
+import Setting from "../../setting.js"
 
-const ALLOWED_ROOT = path.resolve(projectRoot)
-const TEMP_SCRIPT_DIR = path.join(ALLOWED_ROOT, "temp", "run-command")
+const PROJECT_ROOT = path.resolve(projectRoot)
+const TEMP_SCRIPT_DIR = path.join(PROJECT_ROOT, "temp", "run-command")
 const DEFAULT_TIMEOUT = 60000
 const MAX_TIMEOUT = 600000
 const FORCE_KILL_GRACE_MS = 5000
@@ -169,29 +170,95 @@ function prepareCommandExecution(command) {
     }
 }
 
-export class RunCommandTool extends AbstractTool {
-    name = "RunCommand"
-    description = `在 ${IS_WINDOWS ? "Windows" : process.platform} 的项目目录 ${ALLOWED_ROOT} 下执行命令。可指定项目内工作目录和超时；临时文件放在 temp 目录，禁止破坏性操作，长输出会截断。`
-    parameters = {
-        properties: {
-            command: {
-                type: "string",
-                description: "要执行的命令",
-            },
-            cwd: {
-                type: "string",
-                description: "工作目录，相对于项目根目录，默认为项目根目录",
-            },
-            timeout: {
-                type: "number",
-                description: `超时秒数，默认 ${DEFAULT_TIMEOUT / 1000} 秒，最大 ${MAX_TIMEOUT / 1000} 秒。执行下载等耗时操作时可设置为 120~300。`,
-            },
-        },
-        required: ["command"],
+function getConfigOptions(e) {
+    const selfId = Number(e?.self_id)
+    return Number.isFinite(selfId) && selfId > 0 ? { selfId } : {}
+}
+
+function getWorkspaceState(e) {
+    const configOptions = getConfigOptions(e)
+    const config = Setting.getConfig("AI", configOptions) || {}
+    const configured = Array.isArray(config.workspaces) ? config.workspaces : []
+    const workspaces = configured
+        .map((workspace) => {
+            const name = String(workspace?.name || "").trim()
+            const configuredPath = String(workspace?.path || "").trim()
+            if (!name || !configuredPath) return null
+            return {
+                name,
+                path: path.resolve(PROJECT_ROOT, configuredPath),
+            }
+        })
+        .filter(Boolean)
+
+    if (workspaces.length === 0) {
+        workspaces.push({ name: "sakura", path: PROJECT_ROOT })
     }
 
-    func = async function (opts) {
-        const { command, cwd = ".", timeout: timeoutSec } = opts
+    const configuredDefault = String(config.defaultWorkspace || "").trim()
+    const defaultWorkspace = workspaces.some((workspace) => workspace.name === configuredDefault)
+        ? configuredDefault
+        : workspaces[0].name
+
+    return { config, configOptions, workspaces, defaultWorkspace }
+}
+
+function getExistingWorkspace(state, root) {
+    const requestedRoot = String(root || "").trim()
+    const selectedName = requestedRoot || state.defaultWorkspace
+    const workspace = state.workspaces.find((item) => item.name === selectedName)
+    if (!workspace) {
+        return {
+            error: `错误：未找到工作区 ${selectedName}。可用工作区：${state.workspaces.map((item) => item.name).join("、")}`,
+        }
+    }
+
+    try {
+        if (!fs.statSync(workspace.path).isDirectory()) {
+            return { error: `错误：工作区 ${workspace.name} 的路径不是文件夹：${workspace.path}` }
+        }
+    } catch (error) {
+        return { error: `错误：无法访问工作区 ${workspace.name}：${workspace.path}（${error.message || error}）` }
+    }
+
+    return { workspace, requestedRoot }
+}
+
+export class RunCommandTool extends AbstractTool {
+    name = "RunCommand"
+    description = "在已配置的工作区执行命令。"
+
+    function(e) {
+        const state = getWorkspaceState(e)
+        const roots = state.workspaces.map((workspace) => workspace.name)
+
+        return {
+            name: this.name,
+            description: `在 ${IS_WINDOWS ? "Windows" : process.platform} 执行命令；工作区只决定起点，不限制其他路径。`,
+            parameters: {
+                type: "object",
+                properties: {
+                    command: {
+                        type: "string",
+                        description: "要执行的命令",
+                    },
+                    root: {
+                        type: "string",
+                        enum: roots,
+                        description: `可选；留空使用 ${state.defaultWorkspace}，传入后保存为后续默认工作区。`,
+                    },
+                    timeout: {
+                        type: "number",
+                        description: `超时秒数，默认 ${DEFAULT_TIMEOUT / 1000} 秒，最大 ${MAX_TIMEOUT / 1000} 秒。`,
+                    },
+                },
+                required: ["command"],
+            },
+        }
+    }
+
+    func = async function (opts = {}, e) {
+        const { command, root, timeout: timeoutSec } = opts
         const commandTimeout = timeoutSec
             ? Math.min(Math.max(timeoutSec, 1) * 1000, MAX_TIMEOUT)
             : DEFAULT_TIMEOUT
@@ -200,9 +267,20 @@ export class RunCommandTool extends AbstractTool {
             return "错误：必须提供要执行的命令。"
         }
 
-        const workDir = path.resolve(ALLOWED_ROOT, cwd)
-        if (!workDir.startsWith(ALLOWED_ROOT)) {
-            return "错误：工作目录必须在项目根目录内。"
+        const state = getWorkspaceState(e)
+        const resolved = getExistingWorkspace(state, root)
+        if (resolved.error) return resolved.error
+
+        const { workspace, requestedRoot } = resolved
+        const switchesDefault = requestedRoot && workspace.name !== state.defaultWorkspace
+        if (switchesDefault) {
+            const saved = Setting.setConfig("AI", {
+                ...state.config,
+                defaultWorkspace: workspace.name,
+            }, state.configOptions)
+            if (!saved) {
+                return `错误：无法将 ${workspace.name} 保存为默认工作区，命令未执行。`
+            }
         }
 
         let preparedCommand
@@ -214,7 +292,7 @@ export class RunCommandTool extends AbstractTool {
 
         return new Promise((resolve) => {
             const child = spawn(preparedCommand.commandToRun, [], {
-                cwd: workDir,
+                cwd: workspace.path,
                 shell: true,
                 env: { ...process.env, PAGER: "cat" },
                 stdio: ["ignore", "pipe", "pipe"],
@@ -241,7 +319,10 @@ export class RunCommandTool extends AbstractTool {
             const finish = (message) => {
                 if (!settled) {
                     settled = true
-                    resolve(truncateCommandResult(message))
+                    const workspaceText = switchesDefault
+                        ? `工作区：${workspace.name}（已设为默认）`
+                        : `工作区：${workspace.name}`
+                    resolve(truncateCommandResult(`${workspaceText}\n${message}`))
                 }
             }
 

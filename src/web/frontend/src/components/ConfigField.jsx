@@ -245,6 +245,31 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
         );
     }
 
+    if ((type === 'string' || !type) && uiType === 'serverDirectory') {
+        return (
+            <ServerDirectoryField
+                name={name}
+                displayName={displayName}
+                help={help}
+                value={value}
+                onChange={onChange}
+            />
+        );
+    }
+
+    if ((type === 'string' || !type) && uiType === 'workspaceSelect') {
+        return (
+            <WorkspaceSelectField
+                name={name}
+                displayName={displayName}
+                help={help}
+                value={value}
+                onChange={onChange}
+                workspaces={formValue?.workspaces}
+            />
+        );
+    }
+
     // String with #textarea uiType → Textarea
     if ((type === 'string' || !type) && uiType === 'textarea') {
         return (
@@ -391,6 +416,200 @@ function PasswordField({ value, onChange }) {
                 {show ? '👁️' : '🔒'}
             </button>
         </div>
+    );
+}
+
+function WorkspaceSelectField({ name, displayName, help, value, onChange, workspaces }) {
+    const options = [];
+    const seen = new Set();
+
+    for (const workspace of Array.isArray(workspaces) ? workspaces : []) {
+        const workspaceName = String(workspace?.name || '').trim();
+        if (!workspaceName || seen.has(workspaceName)) continue;
+        seen.add(workspaceName);
+        options.push(workspaceName);
+    }
+
+    return (
+        <div className="field-group">
+            <label className="field-label">
+                {displayName}
+                <span className="field-type-badge">{name}</span>
+            </label>
+            {help && <div className="field-help">{help}</div>}
+            <select
+                className="field-input"
+                value={options.includes(value) ? value : ''}
+                onChange={(event) => onChange(event.target.value)}
+                disabled={options.length === 0}
+            >
+                <option value="" disabled>
+                    {options.length === 0 ? '请先添加工作区' : '请选择默认工作区'}
+                </option>
+                {options.map((workspaceName) => (
+                    <option key={workspaceName} value={workspaceName}>{workspaceName}</option>
+                ))}
+            </select>
+        </div>
+    );
+}
+
+function ServerDirectoryField({ name, displayName, help, value, onChange }) {
+    const [showBrowser, setShowBrowser] = useState(false);
+
+    return (
+        <div className="field-group">
+            <label className="field-label">
+                {displayName}
+                <span className="field-type-badge">{name}</span>
+            </label>
+            {help && <div className="field-help">{help}</div>}
+            <div className="server-directory-input">
+                <input
+                    type="text"
+                    className="field-input"
+                    value={value ?? ''}
+                    placeholder="例如 D:\\code\\Sakura"
+                    onChange={(event) => onChange(event.target.value)}
+                />
+                <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setShowBrowser(true)}
+                >
+                    浏览
+                </button>
+            </div>
+            {showBrowser && (
+                <ServerDirectoryModal
+                    initialPath={value}
+                    onCancel={() => setShowBrowser(false)}
+                    onConfirm={(selectedPath) => {
+                        onChange(selectedPath);
+                        setShowBrowser(false);
+                    }}
+                />
+            )}
+        </div>
+    );
+}
+
+function ServerDirectoryModal({ initialPath, onCancel, onConfirm }) {
+    const [currentPath, setCurrentPath] = useState('');
+    const [pathInput, setPathInput] = useState(initialPath || '');
+    const [parentPath, setParentPath] = useState(null);
+    const [directories, setDirectories] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const loadDirectory = useCallback(async (requestedPath = '') => {
+        setLoading(true);
+        setError('');
+        try {
+            const query = requestedPath ? `?path=${encodeURIComponent(requestedPath)}` : '';
+            const response = await fetch(`/api/system/directories${query}`, {
+                headers: { Authorization: `Bearer ${getAuthToken()}` },
+            });
+            const payload = await response.json();
+            if (!response.ok || !payload.success) {
+                throw new Error(payload.error || '文件夹读取失败');
+            }
+
+            const data = payload.data || {};
+            setCurrentPath(data.path || '');
+            setPathInput(data.path || '');
+            setParentPath(data.parent || null);
+            setDirectories(Array.isArray(data.directories) ? data.directories : []);
+        } catch (loadError) {
+            setError(loadError.message || '文件夹读取失败');
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            void loadDirectory(initialPath || '');
+        }, 0);
+
+        return () => window.clearTimeout(timer);
+    }, [initialPath, loadDirectory]);
+
+    useEffect(() => {
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape') onCancel();
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [onCancel]);
+
+    const openTypedPath = (event) => {
+        event.preventDefault();
+        loadDirectory(pathInput);
+    };
+
+    return createPortal(
+        <div className="modal-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+            <div className="modal-card directory-browser-modal" onClick={(event) => event.stopPropagation()}>
+                <div className="modal-header">
+                    <span className="modal-title">选择服务器文件夹</span>
+                    <button type="button" className="modal-close" onClick={onCancel}>✕</button>
+                </div>
+                <div className="modal-body directory-browser-body">
+                    <form className="directory-browser-path" onSubmit={openTypedPath}>
+                        <input
+                            type="text"
+                            className="field-input"
+                            value={pathInput}
+                            onChange={(event) => setPathInput(event.target.value)}
+                            aria-label="服务器文件夹路径"
+                        />
+                        <button type="submit" className="btn btn-secondary" disabled={loading}>打开</button>
+                    </form>
+                    <div className="directory-browser-toolbar">
+                        <button
+                            type="button"
+                            className="btn btn-secondary"
+                            disabled={!parentPath || loading}
+                            onClick={() => loadDirectory(parentPath)}
+                        >
+                            返回上级
+                        </button>
+                        <span className="directory-browser-current" title={currentPath}>{currentPath}</span>
+                    </div>
+                    {error && <div className="directory-browser-error">{error}</div>}
+                    <div className="directory-browser-list">
+                        {loading && <div className="directory-browser-empty">读取中...</div>}
+                        {!loading && directories.length === 0 && !error && (
+                            <div className="directory-browser-empty">这里没有子文件夹</div>
+                        )}
+                        {!loading && directories.map((directory) => (
+                            <button
+                                type="button"
+                                className="directory-browser-item"
+                                key={directory.path}
+                                onClick={() => loadDirectory(directory.path)}
+                            >
+                                <span aria-hidden="true">📁</span>
+                                <span>{directory.name}</span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                <div className="modal-footer">
+                    <button type="button" className="btn btn-secondary" onClick={onCancel}>取消</button>
+                    <button
+                        type="button"
+                        className="btn btn-primary"
+                        disabled={!currentPath || loading}
+                        onClick={() => onConfirm(currentPath)}
+                    >
+                        选择此文件夹
+                    </button>
+                </div>
+            </div>
+        </div>,
+        document.body
     );
 }
 

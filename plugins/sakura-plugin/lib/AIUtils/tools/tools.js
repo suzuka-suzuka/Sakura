@@ -262,7 +262,7 @@ export async function getToolsSchema(e, toolGroupName) {
       const configKey = TOOL_CONFIG_KEYS[tool.name];
       return configKey && allowedTools.has(configKey);
     })
-    .map(tool => tool.function());
+    .map(tool => tool.function(e));
 
   return { localTools, allowedMcpServerIds };
 }

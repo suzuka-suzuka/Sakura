@@ -53,6 +53,7 @@ export default function ConfigForm({
                         value={draft?.[key]}
                         onChange={(value) => handleChange(key, value)}
                         scopeSelfId={scopeSelfId}
+                        formValue={draft}
                     />
                 ))}
             </div>
@@ -96,6 +97,7 @@ export default function ConfigForm({
                                         value={draft?.[key]?.[childKey]?.[subKey]}
                                         onChange={(value) => handleChange(`${key}.${childKey}.${subKey}`, value)}
                                         scopeSelfId={scopeSelfId}
+                                        formValue={draft?.[key]?.[childKey]}
                                     />
                                 ))}
                             </div>
@@ -110,6 +112,7 @@ export default function ConfigForm({
                             value={draft?.[key]?.[childKey]}
                             onChange={(value) => handleChange(`${key}.${childKey}`, value)}
                             scopeSelfId={scopeSelfId}
+                            formValue={draft?.[key]}
                         />
                     );
                 })}

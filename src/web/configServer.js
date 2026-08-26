@@ -23,6 +23,7 @@ import {
     listVertexCredentials,
 } from '../../plugins/sakura-plugin/lib/AIUtils/vertexCredentialStore.js';
 import { getManagedVertexCredentialPath } from '../../plugins/sakura-plugin/lib/AIUtils/vertexAuth.js';
+import { listServerDirectories } from './serverDirectories.js';
 let cachedStaticInfo = null;
 let staticInfoTime = 0;
 const STATIC_INFO_CACHE_TIME = 60000;
@@ -207,6 +208,7 @@ async function getBotInfo() {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const PROJECT_ROOT = path.resolve(__dirname, '../..');
 const SESSION_STORE_PATH = path.join(__dirname, '../../data/web-sessions.json');
 
 const MIME_TYPES = {
@@ -793,6 +795,20 @@ async function handleApi(req, res) {
         if (!requireAuth(req, res)) return true;
         const selfId = parseSelfIdParam(url);
         sendJson(res, { success: true, data: accountConfig.getRuntimeConfig(selfId) });
+        return true;
+    }
+
+    if (pathname === '/api/system/directories' && req.method === 'GET') {
+        if (!requireAuth(req, res)) return true;
+        try {
+            const result = listServerDirectories(url.searchParams.get('path'), PROJECT_ROOT);
+            sendJson(res, { success: true, data: result });
+        } catch (error) {
+            sendJson(res, {
+                success: false,
+                error: `无法读取服务器文件夹：${error.message || error}`,
+            }, 400);
+        }
         return true;
     }
 
