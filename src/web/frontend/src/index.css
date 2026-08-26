@@ -262,19 +262,9 @@ body {
 }
 
 .left-nav-item.nested {
-  width: calc(100% - 18px);
-  margin-left: 18px;
   padding-top: 8px;
   padding-bottom: 8px;
   font-size: 13px;
-}
-
-.left-nav-item.nested::after {
-  content: '';
-  position: absolute;
-  left: -9px;
-  width: 10px;
-  border-top: 1px solid var(--border-default);
 }
 
 /* ========== Header ========== */
