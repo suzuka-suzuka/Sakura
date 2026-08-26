@@ -27,6 +27,7 @@ import {
   buildToolCallbackPayload,
   splitToolFollowUpResult,
 } from "../toolResultProtocol.js";
+import { buildToolResultLogPart } from "../toolResultLog.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -532,9 +533,10 @@ async function executeSingleTool(functionCall, e, pluginInstance, toolContext) {
     functionResponsePart.functionResponse.id = toolCallId;
   }
 
+  const functionResponsePartForLog = buildToolResultLogPart(functionResponsePart);
   logger.info(
     `${toolName}工具执行结果: ${JSON.stringify(
-      functionResponsePart,
+      functionResponsePartForLog,
       null,
       2
     )}`
