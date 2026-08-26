@@ -1,12 +1,11 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 import YAML from "js-yaml"
-import { pluginConfigDir, pluginRoot } from "../../path.js"
+import { pluginRoot } from "../../path.js"
 
-const TRACKED_SKILLS_DIR = path.join(pluginRoot, "lib", "AIUtils", "skills")
-const PRIVATE_SKILLS_DIR = path.join(pluginConfigDir, "skills")
-const PLUGINS_DIR = path.dirname(pluginRoot)
+const PRIVATE_SKILLS_DIR = path.join(pluginRoot, "skills")
 const MAX_INSTRUCTION_CHARS = 30000
+const FRONTMATTER_RE = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/
 
 async function listPackageDirs(rootDir) {
   let entries
@@ -22,54 +21,60 @@ async function listPackageDirs(rootDir) {
     .map((entry) => path.join(rootDir, entry.name))
 }
 
-function normalizeManifest(input, packageDir, scope) {
-  const id = String(input?.id || "").trim()
-  const name = String(input?.name || id).trim()
+function parseSkillDocument(raw, packageDir, scope) {
+  const source = String(raw || "").replace(/^\uFEFF/, "")
+  const frontmatter = source.match(FRONTMATTER_RE)
+  if (!frontmatter) {
+    throw new Error("SKILL.md 必须以 YAML frontmatter 开头")
+  }
+
+  const input = YAML.load(frontmatter[1]) || {}
+  if (typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("SKILL.md frontmatter 必须是对象")
+  }
+
+  const id = path.basename(packageDir)
+  const name = String(input.name || "").trim()
   const description = String(input?.description || "").trim()
-  if (!/^[a-z0-9][a-z0-9._-]{1,79}$/.test(id)) {
-    throw new Error("skill.yaml 缺少合法 id")
+  if (!/^[a-z0-9][a-z0-9._-]{0,79}$/.test(id)) {
+    throw new Error("Skill 目录名必须是 1 到 80 位小写字母、数字、点、下划线或连字符")
   }
   if (!name || !description) {
-    throw new Error("skill.yaml 必须填写 name 和 description")
+    throw new Error("SKILL.md frontmatter 必须填写 name 和 description")
   }
 
   return {
-    version: Number(input.version || 1),
-    id,
-    name,
-    description,
-    keywords: Array.isArray(input.keywords)
-      ? input.keywords.map((item) => String(item).trim()).filter(Boolean)
-      : [],
-    scope,
-    packageDir,
-    instructionPath: path.join(packageDir, "SKILL.md"),
+    skill: {
+      version: Number(input.version || 1),
+      id,
+      name,
+      description,
+      keywords: Array.isArray(input.keywords)
+        ? input.keywords.map((item) => String(item).trim()).filter(Boolean)
+        : [],
+      scope,
+      packageDir,
+      instructionPath: path.join(packageDir, "SKILL.md"),
+    },
+    instructions: source.slice(frontmatter[0].length).trimStart(),
   }
 }
 
 async function loadSkillPackage(packageDir, scope) {
-  const manifestPath = path.join(packageDir, "skill.yaml")
-  const raw = await fs.readFile(manifestPath, "utf8")
-  const manifest = normalizeManifest(YAML.load(raw) || {}, packageDir, scope)
-  await fs.access(manifest.instructionPath)
-  return manifest
+  const instructionPath = path.join(packageDir, "SKILL.md")
+  const raw = await fs.readFile(instructionPath, "utf8")
+  if (raw.length > MAX_INSTRUCTION_CHARS) {
+    throw new Error(`SKILL.md 超过 ${MAX_INSTRUCTION_CHARS} 字符限制`)
+  }
+  return parseSkillDocument(raw, packageDir, scope).skill
 }
 
 export async function loadSkillCatalog() {
   const skills = []
   const errors = []
   const seen = new Map()
-  const pluginSkillRoots = (await listPackageDirs(PLUGINS_DIR))
-    .filter((packageDir) => path.resolve(packageDir) !== path.resolve(pluginRoot))
-    .map((packageDir) => ({
-      rootDir: path.join(packageDir, "skills"),
-      scope: `plugin:${path.basename(packageDir)}`,
-    }))
-  const roots = [
-    { rootDir: TRACKED_SKILLS_DIR, scope: "tracked" },
-    { rootDir: PRIVATE_SKILLS_DIR, scope: "private" },
-    ...pluginSkillRoots,
-  ]
+  await fs.mkdir(PRIVATE_SKILLS_DIR, { recursive: true })
+  const roots = [{ rootDir: PRIVATE_SKILLS_DIR, scope: "private" }]
 
   for (const { rootDir, scope } of roots) {
     for (const packageDir of await listPackageDirs(rootDir)) {
@@ -136,10 +141,11 @@ export async function loadSkillInstructions(skillId) {
     throw new Error(`未找到 Skill：${skillId}${suffix}`)
   }
 
-  const instructions = await fs.readFile(skill.instructionPath, "utf8")
-  if (instructions.length > MAX_INSTRUCTION_CHARS) {
+  const raw = await fs.readFile(skill.instructionPath, "utf8")
+  if (raw.length > MAX_INSTRUCTION_CHARS) {
     throw new Error(`Skill ${skillId} 的说明超过 ${MAX_INSTRUCTION_CHARS} 字符限制`)
   }
+  const { instructions } = parseSkillDocument(raw, skill.packageDir, skill.scope)
 
   return {
     id: skill.id,
