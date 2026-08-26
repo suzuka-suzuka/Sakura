@@ -15,7 +15,6 @@ import { EconomyTool } from "./EconomyTool.js";
 import { EmojiTool } from "./EmojiTool.js";
 import { NaiTool } from "./NaiTool.js";
 import { RunCommandTool } from "./RunCommandTool.js";
-import { ReadLogTool } from "./ReadLogTool.js";
 import { MemoryTool } from "./MemoryTool.js";
 import { ImageSearchTool } from "./ImageSearchTool.js";
 import { UploadFileTool } from "./UploadFileTool.js";
@@ -45,7 +44,6 @@ const availableTools = [
   new EmojiTool(),
   new NaiTool(),
   new RunCommandTool(),  // 通用命令执行（包含文件搜索、Python 执行等）
-  new ReadLogTool(),     // 读取 Bot 运行日志
   new MemoryTool(),      // 添加用户或群公共记忆
   new ImageSearchTool(), // 统一搜图工具
   new UploadFileTool(),
@@ -69,7 +67,6 @@ const TOOL_CONFIG_KEYS = {
   "SendEmoji": "Emoji",
   "NaiPainting": "Nai",
   "RunCommand": "RunCommand",
-  "ReadLog": "ReadLog",
   "Memory": "Memory",
   "ImageSearch": "ImageSearch",
   "UploadFile": "UploadFile",
@@ -77,7 +74,7 @@ const TOOL_CONFIG_KEYS = {
   "SkillGuide": "SkillGuide",
 };
 
-const OWNER_ONLY_TOOLS = new Set(["RunCommand", "ReadLog", "UploadFile", "SkillGuide"]);
+const OWNER_ONLY_TOOLS = new Set(["RunCommand", "UploadFile"]);
 
 // ─── 工具执行确认机制 ──────────────────────────────────────
 
@@ -213,7 +210,6 @@ export const AVAILABLE_TOOL_OPTIONS = [
   { key: "Emoji", label: "表情包" },
   { key: "Nai", label: "NAI绘画" },
   { key: "RunCommand", label: "命令执行" },
-  { key: "ReadLog", label: "日志读取" },
   { key: "Memory", label: "记忆工具" },
   { key: "ImageSearch", label: "图片搜索" },
   { key: "McpFetch", label: "网络请求(MCP)" },
@@ -256,13 +252,15 @@ export async function getToolsSchema(e, toolGroupName) {
   if (allowedTools.size === 0) return { localTools: [], allowedMcpServerIds: [] };
 
   const isMaster = Boolean(e?.isMaster);
-  const localTools = availableTools
+  const localToolInstances = availableTools
     .filter(tool => {
       if (OWNER_ONLY_TOOLS.has(tool.name) && !isMaster) return false;
       const configKey = TOOL_CONFIG_KEYS[tool.name];
       return configKey && allowedTools.has(configKey);
-    })
-    .map(tool => tool.function(e));
+    });
+  const localTools = await Promise.all(
+    localToolInstances.map(tool => tool.function(e))
+  );
 
   return { localTools, allowedMcpServerIds };
 }

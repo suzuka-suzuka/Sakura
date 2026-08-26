@@ -5,6 +5,7 @@ import {
 } from "../lib/nai/naiApi.js";
 import { getImg } from "../lib/utils.js";
 import { saveVibe, getVibe, deleteVibe as removeVibe, listVibes as getAllVibes } from "../lib/nai/vibeStore.js";
+import { parseNaiCharacterPrompt } from "../lib/nai/characterPosition.js";
 
 export class NaiPainting extends plugin {
     constructor() {
@@ -36,7 +37,7 @@ export class NaiPainting extends plugin {
         }
 
         try {
-            saveVibe(name, imageBase64);
+            await saveVibe(name, imageBase64);
             await e.reply(`画风「${name}」已保存成功！`, 10);
         } catch (err) {
             logger.error(`[NaiPainting] Failed to save vibe: ${err.message}`);
@@ -91,43 +92,9 @@ export class NaiPainting extends plugin {
 
         const characters = [];
         let prompt = rawMsg
-            .replace(/\[(.*?)\]/g, (match, content) => {
-                let text = content.trim();
-                let center = { x: 0.5, y: 0.5 };
-
-                const positionMap = {
-                    左上: { x: 0.3, y: 0.3 },
-                    右上: { x: 0.7, y: 0.3 },
-                    左下: { x: 0.3, y: 0.7 },
-                    右下: { x: 0.7, y: 0.7 },
-                    中间: { x: 0.5, y: 0.5 },
-                    中心: { x: 0.5, y: 0.5 },
-                    左: { x: 0.3, y: 0.5 },
-                    右: { x: 0.7, y: 0.5 },
-                    上: { x: 0.5, y: 0.3 },
-                    下: { x: 0.5, y: 0.7 },
-                    中: { x: 0.5, y: 0.5 },
-                };
-
-                for (const [key, pos] of Object.entries(positionMap)) {
-                    if (text.startsWith(key)) {
-                        center = pos;
-                        text = text
-                            .substring(key.length)
-                            .replace(/^[,:\s]+/, "")
-                            .trim();
-                        break;
-                    }
-                }
-
-                if (text) {
-                    characters.push({
-                        prompt: text,
-                        uc: "",
-                        center: center,
-                        enabled: true,
-                    });
-                }
+            .replace(/\[([\s\S]*?)\]/g, (match, content) => {
+                const character = parseNaiCharacterPrompt(content);
+                if (character) characters.push(character);
                 return "";
             })
             .trim();

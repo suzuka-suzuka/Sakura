@@ -4,6 +4,7 @@ import YAML from "js-yaml"
 import { pluginRoot } from "../../path.js"
 
 const PRIVATE_SKILLS_DIR = path.join(pluginRoot, "skills")
+const PUBLIC_SKILLS_DIR = path.join(pluginRoot, "lib", "AIUtils", "skills", "public")
 const MAX_INSTRUCTION_CHARS = 30000
 const FRONTMATTER_RE = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/
 
@@ -49,9 +50,6 @@ function parseSkillDocument(raw, packageDir, scope) {
       id,
       name,
       description,
-      keywords: Array.isArray(input.keywords)
-        ? input.keywords.map((item) => String(item).trim()).filter(Boolean)
-        : [],
       scope,
       packageDir,
       instructionPath: path.join(packageDir, "SKILL.md"),
@@ -69,12 +67,17 @@ async function loadSkillPackage(packageDir, scope) {
   return parseSkillDocument(raw, packageDir, scope).skill
 }
 
-export async function loadSkillCatalog() {
+export async function loadSkillCatalog({ includePrivate = true } = {}) {
   const skills = []
   const errors = []
   const seen = new Map()
   await fs.mkdir(PRIVATE_SKILLS_DIR, { recursive: true })
-  const roots = [{ rootDir: PRIVATE_SKILLS_DIR, scope: "private" }]
+  const roots = [
+    { rootDir: PUBLIC_SKILLS_DIR, scope: "public" },
+    ...(includePrivate
+      ? [{ rootDir: PRIVATE_SKILLS_DIR, scope: "private" }]
+      : []),
+  ]
 
   for (const { rootDir, scope } of roots) {
     for (const packageDir of await listPackageDirs(rootDir)) {
@@ -95,46 +98,8 @@ export async function loadSkillCatalog() {
   return { skills, errors }
 }
 
-function searchScore(skill, query) {
-  const normalized = String(query || "").trim().toLowerCase()
-  if (!normalized) return 1
-  const tokens = normalized.split(/\s+/).filter(Boolean)
-  const id = skill.id.toLowerCase()
-  const name = skill.name.toLowerCase()
-  const description = skill.description.toLowerCase()
-  const keywords = skill.keywords.map((item) => item.toLowerCase())
-
-  let score = 0
-  for (const token of tokens) {
-    if (id === token) score += 20
-    else if (id.includes(token)) score += 10
-    if (name.includes(token)) score += 8
-    if (keywords.some((keyword) => keyword.includes(token) || token.includes(keyword))) score += 6
-    if (description.includes(token)) score += 3
-  }
-  return score
-}
-
-export async function searchSkills(query = "", limit = 10) {
-  const { skills, errors } = await loadSkillCatalog()
-  const matches = skills
-    .map((skill) => ({ skill, score: searchScore(skill, query) }))
-    .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score || a.skill.id.localeCompare(b.skill.id))
-    .slice(0, Math.max(1, Math.min(30, Number(limit) || 10)))
-    .map(({ skill }) => ({
-      id: skill.id,
-      name: skill.name,
-      description: skill.description,
-      keywords: skill.keywords,
-      scope: skill.scope,
-    }))
-
-  return { matches, errors }
-}
-
-export async function loadSkillInstructions(skillId) {
-  const { skills, errors } = await loadSkillCatalog()
+export async function loadSkillInstructions(skillId, options = {}) {
+  const { skills, errors } = await loadSkillCatalog(options)
   const skill = skills.find((item) => item.id === skillId)
   if (!skill) {
     const suffix = errors.length ? `；另有 ${errors.length} 个 Skill 加载失败` : ""

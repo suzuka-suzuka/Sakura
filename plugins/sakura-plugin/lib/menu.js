@@ -44,7 +44,7 @@ export const menuGroups = [
     items: [
       { name: "AI图片生成/编辑", command: "#i [route=路由ID|grok|gpt|gemini|vertex] [比例] [1K/2K/4K] [n=1-6] <提示词>", desc: "通过图片路由使用 Grok、OpenAI、Gemini 或 Vertex 生图；省略路由时使用后台默认路由，引用图片即可改图。回退时会按目标能力转换比例、尺寸和数量。", costCommand: charge("EditImage.dispatchHandler"), examples: ["#i 16:9 2K 赛博风格城市夜景", "#i route=image-main n=4 二次元头像"] },
       { name: "自定义图片指令", command: "配置的 EditImage 触发词", desc: "按后台配置的图片编辑触发词处理引用图片。", costCommand: charge("EditImage.dispatchHandler") },
-      { name: "NAI绘图", command: "#绘图 <提示词>", desc: "使用 NovelAI 绘图，支持画风和附加提示词。", costCommand: charge("NaiPainting.naiParams") },
+      { name: "NAI绘图", command: "#绘图 <场景> [@横,纵: 角色]", desc: "坐标范围 0-100（百分号可省略）；V5 不兼容时自动切换 V4.5。", costCommand: charge("NaiPainting.naiParams") },
       { name: "添加画风", command: "#添加画风 <名称>", desc: "添加 NAI 画风预设。", permission: "主人" },
       { name: "删除画风", command: "#删除画风 <名称>", desc: "删除 NAI 画风预设。", permission: "主人" },
       { name: "画风列表", command: "#画风列表", desc: "查看可用 NAI 画风。" },
