@@ -245,21 +245,48 @@ export function toolGroupHasTool(toolGroupName, toolKey) {
   return resolveToolGroup(toolGroupName).allowedTools.has(toolKey);
 }
 
+function resolveLocalToolInstances(e, allowedTools) {
+  const isMaster = Boolean(e?.isMaster);
+  return availableTools.filter(tool => {
+    if (OWNER_ONLY_TOOLS.has(tool.name) && !isMaster) return false;
+    const configKey = TOOL_CONFIG_KEYS[tool.name];
+    return configKey && allowedTools.has(configKey);
+  });
+}
+
+function buildToolContext(toolGroupName, localToolInstances) {
+  const enabledTools = new Set();
+  for (const tool of localToolInstances) {
+    enabledTools.add(tool.name);
+    const configKey = TOOL_CONFIG_KEYS[tool.name];
+    if (configKey) enabledTools.add(configKey);
+  }
+
+  return {
+    toolGroupName: String(toolGroupName || ""),
+    enabledTools: [...enabledTools],
+  };
+}
+
+function resolveToolContext(e, toolGroupName) {
+  if (!toolGroupName) {
+    return { toolGroupName: "", enabledTools: [] };
+  }
+  const { allowedTools } = resolveToolGroup(toolGroupName);
+  const localToolInstances = resolveLocalToolInstances(e, allowedTools);
+  return buildToolContext(toolGroupName, localToolInstances);
+}
+
 export async function getToolsSchema(e, toolGroupName) {
   if (!toolGroupName) return { localTools: [], allowedMcpServerIds: [] };
 
   const { allowedTools, allowedMcpServerIds } = resolveToolGroup(toolGroupName);
   if (allowedTools.size === 0) return { localTools: [], allowedMcpServerIds: [] };
 
-  const isMaster = Boolean(e?.isMaster);
-  const localToolInstances = availableTools
-    .filter(tool => {
-      if (OWNER_ONLY_TOOLS.has(tool.name) && !isMaster) return false;
-      const configKey = TOOL_CONFIG_KEYS[tool.name];
-      return configKey && allowedTools.has(configKey);
-    });
+  const localToolInstances = resolveLocalToolInstances(e, allowedTools);
+  const toolContext = buildToolContext(toolGroupName, localToolInstances);
   const localTools = await Promise.all(
-    localToolInstances.map(tool => tool.function(e))
+    localToolInstances.map(tool => tool.function(e, toolContext))
   );
 
   return { localTools, allowedMcpServerIds };
@@ -423,7 +450,7 @@ async function sendToolStartVisual(e, functionCalls = []) {
 /**
  * 执行单个工具调用
  */
-async function executeSingleTool(functionCall, e, pluginInstance) {
+async function executeSingleTool(functionCall, e, pluginInstance, toolContext) {
   const { name: toolName, args: toolArgs, id: toolCallId } = functionCall;
 
   let toolResultData = null;
@@ -466,7 +493,7 @@ async function executeSingleTool(functionCall, e, pluginInstance) {
   if (toolToExecute) {
     logger.info(`正在执行工具："${toolName}" ${JSON.stringify(toolArgs)}`);
     try {
-      const rawResult = await toolToExecute.func(toolArgs, e);
+      const rawResult = await toolToExecute.func(toolArgs, e, toolContext);
       const splitResult = splitToolFollowUpResult(rawResult);
       const resultForResponse = splitResult.response;
 
@@ -522,13 +549,15 @@ async function executeSingleTool(functionCall, e, pluginInstance) {
 export async function executeToolCalls(
   e,
   initialFunctionCalls,
-  pluginInstance = null
+  pluginInstance = null,
+  toolGroupName = ""
 ) {
   if (!initialFunctionCalls || initialFunctionCalls.length === 0) {
     return { historyContents: [], queryParts: [] };
   }
 
   await sendToolStartVisual(e, initialFunctionCalls);
+  const toolContext = resolveToolContext(e, toolGroupName);
 
   // 如果有需要确认的工具（且命令不在白名单），改为顺序执行
   const needsConfirm = pluginInstance && initialFunctionCalls.some(
@@ -540,13 +569,13 @@ export async function executeToolCalls(
     toolExecutionResults = [];
     for (const fc of initialFunctionCalls) {
       toolExecutionResults.push(
-        await executeSingleTool(fc, e, pluginInstance)
+        await executeSingleTool(fc, e, pluginInstance, toolContext)
       );
     }
   } else {
     toolExecutionResults = await Promise.all(
       initialFunctionCalls.map((fc) =>
-        executeSingleTool(fc, e, pluginInstance)
+        executeSingleTool(fc, e, pluginInstance, toolContext)
       )
     );
   }

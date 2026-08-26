@@ -1,53 +1,74 @@
 
 import { generateImage } from "../nai/naiApi.js"
 
-export async function checkForNaiTags(message, e, naiPrompt) {
-    if (!message) return message;
+const DRAW_TAG_REGEX = /<draw>([\s\S]*?)<\/draw>/gi
 
-    const drawTagRegex = /<draw>([\s\S]*?)<\/draw>/gi;
-
-
-
-    let hasMatch = false;
-    const tasks = [];
-
-    let cleanedMessage = message.replace(drawTagRegex, (match, content) => {
-        hasMatch = true;
-        tasks.push(async () => {
-            try {
-                let global = content.replace(/[\r\n]+/g, ',').trim();
-
-                if (naiPrompt) {
-                    if (global) {
-                        global += `, ${naiPrompt}`;
-                    } else {
-                        global = naiPrompt;
-                    }
-                }
-
-                logger.info(`绘图提示词: ${global}`);
-                for (let i = 0; i < 3; i++) {
-                    const imageBuffer = await generateImage(global, null, null, { width: 1216, height: 832 }, null, []);
-                    const base64Image = imageBuffer.toString('base64');
-                    e.reply(segment.image(`base64://${base64Image}`));
-                }
-
-            } catch (error) {
-                logger.error(`绘图失败: ${error.message}`);
-            }
-        });
-        return "";
-    });
-
-
-
-    if (hasMatch) {
-        for (const task of tasks) {
-            task().catch(err => logger.error(`绘图失败: ${err}`));
-        }
-    }
-
-    return cleanedMessage.trim();
+function normalizePromptPart(value) {
+    return String(value || "")
+        .split(/[\r\n]+/)
+        .map(part => part.trim())
+        .filter(Boolean)
+        .join(", ")
 }
 
+export function parseNaiDrawTag(message, naiPrompt = "") {
+    if (!message) {
+        return { cleanedMessage: message, drawPrompt: "" }
+    }
 
+    let firstVisualPrompt = ""
+    const cleanedMessage = String(message).replace(DRAW_TAG_REGEX, (_match, content) => {
+        if (!firstVisualPrompt) {
+            firstVisualPrompt = normalizePromptPart(content)
+        }
+        return ""
+    }).trim()
+
+    // 角色级 naiPrompt 只能补充已有的非空 <draw>，不能单独触发生图。
+    if (!firstVisualPrompt) {
+        return { cleanedMessage, drawPrompt: "" }
+    }
+
+    const extraPrompt = normalizePromptPart(naiPrompt)
+    return {
+        cleanedMessage,
+        drawPrompt: extraPrompt
+            ? `${firstVisualPrompt}, ${extraPrompt}`
+            : firstVisualPrompt,
+    }
+}
+
+export async function checkForNaiTags(
+    message,
+    e,
+    naiPrompt,
+    { drawState = null, generateImageImpl = generateImage } = {},
+) {
+    const { cleanedMessage, drawPrompt } = parseNaiDrawTag(message, naiPrompt)
+    if (!drawPrompt || drawState?.scheduled) {
+        return cleanedMessage
+    }
+
+    // 在启动后台任务前立刻占位，确保一次聊天即使包含中间回复和最终回复也只画一张。
+    if (drawState) drawState.scheduled = true
+
+    void (async () => {
+        try {
+            logger.info(`绘图提示词: ${drawPrompt}`)
+            const imageBuffer = await generateImageImpl(
+                drawPrompt,
+                null,
+                null,
+                { width: 1216, height: 832 },
+                null,
+                [],
+            )
+            const base64Image = imageBuffer.toString("base64")
+            await e.reply(segment.image(`base64://${base64Image}`))
+        } catch (error) {
+            logger.error(`绘图失败: ${error.message || error}`)
+        }
+    })()
+
+    return cleanedMessage
+}

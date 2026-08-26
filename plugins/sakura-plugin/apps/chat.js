@@ -225,6 +225,7 @@ export class AIChat extends plugin {
     }
 
     let currentFullHistory = [];
+    const naiDrawState = { scheduled: false };
 
     try {
       if (history) {
@@ -249,7 +250,12 @@ export class AIChat extends plugin {
         history: currentFullHistory,
         pluginInstance: this,
         onIntermediateText: async (text) => {
-          const cleanedTextContent = await checkForNaiTags(text, e, naiPrompt);
+          const cleanedTextContent = await checkForNaiTags(
+            text,
+            e,
+            naiPrompt,
+            { drawState: naiDrawState }
+          );
           await this.smartReply(e, cleanedTextContent, 0, true);
         },
       });
@@ -280,7 +286,12 @@ export class AIChat extends plugin {
         await saveConversationHistory(e, currentFullHistory, prefix);
       }
 
-      const finalResponseText = await checkForNaiTags(agentResult.finalText, e, naiPrompt);
+      const finalResponseText = await checkForNaiTags(
+        agentResult.finalText,
+        e,
+        naiPrompt,
+        { drawState: naiDrawState }
+      );
       // 最后回复也走 smartReply
       await this.smartReply(e, finalResponseText);
       return true;

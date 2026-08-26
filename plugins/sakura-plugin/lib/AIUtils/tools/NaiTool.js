@@ -98,14 +98,14 @@ export function buildNaiToolRequest(opts = {}) {
 
 export class NaiTool extends AbstractTool {
     name = "NaiPainting";
-    description = "使用 NovelAI 生成二次元/动漫风格图片。简单单人图可直接调用；多人站位、角色交互、复杂构图、画面文字、透明背景或指定画风时，先根据 SkillGuide 目录判断并按需加载 nai5-image-generation。";
+    description = "使用 NovelAI 生成二次元/动漫风格图片。简单单人图可直接调用；多人站位、角色交互、复杂构图、画面文字、透明背景或指定画风时，先用 SkillGuide 加载 nai5-image-generation，再按父 Skill 返回的目录只加载相关子 Skill。";
 
     parameters = {
         type: "object",
         properties: {
             prompt: {
                 type: "string",
-                description: "基础提示词：人数、场景、画风、构图、镜头和光线。优先使用准确的英文 NAI 标签和简短自然语言。",
+                description: "基础提示词：人数、场景、画风、构图、镜头和光线。优先使用准确的英文 NAI Tag；也可使用完整连贯的英文自然语言描述或两者混合，不要用残缺短句代替完整描述。画面文字必须把 Text: 内容放在末尾。",
             },
             aspectRatio: {
                 type: "string",
@@ -125,7 +125,7 @@ export class NaiTool extends AbstractTool {
                     properties: {
                         prompt: {
                             type: "string",
-                            description: "单个角色提示词，以 girl、boy 或 other 开头，不写人数数字。",
+                            description: "单个角色提示词，以 girl、boy 或 other 开头，不写人数数字；优先使用准确 Tag，复杂动作可用完整英文句子补强。",
                         },
                         x: {
                             type: "number",

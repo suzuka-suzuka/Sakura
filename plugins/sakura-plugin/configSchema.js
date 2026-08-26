@@ -482,24 +482,25 @@ export const NaiSchema = z.object({
     token: z.string().default('').describe('Token|#textarea'),
     model: z.string().default('nai-diffusion-4-5-full').describe('模型'),
     negative: z.string().default('nsfw, lowres, artistic error, scan artifacts, worst quality, bad quality, jpeg artifacts, multiple views, very displeasing, too many watermarks, negative space, blank page').describe('负面提示词|默认负面提示词'),
-    chatDrawPrompt: z.string().default(`**[Visual Snapshot Instruction]**
-Generate a strictly visual description tag <draw>...</draw> at the end of your response to represent your current visual state.
+    chatDrawPrompt: z.string().default(`**[RP Visual Snapshot — tag only, no image-tool call]**
+Continue the roleplay response normally. Do not call an image-generation tool for this snapshot. At the absolute end of the response, append exactly one compact <draw>...</draw> block for the backend to render asynchronously. The closing </draw> tag must be the final characters of the response.
 
-You must focus on describing your appearance, outfit, and current dynamic elements.
+Inside <draw>, describe only one concrete visible frame from the current moment, in this order:
+1. Visible character count and identity.
+2. Stable visible appearance when needed, then current clothing and accessories.
+3. Pose, action, physical interaction, expression, gaze, and any visible situational changes.
+4. Immediate environment, time, weather, and important props.
+5. Framing, camera angle, relative placement, lighting, color mood, and relevant visual effects.
 
-1. **Character Identity**: If you are a known character from an anime/game, you MUST start the tag with your English Danbooru character tag (e.g., izumi sagiri, hatsune miku). Otherwise, use 1girl or 1boy.
-2. **Clothing**: What outfits or accessories are you wearing right now?
-3. **Dynamic Action**: What are you doing right now? (e.g., reaching out, running, sitting with legs crossed)
-4. **Expression**: Detailed facial emotion. (e.g., tears in eyes, wide grin, blushing)
-5. **Camera & Composition**: How is the scene shot? (e.g., close-up, dutch angle, looking at viewer, cinematic lighting)
-6. **Environment**: Immediate surroundings. (e.g., rain-soaked street, cozy bedroom, burning ruins)
+Rules:
+- Use accurate English NovelAI/Danbooru-style tags separated by commas. For a complex interaction or spatial relationship, add one complete English sentence after the tag anchors; do not use broken sentence fragments.
+- For a known anime/game character, begin with the recognized English character tag. For an original character, begin with 1girl, 1boy, or another accurate count and include the stable visible traits established by the role.
+- Describe the current scene, not a generic character sheet. Preserve continuity with the roleplay history and do not invent extra people, clothing changes, camera text, watermarks, dialogue boxes, or a new art style.
+- Include only visually observable information. Do not put thoughts, personality, backstory, sounds, smells, or spoken dialogue into the image prompt. Spoken dialogue is not visible image text unless the user explicitly asks for text in the picture.
+- Keep it concise: one line, normally 12–30 comma-separated visual items. Do not use Markdown fences and do not output more than one <draw> block.
 
-**Format Constraint**:
-- Use Danbooru-style tags or short descriptive English phrases, separated by commas. MUST be in English.
-- **DO NOT** describe your basic physical traits (hair color, eye color) unless altered by the situation.
-
-**Example**:
-<draw>izumi sagiri, pink pajamas, leaning against the wall, arms crossed, skeptical expression, looking to the side, dimly lit bedroom, cowboy shot</draw>`).describe('聊天自动绘图指令|#textarea|角色开启NAI绘图时追加到系统提示词；留空则不追加'),
+Example:
+<draw>1girl, original character, long silver hair, blue eyes, oversized white shirt, sitting on the edge of a bed, leaning toward viewer, one hand reaching forward, warm blush, gentle smile, looking at viewer, cozy bedroom at night, bedside lamp, cowboy shot, eye-level, slightly left of center, warm backlighting, shallow depth of field</draw>`).describe('聊天自动绘图指令|#textarea|角色开启NAI绘图时追加到系统提示词；只追加绘图标签并异步生成一张图，不调用绘图工具；留空则不追加'),
 }).describe('NovelAI 绘画');
 
 const CommandCostSchema = z.object({

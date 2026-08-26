@@ -40,7 +40,7 @@ plugins/*
 !plugins/sakura-plugin/
 !plugins/sakura-plugin/**
 
-# 私人 AI Skill：仅保存在部署机器，不进入 Sakura 仓库
+# 用户创建的 AI Skill：仅保存在部署机器；是否仅主人可见由 SKILL.md 的 masterOnly 决定
 plugins/sakura-plugin/skills/
 
 # Frontend build output

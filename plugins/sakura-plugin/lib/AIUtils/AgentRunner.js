@@ -160,7 +160,8 @@ export async function runAgentLoop({
         const toolCallback = await executeToolCalls(
           e,
           functionCalls,
-          pluginInstance
+          pluginInstance,
+          toolGroup
         );
         currentFullHistory.push(...toolCallback.historyContents);
         const newToolQueryParts = filterNewInlineDataParts(
