@@ -171,7 +171,7 @@ function prepareCommandExecution(command) {
 
 export class RunCommandTool extends AbstractTool {
     name = "RunCommand"
-    description = `在项目目录下执行命令行命令。当前系统 ${IS_WINDOWS ? "Windows" : process.platform}。工作目录 ${ALLOWED_ROOT}。支持任意合法命令，不允许破坏性操作。遇到复杂或陌生的项目任务时，先调用 SkillGuide 搜索并加载相关指导。如需创建或下载临时文件，请放置在项目根目录的 temp 目录下，切勿直接在项目根目录创建文件。输出超过 ${MAX_OUTPUT_CHARS} 字符时会保留开头和结尾并截断中间。`
+    description = `在 ${IS_WINDOWS ? "Windows" : process.platform} 的项目目录 ${ALLOWED_ROOT} 下执行命令。可指定项目内工作目录和超时；临时文件放在 temp 目录，禁止破坏性操作，长输出会截断。`
     parameters = {
         properties: {
             command: {

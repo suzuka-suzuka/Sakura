@@ -260,10 +260,7 @@ export async function getToolsSchema(e, toolGroupName) {
     .filter(tool => {
       if (OWNER_ONLY_TOOLS.has(tool.name) && !isMaster) return false;
       const configKey = TOOL_CONFIG_KEYS[tool.name];
-      if (!configKey) return false;
-      // RunCommand 工具组自动附带 SkillGuide：先加载短指导，再执行命令。
-      if (tool.name === "SkillGuide" && allowedTools.has("RunCommand")) return true;
-      return allowedTools.has(configKey);
+      return configKey && allowedTools.has(configKey);
     })
     .map(tool => tool.function());
 
