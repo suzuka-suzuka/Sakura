@@ -5,8 +5,10 @@ import Setting from "../setting.js";
 const DEFAULT_MODEL = "nai-diffusion-4-5-full";
 const DEFAULT_NEGATIVE =
     "lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page";
-const QUALITY_SUFFIX = "very aesthetic, masterpiece";
-const NO_TEXT_SUFFIX = "no text";
+const DEFAULT_STEPS = 28;
+const QUALITY_TAGS = ["very aesthetic", "masterpiece"];
+const NO_TEXT_TAG = "no text";
+const MANAGED_PROMPT_TAGS = new Set([...QUALITY_TAGS, NO_TEXT_TAG]);
 const NAI_SUBSCRIPTION_URL = "https://image.novelai.net/user/subscription";
 const NAI_USAGE_MIN_PERCENT = 5;
 const NAI_USAGE_FALLBACK_COOLDOWN_SECONDS = 60;
@@ -19,7 +21,7 @@ const MODEL_PROFILES = {
         family: "v5",
         paramsVersion: 4,
         scale: 7,
-        steps: 23,
+        steps: DEFAULT_STEPS,
         legacyUc: false,
         skipCfgAboveSigma: null,
         maxCharacters: 32,
@@ -30,7 +32,7 @@ const MODEL_PROFILES = {
         family: "v4.5",
         paramsVersion: 4,
         scale: 5,
-        steps: 23,
+        steps: DEFAULT_STEPS,
         legacyUc: false,
         skipCfgAboveSigma: null,
         maxCharacters: 6,
@@ -41,7 +43,7 @@ const MODEL_PROFILES = {
         family: "v4",
         paramsVersion: 4,
         scale: 5.5,
-        steps: 23,
+        steps: DEFAULT_STEPS,
         legacyUc: true,
         skipCfgAboveSigma: null,
         maxCharacters: 6,
@@ -52,7 +54,7 @@ const MODEL_PROFILES = {
         family: "legacy",
         paramsVersion: 3,
         scale: 5,
-        steps: 28,
+        steps: DEFAULT_STEPS,
         legacyUc: false,
         skipCfgAboveSigma: 58,
         maxCharacters: null,
@@ -70,29 +72,64 @@ const VIBE_PARAMETER_KEYS = [
 const queue = [];
 let isProcessing = false;
 
+function normalizePromptTag(tag) {
+    return String(tag || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function mergeManagedPromptTags(visualPrompt, hasVisibleTextIntent) {
+    const promptParts = String(visualPrompt || "")
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean);
+    const mergedParts = [];
+    const seenManagedTags = new Set();
+
+    for (const part of promptParts) {
+        const normalized = normalizePromptTag(part);
+        if (MANAGED_PROMPT_TAGS.has(normalized)) {
+            if (normalized === NO_TEXT_TAG && hasVisibleTextIntent) continue;
+            if (seenManagedTags.has(normalized)) continue;
+            seenManagedTags.add(normalized);
+        }
+        mergedParts.push(part);
+    }
+
+    for (const tag of QUALITY_TAGS) {
+        if (seenManagedTags.has(tag)) continue;
+        seenManagedTags.add(tag);
+        mergedParts.push(tag);
+    }
+    if (!hasVisibleTextIntent && !seenManagedTags.has(NO_TEXT_TAG)) {
+        mergedParts.push(NO_TEXT_TAG);
+    }
+
+    return mergedParts.join(", ");
+}
+
 export function appendNaiQualityTags(prompt) {
     const input = String(prompt || "").trim();
     const textBlockIndex = input.search(/\bText\s*:/i);
-    if (textBlockIndex >= 0) {
-        const visualPrompt = input
-            .slice(0, textBlockIndex)
-            .replace(/[\s,]+$/g, "");
-        const textBlock = input.slice(textBlockIndex).trim();
-        return [visualPrompt, QUALITY_SUFFIX]
-            .filter(Boolean)
-            .join(", ") + `\n${textBlock}`;
-    }
-
-    const hasVisibleTextIntent = /\b(?:english|japanese|chinese)?\s*text\b/i.test(
-        input,
+    const visualPrompt = (textBlockIndex >= 0
+        ? input.slice(0, textBlockIndex)
+        : input
+    ).replace(/[\s,]+$/g, "");
+    const textBlock = textBlockIndex >= 0
+        ? input.slice(textBlockIndex).trim()
+        : "";
+    const visiblePromptWithoutNoText = visualPrompt.replace(
+        /\bno\s+text\b/gi,
+        "",
     );
-    return [
-        input.replace(/[\s,]+$/g, ""),
-        QUALITY_SUFFIX,
-        ...(hasVisibleTextIntent ? [] : [NO_TEXT_SUFFIX]),
-    ]
-        .filter(Boolean)
-        .join(", ");
+    const hasVisibleTextIntent = Boolean(textBlock) ||
+        /\b(?:english|japanese|chinese)?\s*text\b/i.test(
+            visiblePromptWithoutNoText,
+        );
+    const mergedPrompt = mergeManagedPromptTags(
+        visualPrompt,
+        hasVisibleTextIntent,
+    );
+
+    return textBlock ? `${mergedPrompt}\n${textBlock}` : mergedPrompt;
 }
 
 export function wantsNaiTransparentBackground(prompt) {
