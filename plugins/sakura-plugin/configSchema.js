@@ -108,9 +108,11 @@ const ToolGroupSchema = z.object({
 const RunCommandWorkspaceSchema = z.object({
     name: z.string()
         .trim()
-        .regex(/^[a-z0-9][a-z0-9._-]{0,63}$/, '工作区名称只能包含小写字母、数字、点、下划线和连字符')
+        .min(1, '工作区名称不能为空')
+        .max(64, '工作区名称不能超过 64 个字符')
+        .refine((value) => !/[\p{Cc}]/u.test(value), '工作区名称不能包含换行等控制字符')
         .default('workspace')
-        .describe('工作区名称|作为 RunCommand 的 root 参数，例如 sakura-11'),
+        .describe('工作区名称|作为 RunCommand 的 root 参数，例如 Sakura 11 或 工作区A'),
     path: nonEmptyString('工作区路径')
         .default('.')
         .describe('工作区路径|#serverDirectory|命令进程的默认起点目录；不限制命令访问其他路径'),
