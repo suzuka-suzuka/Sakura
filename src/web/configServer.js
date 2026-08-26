@@ -12,7 +12,6 @@ import accountConfig from '../core/accountConfig.js';
 import { logger } from '../utils/logger.js';
 import { bot as botFacade, getBotSummaries } from '../api/client.js';
 import { AVAILABLE_TOOL_OPTIONS } from '../../plugins/sakura-plugin/lib/AIUtils/tools/tools.js';
-import { buildMenuData } from '../../plugins/sakura-plugin/lib/menu.js';
 import {
     getProviderModelDiscoveryFingerprint,
     listProviderModels,
@@ -24,12 +23,27 @@ import {
 } from '../../plugins/sakura-plugin/lib/AIUtils/vertexCredentialStore.js';
 import { getManagedVertexCredentialPath } from '../../plugins/sakura-plugin/lib/AIUtils/vertexAuth.js';
 import { listServerDirectories } from './serverDirectories.js';
+import {
+    MAX_EDITABLE_FILE_SIZE,
+    MAX_UPLOAD_FILE_SIZE,
+    createServerEntry,
+    deleteServerEntry,
+    getServerDownload,
+    getServerFileErrorStatus,
+    listServerFiles,
+    readServerTextFile,
+    renameServerEntry,
+    writeServerTextFile,
+    writeServerUpload,
+} from './serverFiles.js';
 let cachedStaticInfo = null;
 let staticInfoTime = 0;
 const STATIC_INFO_CACHE_TIME = 60000;
 const WEB_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SESSION_PERSIST_MIN_INTERVAL_MS = 60 * 1000;
 const MAX_REQUEST_BODY_SIZE = 1024 * 1024;
+const FILE_DOWNLOAD_TICKET_TTL_MS = 60 * 1000;
+const MAX_FILE_DOWNLOAD_TICKETS = 128;
 
 async function getStaticSystemInfo() {
     const now = Date.now();
@@ -225,9 +239,36 @@ const MIME_TYPES = {
 
 const wsClients = new Set();
 const authSessions = new Map();
+const fileDownloadTickets = new Map();
 let sessionSaveTimer = null;
 let sessionsLoaded = false;
 let currentWebPassword = Config.get('web.password') || 'admin';
+
+function cleanupFileDownloadTickets(now = Date.now()) {
+    for (const [ticket, record] of fileDownloadTickets.entries()) {
+        if (record.expiresAt <= now) fileDownloadTickets.delete(ticket);
+    }
+}
+
+function createFileDownloadTicket(filePath) {
+    cleanupFileDownloadTickets();
+    while (fileDownloadTickets.size >= MAX_FILE_DOWNLOAD_TICKETS) {
+        fileDownloadTickets.delete(fileDownloadTickets.keys().next().value);
+    }
+
+    const ticket = crypto.randomBytes(24).toString('hex');
+    const expiresAt = Date.now() + FILE_DOWNLOAD_TICKET_TTL_MS;
+    fileDownloadTickets.set(ticket, { path: filePath, expiresAt });
+    return { ticket, expiresAt };
+}
+
+function consumeFileDownloadTicket(ticket) {
+    cleanupFileDownloadTickets();
+    const record = fileDownloadTickets.get(ticket);
+    if (!record) return null;
+    fileDownloadTickets.delete(ticket);
+    return record.path;
+}
 
 
 function cleanupExpiredSessions(now = Date.now(), { persist = true } = {}) {
@@ -281,6 +322,7 @@ function closeAllWsClients(reason = 'Session reset') {
 
 function clearAuthSessions(reason = 'Session reset') {
     authSessions.clear();
+    fileDownloadTickets.clear();
     sessionsLoaded = true;
     if (sessionSaveTimer) {
         clearTimeout(sessionSaveTimer);
@@ -507,7 +549,7 @@ function buildResponseHeaders(req, extraHeaders = {}) {
     const allowedOrigin = getAllowedOrigin(req);
     if (allowedOrigin) {
         headers['Access-Control-Allow-Origin'] = allowedOrigin;
-        headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
+        headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
         headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
         headers.Vary = 'Origin';
     }
@@ -516,7 +558,7 @@ function buildResponseHeaders(req, extraHeaders = {}) {
 }
 
 
-function parseBody(req) {
+function parseBody(req, maxSize = MAX_REQUEST_BODY_SIZE) {
     return new Promise((resolve, reject) => {
         const chunks = [];
         let totalSize = 0;
@@ -536,7 +578,7 @@ function parseBody(req) {
 
         req.on('data', (chunk) => {
             totalSize += chunk.length;
-            if (totalSize > MAX_REQUEST_BODY_SIZE) {
+            if (totalSize > maxSize) {
                 finishReject(new Error('Payload too large'));
                 req.destroy();
                 return;
@@ -555,6 +597,35 @@ function parseBody(req) {
     });
 }
 
+function readRequestBuffer(req, maxSize) {
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        let totalSize = 0;
+        let tooLarge = false;
+
+        req.on('data', (chunk) => {
+            totalSize += chunk.length;
+            if (totalSize > maxSize) {
+                tooLarge = true;
+                chunks.length = 0;
+                return;
+            }
+            if (!tooLarge) chunks.push(chunk);
+        });
+        req.on('end', () => {
+            if (tooLarge) {
+                const error = new Error(`上传文件不能超过 ${Math.floor(maxSize / 1024 / 1024)} MB`);
+                error.statusCode = 413;
+                error.code = 'FILE_TOO_LARGE';
+                reject(error);
+                return;
+            }
+            resolve(Buffer.concat(chunks));
+        });
+        req.on('error', reject);
+    });
+}
+
 function parseSelfIdParam(url) {
     const raw = url.searchParams.get('selfId');
     if (raw == null || raw === '') return null;
@@ -567,6 +638,24 @@ function sendJson(res, data, status = 200) {
         'Content-Type': 'application/json; charset=utf-8',
     }));
     res.end(JSON.stringify(data));
+}
+
+function sendServerFileError(res, error, action) {
+    sendJson(res, {
+        success: false,
+        error: `${action}失败：${error.message || error}`,
+        code: error?.code || 'FILE_OPERATION_FAILED',
+    }, getServerFileErrorStatus(error));
+}
+
+function encodeContentDispositionFileName(fileName) {
+    const fallback = String(fileName || 'download')
+        .replace(/[^\x20-\x7e]/g, '_')
+        .replace(/["\\]/g, '_');
+    const encoded = encodeURIComponent(fileName).replace(/['()*]/g, (char) => (
+        `%${char.charCodeAt(0).toString(16).toUpperCase()}`
+    ));
+    return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
 function requireAuth(req, res) {
@@ -610,7 +699,7 @@ async function handleApi(req, res) {
 
     if (req.method === 'OPTIONS') {
         res.writeHead(204, buildResponseHeaders(req, {
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
             'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         }));
         res.end();
@@ -665,28 +754,6 @@ async function handleApi(req, res) {
             logger.error(`[ConfigServer] 获取 Bot 信息失败: ${e}`);
             sendJson(res, { success: false, error: '获取 Bot 信息失败' });
         }
-        return true;
-    }
-
-    // 菜单编辑器 API
-    if (pathname === '/api/menu' && req.method === 'GET') {
-        if (!requireAuth(req, res)) return true;
-        try {
-            const economyConfig = pluginConfigManager.getConfig('sakura-plugin', 'economy');
-            sendJson(res, { success: true, data: buildMenuData({ economyConfig }) });
-        } catch (e) {
-            logger.error(`[ConfigServer] 获取菜单配置失败: ${e}`);
-            sendJson(res, { success: false, error: '获取菜单配置失败' });
-        }
-        return true;
-    }
-
-    if (pathname === '/api/menu' && req.method === 'POST') {
-        if (!requireAuth(req, res)) return true;
-        sendJson(res, {
-            success: false,
-            error: 'Menu is code-defined; edit plugins/sakura-plugin/lib/menu.js',
-        });
         return true;
     }
 
@@ -808,6 +875,149 @@ async function handleApi(req, res) {
                 success: false,
                 error: `无法读取服务器文件夹：${error.message || error}`,
             }, 400);
+        }
+        return true;
+    }
+
+    if (pathname === '/api/files' && req.method === 'GET') {
+        if (!requireAuth(req, res)) return true;
+        try {
+            const result = listServerFiles(url.searchParams.get('path'), PROJECT_ROOT);
+            sendJson(res, { success: true, data: result });
+        } catch (error) {
+            sendServerFileError(res, error, '读取文件夹');
+        }
+        return true;
+    }
+
+    if (pathname === '/api/files/content' && req.method === 'GET') {
+        if (!requireAuth(req, res)) return true;
+        try {
+            const result = readServerTextFile(url.searchParams.get('path'), PROJECT_ROOT);
+            sendJson(res, { success: true, data: result });
+        } catch (error) {
+            sendServerFileError(res, error, '读取文件');
+        }
+        return true;
+    }
+
+    if (pathname === '/api/files/content' && req.method === 'PUT') {
+        if (!requireAuth(req, res)) return true;
+        try {
+            const body = await parseBody(req, MAX_EDITABLE_FILE_SIZE * 3);
+            const result = writeServerTextFile(
+                body.path,
+                body.content,
+                body.expectedMtimeMs,
+                PROJECT_ROOT,
+                { force: body.force === true },
+            );
+            sendJson(res, { success: true, data: result });
+        } catch (error) {
+            sendServerFileError(res, error, '保存文件');
+        }
+        return true;
+    }
+
+    if (pathname === '/api/files/download-ticket' && req.method === 'POST') {
+        if (!requireAuth(req, res)) return true;
+        try {
+            const body = await parseBody(req);
+            const download = getServerDownload(body.path, PROJECT_ROOT);
+            const ticket = createFileDownloadTicket(download.path);
+            sendJson(res, {
+                success: true,
+                data: { ...ticket, name: download.name },
+            });
+        } catch (error) {
+            sendServerFileError(res, error, '准备下载');
+        }
+        return true;
+    }
+
+    if (pathname === '/api/files/download' && req.method === 'GET') {
+        try {
+            const ticket = url.searchParams.get('ticket');
+            let requestedPath;
+            if (ticket) {
+                requestedPath = consumeFileDownloadTicket(ticket);
+                if (!requestedPath) {
+                    sendJson(res, { success: false, error: '下载链接已失效，请重新下载' }, 410);
+                    return true;
+                }
+            } else {
+                if (!requireAuth(req, res)) return true;
+                requestedPath = url.searchParams.get('path');
+            }
+
+            const download = getServerDownload(requestedPath, PROJECT_ROOT);
+            const stream = fs.createReadStream(download.path);
+            stream.on('error', (error) => {
+                logger.warn(`[ConfigServer] 下载文件流中断: ${error.message}`);
+                res.destroy(error);
+            });
+            res.writeHead(200, buildResponseHeaders(req, {
+                'Content-Type': download.contentType,
+                'Content-Length': download.size,
+                'Content-Disposition': encodeContentDispositionFileName(download.name),
+            }));
+            stream.pipe(res);
+        } catch (error) {
+            sendServerFileError(res, error, '下载文件');
+        }
+        return true;
+    }
+
+    if (pathname === '/api/files/entry' && req.method === 'POST') {
+        if (!requireAuth(req, res)) return true;
+        try {
+            const body = await parseBody(req);
+            const result = createServerEntry(body.directory, body.name, body.type, PROJECT_ROOT);
+            sendJson(res, { success: true, data: result });
+        } catch (error) {
+            sendServerFileError(res, error, '新建项目');
+        }
+        return true;
+    }
+
+    if (pathname === '/api/files/rename' && req.method === 'POST') {
+        if (!requireAuth(req, res)) return true;
+        try {
+            const body = await parseBody(req);
+            const result = renameServerEntry(body.path, body.name, PROJECT_ROOT);
+            sendJson(res, { success: true, data: result });
+        } catch (error) {
+            sendServerFileError(res, error, '重命名');
+        }
+        return true;
+    }
+
+    if (pathname === '/api/files' && req.method === 'DELETE') {
+        if (!requireAuth(req, res)) return true;
+        try {
+            const body = await parseBody(req);
+            const result = deleteServerEntry(body.path, PROJECT_ROOT);
+            sendJson(res, { success: true, data: result });
+        } catch (error) {
+            sendServerFileError(res, error, '删除');
+        }
+        return true;
+    }
+
+    if (pathname === '/api/files/upload' && req.method === 'POST') {
+        if (!requireAuth(req, res)) return true;
+        try {
+            const buffer = await readRequestBuffer(req, MAX_UPLOAD_FILE_SIZE);
+            const result = writeServerUpload(
+                url.searchParams.get('directory'),
+                url.searchParams.get('name'),
+                buffer,
+                url.searchParams.get('overwrite') === 'true',
+                PROJECT_ROOT,
+            );
+            sendJson(res, { success: true, data: result });
+        } catch (error) {
+            sendServerFileError(res, error, '上传文件');
         }
         return true;
     }
@@ -1212,17 +1422,6 @@ export function startConfigServer() {
             if (req.url.startsWith('/api/')) {
                 const handled = await handleApi(req, res);
                 if (handled) return;
-            }
-
-            // 拦截 /menu，服务独立的菜单编辑器
-            const url = new URL(req.url, `http://${req.headers.host}`);
-            if (url.pathname === '/menu' || url.pathname === '/menu/') {
-                const editorPath = path.join(__dirname, '../../plugins/sakura-plugin/resources/menu/editor.html');
-                if (fs.existsSync(editorPath)) {
-                    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-                    res.end(fs.readFileSync(editorPath));
-                    return;
-                }
             }
 
             serveStatic(req, res);

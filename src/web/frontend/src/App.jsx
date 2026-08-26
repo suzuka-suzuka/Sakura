@@ -6,6 +6,7 @@ import LoginPage from './components/LoginPage';
 import ConfigForm from './components/ConfigForm';
 import PluginConfigPanel from './components/PluginConfigPanel';
 import SystemMonitor from './components/SystemMonitor';
+import FileManager from './components/FileManager';
 import { resolvePluginScopeSelfId } from './utils/accountScope';
 
 const DEFAULT_SCOPE_KEY = '__default__';
@@ -120,15 +121,17 @@ function App() {
     { key: 'monitor', label: '系统监控', icon: '📊' },
     { key: 'framework', label: '框架配置', icon: '🌸' },
     { key: 'account', label: '账号配置', icon: '👤' },
-    ...pluginNames.map((name) => {
+    ...pluginNames.flatMap((name) => {
       const meta = pluginMeta?.[name];
-      return {
+      const pluginItem = {
         key: name,
         label: meta?.displayName || name,
         icon: meta?.icon || '🧩',
       };
+      return name === 'sakura-plugin'
+        ? [pluginItem, { key: '__file_manager__', label: '文件管理', icon: '📁', nested: true }]
+        : [pluginItem];
     }),
-    { key: '__menu_editor__', label: '菜单编辑', icon: '📝' },
   ], [pluginNames, pluginMeta]);
 
   const accountTab = useMemo(() => {
@@ -146,7 +149,11 @@ function App() {
   }, [accountSchema]);
 
   const categoryTabs = useMemo(() => {
-    if (activeSection === 'monitor' || activeSection === 'account') {
+    if (
+      activeSection === 'monitor'
+      || activeSection === 'account'
+      || activeSection === '__file_manager__'
+    ) {
       return [];
     }
 
@@ -223,7 +230,11 @@ function App() {
   const safeIdx = Math.min(activeCategoryIdx, Math.max(categoryTabs.length - 1, 0));
   const currentTab = categoryTabs[safeIdx] || null;
   const isAccountSection = activeSection === 'account';
-  const isPluginSection = activeSection !== 'framework' && activeSection !== 'monitor' && activeSection !== 'account';
+  const isFileManagerSection = activeSection === '__file_manager__';
+  const isPluginSection = activeSection !== 'framework'
+    && activeSection !== 'monitor'
+    && activeSection !== 'account'
+    && !isFileManagerSection;
 
   const showAccountTopbar = botAccounts.length > 1 && (isPluginSection || isAccountSection);
 
@@ -275,14 +286,8 @@ function App() {
           {navItems.map((item) => (
             <button
               key={item.key}
-              className={`left-nav-item ${activeSection === item.key ? 'active' : ''}`}
-              onClick={() => {
-                if (item.key === '__menu_editor__') {
-                  window.open('/menu', '_self');
-                } else {
-                  handleSectionChange(item.key);
-                }
-              }}
+              className={`left-nav-item ${item.nested ? 'nested' : ''} ${activeSection === item.key ? 'active' : ''}`}
+              onClick={() => handleSectionChange(item.key)}
             >
               <span className="left-nav-icon">{item.icon}</span>
               <span className="left-nav-label">{item.label}</span>
@@ -390,6 +395,14 @@ function App() {
                   <div className="spinner"></div>
                 </div>
               )
+            )}
+
+            {isFileManagerSection && (
+              <FileManager
+                token={token}
+                onUnauthorized={logout}
+                onToast={addToast}
+              />
             )}
 
             {isPluginSection && currentTab && (

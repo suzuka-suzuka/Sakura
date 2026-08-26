@@ -261,6 +261,22 @@ body {
   white-space: nowrap;
 }
 
+.left-nav-item.nested {
+  width: calc(100% - 18px);
+  margin-left: 18px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  font-size: 13px;
+}
+
+.left-nav-item.nested::after {
+  content: '';
+  position: absolute;
+  left: -9px;
+  width: 10px;
+  border-top: 1px solid var(--border-default);
+}
+
 /* ========== Header ========== */
 
 .app-header {
@@ -1290,6 +1306,290 @@ select.field-input {
   min-height: 180px;
   color: var(--text-muted);
   font-size: 13px;
+}
+
+/* ========== Server File Manager ========== */
+
+.file-manager-card {
+  overflow: hidden;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-card);
+}
+
+.file-manager-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.file-manager-path-form {
+  display: flex;
+  gap: 8px;
+}
+
+.file-manager-path-form .field-input {
+  min-width: 0;
+  font-family: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+}
+
+.file-manager-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.file-manager-roots {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 18px;
+  color: var(--text-muted);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.file-manager-roots button {
+  padding: 3px 9px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.file-manager-roots button:hover {
+  color: var(--accent-dark);
+  border-color: var(--border-active);
+}
+
+.file-manager-error,
+.file-manager-dialog-error {
+  padding: 10px 12px;
+  color: var(--error);
+  background: var(--error-dim);
+  border: 1px solid rgba(229, 57, 53, 0.2);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+
+.file-manager-error {
+  margin: 14px 18px 0;
+}
+
+.file-manager-dialog-error {
+  margin-top: 12px;
+}
+
+.file-manager-table {
+  min-height: 280px;
+}
+
+.file-manager-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 100px 170px minmax(230px, auto);
+  align-items: center;
+  min-height: 52px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.file-manager-row:last-child {
+  border-bottom: none;
+}
+
+.file-manager-row:not(.file-manager-header-row):hover {
+  background: var(--bg-card-hover);
+}
+
+.file-manager-header-row {
+  min-height: 38px;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.file-manager-name-cell {
+  min-width: 0;
+}
+
+.file-manager-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 100%;
+  padding: 6px 0;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-manager-name:hover .file-manager-name-text {
+  color: var(--accent-dark);
+  text-decoration: underline;
+}
+
+.file-manager-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-manager-badge {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  color: var(--accent-dark);
+  background: var(--accent-dim);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+}
+
+.file-manager-meta {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.file-manager-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.file-manager-actions button {
+  padding: 4px 7px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.file-manager-actions button:hover {
+  color: var(--accent-dark);
+  background: var(--accent-dim);
+  border-color: var(--border-subtle);
+}
+
+.file-manager-actions button.danger:hover {
+  color: var(--error);
+  background: var(--error-dim);
+  border-color: rgba(229, 57, 53, 0.15);
+}
+
+.file-manager-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.file-manager-name-modal {
+  max-width: 430px;
+}
+
+.file-editor-modal {
+  width: min(1100px, 94vw);
+  max-width: none;
+  height: min(800px, 90vh);
+  max-height: 90vh;
+}
+
+.file-editor-title {
+  min-width: 0;
+}
+
+.file-editor-title > span:last-child {
+  display: block;
+  overflow: hidden;
+  max-width: 760px;
+  color: var(--text-muted);
+  font-family: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-editor-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px;
+}
+
+.file-editor-textarea {
+  width: 100%;
+  height: 100%;
+  min-height: 480px;
+  resize: none;
+  padding: 14px;
+  color: var(--text-primary);
+  background: #fffafd;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  outline: none;
+  font-family: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  tab-size: 4;
+}
+
+.file-editor-textarea:focus {
+  border-color: var(--border-active);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.file-editor-footer {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.file-editor-footer > span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.file-editor-footer > div {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 900px) {
+  .file-manager-table {
+    overflow-x: auto;
+  }
+
+  .file-manager-row {
+    min-width: 780px;
+  }
+}
+
+@media (max-width: 640px) {
+  .file-manager-toolbar-actions .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .file-editor-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .file-editor-footer > div {
+    justify-content: flex-end;
+  }
 }
 
 /* ========== Content Area ========== */
