@@ -15,6 +15,29 @@ const NAI_USAGE_FALLBACK_COOLDOWN_SECONDS = 60;
 const NAI_OPUS_TIER = 3;
 const NAI_FREE_MAX_PIXELS = 1024 * 1024;
 const NAI_FREE_MAX_STEPS = 28;
+const NAI_IMAGE_RETRY_DELAYS_MS = [10_000, 20_000, 30_000];
+const NAI_RETRYABLE_NETWORK_CODES = new Set([
+    "ABORT_ERR",
+    "EAI_AGAIN",
+    "ECONNABORTED",
+    "ECONNREFUSED",
+    "ECONNRESET",
+    "EHOSTUNREACH",
+    "ENETDOWN",
+    "ENETUNREACH",
+    "ENOTFOUND",
+    "EPIPE",
+    "ERR_STREAM_PREMATURE_CLOSE",
+    "ETIMEDOUT",
+    "UND_ERR_ABORTED",
+    "UND_ERR_BODY_TIMEOUT",
+    "UND_ERR_CONNECT_TIMEOUT",
+    "UND_ERR_HEADERS_TIMEOUT",
+    "UND_ERR_RES_CONTENT_LENGTH_MISMATCH",
+    "UND_ERR_SOCKET",
+]);
+const NAI_RETRYABLE_NETWORK_MESSAGE =
+    /(?:terminated|fetch failed|network error|socket hang up|timed?\s*out|timeout|connection (?:reset|refused|closed)|premature close|other side closed|econnreset|econnrefused|etimedout|eai_again|enotfound|网络(?:错误|异常|中断)|连接(?:重置|超时|中断|失败))/i;
 
 const MODEL_PROFILES = {
     v5: {
@@ -581,6 +604,117 @@ export function generateImageWithCallback(
     });
 }
 
+function getNaiErrorChain(error) {
+    const chain = [];
+    const seen = new Set();
+    let current = error;
+
+    while (current != null && !seen.has(current)) {
+        chain.push(current);
+        if (typeof current !== "object") break;
+        seen.add(current);
+        current = current.cause;
+    }
+
+    return chain;
+}
+
+function getNaiErrorStatus(error) {
+    for (const item of getNaiErrorChain(error)) {
+        if (typeof item !== "object" || item == null) continue;
+        const status = Number(
+            item.status ?? item.statusCode ?? item.response?.status,
+        );
+        if (Number.isInteger(status) && status > 0) return status;
+    }
+    return null;
+}
+
+function isRetryableNaiImageError(error) {
+    if (getNaiErrorStatus(error) === 429) return true;
+
+    return getNaiErrorChain(error).some((item) => {
+        const code = String(item?.code || "").toUpperCase();
+        if (NAI_RETRYABLE_NETWORK_CODES.has(code)) return true;
+
+        const name = String(item?.name || "").toLowerCase();
+        if (name === "aborterror" || name === "timeouterror") return true;
+
+        const message = String(item?.message ?? item ?? "");
+        return NAI_RETRYABLE_NETWORK_MESSAGE.test(message);
+    });
+}
+
+function waitForNaiImageRetry(delayMs) {
+    return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+async function performNaiImageRequest(payload, token) {
+    const response = await fetch("https://image.novelai.net/ai/generate-image", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+        let errorText;
+        try {
+            errorText = await response.text();
+        } catch (error) {
+            const responseError = new Error(
+                error?.message || String(error),
+                { cause: error },
+            );
+            responseError.status = response.status;
+            throw responseError;
+        }
+
+        const requestError = new Error(
+            `API Request failed with status ${response.status}: ${errorText}`,
+        );
+        requestError.status = response.status;
+        throw requestError;
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const zip = new AdmZip(buffer);
+    const zipEntries = zip.getEntries();
+
+    if (zipEntries.length > 0) {
+        return zipEntries[0].getData();
+    }
+    throw new Error("生成失败，未收到图片数据");
+}
+
+async function requestNaiImageWithRetry(payload, token) {
+    for (let retryIndex = 0; ; retryIndex += 1) {
+        try {
+            return await performNaiImageRequest(payload, token);
+        } catch (error) {
+            const retryDelayMs = NAI_IMAGE_RETRY_DELAYS_MS[retryIndex];
+            if (
+                retryDelayMs == null ||
+                !isRetryableNaiImageError(error)
+            ) {
+                throw error;
+            }
+
+            const retryNumber = retryIndex + 1;
+            const reason = getNaiErrorStatus(error) === 429
+                ? "HTTP 429"
+                : (error?.message || String(error));
+            global.logger?.warn?.(
+                `[NAI] 生图请求失败（${reason}），${retryDelayMs / 1000} 秒后进行第 ${retryNumber}/${NAI_IMAGE_RETRY_DELAYS_MS.length} 次重试`,
+            );
+            await waitForNaiImageRetry(retryDelayMs);
+        }
+    }
+}
+
 async function _generateImage(
     prompt,
     model = null,
@@ -657,33 +791,7 @@ async function _generateImage(
         }
     }
 
-    const response = await fetch("https://image.novelai.net/ai/generate-image", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${config.token}`,
-        },
-        body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-            `API Request failed with status ${response.status}: ${errorText}`,
-        );
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const zip = new AdmZip(buffer);
-    const zipEntries = zip.getEntries();
-
-    if (zipEntries.length > 0) {
-        const imageEntry = zipEntries[0];
-        return imageEntry.getData();
-    } else {
-        throw new Error("生成失败，未收到图片数据");
-    }
+    return requestNaiImageWithRetry(payload, config.token);
 }
 
 /**
