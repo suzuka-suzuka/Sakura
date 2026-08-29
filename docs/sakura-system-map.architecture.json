@@ -1,0 +1,303 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Sakura 系统地图",
+    "locale": "zh-CN",
+    "output": "sakura-system-map.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/suzuka-suzuka/Sakura",
+      "revision": "36492217e1079df331d646793d3954ba98b85a0d"
+    }
+  },
+  "components": [
+    {
+      "id": "qqUsers",
+      "type": "external",
+      "label": "QQ 用户与群聊",
+      "sublabel": "命令、消息、通知事件",
+      "pos": [20, 420],
+      "size": [140, 72]
+    },
+    {
+      "id": "qqGateway",
+      "type": "messagebus",
+      "label": "QQ 客户端网关",
+      "sublabel": "OneBot v11 / Milky",
+      "tag": "WebSocket",
+      "sources": [
+        { "path": "src/api/client.js", "label": "OneBot API" },
+        { "path": "src/adapters/milkyClient.js", "label": "Milky 适配" },
+        { "path": "src/core/wsClient.js", "label": "WebSocket 客户端" }
+      ],
+      "pos": [200, 420],
+      "size": [170, 72]
+    },
+    {
+      "id": "botRuntime",
+      "type": "backend",
+      "label": "Bot 运行时",
+      "sublabel": "app.js → src/index.js",
+      "tag": "父进程监护 / 子进程工作",
+      "sources": [
+        { "path": "app.js", "label": "父进程入口" },
+        { "path": "src/index.js", "label": "工作进程入口" },
+        { "path": "src/core/botLifecycle.js", "label": "生命周期" }
+      ],
+      "pos": [410, 420],
+      "size": [180, 72]
+    },
+    {
+      "id": "pluginRuntime",
+      "type": "backend",
+      "label": "事件与插件运行时",
+      "sublabel": "Event / Loader / Plugin",
+      "tag": "优先级分发 + 热重载",
+      "sources": [
+        { "path": "src/core/event.js", "label": "事件封装" },
+        { "path": "src/core/loader.js", "label": "插件发现与分发" },
+        { "path": "src/core/plugin.js", "label": "插件基类与装饰器" }
+      ],
+      "pos": [630, 420],
+      "size": [190, 72]
+    },
+    {
+      "id": "systemPlugins",
+      "type": "security",
+      "label": "系统插件",
+      "sublabel": "管理、权限、离线、更新",
+      "sources": [
+        { "path": "plugins/system/admin.js", "label": "管理命令" },
+        { "path": "plugins/system/permission.js", "label": "权限管理" },
+        { "path": "plugins/system/offline.js", "label": "离线处理" }
+      ],
+      "pos": [630, 160],
+      "size": [190, 72]
+    },
+    {
+      "id": "sakuraApps",
+      "type": "backend",
+      "label": "sakura-plugin 应用层",
+      "sublabel": "apps/* 命令与事件入口",
+      "tag": "Command / OnEvent / Cron",
+      "sources": [
+        { "path": "plugins/sakura-plugin/apps/chat.js", "label": "AI 对话入口" },
+        { "path": "plugins/sakura-plugin/apps/menu.js", "label": "菜单入口" },
+        { "path": "plugins/sakura-plugin/configSchema.js", "label": "插件配置 Schema" }
+      ],
+      "pos": [860, 420],
+      "size": [200, 72]
+    },
+    {
+      "id": "aiSubsystem",
+      "type": "backend",
+      "label": "AI 与工具路由",
+      "sublabel": "AgentRunner / Providers / MCP",
+      "tag": "utilityRoute / geminiRoute",
+      "sources": [
+        { "path": "plugins/sakura-plugin/lib/AIUtils/AgentRunner.js", "label": "Agent 循环" },
+        { "path": "plugins/sakura-plugin/lib/AIUtils/providerRouter.js", "label": "供应商路由" },
+        { "path": "plugins/sakura-plugin/lib/AIUtils/tools/tools.js", "label": "工具注册表" }
+      ],
+      "pos": [860, 160],
+      "size": [200, 72]
+    },
+    {
+      "id": "externalServices",
+      "type": "external",
+      "label": "外部 AI 与媒体服务",
+      "sublabel": "OpenAI / Gemini / NovelAI / Tavily",
+      "tag": "HTTP / MCP",
+      "sources": [
+        { "path": "plugins/sakura-plugin/lib/AIUtils/providerRouter.js", "label": "聊天供应商" },
+        { "path": "plugins/sakura-plugin/lib/nai/naiApi.js", "label": "NovelAI" },
+        { "path": "plugins/sakura-plugin/lib/imageSearch/index.js", "label": "以图搜图" }
+      ],
+      "pos": [1100, 20],
+      "size": [200, 72]
+    },
+    {
+      "id": "domainServices",
+      "type": "backend",
+      "label": "游戏、经济与社交域",
+      "sublabel": "BA / 大富翁 / 钓鱼 / 签到等",
+      "tag": "独立 lib 子系统",
+      "sources": [
+        { "path": "plugins/sakura-plugin/lib/ba/engine.js", "label": "BA 战斗引擎" },
+        { "path": "plugins/sakura-plugin/lib/monopoly/GameService.js", "label": "大富翁服务" },
+        { "path": "plugins/sakura-plugin/lib/economy/EconomyManager.js", "label": "经济系统" }
+      ],
+      "pos": [1100, 420],
+      "size": [200, 72]
+    },
+    {
+      "id": "renderingLayer",
+      "type": "backend",
+      "label": "图片渲染层",
+      "sublabel": "HTML 截图 + Canvas",
+      "tag": "Chrome / Puppeteer",
+      "sources": [
+        { "path": "plugins/sakura-plugin/lib/ba/browser.js", "label": "持久浏览器" },
+        { "path": "plugins/sakura-plugin/lib/monopoly/presentation/BoardRenderer.js", "label": "棋盘渲染" },
+        { "path": "plugins/sakura-plugin/lib/sign/ImageGenerator.js", "label": "Canvas 图片" }
+      ],
+      "pos": [1100, 680],
+      "size": [200, 72]
+    },
+    {
+      "id": "redisState",
+      "type": "database",
+      "label": "Redis 状态层",
+      "sublabel": "会话、锁、上下文、缓存",
+      "tag": "Redis 6+",
+      "sources": [
+        { "path": "src/utils/redis.js", "label": "Redis 启动与连接" },
+        { "path": "plugins/sakura-plugin/lib/monopoly/SessionStore.js", "label": "游戏会话" },
+        { "path": "plugins/sakura-plugin/lib/economy/redisAtomic.js", "label": "原子经济操作" }
+      ],
+      "pos": [860, 680],
+      "size": [200, 72]
+    },
+    {
+      "id": "webConfig",
+      "type": "frontend",
+      "label": "Web 配置面板",
+      "sublabel": "Vite UI + configServer",
+      "tag": "REST / WebSocket / YAML",
+      "sources": [
+        { "path": "src/web/frontend/src/App.jsx", "label": "前端入口" },
+        { "path": "src/web/configServer.js", "label": "配置服务" },
+        { "path": "src/core/pluginConfig.js", "label": "插件配置热加载" }
+      ],
+      "pos": [410, 680],
+      "size": [180, 72]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Sakura 本地运行域",
+      "wraps": [
+        "botRuntime",
+        "pluginRuntime",
+        "systemPlugins",
+        "sakuraApps",
+        "aiSubsystem",
+        "domainServices",
+        "renderingLayer",
+        "redisState",
+        "webConfig"
+      ],
+      "pad": 38
+    }
+  ],
+  "connections": [
+    {
+      "id": "qqMessageInput",
+      "from": "qqUsers",
+      "to": "qqGateway",
+      "label": "群聊 / 私聊消息",
+      "labelAt": [180, 506],
+      "variant": "emphasis"
+    },
+    {
+      "id": "gatewayProtocol",
+      "from": "qqGateway",
+      "to": "botRuntime",
+      "label": "双向 WS：事件 / API 调用",
+      "labelAt": [390, 506],
+      "variant": "emphasis"
+    },
+    {
+      "id": "runtimeEvents",
+      "from": "botRuntime",
+      "to": "pluginRuntime",
+      "label": "标准化 Event",
+      "labelAt": [610, 506],
+      "variant": "emphasis"
+    },
+    {
+      "id": "dispatchSystem",
+      "from": "pluginRuntime",
+      "to": "systemPlugins",
+      "label": "管理与权限事件",
+      "variant": "security"
+    },
+    {
+      "id": "dispatchSakura",
+      "from": "pluginRuntime",
+      "to": "sakuraApps",
+      "label": "按优先级分发",
+      "labelAt": [840, 506],
+      "variant": "emphasis"
+    },
+    {
+      "id": "invokeAI",
+      "from": "sakuraApps",
+      "to": "aiSubsystem",
+      "label": "对话与工具调用"
+    },
+    {
+      "id": "invokeDomains",
+      "from": "sakuraApps",
+      "to": "domainServices",
+      "label": "业务命令",
+      "labelAt": [1080, 506]
+    },
+    {
+      "id": "callProviders",
+      "from": "aiSubsystem",
+      "to": "externalServices",
+      "label": "流式生成 / 搜索 / 绘图",
+      "variant": "dashed"
+    },
+    {
+      "id": "persistState",
+      "from": "sakuraApps",
+      "to": "redisState",
+      "label": "读写共享状态",
+      "labelAt": [960, 586]
+    },
+    {
+      "id": "renderDomainViews",
+      "from": "domainServices",
+      "to": "renderingLayer",
+      "label": "战斗图 / 棋盘 / 卡片",
+      "labelAt": [1200, 586]
+    },
+    {
+      "id": "configureRuntime",
+      "from": "webConfig",
+      "to": "botRuntime",
+      "label": "配置、状态与文件管理",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "消息主链",
+      "items": [
+        "QQ 客户端通过 OneBot v11 或 Milky 接入",
+        "Event 标准化后由 Loader 按优先级交给插件"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "能力分层",
+      "items": [
+        "system 插件负责管理与权限",
+        "sakura-plugin 承载 AI、游戏、经济与媒体能力"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "状态与呈现",
+      "items": [
+        "Redis 保存会话、锁、上下文与缓存",
+        "HTML/Puppeteer 与 Canvas 生成 QQ 可见图片"
+      ]
+    }
+  ]
+}
