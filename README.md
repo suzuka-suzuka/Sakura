@@ -2,6 +2,8 @@
 
 Sakura 是一个基于 Node.js 的 QQ 机器人框架，支持 OneBot 正向/反向 WebSocket、Milky 适配、插件热加载、Redis 状态存储、PM2 守护运行，以及内置 Web 配置面板。
 
+想快速了解消息链路、进程边界、插件系统、Redis 状态、Web 配置面板与外部 AI 服务之间的关系，可以直接打开 [Sakura 交互式系统地图](https://suzuka-suzuka.github.io/Sakura/sakura-system-map.html)。地图支持明暗主题、缩放、检索和源码证据定位。
+
 ## 主要能力
 
 - 多连接支持：OneBot 正向 WebSocket、反向 WebSocket、Milky HTTP/WebSocket。

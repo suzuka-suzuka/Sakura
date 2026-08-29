@@ -5,9 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Sakura Bot 是一个基于 Node.js 的 QQ 机器人框架，支持 OneBot、Milky、插件热加载、Redis 状态存储和 Web 配置面板。"
+      content="Sakura Bot 是一体化的 QQ 机器人项目，主仓库同时包含框架核心、系统插件、Sakura 综合功能插件与 Web 配置面板。"
     />
-    <title>Sakura Bot | QQ 机器人框架</title>
+    <meta name="theme-color" content="#fff8fa" />
+    <title>Sakura Bot | 一体化 QQ 机器人框架与功能套件</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -17,23 +18,25 @@
         <span>Sakura Bot</span>
       </a>
       <nav class="site-nav" aria-label="主导航">
+        <a href="#architecture">架构</a>
         <a href="#features">能力</a>
-        <a href="#plugin">插件</a>
+        <a href="#integrated">一体化仓库</a>
         <a href="#start">开始</a>
       </nav>
-      <a class="header-action" href="https://github.com/suzuka-suzuka/Sakura">GitHub</a>
+      <a class="header-action" href="./sakura-system-map.html">系统地图</a>
     </header>
 
     <main id="top">
       <section class="hero">
         <div class="hero-content">
-          <p class="eyebrow">Node.js / OneBot / Milky / Plugin Framework</p>
+          <p class="eyebrow">Node.js / OneBot / Milky / Integrated Repository</p>
           <h1>Sakura Bot</h1>
           <p class="hero-copy">
-            一个面向 QQ 群场景的机器人框架：连接适配、插件加载、配置面板、状态存储和守护运行都放在同一个清晰的工程里。
+            一个仓库交付框架核心、内置系统插件、Sakura 综合功能插件和 Web 配置面板。连接、事件分发、状态、配置与群功能保持在同一条版本线上。
           </p>
           <div class="hero-actions" aria-label="主要操作">
             <a class="button primary" href="#start">快速开始</a>
+            <a class="button secondary" href="./sakura-system-map.html">查看系统地图</a>
             <a class="button secondary" href="https://github.com/suzuka-suzuka/Sakura">查看源码</a>
           </div>
         </div>
@@ -42,26 +45,50 @@
           <figure class="sakura-board">
             <img src="./assets/sakura.jpg" alt="Sakura Bot 项目看板图" />
             <figcaption>
-              <span>Sakura Board</span>
-              <strong>QQ Bot Framework</strong>
+              <span>One Repository</span>
+              <strong>Framework + Official Plugins</strong>
             </figcaption>
           </figure>
           <div class="hero-facts" aria-label="项目摘要">
-            <span>Node.js 20+</span>
-            <span>Redis 状态</span>
-            <span>Web 配置面板</span>
+            <span>框架 + 官方插件</span>
+            <span>OneBot / Milky</span>
+            <span>Redis + WebUI</span>
           </div>
         </div>
       </section>
 
       <section class="intro band">
         <div>
-          <span class="section-kicker">为什么是 Sakura</span>
-          <h2>把机器人运行时和群功能生态收拢到一个顺手的工作台。</h2>
+          <span class="section-kicker">Current Repository</span>
+          <h2>框架和 Sakura Plugin，现在就是同一个项目。</h2>
         </div>
         <p>
-          框架负责 WebSocket 连接、事件分发、插件生命周期、Redis 状态和 Web 配置；综合插件提供 AI 对话、生图、Pixiv、表情、经济、钓鱼、群管和自动推送等常用能力。
+          主仓库直接包含 <code>src/</code>、<code>plugins/system/</code>、<code>plugins/sakura-plugin/</code> 与 Web 前端。克隆并安装根目录 workspace，即可获得同版本的运行时、内置管理能力和综合群功能。
         </p>
+      </section>
+
+      <section id="architecture" class="section map-section">
+        <div class="map-copy">
+          <span class="section-kicker">System Map</span>
+          <h2>一张图看清 Sakura 的系统边界。</h2>
+          <p>
+            交互式系统地图展示父子进程、OneBot/Milky 接入、事件分发、系统插件、Sakura Plugin、Redis、Web 配置面板及可选外部服务之间的真实边界。
+          </p>
+          <div class="map-points" aria-label="系统地图功能">
+            <span>明暗主题</span>
+            <span>缩放与检索</span>
+            <span>源码证据定位</span>
+          </div>
+          <a class="inline-link" href="./sakura-system-map.html">打开完整交互式系统地图 →</a>
+        </div>
+        <a class="map-preview" href="./sakura-system-map.html" aria-label="打开 Sakura 交互式系统地图">
+          <img
+            src="./sakura-system-map.visual-check.1440x900.light.png"
+            alt="Sakura 系统地图预览"
+            loading="lazy"
+          />
+          <span class="map-preview-label">打开交互式地图 <strong aria-hidden="true">↗</strong></span>
+        </a>
       </section>
 
       <section id="features" class="section">
@@ -73,77 +100,85 @@
           <article class="feature-card">
             <span class="feature-tag">Connect</span>
             <h3>多连接适配</h3>
-            <p>支持 OneBot 正向/反向 WebSocket，也能接入 Milky HTTP/WebSocket，方便按部署环境切换。</p>
+            <p>支持 OneBot 正向/反向 WebSocket，也能接入 Milky HTTP/WebSocket，按实际部署环境选择连接方式。</p>
           </article>
           <article class="feature-card">
-            <span class="feature-tag">Plugin</span>
-            <h3>插件热加载</h3>
-            <p>自动加载 `plugins/*/apps` 下的插件类，注册 Command、OnEvent 和 Cron 时保持业务代码清爽。</p>
+            <span class="feature-tag">Dispatch</span>
+            <h3>事件与插件分发</h3>
+            <p>统一封装消息事件，按优先级分发 Command、OnEvent 与 Cron，并支持插件热加载。</p>
           </article>
           <article class="feature-card">
-            <span class="feature-tag">Panel</span>
-            <h3>Web 配置面板</h3>
-            <p>启动后提供可视化配置入口，可编辑框架、账号、插件菜单和动态选项。</p>
+            <span class="feature-tag">Config</span>
+            <h3>配置校验与热更新</h3>
+            <p>框架配置和插件配置通过 schema 校验、补全并热更新，减少手工维护 YAML 的偏差。</p>
           </article>
           <article class="feature-card">
             <span class="feature-tag">State</span>
             <h3>Redis 状态存储</h3>
-            <p>会话、上下文、定时任务和插件状态交给 Redis，适合长期运行的群机器人。</p>
+            <p>会话、上下文、定时任务与插件状态统一依赖 Redis，支撑长期运行的群机器人。</p>
           </article>
           <article class="feature-card">
-            <span class="feature-tag">Economy</span>
-            <h3>统一扣费钩子</h3>
-            <p>插件 handler 可以声明消耗配置，由框架统一检查、扣费和按结果退款。</p>
+            <span class="feature-tag">Panel</span>
+            <h3>内置 Web 配置面板</h3>
+            <p>启动后提供可视化入口，可编辑框架、账号、插件配置、菜单和动态选项。</p>
           </article>
           <article class="feature-card">
-            <span class="feature-tag">Ops</span>
-            <h3>PM2 守护运行</h3>
-            <p>内置生产启动、停止和日志脚本，部署后更容易观察和维护。</p>
+            <span class="feature-tag">Runtime</span>
+            <h3>守护进程与图片渲染</h3>
+            <p>父进程负责工作进程生命周期，生产环境可由 PM2 守护；Chrome/Chromium 提供图片渲染能力。</p>
           </article>
         </div>
       </section>
 
-      <section id="plugin" class="section split-section">
+      <section id="integrated" class="section split-section">
         <div>
-          <span class="section-kicker">Sakura Plugin</span>
-          <h2>综合插件让机器人像一个功能工作室。</h2>
+          <span class="section-kicker">One Repository</span>
+          <h2>框架、系统插件、综合功能与 WebUI 一起发布。</h2>
           <p>
-            Sakura Plugin 是可额外部署的综合功能插件，可安装到 `plugins/sakura-plugin`，围绕群聊互动、内容创作、自动推送和群管理提供完整配置 schema，推荐通过 Web 面板编辑。
+            <code>plugins/sakura-plugin</code> 是当前主仓库的一部分，不是外部子仓库、Git 子模块，也不需要安装后另行下载。根目录的 pnpm workspace 会一起安装框架、插件与 Web 前端依赖，并由同一份锁文件固定版本。
           </p>
-          <a class="inline-link" href="https://github.com/suzuka-suzuka/sakura-plugin/tree/sakura">查看 Sakura Plugin 仓库</a>
+          <a
+            class="inline-link"
+            href="https://github.com/suzuka-suzuka/Sakura/tree/main/plugins/sakura-plugin"
+          >在主仓库中查看 Sakura Plugin →</a>
         </div>
-        <div class="plugin-list">
-          <span>AI 对话与记忆</span>
-          <span>图片生成与编辑</span>
-          <span>Pixiv 与搜图</span>
-          <span>表情包管理</span>
-          <span>签到经济系统</span>
-          <span>钓鱼玩法</span>
-          <span>群管理工具</span>
-          <span>定时提醒与推送</span>
+        <div class="plugin-list" aria-label="随仓库发布的主要功能">
+          <span>AI 对话与工具路由</span>
+          <span>NovelAI / Pixiv / 反向搜图</span>
+          <span>BA 4v4 / 大富翁 / 飞行棋</span>
+          <span>经济 / 签到 / 钓鱼</span>
+          <span>群管理与消息自动化</span>
+          <span>好感度 / 睡眠 / 社交玩法</span>
+          <span>HTML / Canvas 图片渲染</span>
+          <span>配置 schema 与 WebUI</span>
         </div>
       </section>
 
       <section class="section workflow">
         <div class="section-heading">
-          <span class="section-kicker">Flow</span>
-          <h2>运行链路</h2>
+          <span class="section-kicker">Runtime Flow</span>
+          <h2>一条清晰的消息链路</h2>
         </div>
         <div class="timeline">
           <article>
             <strong>1</strong>
-            <h3>连接 QQ 客户端</h3>
-            <p>通过 NapCat、Lagrange 或其他 OneBot/Milky 实现接入消息事件。</p>
+            <h3>父进程准备运行时</h3>
+            <p><code>app.js</code> 连接或按配置拉起 Redis，再 fork 工作进程并处理异常重启。</p>
           </article>
           <article>
             <strong>2</strong>
-            <h3>事件进入框架</h3>
-            <p>Sakura 负责连接管理、事件封装、权限判断和插件分发。</p>
+            <h3>接入 QQ 事件</h3>
+            <p>工作进程通过 OneBot 或 Milky 接收消息，并统一包装成框架 Event。</p>
           </article>
           <article>
             <strong>3</strong>
-            <h3>插件响应群聊</h3>
-            <p>插件按命令、事件或定时任务处理请求，并把结果发回群聊。</p>
+            <h3>Loader 分发处理</h3>
+            <p>命令、事件监听与定时任务按优先级进入系统插件或 Sakura Plugin。</p>
+          </article>
+          <article>
+            <strong>4</strong>
+            <h3>状态与结果回流</h3>
+            <p>处理器读取配置和 Redis 状态，按需调用外部服务，再把文本或图片发回 QQ。</p>
           </article>
         </div>
       </section>
@@ -151,23 +186,29 @@
       <section id="start" class="section start-section">
         <div>
           <span class="section-kicker">Start</span>
-          <h2>三步跑起来</h2>
-          <p>准备 Node.js 20、pnpm、Redis、Chrome/Chromium 和一个兼容 OneBot 或 Milky 的 QQ 客户端。</p>
+          <h2>克隆一次，完整安装。</h2>
+          <p>
+            准备 Node.js 20+、pnpm 9+、Redis 6+、Chrome/Chromium，以及一个兼容 OneBot 或 Milky 的 QQ 客户端。
+          </p>
+          <a class="inline-link" href="https://github.com/suzuka-suzuka/Sakura#readme">查看完整安装与配置说明 →</a>
         </div>
         <div class="code-panel">
-          <button class="copy-button" type="button" data-copy="git clone https://github.com/suzuka-suzuka/Sakura.git&#10;cd Sakura&#10;pnpm install&#10;pnpm start">复制</button>
+          <button
+            class="copy-button"
+            type="button"
+            data-copy="git clone https://github.com/suzuka-suzuka/Sakura.git&#10;cd Sakura&#10;pnpm install&#10;pnpm start"
+          >复制</button>
           <pre><code>git clone https://github.com/suzuka-suzuka/Sakura.git
 cd Sakura
 pnpm install
 pnpm start</code></pre>
         </div>
       </section>
-
     </main>
 
     <footer class="site-footer">
-      <span>Sakura Bot</span>
-      <span>MIT License</span>
+      <span>Sakura Bot · MIT License</span>
+      <a href="./sakura-system-map.html">交互式系统地图</a>
       <a href="https://github.com/suzuka-suzuka/Sakura">github.com/suzuka-suzuka/Sakura</a>
     </footer>
 
