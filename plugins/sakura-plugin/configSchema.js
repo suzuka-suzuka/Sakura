@@ -482,6 +482,7 @@ export const NaiSchema = z.object({
     token: z.string().default('').describe('Token|#textarea'),
     model: z.string().default('nai-diffusion-4-5-full').describe('模型'),
     negative: z.string().default('nsfw, lowres, artistic error, scan artifacts, worst quality, bad quality, jpeg artifacts, multiple views, very displeasing, too many watermarks, negative space, blank page').describe('负面提示词|默认负面提示词'),
+    chatDrawCount: z.number().int().min(1).max(4).default(1).describe('聊天绘图数量|一次聊天生成 1–4 张；多张拆成连续单张请求，每张生成后立即排队发送且不阻塞下一张生图'),
     chatDrawPrompt: z.string().default(`**[RP Visual Snapshot — tag only, no image-tool call]**
 Continue the roleplay response normally. Do not call an image-generation tool for this snapshot. At the absolute end of the response, append exactly one compact <draw>...</draw> block for the backend to render asynchronously. The closing </draw> tag must be the final characters of the response.
 
@@ -500,7 +501,7 @@ Rules:
 - Keep it concise: one line, normally 12–30 comma-separated visual items. Do not use Markdown fences and do not output more than one <draw> block.
 
 Example:
-<draw>1girl, original character, long silver hair, blue eyes, oversized white shirt, sitting on the edge of a bed, leaning toward viewer, one hand reaching forward, warm blush, gentle smile, looking at viewer, cozy bedroom at night, bedside lamp, cowboy shot, eye-level, slightly left of center, warm backlighting, shallow depth of field</draw>`).describe('聊天自动绘图指令|#textarea|角色开启NAI绘图时追加到系统提示词；只追加绘图标签并异步生成一张图，不调用绘图工具；留空则不追加'),
+<draw>1girl, original character, long silver hair, blue eyes, oversized white shirt, sitting on the edge of a bed, leaning toward viewer, one hand reaching forward, warm blush, gentle smile, looking at viewer, cozy bedroom at night, bedside lamp, cowboy shot, eye-level, slightly left of center, warm backlighting, shallow depth of field</draw>`).describe('聊天自动绘图指令|#textarea|角色开启NAI绘图时追加到系统提示词；只追加绘图标签并按聊天绘图数量异步生成，不调用绘图工具；留空则不追加'),
 }).describe('NovelAI 绘画');
 
 const CommandCostSchema = z.object({

@@ -6,7 +6,7 @@ import {
 } from "../lib/AIUtils/ConversationHistory.js";
 import { resolveToolConfirmation } from "../lib/AIUtils/tools/tools.js";
 import { getQuoteContent } from "../lib/AIUtils/messaging.js";
-import { checkForNaiTags } from "../lib/AIUtils/naiHandler.js";
+import { checkForNaiTags } from "../lib/AIUtils/naiChatDraw.js";
 import { buildMultimodalQueryParts } from "../lib/AIUtils/messageParts.js";
 import { randomReact, getImg, smartReplyMsg } from "../lib/utils.js";
 import {
@@ -213,12 +213,15 @@ export class AIChat extends plugin {
 
   async doChat(e, matchedProfile, query) {
     let { route, Prompt, groupContext, history, toolGroup, enableNaiPainting, naiPrompt } = matchedProfile;
+    let chatDrawCount = 1;
 
     logger.info(`Chat触发`);
     await randomReact(e);
 
     if (enableNaiPainting) {
-      const drawPrompt = Setting.getConfig("nai", { selfId: e?.self_id })?.chatDrawPrompt;
+      const naiConfig = Setting.getConfig("nai", { selfId: e?.self_id });
+      const drawPrompt = naiConfig?.chatDrawPrompt;
+      chatDrawCount = naiConfig?.chatDrawCount ?? 1;
       if (typeof drawPrompt === "string" && drawPrompt.trim()) {
         Prompt += `\n\n---\n${drawPrompt.trim()}`;
       }
@@ -254,7 +257,7 @@ export class AIChat extends plugin {
             text,
             e,
             naiPrompt,
-            { drawState: naiDrawState }
+            { drawState: naiDrawState, imageCount: chatDrawCount }
           );
           await this.smartReply(e, cleanedTextContent, 0, true);
         },
@@ -290,7 +293,7 @@ export class AIChat extends plugin {
         agentResult.finalText,
         e,
         naiPrompt,
-        { drawState: naiDrawState }
+        { drawState: naiDrawState, imageCount: chatDrawCount }
       );
       // 最后回复也走 smartReply
       await this.smartReply(e, finalResponseText);

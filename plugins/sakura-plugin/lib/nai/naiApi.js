@@ -519,6 +519,8 @@ export function buildNaiImagePayload({
 
     // 模型协议版本不能被调用方的透传参数覆盖。
     generationParameters.params_version = profile.paramsVersion;
+    // NAI 的多图请求会额外消耗 Anlas；批量生成必须由调用层拆成连续单图请求。
+    generationParameters.n_samples = 1;
     if (profile.family === "v5") {
         generationParameters.noise_schedule = "karras";
     }
