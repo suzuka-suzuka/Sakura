@@ -5,12 +5,15 @@ import {
   extractDouyinUrlFromValue,
   formatDouyinCount,
 } from "../lib/douyin/douyinService.js";
+import { renderDouyinCommentCards } from "../lib/douyin/commentRenderer.js";
 
 const service = new DouyinService();
 const activeRequests = new Set();
 const requestCooldowns = new Map();
 const MANUAL_COMMAND_PATTERN = /^\s*[#＃]?\s*抖音解析(?:\s|$)/i;
 const CLEANUP_DELAY_MS = 90_000;
+const MAX_COMMENT_IMAGES_PER_NODE = 9;
+const MAX_COMMENT_IMAGE_BYTES = 10 * 1024 * 1024;
 
 function scheduleCleanup(paths) {
   const files = (Array.isArray(paths) ? paths : [paths]).filter(Boolean);
@@ -65,8 +68,7 @@ function buildSummaryText(aweme) {
   return lines.join("\n");
 }
 
-async function sendSummary(e, aweme) {
-  const text = buildSummaryText(aweme);
+async function sendDirectSummary(e, aweme, text) {
   if (!aweme.cover) {
     await e.reply(text);
     return;
@@ -80,70 +82,273 @@ async function sendSummary(e, aweme) {
   }
 }
 
-function buildForwardNode(e, aweme, content) {
+async function sendSummary(e, aweme, commentResult = {}) {
+  const text = buildSummaryText(aweme);
+  const content = [
+    ...(aweme.cover ? [segment.image(aweme.cover)] : []),
+    segment.text(text),
+  ];
+  const commentNodes = Array.isArray(commentResult.nodes) ? commentResult.nodes : [];
+
+  try {
+    await sendForwardWithCommentFallback(
+      e,
+      [buildForwardNode(e, aweme, content)],
+      commentNodes,
+      (visibleCommentCount) => ({
+        source:
+          visibleCommentCount > 0
+            ? `抖音视频解析 · ${visibleCommentCount}条热评`
+            : "抖音视频解析",
+        prompt:
+          visibleCommentCount > 0 ? "点击查看视频信息与热评" : "点击查看视频信息",
+        news: [
+          { text: `作者：${aweme.author?.nickname || "抖音用户"}` },
+          { text: shortText(aweme.desc, 80) || "无文案" },
+        ],
+      }),
+      "视频信息"
+    );
+  } catch (error) {
+    logger.warn(`[Douyin] 视频信息转发失败，回退为普通消息：${error.message}`);
+    await sendDirectSummary(e, aweme, text);
+  }
+}
+
+async function sendForwardWithCommentFallback(
+  e,
+  contentNodes,
+  commentNodes,
+  buildOptions,
+  label
+) {
+  const safeCommentNodes = Array.isArray(commentNodes) ? commentNodes : [];
+  try {
+    await e.sendForwardMsg(
+      [...contentNodes, ...safeCommentNodes],
+      buildOptions(safeCommentNodes.length)
+    );
+  } catch (error) {
+    if (safeCommentNodes.length === 0) throw error;
+    logger.warn(
+      `[Douyin] ${label}与评论卡片合并转发失败，去掉评论卡片重试：${error.message}`
+    );
+    await e.sendForwardMsg(contentNodes, buildOptions(0));
+  }
+}
+
+function buildForwardNode(e, aweme, content, nickname = "") {
   const botId = Number(e.bot?.self_id || e.self_id || e.user_id || 10000);
   return {
     user_id: Number.isFinite(botId) ? botId : 10000,
-    nickname: aweme.author?.nickname || "抖音图文",
+    nickname: nickname || aweme.author?.nickname || "抖音图文",
     content,
   };
 }
 
-async function sendGallery(e, aweme, config) {
-  const maxCount = Math.max(1, Number(config.maxGalleryImages) || 12);
-  const result = await service.downloadImages(aweme, {
-    maxCount,
-    concurrency: 3,
+function getCommentImageCandidates(comment) {
+  const candidates = Array.isArray(comment?.imageCandidates)
+    ? comment.imageCandidates
+    : [];
+  return candidates
+    .map((item) =>
+      (Array.isArray(item) ? item : item?.urls || []).filter(
+        (url) => typeof url === "string" && url.length > 0
+      )
+    )
+    .filter((urls) => urls.length > 0);
+}
+
+async function downloadCommentImageBuffers(comments) {
+  const safeComments = (Array.isArray(comments) ? comments : []).slice(0, 10);
+  const buffersByComment = safeComments.map(() => []);
+  const jobs = [];
+
+  safeComments.forEach((comment, commentIndex) => {
+    const visibleComments = [
+      comment,
+      ...(Array.isArray(comment?.replies) ? comment.replies.slice(0, 3) : []),
+    ];
+    let imageIndex = 0;
+    for (const visibleComment of visibleComments) {
+      for (const urls of getCommentImageCandidates(visibleComment)) {
+        if (imageIndex >= MAX_COMMENT_IMAGES_PER_NODE) break;
+        jobs.push({
+          commentIndex,
+          imageIndex,
+          urls,
+          id: visibleComment?.id || `${commentIndex + 1}-${imageIndex + 1}`,
+        });
+        imageIndex += 1;
+      }
+      if (imageIndex >= MAX_COMMENT_IMAGES_PER_NODE) break;
+    }
   });
+
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < jobs.length) {
+      const job = jobs[cursor];
+      cursor += 1;
+      try {
+        buffersByComment[job.commentIndex][job.imageIndex] =
+          await service.downloadImageBuffer(
+            job.urls,
+            `comment-${job.id}-image-${job.imageIndex + 1}`,
+            { maxBytes: MAX_COMMENT_IMAGE_BYTES }
+          );
+      } catch (error) {
+        logger.warn(
+          `[Douyin] 评论 ${job.id} 的配图下载失败，已略过：${error.message}`
+        );
+      }
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(4, Math.max(1, jobs.length)) }, () => worker())
+  );
+  return buffersByComment.map((buffers) => buffers.filter(Buffer.isBuffer));
+}
+
+async function buildCommentNodes(e, aweme, config) {
+  if (config.commentsEnabled === false) return { nodes: [], count: 0, total: 0 };
+  const limit = Math.min(10, Math.max(1, Number(config.maxComments) || 10));
+  const replyLimit = Math.min(
+    3,
+    Math.max(0, Number(config.maxCommentReplies ?? 3))
+  );
+
+  try {
+    const result = await service.getTopComments(aweme, {
+      limit,
+      replyLimit,
+      cookie: config.cookie || "",
+      browserFallback: config.browserFallback !== false,
+    });
+    if (result.comments.length === 0) {
+      return { nodes: [], count: 0, total: result.total || 0 };
+    }
+    const comments = result.comments.slice(0, limit);
+    const [cardBuffers, commentImageBuffers] = await Promise.all([
+      renderDouyinCommentCards(comments, {
+        loadImage: (urls, id, maxBytes) =>
+          service.downloadImageDataUri(urls, id, { maxBytes }),
+      }),
+      downloadCommentImageBuffers(comments),
+    ]);
+    const nodes = cardBuffers.map((buffer, index) =>
+      buildForwardNode(
+        e,
+        aweme,
+        [
+          segment.image(buffer),
+          ...(commentImageBuffers[index] || []).map((imageBuffer) =>
+            segment.image(imageBuffer)
+          ),
+        ],
+        comments[index]?.author?.nickname || `热评 ${index + 1}`
+      )
+    );
+    return { nodes, count: nodes.length, total: result.total || nodes.length };
+  } catch (error) {
+    logger.warn(`[Douyin] 评论获取或卡片渲染失败，继续发送作品：${error.message}`);
+    return { nodes: [], count: 0, total: 0 };
+  }
+}
+
+async function sendGallery(e, aweme, config, commentResultPromise) {
+  const maxCount = Math.max(1, Number(config.maxGalleryImages) || 12);
+  const [result, commentResult] = await Promise.all([
+    service.downloadImages(aweme, {
+      maxCount,
+      concurrency: 3,
+    }),
+    commentResultPromise,
+  ]);
+  const commentNodes = Array.isArray(commentResult?.nodes) ? commentResult.nodes : [];
   const paths = result.files.map((item) => item.path);
+  const summaryText = buildSummaryText(aweme);
 
   try {
     if (paths.length === 0) {
       const firstImage = aweme.images?.[0];
-      if (firstImage) {
-        try {
-          await e.reply(segment.image(firstImage));
-        } catch {
-        }
-      }
-      await e.reply(`图文图片下载失败，请打开原链接查看：\n${aweme.sourceUrl}`);
+      const content = [
+        ...(firstImage ? [segment.image(firstImage)] : []),
+        segment.text(`${summaryText}\n\n图片下载失败，请打开原链接查看。`),
+      ];
+      await sendForwardWithCommentFallback(
+        e,
+        [buildForwardNode(e, aweme, content)],
+        commentNodes,
+        (visibleCommentCount) => ({
+          source:
+            visibleCommentCount > 0
+              ? `抖音图文解析 · ${visibleCommentCount}条热评`
+              : "抖音图文解析",
+          prompt:
+            visibleCommentCount > 0 ? "点击查看图文与热评" : "点击查看图文信息",
+          news: [
+            { text: `作者：${aweme.author?.nickname || "抖音用户"}` },
+            { text: shortText(aweme.desc, 80) || "无文案" },
+          ],
+        }),
+        "图文信息"
+      );
       return false;
     }
 
-    const nodes = paths.map((filePath, index) =>
-      buildForwardNode(e, aweme, [
-        segment.image(filePath),
-        ...(index === 0 && aweme.sourceUrl
-          ? [segment.text(`第 1/${paths.length} 张\n${aweme.sourceUrl}`)]
-          : [segment.text(`第 ${index + 1}/${paths.length} 张`)]),
-      ])
-    );
-    await e.sendForwardMsg(nodes, {
-      source: `抖音图文（${paths.length}张）`,
-      prompt: "点击查看图文",
-      news: [
-        { text: `作者：${aweme.author?.nickname || "抖音用户"}` },
-        { text: shortText(aweme.desc, 80) || "无文案" },
-      ],
-    });
-
+    const deliveryNotes = [];
     if (aweme.images.length > paths.length || result.failures.length > 0) {
-      await e.reply(
-        `共识别 ${aweme.images.length} 张图片，成功发送 ${paths.length} 张${
-          aweme.images.length > maxCount ? `（最多发送 ${maxCount} 张）` : ""
-        }。`
+      deliveryNotes.push(
+        `共识别 ${aweme.images.length} 张图片，成功载入 ${paths.length} 张${
+          aweme.images.length > maxCount ? `（最多载入 ${maxCount} 张）` : ""
+        }`
       );
     }
+    if (result.watermarkedCount > 0) {
+      deliveryNotes.push(
+        `其中 ${result.watermarkedCount} 张未取得无水印原图，使用了平台下载版本`
+      );
+    }
+    const deliveryNote =
+      deliveryNotes.length > 0 ? `\n发送说明：${deliveryNotes.join("；")}。` : "";
+    const imageNodes = paths.map((filePath, index) =>
+      buildForwardNode(e, aweme, [
+        segment.image(filePath),
+        segment.text(
+          index === 0
+            ? `${summaryText}${deliveryNote}\n\n第 1/${paths.length} 张`
+            : `第 ${index + 1}/${paths.length} 张`
+        ),
+      ])
+    );
+    await sendForwardWithCommentFallback(
+      e,
+      imageNodes,
+      commentNodes,
+      (visibleCommentCount) => ({
+        source: `抖音图文（${paths.length}张${
+          visibleCommentCount > 0 ? ` · ${visibleCommentCount}条热评` : ""
+        }）`,
+        prompt: visibleCommentCount > 0 ? "点击查看图文与热评" : "点击查看图文",
+        news: [
+          { text: `作者：${aweme.author?.nickname || "抖音用户"}` },
+          { text: shortText(aweme.desc, 80) || "无文案" },
+        ],
+      }),
+      "图文"
+    );
     return true;
   } catch (error) {
     logger.warn(`[Douyin] 图文转发失败，回退首图：${error.message}`);
     try {
       await e.reply([
-        segment.image(paths[0]),
-        segment.text(`图文合并转发失败，已发送首图。\n${aweme.sourceUrl}`),
+        ...(paths[0] ? [segment.image(paths[0])] : []),
+        segment.text(`${summaryText}\n\n图文合并转发失败，已回退为普通消息。`),
       ]);
     } catch {
-      await e.reply(`图文发送失败，请打开原链接查看：\n${aweme.sourceUrl}`);
+      await e.reply(`${summaryText}\n\n图文发送失败，请打开原链接查看。`);
     }
     return false;
   } finally {
@@ -307,18 +512,18 @@ export class douyin extends plugin {
         cookie: config.cookie || "",
         browserFallback: config.browserFallback !== false,
       });
-      await sendSummary(e, aweme);
+      const commentResultPromise = buildCommentNodes(e, aweme, config);
 
       if (aweme.type === "note") {
-        if (aweme.images.length === 0) {
-          await e.reply(`未取得图文原图，请打开原链接查看：\n${aweme.sourceUrl}`);
-        } else {
-          await sendGallery(e, aweme, config);
-        }
-      } else if (aweme.streams.length === 0) {
-        await e.reply(`未取得可下载的视频地址，请打开原链接观看：\n${aweme.sourceUrl}`);
+        await sendGallery(e, aweme, config, commentResultPromise);
       } else {
-        await sendVideo(e, aweme, config);
+        const commentResult = await commentResultPromise;
+        await sendSummary(e, aweme, commentResult);
+        if (aweme.streams.length === 0) {
+          await e.reply(`未取得可下载的视频地址，请打开原链接观看：\n${aweme.sourceUrl}`);
+        } else {
+          await sendVideo(e, aweme, config);
+        }
       }
     } catch (error) {
       logger.error(`[Douyin] 解析失败：${error.stack || error.message}`);

@@ -17,6 +17,7 @@ const SHARE_ID_PATTERN = /\/share\/(?:video|note)\/(\d{15,22})(?:[/?#]|$)/i;
 const DEFAULT_TEMP_DIR = path.join(plugindata, "douyin_temp");
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 const MAX_JSON_SEARCH_NODES = 50_000;
+const COMMENT_CACHE_TTL_MS = 3 * 60 * 1000;
 
 function createDouyinError(message, code, extra = {}) {
   const error = new Error(message);
@@ -211,6 +212,98 @@ export function buildAwemeDetailUrl(awemeId, signer = generateABogus) {
   return `https://www.douyin.com/aweme/v1/web/aweme/detail/?${query.toString()}`;
 }
 
+function addCookieTokens(query, cookie) {
+  const cookies = parseCookieHeader(cookie);
+  const msToken = cookies.get("msToken");
+  const verifyFp = cookies.get("s_v_web_id") || cookies.get("verifyFp");
+  if (msToken) query.set("msToken", msToken);
+  if (verifyFp) {
+    query.set("verifyFp", verifyFp);
+    query.set("fp", verifyFp);
+  }
+}
+
+function buildCommentQuery(parameters, cookie = "") {
+  const query = new URLSearchParams({
+    device_platform: "webapp",
+    aid: "6383",
+    channel: "channel_pc_web",
+    ...parameters,
+    item_type: "0",
+    cut_version: "1",
+    pc_client_type: "1",
+    version_code: "190500",
+    version_name: "19.5.0",
+    cookie_enabled: "true",
+    screen_width: "1344",
+    screen_height: "756",
+    browser_language: "zh-CN",
+    browser_platform: "Win32",
+    browser_name: "Firefox",
+    browser_version: "118.0",
+    browser_online: "true",
+    engine_name: "Gecko",
+    engine_version: "109.0",
+    os_name: "Windows",
+    os_version: "10",
+    cpu_core_num: "16",
+    device_memory: "",
+    platform: "PC",
+  });
+  addCookieTokens(query, cookie);
+  return query;
+}
+
+function signCommentUrl(pathname, query, signer = generateABogus) {
+  query.set("a_bogus", signer(query.toString(), DOUYIN_API_USER_AGENT));
+  return `https://www.douyin.com${pathname}?${query.toString()}`;
+}
+
+export function buildCommentListUrl(
+  awemeId,
+  { cursor = 0, count = 10, cookie = "" } = {},
+  signer = generateABogus
+) {
+  if (!/^\d{15,22}$/.test(String(awemeId || ""))) {
+    throw createDouyinError("无效的抖音作品 ID", "DOUYIN_INVALID_ID");
+  }
+  const query = buildCommentQuery(
+    {
+      aweme_id: String(awemeId),
+      cursor: String(Math.max(0, Math.floor(Number(cursor) || 0))),
+      count: String(Math.min(20, Math.max(1, Math.floor(Number(count) || 10)))),
+      insert_ids: "",
+      whale_cut_token: "",
+    },
+    cookie
+  );
+  return signCommentUrl("/aweme/v1/web/comment/list/", query, signer);
+}
+
+export function buildCommentReplyUrl(
+  awemeId,
+  commentId,
+  { cursor = 0, count = 3, cookie = "" } = {},
+  signer = generateABogus
+) {
+  if (!/^\d{15,22}$/.test(String(awemeId || ""))) {
+    throw createDouyinError("无效的抖音作品 ID", "DOUYIN_INVALID_ID");
+  }
+  if (!/^\d{10,30}$/.test(String(commentId || ""))) {
+    throw createDouyinError("无效的抖音评论 ID", "DOUYIN_INVALID_COMMENT_ID");
+  }
+  const query = buildCommentQuery(
+    {
+      item_id: String(awemeId),
+      comment_id: String(commentId),
+      cursor: String(Math.max(0, Math.floor(Number(cursor) || 0))),
+      count: String(Math.min(20, Math.max(1, Math.floor(Number(count) || 3)))),
+    },
+    cookie
+  );
+  return signCommentUrl("/aweme/v1/web/comment/list/reply/", query, signer);
+}
+
 function isPrivateIpv4(hostname) {
   const parts = String(hostname || "").split(".");
   if (parts.length !== 4 || parts.some((part) => !/^\d+$/.test(part))) return false;
@@ -310,7 +403,13 @@ function normalizeTimestamp(value) {
   )} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-function normalizeImages(detail) {
+function collectImageUrls(...values) {
+  const urls = [];
+  for (const value of values) collectUrls(value, urls);
+  return urls;
+}
+
+function normalizeImageCandidates(detail) {
   const pools = [
     detail?.image_post_info?.images,
     detail?.imagePostInfo?.images,
@@ -319,20 +418,169 @@ function normalizeImages(detail) {
     detail?.images,
   ];
   const result = [];
+  const usedPrimaryUrls = new Set();
 
   for (const pool of pools) {
     if (!Array.isArray(pool)) continue;
     for (const item of pool) {
-      const url = pickFirstUrl(
+      const cleanUrls = collectImageUrls(
+        item?.origin_image,
+        item?.originImage,
         item?.display_image,
-        item?.download_url_list,
+        item?.displayImage,
         item?.url_list,
-        item
+        item?.urlList,
+        item?.image_url,
+        item?.imageUrl,
+        typeof item === "string" ? item : null
       );
-      if (url && !result.includes(url)) result.push(url);
+      const watermarkUrls = collectImageUrls(
+        item?.download_url_list,
+        item?.downloadUrlList,
+        item?.download_addr,
+        item?.downloadAddr,
+        item?.owner_watermark_image,
+        item?.ownerWatermarkImage,
+        item?.user_watermark_image,
+        item?.userWatermarkImage
+      ).filter((url) => !cleanUrls.includes(url));
+      const primaryUrl = cleanUrls[0] || watermarkUrls[0] || "";
+      if (!primaryUrl || usedPrimaryUrls.has(primaryUrl)) continue;
+      usedPrimaryUrls.add(primaryUrl);
+      result.push({
+        cleanUrls: cleanUrls.slice(0, 8),
+        watermarkUrls: watermarkUrls.slice(0, 4),
+      });
     }
   }
   return result;
+}
+
+function truncateCommentText(value, maxLength = 600) {
+  const text = normalizeText(value).replace(/\r\n?/g, "\n").replace(/\n{3,}/g, "\n\n");
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1)}…`;
+}
+
+function normalizeCommentImageCandidates(comment) {
+  const pools = [
+    comment?.image_list,
+    comment?.imageList,
+    comment?.images,
+    comment?.comment_image_list,
+    comment?.commentImageList,
+  ];
+  const result = [];
+  const usedPrimaryUrls = new Set();
+
+  for (const pool of pools) {
+    const items = Array.isArray(pool) ? pool : pool ? [pool] : [];
+    for (const item of items) {
+      const urls = collectImageUrls(
+        item?.origin_url,
+        item?.originUrl,
+        item?.large_url,
+        item?.largeUrl,
+        item?.download_url,
+        item?.downloadUrl,
+        item?.crop_url,
+        item?.cropUrl,
+        item?.medium_url,
+        item?.mediumUrl,
+        item?.thumb_url,
+        item?.thumbUrl,
+        item?.image_url,
+        item?.imageUrl,
+        item?.url_list,
+        item?.urlList,
+        item?.url,
+        typeof item === "string" ? item : null
+      ).slice(0, 8);
+      const primaryUrl = urls[0];
+      if (!primaryUrl || usedPrimaryUrls.has(primaryUrl)) continue;
+      usedPrimaryUrls.add(primaryUrl);
+      result.push(urls);
+      if (result.length >= 9) return result;
+    }
+  }
+
+  const sticker = comment?.sticker;
+  const stickerUrls = collectImageUrls(
+    sticker?.static_url,
+    sticker?.staticUrl,
+    sticker?.animate_url,
+    sticker?.animateUrl,
+    sticker?.sticker_url,
+    sticker?.stickerUrl,
+    sticker?.origin_url,
+    sticker?.originUrl,
+    sticker?.image_url,
+    sticker?.imageUrl,
+    sticker?.url_list,
+    sticker?.urlList,
+    sticker?.url,
+    typeof sticker === "string" ? sticker : null
+  ).slice(0, 8);
+  if (stickerUrls[0] && !usedPrimaryUrls.has(stickerUrls[0])) {
+    result.push(stickerUrls);
+  }
+  return result.slice(0, 9);
+}
+
+export function normalizeDouyinComment(
+  comment,
+  { creatorIds = [], isReply = false } = {}
+) {
+  const user = comment?.user && typeof comment.user === "object" ? comment.user : {};
+  const userIds = [user?.uid, user?.sec_uid, user?.secUid]
+    .map((value) => normalizeText(value))
+    .filter(Boolean);
+  const creatorSet = new Set(
+    (Array.isArray(creatorIds) ? creatorIds : [creatorIds])
+      .map((value) => normalizeText(value))
+      .filter(Boolean)
+  );
+  const avatarUrls = collectImageUrls(
+    user?.avatar_medium,
+    user?.avatarMedium,
+    user?.avatar_thumb,
+    user?.avatarThumb,
+    user?.avatar_larger,
+    user?.avatarLarger,
+    user?.avatar
+  ).slice(0, 6);
+  const imageCandidates = normalizeCommentImageCandidates(comment);
+
+  return {
+    id: normalizeText(comment?.cid ?? comment?.comment_id ?? comment?.commentId),
+    text: truncateCommentText(comment?.text),
+    likes: normalizeNumber(comment?.digg_count, comment?.diggCount),
+    createdAt: normalizeTimestamp(comment?.create_time ?? comment?.createTime),
+    ipLabel: normalizeText(comment?.ip_label ?? comment?.ipLabel),
+    replyCount: normalizeNumber(
+      comment?.reply_comment_total,
+      comment?.replyCommentTotal
+    ),
+    replyTo: normalizeText(
+      comment?.reply_to_user?.nickname ??
+        comment?.replyToUser?.nickname ??
+        comment?.reply_to_nickname
+    ),
+    isReply,
+    isPinned: normalizeNumber(comment?.stick_position, comment?.stickPosition) > 0,
+    author: {
+      id: userIds[0] || "",
+      nickname:
+        normalizeText(user?.nickname ?? user?.unique_id ?? user?.uniqueId) ||
+        "抖音用户",
+      uniqueId: normalizeText(user?.unique_id ?? user?.uniqueId),
+      avatarUrls,
+      isCreator: userIds.some((id) => creatorSet.has(id)),
+    },
+    imageCandidates,
+    hasImage: imageCandidates.length > 0 || Boolean(comment?.sticker),
+    replies: [],
+  };
 }
 
 function detectCodec(value, fallback = "unknown") {
@@ -415,7 +663,10 @@ export function normalizeDouyinAweme(candidate, { sourceUrl = "", awemeId = "" }
     candidate ??
     {};
   const video = detail?.video && typeof detail.video === "object" ? detail.video : {};
-  const images = normalizeImages(detail);
+  const imageCandidates = normalizeImageCandidates(detail);
+  const images = imageCandidates.map(
+    (candidate) => candidate.cleanUrls[0] || candidate.watermarkUrls[0]
+  );
   const streams = normalizeVideoStreams(video);
   const rawType = Number(detail?.aweme_type ?? detail?.awemeType);
   const isNote =
@@ -441,6 +692,8 @@ export function normalizeDouyinAweme(candidate, { sourceUrl = "", awemeId = "" }
     ),
     author: {
       id: normalizeText(author?.uid ?? author?.sec_uid ?? author?.secUid),
+      secUid: normalizeText(author?.sec_uid ?? author?.secUid),
+      uniqueId: normalizeText(author?.unique_id ?? author?.uniqueId),
       nickname:
         normalizeText(author?.nickname ?? author?.unique_id ?? author?.uniqueId) ||
         "抖音用户",
@@ -464,6 +717,7 @@ export function normalizeDouyinAweme(candidate, { sourceUrl = "", awemeId = "" }
       "",
     duration: normalizeDuration(video?.duration ?? detail?.duration),
     images,
+    imageCandidates,
     streams,
   };
 }
@@ -662,6 +916,7 @@ export class DouyinService {
     this.browserCookieProvider = browserCookieProvider;
     this.browserCookieCache = null;
     this.browserCookiePromise = null;
+    this.commentCache = new Map();
   }
 
   log(level, ...args) {
@@ -1033,6 +1288,219 @@ export class DouyinService {
     return aweme;
   }
 
+  async requestCommentJson(url, cookie, referer) {
+    const { response, text } = await this.requestText(
+      url,
+      {
+        headers: this.buildHeaders(cookie, {
+          referer: referer || DOUYIN_REFERER,
+          "user-agent": DOUYIN_API_USER_AGENT,
+        }),
+        redirect: "error",
+      },
+      30_000
+    );
+
+    if ([403, 412, 418, 429].includes(response.status)) {
+      throw createDouyinError("抖音评论接口触发了访问验证", "DOUYIN_BLOCKED", {
+        status: response.status,
+      });
+    }
+    if (!response.ok) {
+      throw createDouyinError(
+        `抖音评论接口返回 HTTP ${response.status}`,
+        "DOUYIN_COMMENT_API_FAILED",
+        { status: response.status }
+      );
+    }
+
+    const data = parseJsonCandidate(text);
+    if (!data) {
+      throw createDouyinError("抖音评论接口未返回 JSON", "DOUYIN_COMMENT_BAD_JSON");
+    }
+    const statusCode = Number(data?.status_code ?? data?.statusCode ?? 0);
+    if (Number.isFinite(statusCode) && statusCode !== 0) {
+      const message = normalizeText(data?.status_msg ?? data?.statusMsg ?? data?.message);
+      const code = /登录|验证|verify|cookie/i.test(message)
+        ? "DOUYIN_COOKIE_REQUIRED"
+        : "DOUYIN_COMMENT_API_FAILED";
+      throw createDouyinError(message || `抖音评论接口状态异常：${statusCode}`, code, {
+        statusCode,
+      });
+    }
+    return data;
+  }
+
+  async fetchCommentListPage(aweme, { cursor = 0, count = 10, cookie = "" } = {}) {
+    const url = buildCommentListUrl(aweme?.id, { cursor, count, cookie });
+    return this.requestCommentJson(url, cookie, aweme?.sourceUrl);
+  }
+
+  async fetchCommentRepliesPage(
+    aweme,
+    commentId,
+    { cursor = 0, count = 3, cookie = "" } = {}
+  ) {
+    const url = buildCommentReplyUrl(aweme?.id, commentId, {
+      cursor,
+      count,
+      cookie,
+    });
+    return this.requestCommentJson(url, cookie, aweme?.sourceUrl);
+  }
+
+  async getTopComments(
+    aweme,
+    {
+      limit = 10,
+      replyLimit = 3,
+      cookie = "",
+      browserFallback = true,
+      cacheTtlMs = COMMENT_CACHE_TTL_MS,
+    } = {}
+  ) {
+    const awemeId = normalizeText(aweme?.id);
+    if (!/^\d{15,22}$/.test(awemeId)) {
+      throw createDouyinError("无效的抖音作品 ID", "DOUYIN_INVALID_ID");
+    }
+    const safeLimit = Math.min(10, Math.max(1, Math.floor(Number(limit) || 10)));
+    const safeReplyLimit = Math.min(
+      3,
+      Math.max(0, Math.floor(Number(replyLimit) || 0))
+    );
+    const cacheKey = `${awemeId}:${safeLimit}:${safeReplyLimit}`;
+    const cached = this.commentCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.result;
+    if (cached) this.commentCache.delete(cacheKey);
+
+    const loadTopLevel = async (effectiveCookie) => {
+      const rawComments = [];
+      const usedIds = new Set();
+      let cursor = 0;
+      let hasMore = true;
+      let total = 0;
+      let pageCount = 0;
+
+      while (hasMore && rawComments.length < safeLimit && pageCount < 3) {
+        const page = await this.fetchCommentListPage(aweme, {
+          cursor,
+          count: safeLimit - rawComments.length,
+          cookie: effectiveCookie,
+        });
+        if (pageCount === 0) total = normalizeNumber(page?.total);
+        const pageComments = Array.isArray(page?.comments) ? page.comments : [];
+        for (const comment of pageComments) {
+          const id = normalizeText(comment?.cid ?? comment?.comment_id);
+          if (id && usedIds.has(id)) continue;
+          if (id) usedIds.add(id);
+          rawComments.push(comment);
+          if (rawComments.length >= safeLimit) break;
+        }
+
+        const nextCursor = normalizeNumber(page?.cursor, page?.max_cursor);
+        hasMore = Boolean(Number(page?.has_more ?? page?.hasMore));
+        pageCount += 1;
+        if (pageComments.length === 0 || nextCursor === cursor) break;
+        cursor = nextCursor;
+      }
+      return { rawComments, total, effectiveCookie };
+    };
+
+    let effectiveCookie = this.getCachedBrowserCookie(cookie);
+    let loaded;
+    try {
+      loaded = await loadTopLevel(effectiveCookie);
+    } catch (error) {
+      const shouldUseBrowser = [
+        "DOUYIN_BLOCKED",
+        "DOUYIN_COOKIE_REQUIRED",
+        "DOUYIN_COMMENT_BAD_JSON",
+      ].includes(error?.code);
+      if (!browserFallback || !shouldUseBrowser) throw error;
+      this.log("info", "[Douyin] 评论请求受限，启动浏览器刷新匿名访问 Cookie");
+      effectiveCookie = await this.refreshBrowserCookies(cookie, { force: true });
+      loaded = await loadTopLevel(effectiveCookie);
+    }
+
+    const creatorIds = [aweme?.author?.id, aweme?.author?.secUid].filter(Boolean);
+    const comments = loaded.rawComments.map((comment) => {
+      const normalized = normalizeDouyinComment(comment, { creatorIds });
+      const includedReplies =
+        comment?.reply_comment ?? comment?.replyComment ?? comment?.reply_comments;
+      normalized.replies = (Array.isArray(includedReplies) ? includedReplies : [])
+        .slice(0, safeReplyLimit)
+        .map((reply) =>
+          normalizeDouyinComment(reply, { creatorIds, isReply: true })
+        );
+      return normalized;
+    });
+
+    if (safeReplyLimit > 0) {
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < comments.length) {
+          const index = cursor;
+          cursor += 1;
+          const comment = comments[index];
+          if (
+            !comment.id ||
+            comment.replies.length >= safeReplyLimit ||
+            comment.replyCount <= comment.replies.length
+          ) {
+            continue;
+          }
+          try {
+            const page = await this.fetchCommentRepliesPage(aweme, comment.id, {
+              cursor: 0,
+              count: safeReplyLimit,
+              cookie: loaded.effectiveCookie,
+            });
+            const usedReplyIds = new Set(comment.replies.map((reply) => reply.id));
+            for (const rawReply of Array.isArray(page?.comments) ? page.comments : []) {
+              const reply = normalizeDouyinComment(rawReply, {
+                creatorIds,
+                isReply: true,
+              });
+              if (reply.id && usedReplyIds.has(reply.id)) continue;
+              if (reply.id) usedReplyIds.add(reply.id);
+              comment.replies.push(reply);
+              if (comment.replies.length >= safeReplyLimit) break;
+            }
+          } catch (error) {
+            this.log(
+              "warn",
+              `[Douyin] 获取评论 ${comment.id} 的二级回复失败：${error.message}`
+            );
+          }
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(3, Math.max(1, comments.length)) }, () =>
+          worker()
+        )
+      );
+    }
+
+    const result = {
+      comments,
+      total: loaded.total,
+      fetchedAt: Date.now(),
+    };
+    this.commentCache.set(cacheKey, {
+      result,
+      expiresAt: Date.now() + Math.max(10_000, Number(cacheTtlMs) || COMMENT_CACHE_TTL_MS),
+    });
+    if (this.commentCache.size > 100) {
+      const now = Date.now();
+      for (const [key, entry] of this.commentCache) {
+        if (entry.expiresAt <= now || this.commentCache.size > 80) {
+          this.commentCache.delete(key);
+        }
+      }
+    }
+    return result;
+  }
+
   ensureTempDir() {
     fs.mkdirSync(this.tempDir, { recursive: true });
   }
@@ -1238,62 +1706,141 @@ export class DouyinService {
     throw lastError || createDouyinError("视频下载失败", "DOUYIN_MEDIA_FAILED");
   }
 
-  async downloadImage(url, id, { maxBytes = 15 * 1024 * 1024 } = {}) {
+  async downloadImage(urlOrUrls, id, { maxBytes = 15 * 1024 * 1024 } = {}) {
+    const urls = collectUrls(urlOrUrls, []).slice(0, 8);
+    if (urls.length === 0) {
+      throw createDouyinError("未找到可下载的图片地址", "DOUYIN_IMAGE_URL_MISSING");
+    }
+
     let lastError = null;
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      const temporaryPath = this.createTempPath(id, ".image");
-      try {
-        const result = await this.downloadOnce(url, temporaryPath, {
-          maxBytes,
-          timeoutMs: 45_000,
-          mediaType: "image",
-        });
-        const finalPath = temporaryPath.replace(
-          /\.image$/,
-          contentTypeExtension(result.contentType)
-        );
-        fs.renameSync(temporaryPath, finalPath);
-        return { ...result, path: finalPath };
-      } catch (error) {
-        lastError = error;
-        this.log("warn", `[Douyin] 图片下载失败 ${attempt}/2：${error.message}`);
+    for (let urlIndex = 0; urlIndex < urls.length; urlIndex += 1) {
+      const url = urls[urlIndex];
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        const temporaryPath = this.createTempPath(id, ".image");
+        try {
+          const result = await this.downloadOnce(url, temporaryPath, {
+            maxBytes,
+            timeoutMs: 45_000,
+            mediaType: "image",
+          });
+          const finalPath = temporaryPath.replace(
+            /\.image$/,
+            contentTypeExtension(result.contentType)
+          );
+          fs.renameSync(temporaryPath, finalPath);
+          return { ...result, path: finalPath, sourceUrl: url };
+        } catch (error) {
+          lastError = error;
+          this.log(
+            "warn",
+            `[Douyin] 图片候选 ${urlIndex + 1}/${urls.length} 下载失败 ${attempt}/2：${
+              error.message
+            }`
+          );
+        }
       }
     }
     throw lastError || createDouyinError("图片下载失败", "DOUYIN_MEDIA_FAILED");
   }
 
+  async downloadImageDataUri(
+    urlOrUrls,
+    id,
+    { maxBytes = 10 * 1024 * 1024 } = {}
+  ) {
+    const result = await this.downloadImage(urlOrUrls, id, { maxBytes });
+    try {
+      const contentType = normalizeText(result.contentType)
+        .toLowerCase()
+        .split(";", 1)[0];
+      const mimeType = contentType.startsWith("image/")
+        ? contentType
+        : result.path.endsWith(".png")
+          ? "image/png"
+          : result.path.endsWith(".webp")
+            ? "image/webp"
+            : result.path.endsWith(".gif")
+              ? "image/gif"
+              : "image/jpeg";
+      return `data:${mimeType};base64,${fs.readFileSync(result.path).toString("base64")}`;
+    } finally {
+      this.cleanup(result.path);
+    }
+  }
+
+  async downloadImageBuffer(
+    urlOrUrls,
+    id,
+    { maxBytes = 10 * 1024 * 1024 } = {}
+  ) {
+    const result = await this.downloadImage(urlOrUrls, id, { maxBytes });
+    try {
+      return fs.readFileSync(result.path);
+    } finally {
+      this.cleanup(result.path);
+    }
+  }
+
   async downloadImages(aweme, { maxCount = 12, concurrency = 3 } = {}) {
-    const urls = (Array.isArray(aweme?.images) ? aweme.images : [])
+    const images = (Array.isArray(aweme?.images) ? aweme.images : [])
       .filter(Boolean)
       .slice(0, Math.max(1, maxCount));
-    const results = new Array(urls.length);
+    const imageCandidates = Array.isArray(aweme?.imageCandidates)
+      ? aweme.imageCandidates
+      : [];
+    const sources = images.map((url, index) => {
+      const candidate = imageCandidates[index] || {};
+      const cleanUrls = collectUrls(candidate.cleanUrls, []);
+      const watermarkUrls = collectUrls(candidate.watermarkUrls, []).filter(
+        (item) => !cleanUrls.includes(item)
+      );
+      // 详情提供了原图时只在原图 CDN 之间重试，不能因临时失败悄悄降级为水印图。
+      const urls = cleanUrls.length > 0 ? cleanUrls : watermarkUrls;
+      return {
+        urls: (urls.length > 0 ? urls : [url]).slice(0, 8),
+        watermarkUrls: cleanUrls.length > 0 ? [] : watermarkUrls,
+      };
+    });
+    const results = new Array(sources.length);
     let cursor = 0;
 
     const worker = async () => {
-      while (cursor < urls.length) {
+      while (cursor < sources.length) {
         const index = cursor;
         cursor += 1;
+        const source = sources[index];
         try {
-          results[index] = await this.downloadImage(
-            urls[index],
+          const downloaded = await this.downloadImage(
+            source.urls,
             `${aweme?.id || "note"}_${index + 1}`
           );
+          results[index] = {
+            ...downloaded,
+            watermarked: source.watermarkUrls.includes(downloaded.sourceUrl),
+          };
         } catch (error) {
-          results[index] = { error, url: urls[index] };
+          results[index] = { error, urls: source.urls };
         }
       }
     };
 
     await Promise.all(
       Array.from(
-        { length: Math.min(Math.max(1, concurrency), Math.max(1, urls.length)) },
+        {
+          length: Math.min(
+            Math.max(1, concurrency),
+            Math.max(1, sources.length)
+          ),
+        },
         () => worker()
       )
     );
+    const files = results.filter((item) => item?.path);
     return {
-      files: results.filter((item) => item?.path),
+      files,
       failures: results.filter((item) => item?.error),
-      total: urls.length,
+      total: sources.length,
+      watermarkedCount: files.filter((item) => item.watermarked).length,
     };
   }
 

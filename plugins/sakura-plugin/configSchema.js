@@ -481,6 +481,9 @@ export const DouyinSchema = z.object({
     maxVideoSizeMB: z.number().int().min(1).max(500).default(80).describe('视频大小上限(MB)|超过后只发送作品信息和原链接'),
     maxVideoDurationSeconds: z.number().int().min(0).max(3600).default(600).describe('视频时长上限(秒)|设为0表示不限制，超过后不下载视频'),
     maxGalleryImages: z.number().int().min(1).max(20).default(12).describe('图文图片上限|单个作品最多下载并发送的图片数量'),
+    commentsEnabled: z.boolean().default(true).describe('展示评论卡片|获取作品前10条一级评论，卡片和评论配图会作为同一节点追加到合并转发消息'),
+    maxComments: z.number().int().min(1).max(10).default(10).describe('一级评论上限|每个作品最多渲染的一级评论卡片数量'),
+    maxCommentReplies: z.number().int().min(0).max(3).default(3).describe('二级评论上限|每张一级评论卡片最多展示的二级评论数量'),
 }).describe('抖音解析');
 
 export const CoolSchema = z.object({
