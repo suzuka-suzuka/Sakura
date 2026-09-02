@@ -472,6 +472,17 @@ export const BilicookieSchema = z.object({
     autoResolve: z.boolean().default(true).describe('自动解析|是否自动解析群内的B站链接'),
 }).describe('B站解析');
 
+export const DouyinSchema = z.object({
+    enable: z.boolean().default(true).describe('启用抖音解析|关闭后不再响应抖音链接和解析指令'),
+    autoResolve: z.boolean().default(true).describe('自动解析|是否自动解析消息中的抖音链接；关闭后仍可使用“#抖音解析”'),
+    browserFallback: z.boolean().default(true).describe('浏览器自动回退|普通请求被抖音拦截时，使用本机无头 Chrome 获取匿名 Cookie 后重试'),
+    cookie: z.string().default('').describe('抖音Cookie|#textarea|可留空匿名尝试；遇到访问验证时填写浏览器登录 www.douyin.com 后的完整 Cookie'),
+    cooldownSeconds: z.number().int().min(0).max(300).default(15).describe('解析冷却(秒)|同一群或私聊两次解析之间的最短间隔；主人不受限制'),
+    maxVideoSizeMB: z.number().int().min(1).max(500).default(80).describe('视频大小上限(MB)|超过后只发送作品信息和原链接'),
+    maxVideoDurationSeconds: z.number().int().min(0).max(3600).default(600).describe('视频时长上限(秒)|设为0表示不限制，超过后不下载视频'),
+    maxGalleryImages: z.number().int().min(1).max(20).default(12).describe('图文图片上限|单个作品最多下载并发送的图片数量'),
+}).describe('抖音解析');
+
 export const CoolSchema = z.object({
     Groups: z.array(z.number()).default([]).describe('启用群号'),
     randomIntervalMin: z.number().default(30).describe('最小间隔(秒)|随机冷却的最小间隔'),
@@ -743,6 +754,7 @@ export const configSchema = {
     'EmojiThief': EmojiThiefSchema,
     'VoxCPMVoice': VoxCPMVoiceSchema,
     'bilicookie': BilicookieSchema,
+    'douyin': DouyinSchema,
     'cool': CoolSchema,
     'economy': EconomySchema,
     'forwardMessage': ForwardMessageSchema,
@@ -770,7 +782,7 @@ export const schemaCategories = {
     '戳一戳': ['poke'],
     '图片功能': ['EditImage', 'nai', 'pixiv', 'r18', 'summary', 'SearchImage', 'cool', 'teatime', 'EmojiThief'],
     '经济系统': ['economy'],
-    '其他功能': ['60sNews', 'GroupInsight', 'AutoCleanup', 'forwardMessage', 'groupnotice', 'repeat', 'recall', 'bilicookie', 'VoxCPMVoice', 'reminderTask'],
+    '其他功能': ['60sNews', 'GroupInsight', 'AutoCleanup', 'forwardMessage', 'groupnotice', 'repeat', 'recall', 'bilicookie', 'douyin', 'VoxCPMVoice', 'reminderTask'],
 };
 
 export const schemaLabels = {
@@ -789,6 +801,7 @@ export const schemaLabels = {
     'EmojiThief': '表情偷取',
     'VoxCPMVoice': 'VoxCPM 语音生成',
     'bilicookie': 'B站解析',
+    'douyin': '抖音解析',
     'cool': '随机冷却',
     'economy': '经济系统',
     'forwardMessage': '消息转发',
