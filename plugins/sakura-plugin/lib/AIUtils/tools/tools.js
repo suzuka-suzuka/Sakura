@@ -28,6 +28,7 @@ import {
   splitToolFollowUpResult,
 } from "../toolResultProtocol.js";
 import { buildToolResultLogPart } from "../toolResultLog.js";
+import { buildSpecialToolStartVisualPayloads } from "./toolStartVisual.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -415,13 +416,23 @@ function buildToolStartVisualItem(toolName, toolArgs = {}) {
   };
 }
 
-async function sendToolStartVisual(e, functionCalls = []) {
+async function sendToolStartVisual(e, functionCalls = [], toolContext = {}) {
   try {
     if (!e?.sendForwardMsg) {
       return;
     }
 
+    const specialPayloads = await buildSpecialToolStartVisualPayloads(
+      e,
+      functionCalls,
+      toolContext,
+    );
+    for (const payload of specialPayloads) {
+      await e.sendForwardMsg(payload.nodes, payload.info);
+    }
+
     const items = functionCalls
+      .filter(({ name }) => name !== "NaiPainting" && name !== "SkillGuide")
       .map(({ name, args }) => buildToolStartVisualItem(name, args))
       .filter(Boolean);
 
@@ -558,8 +569,8 @@ export async function executeToolCalls(
     return { historyContents: [], queryParts: [] };
   }
 
-  await sendToolStartVisual(e, initialFunctionCalls);
   const toolContext = resolveToolContext(e, toolGroupName);
+  await sendToolStartVisual(e, initialFunctionCalls, toolContext);
 
   // 如果有需要确认的工具（且命令不在白名单），改为顺序执行
   const needsConfirm = pluginInstance && initialFunctionCalls.some(
@@ -587,7 +598,7 @@ export async function executeToolCalls(
 
 // ─── 热重载 ──────────────────────────────────────────────
 
-const IGNORED_FILES = new Set(["tools.js", "AbstractTool.js"]);
+const IGNORED_FILES = new Set(["tools.js", "AbstractTool.js", "toolStartVisual.js"]);
 
 /**
  * 动态重载单个工具文件
