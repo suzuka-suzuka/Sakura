@@ -151,7 +151,9 @@ export function logEvent(data) {
       return;
     }
     if (event.request_type === "group") {
-      logger.info(`${prefix}加群请求 ${event.group_id} ${event.user_id} ${event.sub_type} ${event.comment || ""}`);
+      const invited = Number(event.invited_id);
+      const inviteInfo = Number.isSafeInteger(invited) && invited > 0 ? ` ${invited}` : "";
+      logger.info(`${prefix}加群请求 ${event.group_id} ${event.user_id} ${event.sub_type}${inviteInfo} ${event.comment || ""}`);
       return;
     }
   }

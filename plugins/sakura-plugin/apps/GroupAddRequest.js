@@ -26,17 +26,32 @@ export class groupRequestListener extends plugin {
   }
 
   handleGroupAddRequest = OnEvent("request.group", async (e) => {
+    // SnowLuma 的邀请事件中 user_id 是邀请人，invited_id 才是被邀请人。
+    const invitedId = Number(e.invited_id);
+    const hasInvitedId = Number.isSafeInteger(invitedId) && invitedId > 0;
+    const isInvite = e.sub_type === "invite";
     // 「群成员邀请他人入群、待管理员审批」：NapCat 报 sub_type=add，SnowLuma 报 invite。
     // 但「邀请 bot 进新群」也是 invite，那种情况 bot 还不在群里，没法在群里发门牌号，跳过。
-    if (e.sub_type === "invite") {
+    if (isInvite) {
+      if (hasInvitedId && invitedId === Number(e.self_id)) return false;
       const selfMember = await e
         .getGroupMemberInfo(e.group_id, e.self_id)
         .catch(() => null);
       if (!selfMember) return false;
     }
 
-    const info = await e.getStrangerInfo(e.user_id).catch(() => null);
-    const nickname = info?.nickname || e.user_id;
+    const applicantId = hasInvitedId ? invitedId : isInvite ? null : e.user_id;
+    const info = applicantId
+      ? await e.getStrangerInfo(applicantId).catch(() => null)
+      : null;
+    const nickname = info?.nickname || applicantId;
+    const applicant = applicantId ? `${nickname} (${applicantId})` : "未获取到被邀请人 QQ";
+    let inviter = "";
+    if (isInvite) {
+      const member = await e.getGroupMemberInfo(e.group_id, e.user_id).catch(() => null);
+      const inviterName = member?.card?.trim() || member?.nickname?.trim();
+      inviter = `\n邀请人: ${inviterName ? `${inviterName}（${e.user_id}）` : e.user_id}`;
+    }
 
     const markerId = await redis.incr(requestCounterKey(e.self_id, e.group_id));
     await redis.expire(requestCounterKey(e.self_id, e.group_id), REQUEST_TTL);
@@ -47,13 +62,14 @@ export class groupRequestListener extends plugin {
     );
     await redis.expire(requestHashKey(e.self_id, e.group_id), REQUEST_TTL);
 
-    const avatarUrl = `https://q1.qlogo.cn/g?b=qq&nk=${e.user_id}&s=100`;
     // 这里不要拆成多个连续 text 段。部分 QQNT/Milky 组合在“连续文本段 + 图片”混排时，
     // 偶发把中间文本段渲染成乱码/0；把所有文字合成一个 text 段更稳。
     const message = [
-      `来人啦\n门牌号: ${markerId}\n敲门人: ${nickname} (${e.user_id})\n敲门口令: ${e.comment || "这个人啥也没说"}`,
-      segment.image(avatarUrl),
+      `来人啦\n门牌号: ${markerId}\n敲门人: ${applicant}${inviter}\n敲门口令: ${e.comment || "这个人啥也没说"}`,
     ];
+    if (applicantId) {
+      message.push(segment.image(`https://q1.qlogo.cn/g?b=qq&nk=${applicantId}&s=100`));
+    }
     await e.reply(message);
 
     return false;
