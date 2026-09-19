@@ -2,7 +2,10 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { LocalIndex } from "vectra";
 import { memoryRoot, readMemoryDocument } from "./memoryStore.js";
-import { generateTextEmbedding } from "./embeddingProvider.js";
+import {
+  DEFAULT_EMBEDDING_VERSION,
+  generateTextEmbedding,
+} from "./embeddingProvider.js";
 
 const VECTOR_INDEX_DIR = path.join(memoryRoot, "vector-index");
 export const DEFAULT_MEMORY_SEARCH_RESULTS = 8;
@@ -55,7 +58,9 @@ class MemoryVectorStore {
     const existingById = new Map(existingItems.map((item) => [item.id, item]));
     const memoriesToIndex = document.memories.filter((memory) => {
       const item = existingById.get(memory.id);
-      return !item || item.metadata?.contentHash !== hashContent(memory.content);
+      return !item
+        || item.metadata?.contentHash !== hashContent(memory.content)
+        || item.metadata?.embeddingVersion !== DEFAULT_EMBEDDING_VERSION;
     });
 
     const indexedMemories = await Promise.all(
@@ -92,6 +97,7 @@ class MemoryVectorStore {
           metadata: {
             scopeKey: location.scopeKey,
             contentHash: hashContent(memory.content),
+            embeddingVersion: DEFAULT_EMBEDDING_VERSION,
           },
         });
       }

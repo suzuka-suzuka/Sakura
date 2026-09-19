@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import { plugindata } from "../path.js";
+import Setting from "../setting.js";
 import { getAI } from "./getAI.js";
 import sharp from "sharp";
 import db from "../Database.js";
@@ -11,7 +12,6 @@ import {
   generateContentEmbedding,
   generateTextEmbedding as embedText,
 } from "./embeddingProvider.js";
-import { resolveGeminiCapabilityPlan } from "./geminiCapabilityRoute.js";
 
 const EMOJI_DATA_DIR = path.join(plugindata, "emoji_embeddings");
 const VECTRA_INDEX_DIR = path.join(EMOJI_DATA_DIR, "vectra_index");
@@ -20,7 +20,6 @@ const EMOJI_IMAGES_DIR = path.join(EMOJI_DATA_DIR, "images");
 class ImageEmbeddingManager {
   constructor() {
     this.index = null;
-    this.embeddingModel = "gemini-embedding-2";
     this.initialized = false;
     this.initPromise = this.init();
   }
@@ -262,7 +261,6 @@ class ImageEmbeddingManager {
         parts: parts,
       },
       {
-        model: this.embeddingModel,
         purpose: "表情入库",
         outputDimensionality: 768,
       }
@@ -304,7 +302,12 @@ class ImageEmbeddingManager {
       },
     ];
 
-    const { routeId, plan } = resolveGeminiCapabilityPlan(null, "表情识图");
+    const routeId = String(
+      Setting.getConfig("AI")?.utilityRoute || ""
+    ).trim();
+    if (!routeId) {
+      throw new Error("表情识图需要通用辅助路由，但 AI 设定中没有配置 utilityRoute。");
+    }
     const aiResult = await getAI(
       routeId,
       null,
@@ -312,8 +315,7 @@ class ImageEmbeddingManager {
       "",
       false,
       false,
-      [],
-      { plan }
+      []
     );
 
     if (typeof aiResult === "object" && aiResult.text) {
@@ -332,7 +334,6 @@ class ImageEmbeddingManager {
   async generateTextEmbedding(text, taskPrefix = "") {
     const content = taskPrefix ? `${taskPrefix}${text}` : text;
     return embedText(content, {
-      model: this.embeddingModel,
       purpose: "表情检索",
     });
   }

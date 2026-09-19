@@ -97,7 +97,7 @@ config/sakura-plugin/
 4. 在 `AI.profiles` 中配置角色触发前缀列表、角色名和模型路由。
 5. 群内发送任一角色前缀加内容即可触发对话；多个前缀同时匹配时使用最长前缀。
 
-`AI.utilityRoute` 是通用辅助路由，用于应用文案、结构化分析和记忆整理等后台任务。`AI.geminiRoute` 是 Gemini 能力路由，用于向量、消息视频分析和表情识图，留空时这些功能不可用；选定的路由中至少需要一个 `protocol: gemini` 的 Gemini 或 Vertex 目标。主对话、工具执行和工具回传后的续答仍沿角色或拟态各自的模型路由执行；只有上述 Gemini 子任务使用 `geminiRoute`。
+`AI.utilityRoute` 是通用辅助路由，用于应用文案、结构化分析、记忆整理和表情识图等后台任务。`AI.geminiRoute` 是 Gemini 能力路由，用于向量和消息视频分析，留空时这些功能不可用；选定的路由中至少需要一个 `protocol: gemini` 的 Gemini 或 Vertex 目标。主对话、工具执行和工具回传后的续答仍沿角色或拟态各自的模型路由执行；只有上述 Gemini 子任务使用 `geminiRoute`。
 
 旧配置中的 `appsRoute` 会自动迁移到 `utilityRoute`，`toolsRoute` 会自动迁移到 `geminiRoute`。
 
