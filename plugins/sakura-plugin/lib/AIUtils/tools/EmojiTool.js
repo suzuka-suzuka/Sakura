@@ -1,5 +1,6 @@
 import { AbstractTool } from "./AbstractTool.js";
 import { imageEmbeddingManager } from "../ImageEmbedding.js";
+import { getEmojiSearchConfig } from "../emojiSearchConfig.js";
 import fs from "fs";
 
 export class EmojiTool extends AbstractTool {
@@ -29,7 +30,8 @@ export class EmojiTool extends AbstractTool {
         return "表情库为空，暂时无法发送表情";
       }
 
-      const results = await imageEmbeddingManager.searchImage(query, 3, 0.65);
+      const { topK, minScore } = getEmojiSearchConfig();
+      const results = await imageEmbeddingManager.searchImage(query, topK, minScore);
 
       if (!results || (Array.isArray(results) && results.length === 0)) {
         return `没有找到"${query}"相关的表情`;

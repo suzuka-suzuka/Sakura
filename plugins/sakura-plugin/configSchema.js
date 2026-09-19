@@ -450,6 +450,8 @@ export const EmojiThiefSchema = z.object({
     Groups: z.array(z.number()).default([]).describe('启用群号|#groupSelect|在这些群中启用表情包学习'),
     rate: z.number().default(1).describe('回复概率|触发回复的概率'),
     vectorRate: z.number().default(0.1).describe('矢量概率|#step:0.01|学习表情的概率'),
+    searchTopK: z.number().int().min(1).max(20).default(3).describe('检索候选数|#step:1|从相似度最高的这些表情中随机选择'),
+    searchMinScore: z.number().min(0).max(1).default(0.65).describe('最低相似度|#step:0.01|低于此相似度的表情不会被发送'),
 }).describe('表情包学习');
 
 
