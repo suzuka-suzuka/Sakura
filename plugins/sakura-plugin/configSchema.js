@@ -715,7 +715,7 @@ export const RepeatSchema = z.object({
     enable: z.boolean().default(true).describe('启用复读|是否启用自动复读功能'),
     rules: z.array(RepeatRuleSchema)
         .default(DEFAULT_REPEAT_RULES)
-        .describe('触发规则|#nameField:repeatCount|可添加任意次数；同一次数只能配置一条规则'),
+        .describe('触发规则|#repeatRules|#nameField:repeatCount|可添加任意次数；同一次数只能配置一条规则'),
     breakMessages: z.array(nonEmptyString('打断文字'))
         .default(DEFAULT_REPEAT_BREAK_MESSAGES)
         .describe('文字打断内容|文字打断或随机打断时，从这里随机选择'),

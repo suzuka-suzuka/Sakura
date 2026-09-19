@@ -121,6 +121,20 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
                 />
             );
         }
+        if (uiType === 'repeatRules' && meta.items?.type === 'object') {
+            return (
+                <RepeatRulesField
+                    name={name}
+                    displayName={displayName}
+                    help={help}
+                    value={value}
+                    onChange={onChange}
+                    itemMeta={meta.items}
+                    nameField={meta.nameField}
+                    scopeSelfId={scopeSelfId}
+                />
+            );
+        }
         // Array of objects → ObjectArrayField
         if (meta.items?.type === 'object' && meta.items?.children) {
             return (
@@ -1723,6 +1737,45 @@ function RouteTargetsField({
             onChange={handleChange}
             itemMeta={itemMeta}
             nameField="id"
+            scopeSelfId={scopeSelfId}
+            resolveItemMeta={resolveItemMeta}
+        />
+    );
+}
+
+const REPEAT_TEXT_ACTIONS = new Set(['text', 'mute']);
+
+function RepeatRulesField({
+    name,
+    displayName,
+    help,
+    value,
+    onChange,
+    itemMeta,
+    nameField,
+    scopeSelfId = null,
+}) {
+    const resolveItemMeta = useCallback((baseMeta, ruleDraft) => {
+        const action = ruleDraft?.action;
+        const visibleChildren = Object.fromEntries(
+            Object.entries(baseMeta.children || {}).filter(([field]) => {
+                if (field === 'text') return REPEAT_TEXT_ACTIONS.has(action);
+                if (field === 'muteDuration') return action === 'mute';
+                return true;
+            })
+        );
+        return { ...baseMeta, children: visibleChildren };
+    }, []);
+
+    return (
+        <ObjectArrayField
+            name={name}
+            displayName={displayName}
+            help={help}
+            value={value}
+            onChange={onChange}
+            itemMeta={itemMeta}
+            nameField={nameField}
             scopeSelfId={scopeSelfId}
             resolveItemMeta={resolveItemMeta}
         />
