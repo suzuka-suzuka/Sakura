@@ -688,8 +688,39 @@ export const RecallSchema = z.object({
     Groups: z.array(z.number()).default([]).describe('防撤回启用的群|#groupSelect|在这些群中监听消息撤回'),
 }).describe('防撤回');
 
+const RepeatRuleSchema = z.object({
+    repeatCount: z.number().int().min(2).default(3).describe('触发次数|#min:2|从首条消息开始计数，达到此连续复读次数时触发'),
+    action: z.enum(['follow', 'shuffle', 'text', 'image', 'random_interrupt', 'mute'])
+        .default('follow')
+        .describe('触发动作|#optionLabels:follow=跟读,shuffle=打乱文字,text=文字打断,image=图片打断,random_interrupt=随机打断,mute=禁言'),
+    text: z.string().default('').describe('回复文字|#textarea|文字打断时留空则从下方文字池随机选择；禁言时作为成功提示，留空则不提示'),
+    muteDuration: z.number().int().min(1).max(2592000).default(60).describe('禁言时间(秒)|#min:1|#max:2592000|仅禁言动作使用，最大30天'),
+});
+
+const DEFAULT_REPEAT_RULES = [
+    { repeatCount: 3, action: 'follow', text: '', muteDuration: 60 },
+    { repeatCount: 5, action: 'random_interrupt', text: '', muteDuration: 60 },
+    { repeatCount: 7, action: 'mute', text: '好孩子不要复读哦！', muteDuration: 60 },
+];
+
+const DEFAULT_REPEAT_BREAK_MESSAGES = [
+    '复读机来了！',
+    '复读一时爽，一直复读一直爽……才怪！',
+    '请停止你的复读行为！',
+    '好了好了，知道你能复读了',
+    '检测到复读姬能量波动异常，正在进行强制关停！',
+];
+
 export const RepeatSchema = z.object({
     enable: z.boolean().default(true).describe('启用复读|是否启用自动复读功能'),
+    rules: z.array(RepeatRuleSchema)
+        .default(DEFAULT_REPEAT_RULES)
+        .describe('触发规则|#nameField:repeatCount|可添加任意次数；同一次数只能配置一条规则'),
+    breakMessages: z.array(nonEmptyString('打断文字'))
+        .default(DEFAULT_REPEAT_BREAK_MESSAGES)
+        .describe('文字打断内容|文字打断或随机打断时，从这里随机选择'),
+}).superRefine((config, ctx) => {
+    addUniqueFieldIssues(config.rules, 'repeatCount', ctx, ['rules']);
 }).describe('复读');
 
 const RoleSchema = z.object({

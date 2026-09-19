@@ -5,6 +5,8 @@ import { pluginresources } from "../lib/path.js";
 import fs from "fs/promises";
 let msg = {};
 
+const REPEAT_IMAGE_EXTENSIONS = /\.(?:png|jpe?g|gif|webp|bmp)$/i;
+
 export class repeatPlugin extends plugin {
   constructor() {
     super({
@@ -40,65 +42,11 @@ export class repeatPlugin extends plugin {
       msg[scopeKey].times++;
       msg[scopeKey].lastSender = e.sender.user_id;
 
-      if (msg[scopeKey].times === 3) {
-        await e.reply(msg[scopeKey].message);
-        return false;
-      } else if (msg[scopeKey].times === 5) {
-        const breakMessages = [
-          "复读机来了！",
-          "复读一时爽，一直复读一直爽……才怪！",
-          "请停止你的复读行为！",
-          "好了好了，知道你能复读了",
-          "检测到复读姬能量波动异常，正在进行强制关停！",
-        ];
-
-        let randomAction;
-        const isRepeatedMessageNonText =
-          Array.isArray(msg[scopeKey].message) &&
-          msg[scopeKey].message.some((m) => m.type !== "text");
-
-        if (isRepeatedMessageNonText) {
-          randomAction = _.sample([0, 2]);
-        } else {
-          randomAction = _.random(0, 2);
-        }
-
-        let replyContent;
-
-        if (randomAction === 0) {
-          replyContent = breakMessages[_.random(0, breakMessages.length - 1)];
-          await e.reply(replyContent);
-        } else if (randomAction === 1) {
-          replyContent = this.randomString(e.msg);
-          await e.reply(replyContent);
-        } else {
-          const repeatImagePath = path.join(pluginresources, "repeat");
-          const files = await fs.readdir(repeatImagePath);
-          const randomImage = files[_.random(0, files.length - 1)];
-          const fullImagePath = path.join(repeatImagePath, randomImage);
-          await e.reply(segment.image(fullImagePath));
-        }
-        return false;
-      } else if (msg[scopeKey].times === 7) {
-        const muteTargetId = msg[scopeKey].lastSender;
-        const muteDuration = 60;
-        
-        const botInfo = await e.getInfo(e.self_id);
-        const targetInfo = await e.getInfo(muteTargetId);
-
-        if (
-          botInfo?.role !== "member" &&
-          targetInfo?.role === "member"
-        ) {
-          await e.ban(muteDuration, muteTargetId);
-          await e.reply(`好孩子不要复读哦！`);
-        } else {
-          logger.warn(`机器人无权限`);
-        }
-        return false;
-      } else {
-        return false;
-      }
+      const rule = fdConfig.rules?.find(
+        (item) => item.repeatCount === msg[scopeKey].times,
+      );
+      if (rule) await this.runRule(e, msg[scopeKey], rule, fdConfig);
+      return false;
     } else {
       msg[scopeKey].message = e.message;
       msg[scopeKey].times = 1;
@@ -106,6 +54,89 @@ export class repeatPlugin extends plugin {
       return false;
     }
   });
+
+  async runRule(e, state, rule, config) {
+    let action = rule.action;
+    if (action === "random_interrupt") {
+      const actions = this.isTextOnlyMessage(state.message)
+        ? ["text", "shuffle", "image"]
+        : ["text", "image"];
+      action = _.sample(actions);
+    }
+
+    if (action === "follow") {
+      await e.reply(state.message);
+      return;
+    }
+
+    if (action === "shuffle") {
+      await e.reply(this.randomString(e.msg));
+      return;
+    }
+
+    if (action === "text") {
+      await e.reply(this.getBreakText(rule, config));
+      return;
+    }
+
+    if (action === "image") {
+      await this.replyBreakImage(e, rule, config);
+      return;
+    }
+
+    if (action === "mute") {
+      await this.muteLastRepeater(e, state.lastSender, rule);
+    }
+  }
+
+  getBreakText(rule, config) {
+    if (rule.text?.trim()) return rule.text.trim();
+    const messages = config.breakMessages?.filter((item) => item?.trim()) || [];
+    return _.sample(messages)?.trim() || "请停止复读！";
+  }
+
+  async replyBreakImage(e, rule, config) {
+    try {
+      const repeatImagePath = path.join(pluginresources, "repeat");
+      const files = (await fs.readdir(repeatImagePath)).filter((file) =>
+        REPEAT_IMAGE_EXTENSIONS.test(file),
+      );
+      const randomImage = _.sample(files);
+      if (!randomImage) throw new Error("复读打断图片目录中没有可用图片");
+      await e.reply(segment.image(path.join(repeatImagePath, randomImage)));
+    } catch (error) {
+      logger.warn(`复读图片打断失败，改用文字打断：${error.message}`);
+      await e.reply(this.getBreakText(rule, config));
+    }
+  }
+
+  async muteLastRepeater(e, targetId, rule) {
+    const [botInfo, targetInfo] = await Promise.all([
+      e.getInfo(e.self_id),
+      e.getInfo(targetId),
+    ]);
+
+    if (botInfo?.role === "member") {
+      logger.warn(`复读禁言失败：机器人不是群主或管理员`);
+      return;
+    }
+    if (targetInfo?.role !== "member") {
+      logger.warn(`复读禁言已跳过：不能禁言群主或管理员 ${targetId}`);
+      return;
+    }
+
+    await e.ban(rule.muteDuration, targetId);
+    if (rule.text?.trim()) await e.reply(rule.text.trim());
+  }
+
+  isTextOnlyMessage(message) {
+    if (typeof message === "string") return true;
+    return (
+      Array.isArray(message) &&
+      message.length > 0 &&
+      message.every((item) => item.type === "text")
+    );
+  }
 
   async isSameMessage(message1, message2) {
     if (!Array.isArray(message1) || !Array.isArray(message2)) {
