@@ -78,12 +78,13 @@ const ACTION_MAP = {
   set_nickname:            "set_nickname",
 };
 
-function detectMilkyReactionType(reactionId) {
+function detectMilkyReactionType(reactionId, explicitType) {
+  if (explicitType === "face" || explicitType === "emoji") {
+    return explicitType;
+  }
+
   const normalizedId = String(reactionId ?? "").trim();
-  // OneBot 的 set_msg_emoji_like 只有 emoji_id，没有回应类型。
-  // QQ 自带表情 ID 通常不超过 3 位；Unicode Emoji 使用十进制码点，
-  // QQNT 也以 ID 长度大于 3 作为 emoji 类型判断。
-  if (/^\d{4,}$/.test(normalizedId)) {
+  if (/^\d{6}$/.test(normalizedId)) {
     return "emoji";
   }
 
@@ -920,7 +921,10 @@ export class MilkyClient extends EventEmitter {
           group_id: Number(groupId) || 0,
           message_seq: Number(params.message_id),
           reaction: reactionId,
-          reaction_type: detectMilkyReactionType(reactionId),
+          reaction_type: detectMilkyReactionType(
+            reactionId,
+            params.reaction_type
+          ),
           is_add: params.is_add ?? true,
         };
       }
