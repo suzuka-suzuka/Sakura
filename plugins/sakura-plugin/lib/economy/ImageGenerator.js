@@ -137,7 +137,7 @@ export default class EconomyImageGenerator {
   }
 
   async generateStatusImage(data) {
-    const height = 320
+    const height = 400
     const canvas = createCanvas(this.width, height)
     const ctx = canvas.getContext("2d")
 
@@ -151,7 +151,7 @@ export default class EconomyImageGenerator {
     ctx.shadowBlur = 0
 
     const avatarX = 55
-    const avatarY = 85
+    const avatarY = 125
     const avatarSize = 150
     await this.drawAvatar(ctx, data.avatarUrl, avatarX, avatarY, avatarSize)
 
@@ -169,16 +169,52 @@ export default class EconomyImageGenerator {
 
     const contentX = 250
     const contentWidth = this.width - contentX - 70
+    const level = Math.max(1, Math.floor(Number(data.level) || 1))
 
     ctx.fillStyle = "#FF69B4"
     ctx.font = 'bold 30px ZhuZiAYuan, "MotoyaMaru", "Noto Color Emoji", "Noto Sans SC", sans-serif'
-    ctx.fillText(this.truncateText(ctx, data.nickname, contentWidth), contentX, 92)
+    ctx.fillText(this.truncateText(ctx, data.nickname, contentWidth), contentX, 84)
 
     ctx.fillStyle = "#999999"
     ctx.font = '20px ZhuZiAYuan, "MotoyaMaru", "Noto Color Emoji", "Noto Sans SC", sans-serif'
-    ctx.fillText(`ID: ${data.userId}`, contentX, 128)
+    ctx.fillText(`ID: ${data.userId}`, contentX, 118)
 
-    const balanceY = 158
+    const levelY = 142
+    const levelHeight = 78
+    ctx.fillStyle = "rgba(255, 228, 243, 0.78)"
+    this.drawRoundedRect(ctx, contentX, levelY, contentWidth, levelHeight, 18)
+    ctx.fill()
+
+    ctx.fillStyle = "#A85A7D"
+    ctx.font = '20px ZhuZiAYuan, "MotoyaMaru", "Noto Color Emoji", "Noto Sans SC", sans-serif'
+    ctx.fillText(`签到等级  Lv.${level}`, contentX + 24, levelY + 32)
+
+    const experienceInLevel = Math.max(0, Math.floor(Number(data.experienceInLevel) || 0))
+    const nextLevelRequiredExp = Math.max(1, Math.floor(Number(data.nextLevelRequiredExp) || 1))
+    const expText = `${experienceInLevel.toLocaleString("zh-CN")} / ${nextLevelRequiredExp.toLocaleString("zh-CN")}`
+    ctx.textAlign = "right"
+    ctx.fillStyle = "#FF1493"
+    ctx.font = 'bold 20px ZhuZiAYuan, "MotoyaMaru", "Noto Color Emoji", "Noto Sans SC", sans-serif'
+    ctx.fillText(expText, contentX + contentWidth - 24, levelY + 32)
+    ctx.textAlign = "left"
+
+    const barX = contentX + 24
+    const barY = levelY + 48
+    const barWidth = contentWidth - 48
+    const barHeight = 12
+    ctx.fillStyle = "rgba(255, 182, 213, 0.45)"
+    this.drawRoundedRect(ctx, barX, barY, barWidth, barHeight, 6)
+    ctx.fill()
+
+    const progress = Math.max(0, Math.min(1, Number(data.progress) || experienceInLevel / nextLevelRequiredExp))
+    const filledWidth = progress > 0 ? Math.max(8, barWidth * progress) : 0
+    if (filledWidth > 0) {
+      ctx.fillStyle = "#FF69B4"
+      this.drawRoundedRect(ctx, barX, barY, Math.min(filledWidth, barWidth), barHeight, 6)
+      ctx.fill()
+    }
+
+    const balanceY = 234
     const balanceHeight = 92
     ctx.fillStyle = "rgba(255, 228, 243, 0.78)"
     this.drawRoundedRect(ctx, contentX, balanceY, contentWidth, balanceHeight, 18)

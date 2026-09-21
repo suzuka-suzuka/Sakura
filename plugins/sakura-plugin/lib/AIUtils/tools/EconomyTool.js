@@ -2,7 +2,6 @@ import { AbstractTool } from "./AbstractTool.js";
 import { randomUUID } from "node:crypto";
 import EconomyManager from "../../economy/EconomyManager.js";
 import EconomyImageGenerator from "../../economy/ImageGenerator.js";
-import FishingManager from "../../economy/FishingManager.js";
 import {
   acquireRedisLock,
   releaseRedisLock,
@@ -12,7 +11,7 @@ import {
   AI_TRANSFER_MAX_BALANCE_PERCENT,
   canUseTransfer,
   getNonMasterAiTransferLimit,
-  TRANSFER_UNLOCK_FISHING_LEVEL,
+  TRANSFER_UNLOCK_LEVEL,
 } from "../../economy/rules.js";
 
 export class EconomyTool extends AbstractTool {
@@ -91,9 +90,9 @@ export class EconomyTool extends AbstractTool {
       }
 
       if (action === "transfer") {
-        const fishingLevel = new FishingManager(e.group_id).getUserFishingLevel(e.user_id);
-        if (!canUseTransfer(fishingLevel)) {
-          return `转账功能将在钓鱼 Lv.${TRANSFER_UNLOCK_FISHING_LEVEL} 开放，你当前为 Lv.${fishingLevel}。`;
+        const signLevel = economyManager.getLevel(e);
+        if (!canUseTransfer(signLevel)) {
+          return `转账功能将在签到 Lv.${TRANSFER_UNLOCK_LEVEL} 开放，你当前为 Lv.${signLevel}。`;
         }
 
         if (!targetQQ || !/^\d{5,11}$/.test(targetQQ)) {

@@ -1,6 +1,6 @@
 export const REVIVE_COIN_BASE_AMOUNT = 100;
 export const REVIVE_COIN_PER_LEVEL = 2;
-export const TRANSFER_UNLOCK_FISHING_LEVEL = 5;
+export const TRANSFER_UNLOCK_LEVEL = 4;
 export const AI_TRANSFER_MAX_BALANCE_PERCENT = 20;
 export const AI_TRANSFER_GROUP_COOLDOWN_SECONDS = 2 * 60;
 export const EQUIPMENT_SELL_PRICE_RATIO = 0.8;
@@ -32,8 +32,30 @@ export function getReviveCoinPolicy(fishingLevel) {
   };
 }
 
-export function canUseTransfer(fishingLevel) {
-  return normalizeFishingLevel(fishingLevel) >= TRANSFER_UNLOCK_FISHING_LEVEL;
+function normalizeSignLevel(level) {
+  const numericLevel = Number(level);
+  if (!Number.isFinite(numericLevel)) return 1;
+  return Math.max(1, Math.floor(numericLevel));
+}
+
+export function canUseTransfer(signLevel) {
+  return normalizeSignLevel(signLevel) >= TRANSFER_UNLOCK_LEVEL;
+}
+
+export function getSignLevelProgress(experience, level) {
+  const currentLevel = normalizeSignLevel(level);
+  const totalExperience = Math.max(0, Math.floor(Number(experience) || 0));
+  const currentLevelExp = 100 * (currentLevel - 1) ** 2;
+  const nextLevelExp = 100 * currentLevel ** 2;
+  const experienceInLevel = Math.max(0, totalExperience - currentLevelExp);
+  const nextLevelRequiredExp = Math.max(1, nextLevelExp - currentLevelExp);
+  return {
+    level: currentLevel,
+    experience: totalExperience,
+    experienceInLevel,
+    nextLevelRequiredExp,
+    progress: Math.min(1, experienceInLevel / nextLevelRequiredExp),
+  };
 }
 
 // 钓鱼等级里程碑奖励：每 5 级一档、不设上限，每档发一套自救耗材，

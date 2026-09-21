@@ -1,5 +1,6 @@
 import Setting from "../setting.js"
 import db from "../Database.js"
+import { getSignLevelProgress } from "./rules.js"
 
 export default class EconomyManager {
   constructor(e) {
@@ -55,6 +56,12 @@ export default class EconomyManager {
     this._initUser(e);
     const data = this.getUserData(String(e.user_id));
     return data.experience;
+  }
+
+  getLevelProgress(e) {
+    this._initUser(e);
+    const data = this.getUserData(String(e.user_id));
+    return getSignLevelProgress(data.experience, data.level);
   }
 
   _normalizeCoinAmount(amount) {

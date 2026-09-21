@@ -26,7 +26,7 @@ import {
   RED_PACKET_MIN_AMOUNT,
   RED_PACKET_MIN_COUNT,
   RED_PACKET_MODES,
-  TRANSFER_UNLOCK_FISHING_LEVEL,
+  TRANSFER_UNLOCK_LEVEL,
 } from "../lib/economy/rules.js";
 import { getBot, getCurrentBotSelfId } from "../../../src/api/client.js";
 import {
@@ -56,6 +56,14 @@ export default class Economy extends plugin {
     const config = this.appconfig;
     if (!config) return false;
     const groups = config.gamegroups || [];
+    if (groups.length === 0) return false;
+    return groups.some((g) => String(g) === String(e.group_id));
+  }
+
+  checkEconomyGroup(e) {
+    const config = this.appconfig;
+    if (!config || config.enable === false) return false;
+    const groups = config.Groups || [];
     if (groups.length === 0) return false;
     return groups.some((g) => String(g) === String(e.group_id));
   }
@@ -713,15 +721,20 @@ export default class Economy extends plugin {
   });
 
   myStatus = Command(/^#?((我|咱)的(信息|等级|资产))$/, async (e) => {
-    if (!this.checkWhitelist(e)) return false;
+    if (!this.checkEconomyGroup(e)) return false;
     const economyManager = new EconomyManager(e);
     const coins = economyManager.getCoins(e);
+    const levelProgress = economyManager.getLevelProgress(e);
 
     const userData = {
       userId: e.user_id,
       nickname: e.sender.card || e.sender.nickname || e.user_id,
       avatarUrl: `https://q1.qlogo.cn/g?b=qq&nk=${e.user_id}&s=640`,
       coins,
+      level: levelProgress.level,
+      experienceInLevel: levelProgress.experienceInLevel,
+      nextLevelRequiredExp: levelProgress.nextLevelRequiredExp,
+      progress: levelProgress.progress,
     };
 
     try {
@@ -752,17 +765,15 @@ export default class Economy extends plugin {
       return false;
     }
 
-    const fishingManager = new FishingManager(e.group_id);
-    const fishingLevel = fishingManager.getUserFishingLevel(e.user_id);
-    if (!canUseTransfer(fishingLevel)) {
+    const economyManager = new EconomyManager(e);
+    const signLevel = economyManager.getLevel(e);
+    if (!canUseTransfer(signLevel)) {
       await e.reply(
-        `转账功能将在钓鱼 Lv.${TRANSFER_UNLOCK_FISHING_LEVEL} 开放，你当前为 Lv.${fishingLevel}。`,
+        `转账功能将在签到 Lv.${TRANSFER_UNLOCK_LEVEL} 开放，你当前为 Lv.${signLevel}。`,
         10,
       );
       return true;
     }
-
-    const economyManager = new EconomyManager(e);
     const fromCoins = economyManager.getCoins(e);
 
     if (fromCoins < amount) {
@@ -901,12 +912,11 @@ export default class Economy extends plugin {
     // 主人的红包是神明恩赐：不看等级，樱花币一律凭空产生，不动主人自己的余额。
     const isMaster = Boolean(e.isMaster);
     if (!isMaster) {
-      // 红包和转账一样是玩家之间搬钱的通道，用同一个等级门槛挡住小号搬运。
-      const fishingManager = new FishingManager(e.group_id);
-      const fishingLevel = fishingManager.getUserFishingLevel(e.user_id);
-      if (!canUseTransfer(fishingLevel)) {
+      // 红包和转账一样是玩家之间搬钱的通道，用同一个签到等级门槛挡住小号搬运。
+      const signLevel = new EconomyManager(e).getLevel(e);
+      if (!canUseTransfer(signLevel)) {
         await e.reply(
-          `红包功能将在钓鱼 Lv.${TRANSFER_UNLOCK_FISHING_LEVEL} 开放，你当前为 Lv.${fishingLevel}。`,
+          `红包功能将在签到 Lv.${TRANSFER_UNLOCK_LEVEL} 开放，你当前为 Lv.${signLevel}。`,
           10,
         );
         return true;
@@ -1455,7 +1465,7 @@ export default class Economy extends plugin {
   });
 
   coinRanking = Command(/^#?(金币|樱花币|富豪|财富)(排行|榜)$/, async (e) => {
-    if (!this.checkWhitelist(e)) return false;
+    if (!this.checkEconomyGroup(e)) return false;
     return await this.generateRanking(e, "coins", "樱花币排行榜");
   });
   levelRanking = Command(/^#?(等级|经验|精英)(排行|榜)$/, async (e) => {
