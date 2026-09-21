@@ -276,10 +276,16 @@ function App() {
 
       <div className="app-layout">
         <aside className="left-nav">
-          <div className="left-nav-brand">
+          <a
+            className="left-nav-brand"
+            href="https://github.com/suzuka-suzuka/Sakura"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="在新标签页打开 Sakura GitHub 仓库"
+          >
             <span className="left-nav-brand-icon">🌸</span>
             <span className="left-nav-brand-text">Sakura</span>
-          </div>
+          </a>
           <div className="left-nav-divider"></div>
 
           <div className="left-nav-section">配置</div>
