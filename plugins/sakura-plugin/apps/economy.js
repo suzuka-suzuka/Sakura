@@ -749,7 +749,7 @@ export default class Economy extends plugin {
   });
 
   transfer = Command(/^#?(转账|投喂)\s*(\d+).*$/, async (e) => {
-    if (!this.checkWhitelist(e)) return false;
+    if (!this.checkEconomyGroup(e)) return false;
     const amount = parseInt(e.match[2]);
     const targetId = e.at;
 
@@ -905,7 +905,7 @@ export default class Economy extends plugin {
   // 金额和个数两个数字都写全才会触发，「发红包」「发红包啊」「发红包 1000」
   // 都不匹配，直接落给后面的处理器，机器人不出声——用法看菜单即可。
   sendRedPacket = Command(/^#?发红包\s*(\d+(?:个|份|人)?\s+\d+.*)$/, async (e) => {
-    if (!this.checkWhitelist(e)) return false;
+    if (!this.checkEconomyGroup(e)) return false;
     const { mode, amount, count, blessing } = this.parseRedPacketArgs(e.match[1]);
     if (!amount || !count) return false;
 
@@ -967,7 +967,7 @@ export default class Economy extends plugin {
   });
 
   grabRedPacket = Command(/^#?(?:抢|领|拆)红包$/, async (e) => {
-    if (!this.checkWhitelist(e)) return false;
+    if (!this.checkEconomyGroup(e)) return false;
 
     let result;
     try {
