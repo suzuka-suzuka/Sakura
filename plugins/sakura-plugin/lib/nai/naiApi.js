@@ -5,10 +5,9 @@ import Setting from "../setting.js";
 const DEFAULT_MODEL = "nai-diffusion-4-5-full";
 const DEFAULT_NEGATIVE =
     "lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page";
+const DEFAULT_QUALITY = "very aesthetic, masterpiece";
 const DEFAULT_STEPS = 28;
-const QUALITY_TAGS = ["very aesthetic", "masterpiece"];
 const NO_TEXT_TAG = "no text";
-const MANAGED_PROMPT_TAGS = new Set([...QUALITY_TAGS, NO_TEXT_TAG]);
 const NAI_SUBSCRIPTION_URL = "https://image.novelai.net/user/subscription";
 const NAI_USAGE_MIN_PERCENT = 5;
 const NAI_USAGE_FALLBACK_COOLDOWN_SECONDS = 60;
@@ -99,7 +98,29 @@ function normalizePromptTag(tag) {
     return String(tag || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function mergeManagedPromptTags(visualPrompt, hasVisibleTextIntent) {
+function parseQualityTags(value) {
+    const tags = [];
+    const seen = new Set();
+    for (const part of String(value ?? "").split(",")) {
+        const tag = part.trim();
+        if (!tag) continue;
+        const normalized = normalizePromptTag(tag);
+        if (seen.has(normalized)) continue;
+        seen.add(normalized);
+        tags.push(tag);
+    }
+    return tags;
+}
+
+function resolveNaiQuality(quality) {
+    return quality == null ? DEFAULT_QUALITY : quality;
+}
+
+function mergeManagedPromptTags(visualPrompt, hasVisibleTextIntent, qualityTags) {
+    const managedTags = new Set([
+        ...qualityTags.map(normalizePromptTag),
+        NO_TEXT_TAG,
+    ]);
     const promptParts = String(visualPrompt || "")
         .split(",")
         .map((part) => part.trim())
@@ -109,7 +130,7 @@ function mergeManagedPromptTags(visualPrompt, hasVisibleTextIntent) {
 
     for (const part of promptParts) {
         const normalized = normalizePromptTag(part);
-        if (MANAGED_PROMPT_TAGS.has(normalized)) {
+        if (managedTags.has(normalized)) {
             if (normalized === NO_TEXT_TAG && hasVisibleTextIntent) continue;
             if (seenManagedTags.has(normalized)) continue;
             seenManagedTags.add(normalized);
@@ -117,9 +138,11 @@ function mergeManagedPromptTags(visualPrompt, hasVisibleTextIntent) {
         mergedParts.push(part);
     }
 
-    for (const tag of QUALITY_TAGS) {
-        if (seenManagedTags.has(tag)) continue;
-        seenManagedTags.add(tag);
+    for (const tag of qualityTags) {
+        const normalized = normalizePromptTag(tag);
+        if (normalized === NO_TEXT_TAG && hasVisibleTextIntent) continue;
+        if (seenManagedTags.has(normalized)) continue;
+        seenManagedTags.add(normalized);
         mergedParts.push(tag);
     }
     if (!hasVisibleTextIntent && !seenManagedTags.has(NO_TEXT_TAG)) {
@@ -129,7 +152,7 @@ function mergeManagedPromptTags(visualPrompt, hasVisibleTextIntent) {
     return mergedParts.join(", ");
 }
 
-export function appendNaiQualityTags(prompt) {
+export function appendNaiQualityTags(prompt, quality = DEFAULT_QUALITY) {
     const input = String(prompt || "").trim();
     const textBlockIndex = input.search(/\bText\s*:/i);
     const visualPrompt = (textBlockIndex >= 0
@@ -150,6 +173,7 @@ export function appendNaiQualityTags(prompt) {
     const mergedPrompt = mergeManagedPromptTags(
         visualPrompt,
         hasVisibleTextIntent,
+        parseQualityTags(resolveNaiQuality(quality)),
     );
 
     return textBlock ? `${mergedPrompt}\n${textBlock}` : mergedPrompt;
@@ -421,12 +445,13 @@ export function buildNaiImagePayload({
     prompt,
     model = DEFAULT_MODEL,
     negative = DEFAULT_NEGATIVE,
+    quality = DEFAULT_QUALITY,
     parameters = {},
     image = null,
     characters = [],
 }) {
     const profile = getNaiModelProfile(model);
-    const usePrompt = appendNaiQualityTags(prompt);
+    const usePrompt = appendNaiQualityTags(prompt, quality);
     const useNegative = negative || DEFAULT_NEGATIVE;
     const useCharacters = Array.isArray(characters) ? characters : [];
 
@@ -732,6 +757,7 @@ async function _generateImage(
 
     const requestedModel = model || config.model || DEFAULT_MODEL;
     const useNegative = negative || config.negative || DEFAULT_NEGATIVE;
+    const useQuality = resolveNaiQuality(config.quality);
     let useModel = resolveNaiModelForRequest(requestedModel, parameters);
 
     if (useModel !== requestedModel) {
@@ -744,6 +770,7 @@ async function _generateImage(
         prompt,
         model: useModel,
         negative: useNegative,
+        quality: useQuality,
         parameters,
         image,
         characters,
@@ -777,6 +804,7 @@ async function _generateImage(
                     prompt,
                     model: fallbackModel,
                     negative: useNegative,
+                    quality: useQuality,
                     parameters,
                     image,
                     characters,

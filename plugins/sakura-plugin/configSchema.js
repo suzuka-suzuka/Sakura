@@ -497,6 +497,7 @@ export const CoolSchema = z.object({
 export const NaiSchema = z.object({
     token: z.string().default('').describe('Token|#textarea'),
     model: z.string().default('nai-diffusion-4-5-full').describe('模型'),
+    quality: z.string().default('very aesthetic, masterpiece').describe('质量提示词|#textarea|默认追加到正面提示词末尾，逗号分隔；留空则不追加'),
     negative: z.string().default('nsfw, lowres, artistic error, scan artifacts, worst quality, bad quality, jpeg artifacts, multiple views, very displeasing, too many watermarks, negative space, blank page').describe('负面提示词|默认负面提示词'),
     chatDrawCount: z.number().int().min(1).max(4).default(1).describe('聊天绘图数量|一次聊天生成 1–4 张；多张拆成连续单张请求，每张生成后立即排队发送且不阻塞下一张生图'),
     chatDrawPrompt: z.string().default(`**[RP Visual Snapshot — tag only, no image-tool call]**
