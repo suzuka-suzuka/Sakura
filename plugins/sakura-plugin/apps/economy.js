@@ -110,7 +110,7 @@ export default class Economy extends plugin {
   }
 
   transactionLog = Command(/^#?(?:查)?流水(?:.*)$/i, async (e) => {
-    if (!this.checkWhitelist(e)) return false;
+    if (!this.checkEconomyGroup(e)) return false;
     const text = String(e.msg || "").replace(/\[CQ:at[^\]]+\]/g, "").trim();
     const rest = text.replace(/^#?(?:查)?流水/i, "").trim();
     if (rest && !/^(?:第)?\d+(?:页)?$/.test(rest)) {
@@ -161,12 +161,12 @@ export default class Economy extends plugin {
   });
 
   todayTransactionAnalysis = Command(/^#?今日流水分析$/i, async (e) => {
-    if (!this.checkWhitelist(e)) return false;
+    if (!this.checkEconomyGroup(e)) return false;
     return await this.sendTransactionAnalysis(e, "today");
   });
 
   weekTransactionAnalysis = Command(/^#?本周流水分析$/i, async (e) => {
-    if (!this.checkWhitelist(e)) return false;
+    if (!this.checkEconomyGroup(e)) return false;
     return await this.sendTransactionAnalysis(e, "week");
   });
 
