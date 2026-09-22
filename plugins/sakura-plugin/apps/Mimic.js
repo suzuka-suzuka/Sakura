@@ -182,7 +182,7 @@ export class Mimic extends plugin {
 
     return {
       accepted: true,
-      command: "拟态回复",
+      command: "bot对话",
       charge: shouldCharge,
       refundOnFalse: true,
     };
@@ -190,7 +190,7 @@ export class Mimic extends plugin {
 
   Mimic = OnEvent("message.group", {
     economy: {
-      command: "拟态回复",
+      command: "bot对话",
       preflight: "preflightMimic",
       refundOnFalse: true,
     },

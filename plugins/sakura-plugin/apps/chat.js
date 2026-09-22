@@ -146,7 +146,7 @@ export class AIChat extends plugin {
 
     if (matched) {
       const query = textToMatch.substring(matched.prefix.length).trim();
-      return query ? { accepted: true, command: "AI聊天", refundOnFalse: true } : false;
+      return query ? { accepted: true, command: "角色扮演", refundOnFalse: true } : false;
     }
 
     return false;
@@ -154,7 +154,7 @@ export class AIChat extends plugin {
 
   Chat = OnEvent("message", {
     economy: {
-      command: "AI聊天",
+      command: "角色扮演",
       preflight: "preflightChat",
       refundOnFalse: true,
     },

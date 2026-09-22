@@ -67,10 +67,10 @@ export const commandNames = {
     "memesPlugin.randomMemes": "随机表情包",
     "pixivSearch.getPixivByPid": "pid（P站搜图）",
     "pixivSearch.searchPixiv": "来张插画",
-    "AIChat.Chat": "AI聊天",
+    "AIChat.Chat": "角色扮演",
     "EditImage.dispatchHandler": "AI图片编辑",
     "NaiPainting.naiParams": "绘图",
-    "Mimic.Mimic": "拟态回复",
+    "Mimic.Mimic": "bot对话",
     "VoxCPMVoice.generateVoice": "语音生成",
     "pixivSearch.viewRanking": "p站排行榜",
     "pixivSearch.getRankingItem": "p站排行榜详情",
@@ -537,10 +537,10 @@ const defaultCommandCosts = [
     { command: "随机表情包", cost: 5 },
     { command: "pid（P站搜图）", cost: 5 },
     { command: "来张插画", cost: 5 },
-    { command: "AI聊天", cost: 10 },
+    { command: "角色扮演", cost: 10 },
     { command: "AI图片编辑", cost: 20 },
     { command: "绘图", cost: 30 },
-    { command: "拟态回复", cost: 10 },
+    { command: "bot对话", cost: 10 },
     { command: "语音生成", cost: 5 },
     { command: "p站排行榜", cost: 20 },
     { command: "p站排行榜详情", cost: 5 },
@@ -549,11 +549,17 @@ const defaultCommandCosts = [
 
 function migrateEconomyConfig(value) {
     if (!value || typeof value !== 'object' || !Array.isArray(value.commandCosts)) return value;
-    const hasCurrentVideoCost = value.commandCosts.some((item) => item?.command === '视频生成');
+    // 保留旧配置的消耗金额；新旧名称并存时优先使用新名称。
+    const aliases = new Map([
+        ['gv（Grok视频生成）', '视频生成'],
+        ['AI聊天', '角色扮演'],
+        ['拟态回复', 'bot对话'],
+    ]);
+    const configuredNames = new Set(value.commandCosts.map((item) => item?.command));
     const commandCosts = value.commandCosts
-        .filter((item) => !(hasCurrentVideoCost && item?.command === 'gv（Grok视频生成）'))
-        .map((item) => item?.command === 'gv（Grok视频生成）'
-            ? { ...item, command: '视频生成' }
+        .filter((item) => !(aliases.has(item?.command) && configuredNames.has(aliases.get(item.command))))
+        .map((item) => aliases.has(item?.command)
+            ? { ...item, command: aliases.get(item.command) }
             : item);
     return { ...value, commandCosts };
 }
