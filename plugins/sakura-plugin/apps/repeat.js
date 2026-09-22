@@ -21,38 +21,44 @@ export class repeatPlugin extends plugin {
   }
 
   fd = OnEvent("message.group", async (e) => {
-    const fdConfig = this.appconfig;
-    if (!fdConfig.enable) {
-      return false;
+    try {
+      const fdConfig = this.appconfig;
+      if (!fdConfig.enable) {
+        return false;
+      }
+
+      const scopeKey = this.getScopeKey(e.group_id);
+
+      if (!msg[scopeKey]) {
+        msg[scopeKey] = {
+          message: e.message,
+          times: 1,
+          lastSender: e.sender.user_id,
+        };
+        return false;
+      }
+
+      if (await this.isSameMessage(e.message, msg[scopeKey].message)) {
+        if (msg[scopeKey].lastSender === e.sender.user_id) return false;
+        msg[scopeKey].times++;
+        msg[scopeKey].lastSender = e.sender.user_id;
+
+        const rule = fdConfig.rules?.find(
+          (item) => item.repeatCount === msg[scopeKey].times,
+        );
+        if (rule) await this.runRule(e, msg[scopeKey], rule, fdConfig);
+        return false;
+      } else {
+        msg[scopeKey].message = e.message;
+        msg[scopeKey].times = 1;
+        msg[scopeKey].lastSender = e.sender.user_id;
+        return false;
+      }
+    } catch (error) {
+      logger.warn(`复读处理失败：${error?.message || error}`);
     }
-
-    const scopeKey = this.getScopeKey(e.group_id);
-
-    if (!msg[scopeKey]) {
-      msg[scopeKey] = {
-        message: e.message,
-        times: 1,
-        lastSender: e.sender.user_id,
-      };
-      return false;
-    }
-
-    if (await this.isSameMessage(e.message, msg[scopeKey].message)) {
-      if (msg[scopeKey].lastSender === e.sender.user_id) return false;
-      msg[scopeKey].times++;
-      msg[scopeKey].lastSender = e.sender.user_id;
-
-      const rule = fdConfig.rules?.find(
-        (item) => item.repeatCount === msg[scopeKey].times,
-      );
-      if (rule) await this.runRule(e, msg[scopeKey], rule, fdConfig);
-      return false;
-    } else {
-      msg[scopeKey].message = e.message;
-      msg[scopeKey].times = 1;
-      msg[scopeKey].lastSender = e.sender.user_id;
-      return false;
-    }
+    // 复读仅执行群聊互动，始终放行给后续插件。
+    return false;
   });
 
   async runRule(e, state, rule, config) {
