@@ -2,7 +2,9 @@ import {
     generateImageWithCallback,
     getQueueLength,
     getIsProcessing,
+    getNaiQuota,
 } from "../lib/nai/naiApi.js";
+import Setting from "../lib/setting.js";
 import { getImg } from "../lib/utils.js";
 import { saveVibe, getVibe, deleteVibe as removeVibe, listVibes as getAllVibes } from "../lib/nai/vibeStore.js";
 import { parseNaiCharacterPrompt } from "../lib/nai/characterPosition.js";
@@ -15,6 +17,21 @@ export class NaiPainting extends plugin {
             priority: 1135,
         });
     }
+
+    queryNaiQuota = Command(/^#?查询nai额度$/i, "master", async (e) => {
+        try {
+            const { token } = Setting.getConfig("nai", { selfId: e.self_id });
+            const quota = await getNaiQuota(token);
+            await e.reply(
+                `NAI5 剩余用量：${quota.percent}%\n` +
+                `剩余 Anlas：${quota.totalAnlas} 点` +
+                `（订阅 ${quota.subscriptionAnlas}，购买 ${quota.purchasedAnlas}）`,
+            );
+        } catch (error) {
+            await e.reply(`查询 NAI 额度失败：${error.message}`);
+        }
+        return true;
+    });
 
     addVibe = Command(/^#?添加画风\s*(.+)$/, "master", async (e) => {
         const name = e.msg.replace(/^#?添加画风\s*/, "").trim();

@@ -151,6 +151,7 @@ config/sakura-plugin/
 1. 在 `nai.token` 中填写 NovelAI token。
 2. 根据需要调整 `nai.model` 和 `nai.negative`。
 3. 使用 `#绘图 提示词`。
+4. 主人发送 `查询nai额度`，可同时查看 NAI5 剩余用量与剩余 Anlas 点数（使用当前绘图账号的 `nai.token`）。
 
 ### VoxCPM 语音
 

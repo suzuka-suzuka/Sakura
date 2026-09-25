@@ -232,6 +232,51 @@ function createUsageLimitError(
     return error;
 }
 
+export async function getNaiQuota(token, { fetchImpl = global.fetch } = {}) {
+    if (!token) throw new Error("当前绘图配置中未设置 NovelAI Token");
+    if (typeof fetchImpl !== "function") throw new Error("无法请求 NovelAI 额度接口");
+
+    let response;
+    try {
+        response = await fetchImpl(NAI_SUBSCRIPTION_URL, {
+            headers: {
+                Accept: "application/json",
+                Authorization: `Bearer ${token}`,
+            },
+            signal: AbortSignal.timeout(20_000),
+        });
+    } catch {
+        throw new Error("NovelAI 额度查询请求失败");
+    }
+    if (!response.ok) {
+        throw new Error(`NovelAI 额度查询失败（HTTP ${response.status}）`);
+    }
+
+    let subscription;
+    try {
+        subscription = await response.json();
+    } catch {
+        throw new Error("NovelAI 额度接口返回异常");
+    }
+
+    const usage = subscription?.usage;
+    const steps = subscription?.trainingStepsLeft;
+    const percent = usage?.percent;
+    const subscriptionAnlas = steps?.fixedTrainingStepsLeft;
+    const purchasedAnlas = steps?.purchasedTrainingSteps;
+    if (!Number.isFinite(percent) || !Number.isFinite(subscriptionAnlas) ||
+        !Number.isFinite(purchasedAnlas)) {
+        throw new Error("NovelAI 未返回完整的额度数据");
+    }
+
+    return {
+        percent: usage.isNegative ? 0 : Math.max(0, Math.min(100, percent)),
+        subscriptionAnlas,
+        purchasedAnlas,
+        totalAnlas: subscriptionAnlas + purchasedAnlas,
+    };
+}
+
 export async function checkNaiUsageLimit(
     token,
     {
