@@ -75,6 +75,8 @@ export class FishingSessionStore {
       phase: FISHING_PHASE.starting,
       processing: false,
       settled: false,
+      bossAttackProcessing: false,
+      pendingBossAction: null,
       ...values,
     };
     this.sessions.set(normalizedKey, session);
@@ -99,11 +101,34 @@ export class FishingSessionStore {
     return false;
   }
 
+  queueBossAction(key, sessionId, event) {
+    const session = this.get(key);
+    if (!session || session.id !== sessionId || !session.processing ||
+        !session.bossAttackProcessing || session.pendingBossAction || session.settled ||
+        session.phase !== FISHING_PHASE.fighting) {
+      return false;
+    }
+    session.pendingBossAction = event;
+    return true;
+  }
+
+  takePendingBossAction(key, sessionId) {
+    const session = this.get(key);
+    if (!session || session.id !== sessionId || session.processing || session.settled ||
+        session.phase !== FISHING_PHASE.fighting) {
+      return null;
+    }
+    const event = session.pendingBossAction;
+    session.pendingBossAction = null;
+    return event;
+  }
+
   beginSettlement(key, sessionId) {
     const session = this.get(key);
     if (!session || session.id !== sessionId || session.settled) return false;
     session.settled = true;
     session.phase = FISHING_PHASE.settling;
+    session.pendingBossAction = null;
     return true;
   }
 
@@ -111,6 +136,8 @@ export class FishingSessionStore {
     const normalizedKey = String(key);
     const session = this.sessions.get(normalizedKey);
     if (!session || (sessionId && session.id !== sessionId)) return null;
+
+    session.pendingBossAction = null;
 
     for (const timerName of [
       "waitingTimer",

@@ -9,6 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
+import { eventStorage } from "../../../src/core/plugin.js";
 import { pluginresources } from "../lib/path.js";
 import Setting from "../lib/setting.js";
 import FishingSettlementService from "../lib/fishing/SettlementService.js";
@@ -481,12 +482,15 @@ export default class Fishing extends plugin {
         return;
       }
 
+      currentState.bossAttackProcessing = true;
       try {
         await this.executeBossAttack(e, currentState);
       } catch (err) {
         logger.error(`[钓鱼] 首领攻击结算失败: ${err.stack || err}`);
       } finally {
+        currentState.bossAttackProcessing = false;
         fishingSessions.releaseAction(stateKey, sessionId);
+        await this.runPendingBossAction(stateKey, sessionId);
         const latestState = fishingSessions.get(stateKey);
         if (
           latestState?.id === sessionId &&
@@ -499,6 +503,17 @@ export default class Fishing extends plugin {
       }
     }, Math.max(1, Number(delayMs) || BOSS_ATTACK_INTERVAL_MS));
     return true;
+  }
+
+  async runPendingBossAction(stateKey, sessionId) {
+    const pendingEvent = fishingSessions.takePendingBossAction(stateKey, sessionId);
+    if (!pendingEvent) return;
+    try {
+      // 沿用原消息的事件上下文，让回复、会话计时和结算都归属这次操作。
+      await eventStorage.run(pendingEvent, () => this.handleFishing(pendingEvent));
+    } catch (err) {
+      logger.error(`[钓鱼] 处理暂存的首领战指令失败: ${err.stack || err}`);
+    }
   }
 
   async executeBossAttack(e, state) {
@@ -1199,8 +1214,7 @@ export default class Fishing extends plugin {
   });
 
 
-  async handleFishing() {
-    const e = this.e;
+  async handleFishing(e = this.e) {
     const groupId = e.group_id;
     const userId = e.user_id;
     const msg = e.msg?.trim();
@@ -1218,11 +1232,12 @@ export default class Fishing extends plugin {
     if (!fishingSessions.claimAction(stateKey, state.id)) {
       if (
         state.processing &&
+        state.bossAttackProcessing &&
         !state.settled &&
         state.phase === FISHING_PHASE.fighting &&
         isBossFish(state.fish)
       ) {
-        await e.reply("⏳ 首领正在结算反击，这条指令没有被消耗，请立即重发一次。", 5);
+        fishingSessions.queueBossAction(stateKey, state.id, e);
       }
       return;
     }
