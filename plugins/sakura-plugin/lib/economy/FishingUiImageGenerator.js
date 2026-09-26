@@ -386,10 +386,8 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
     if (item.durability) {
       const current = Math.max(0, Math.floor(toFiniteNumber(item.durability.current)))
       const max = Math.max(0, Math.floor(toFiniteNumber(item.durability.max)))
-      const controlLoss = Math.max(0, toFiniteNumber(item.control?.loss))
       return [
         `耐久 ${current}/${max}`,
-        item.kind === "rod" && controlLoss > 0 ? "状态 竿身暗伤" : "",
         item.kind === "rod" ? `熟练度 ${Math.max(0, Math.floor(toFiniteNumber(item.mastery)))}` : "",
       ].filter(Boolean)
     }

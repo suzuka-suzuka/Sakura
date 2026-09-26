@@ -1,30 +1,20 @@
+import { simulateBossScenario } from "../plugins/sakura-plugin/scripts/fishing-boss-balance.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
 
 import {
-  BOSS_ATTACK_INTERVAL_MS,
-  BOSS_PLAYER_ATTACK_COOLDOWN_MS,
   FISH_FIGHT_STATE,
   FISHING_LOCATIONS,
   FORCE_PULL_DIFFICULTY_RANGE,
   LOCAL_NIGHTMARE_CHANCE,
   NORMAL_TUG_SUCCESS_MULTIPLIER,
   WEATHER_CONFIG,
-  calculateBossLineDurability,
   calculateEffectiveFishWeight,
   calculateLegacyFishPrice,
   calculateNormalTugActionEffects,
-  getBossFightTimeoutMs,
-  getFishFightStateChangeDelay,
-  getFishingStaminaCost,
-  getFishingStaminaMax,
   getRarityPoolByBaitQuality,
-  resolveBossAttack,
-  rollBossPlayerDamage,
-  rollNormalTugPressure,
-  selectNextFishFightState,
 } from "../plugins/sakura-plugin/lib/fishing/rules.js";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -778,121 +768,8 @@ export function formatPercent(value) {
   return `${(Number(value) * 100).toFixed(2)}%`;
 }
 
-function createSeededRandom(seed) {
-  let value = seed >>> 0;
-  return () => {
-    value = (Math.imul(value, 1664525) + 1013904223) >>> 0;
-    return value / 0x100000000;
-  };
-}
-
-export function simulateBossWinRate({
-  boss,
-  effectiveControl,
-  lineCapacity,
-  rodDurability,
-  iterations = 20_000,
-  seed = 1,
-}) {
-  const random = createSeededRandom(seed);
-  let victories = 0;
-
-  for (let run = 0; run < iterations; run += 1) {
-    // 本场线耐久挂「承重 − 首领体重」的余量，所以每场都要先摇定首领重量。
-    const [minWeight, maxWeight] = boss.weight;
-    const actualWeight = Math.round(
-      (minWeight + (maxWeight - minWeight) * random()) * 100,
-    ) / 100;
-    let bossHp = boss.hp;
-    let distance = 50;
-    let tension = 50;
-    let lineDurability = calculateBossLineDurability(lineCapacity, actualWeight);
-    let currentRodDurability = rodDurability;
-    // 吞舟重撞的暗伤当场生效，会一路削低有效控制力。
-    let rodScar = 0;
-    let attackRound = 0;
-    const controlNow = () => Math.max(0, effectiveControl - rodScar);
-    let stamina = getFishingStaminaMax(1) - getFishingStaminaCost();
-    let fishState = FISH_FIGHT_STATE.calm;
-    let nextStateChangeAt = getFishFightStateChangeDelay(random);
-    let lastPlayerAttackAt = -BOSS_PLAYER_ATTACK_COOLDOWN_MS;
-    const pressure = rollNormalTugPressure(random);
-    let won = false;
-
-    for (let now = 0; now < getBossFightTimeoutMs(boss); now += 1000) {
-      while (now >= nextStateChangeAt) {
-        fishState = selectNextFishFightState(fishState, random);
-        nextStateChangeAt += getFishFightStateChangeDelay(random);
-      }
-
-      if (now > 0 && now % BOSS_ATTACK_INTERVAL_MS === 0 && bossHp > 0) {
-        attackRound += 1;
-        const attack = resolveBossAttack(boss, random, { tension, attackRound });
-        lineDurability -= attack.lineDamage;
-        currentRodDurability -= attack.rodDamage;
-        rodScar += attack.rodControlLoss;
-        distance = Math.min(100, distance + attack.distanceGain);
-        tension = Math.min(100, tension + attack.tensionGain);
-        stamina -= attack.staminaDrain;
-        bossHp = Math.min(boss.hp, bossHp + attack.heal);
-        if (
-          lineDurability <= 0 ||
-          currentRodDurability <= 0 ||
-          distance >= 100 ||
-          tension >= 100 ||
-          stamina <= 0
-        ) {
-          break;
-        }
-      }
-
-      if (bossHp > 0 && now - lastPlayerAttackAt >= BOSS_PLAYER_ATTACK_COOLDOWN_MS) {
-        bossHp = Math.max(0, bossHp - rollBossPlayerDamage(controlNow(), random));
-        lastPlayerAttackAt = now;
-        if (bossHp <= 0 && distance <= 0) won = true;
-        if (won) break;
-        continue;
-      }
-
-      const pull = calculateNormalTugActionEffects({
-        fishDifficulty: boss.difficulty,
-        effectiveControl: controlNow(),
-        pressure,
-        stateId: fishState,
-        action: "pull",
-      });
-      const loosen = calculateNormalTugActionEffects({
-        fishDifficulty: boss.difficulty,
-        effectiveControl: controlNow(),
-        pressure,
-        stateId: fishState,
-        action: "loosen",
-      });
-      const shouldLoosen = (
-        tension + pull.tensionEffect >= 88 &&
-        distance + loosen.distanceEffect < 96
-      );
-      if (shouldLoosen) {
-        tension = Math.max(0, tension - loosen.tensionEffect);
-        distance += loosen.distanceEffect;
-      } else {
-        distance -= pull.distanceEffect;
-        tension += pull.tensionEffect;
-      }
-
-      if (tension >= 100 || distance >= 100) break;
-      if (distance <= 0) {
-        if (bossHp > 0) distance = 5;
-        else {
-          won = true;
-          break;
-        }
-      }
-    }
-
-    if (won) victories += 1;
-  }
-  return victories / iterations;
+export function simulateBossWinRate({ boss, baseControl = 190, mastery = 0, lineCapacity, rodDurability, iterations = 20_000, seed = 1 }) {
+  return simulateBossScenario({ boss, rod: { control: baseControl, durability: rodDurability }, mastery, lineCapacity, iterations, seed }).winRate;
 }
 
 export function createBossBalanceReport(fishData, shop) {
@@ -906,7 +783,7 @@ export function createBossBalanceReport(fishData, shop) {
       location: boss.locations[0],
       winRate: simulateBossWinRate({
         boss,
-        effectiveControl: legendaryRod.control,
+        baseControl: legendaryRod.control,
         lineCapacity: mythrilLine.capacity,
         rodDurability: legendaryRod.durability,
         seed: 0x5a17 + index * 0x10000,

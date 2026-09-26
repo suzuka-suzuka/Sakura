@@ -12,8 +12,8 @@ categories:
         type: buff
         convertible: true
         duration: 2100
-        description: 使用后35分钟内，钓鱼必定上钩。
-        activation_message: "🍀 好运护符已激活！\n🎣 接下来35分钟内，钓鱼必定上钩！"
+        description: 使用后35分钟内，非首领渔获通过收竿命中判定后可直接钓起；致盲仍可能导致空钩。
+        activation_message: "🍀 好运护符已激活！\n🎣 接下来35分钟内，非首领渔获通过收竿命中判定后可直接钓起！\n🌫️ 致盲仍可能导致空钩。"
 
       - id: item_toolkit_repair
         name: 修理工具箱
@@ -21,7 +21,7 @@ categories:
         type: consumable
         convertible: true
         instant_effect: repair_rod
-        description: 完全修复当前鱼竿的耐久与暗伤，并解除深压回响造成的控制力减益。
+        description: 完全修复当前鱼竿的耐久，并解除深压回响造成的控制力减益。
 
       - id: item_holy_water
         name: 净化圣水
@@ -29,7 +29,7 @@ categories:
         type: consumable
         convertible: true
         instant_effect: clear_debuffs
-        description: 清除骷髅诅咒、花嫁印记、亡者高利贷（含抽成印记）与深压诅咒等负面状态。
+        description: 清除骷髅诅咒、花嫁印记、亡者高利贷（含抽成印记）、深压回响和全部致盲。
 
       - id: item_sand_time
         name: 时之沙

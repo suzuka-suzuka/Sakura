@@ -2325,8 +2325,8 @@
     "base_price": 0,
     "difficulty": 90,
     "nightmare_effect": {
-      "type": "rod_control_loss",
-      "control_loss": 20
+      "type": "rod_damage_percent",
+      "ratio": 0.2
     },
     "weight": [
       77,
@@ -2467,8 +2467,7 @@
     "base_price": 0,
     "difficulty": 70,
     "nightmare_effect": {
-      "type": "stamina_crush",
-      "forced_stamina": 1
+      "type": "blindness"
     },
     "weight": [
       23,
@@ -4851,7 +4850,7 @@
     "rarity": "传说",
     "description": "吞食了百年落樱的池塘霸主，鳞片开合时会喷出令人脱力的绯色瘴气。",
     "base_price": 800,
-    "difficulty": 225,
+    "difficulty": 215,
     "weight": [
       170,
       210
@@ -4862,10 +4861,13 @@
     "boss_exp": 200,
     "reward_chest_id": "chest_pond",
     "boss_mechanic": {
-      "type": "stamina_drain",
+      "type": "distance_damage",
       "name": "樱瘴汲取",
-      "amount": 1,
-      "description": "每次首领攻击额外抽走1点体力；体力归零时挑战失败。"
+      "near_distance": 30,
+      "far_distance": 60,
+      "mid_multiplier": 1.5,
+      "far_multiplier": 2,
+      "description": "距离越远，反击对鱼竿的损伤越高：距离不超过30时损2点，超过30时损3点，超过60时损4点。不改变玩家攻击伤害。"
     },
     "locations": [
       "pond"
@@ -4878,7 +4880,7 @@
     "rarity": "传说",
     "description": "盘踞河湾的水猿之王，一只手拽线，另一只手总能摸到钓客的钱袋。",
     "base_price": 800,
-    "difficulty": 225,
+    "difficulty": 215,
     "weight": [
       170,
       210
@@ -4893,8 +4895,8 @@
       "name": "探囊鬼手",
       "min": 0,
       "max": 50,
-      "broke_rod_damage": 20,
-      "description": "每次首领攻击摸走0～50樱花币，余额不足50时一次掏空；一旦身无分文，它便改为每次重砸鱼竿20点耐久——兜里没钱就别来。"
+      "broke_rod_damage": 8,
+      "description": "每次首领攻击摸走0～50樱花币，余额不足50时一次掏空；一旦身无分文，它便改为每次重砸鱼竿8点耐久。"
     },
     "locations": [
       "river"
@@ -4907,7 +4909,7 @@
     "rarity": "传说",
     "description": "龟甲上背着一整片浓雾，猛然翻身时连方向感和鱼线张力都会一同失控。",
     "base_price": 800,
-    "difficulty": 225,
+    "difficulty": 215,
     "weight": [
       170,
       210
@@ -4934,7 +4936,7 @@
     "rarity": "传说",
     "description": "随着落日赤潮巡游的锯鲨皇，锯齿吻能像割草一样反复切削鱼线。",
     "base_price": 800,
-    "difficulty": 225,
+    "difficulty": 215,
     "weight": [
       170,
       210
@@ -4945,10 +4947,14 @@
     "boss_exp": 200,
     "reward_chest_id": "chest_coast",
     "boss_mechanic": {
-      "type": "line_rend",
+      "type": "tension_rod_damage",
       "name": "赤潮锯刑",
-      "tension_scale": 2,
-      "description": "锯齿咬住绷紧的鱼线：张力越高，本场鱼线耐久伤害越重（张力50约8点、张力85约11点），耐久归零会立即断线。"
+      "mid_tension": 40,
+      "high_tension": 80,
+      "low_damage": 2,
+      "mid_damage": 3,
+      "high_damage": 4,
+      "description": "锯齿沿绷紧的鱼线震伤竿身：命中前张力低于40时竿损2点，40～79时3点，80及以上时4点；可提前用“溜”卸力。张力达到100仍会断线。"
     },
     "locations": [
       "coast"
@@ -4961,7 +4967,7 @@
     "rarity": "传说",
     "description": "能把沉船连同海水一起吞下的深渊巨口，高压水域中的搏斗必须速战速决。",
     "base_price": 800,
-    "difficulty": 225,
+    "difficulty": 215,
     "weight": [
       170,
       210
@@ -4974,11 +4980,10 @@
     "boss_mechanic": {
       "type": "rod_crush",
       "name": "吞舟重撞",
-      "multiplier": 3,
-      "scar_ramp_after": 6,
-      "scar_early": 1,
-      "scar_late": 2,
-      "description": "每次重撞对鱼竿造成3倍持久伤害，耐久不足的鱼竿会当场被撞断并永久损失；同时在竿身留下难以察觉的暗伤——它当场就在拖低你的控制力。"
+      "initial_damage": 1,
+      "damage_step": 1,
+      "max_damage": 5,
+      "description": "本场每次反击的鱼竿损伤递增：1、2、3、4、5点，之后维持5点；耐久耗尽会断竿。"
     },
     "locations": [
       "abyss"
@@ -4991,7 +4996,7 @@
     "rarity": "传说",
     "description": "沉睡在星河尽头的古龙，伤口会吸收坠落的星辉，在战斗中不断弥合。",
     "base_price": 800,
-    "difficulty": 225,
+    "difficulty": 215,
     "weight": [
       170,
       210
@@ -5004,8 +5009,8 @@
     "boss_mechanic": {
       "type": "regenerate",
       "name": "星髓再生",
-      "amount": 8,
-      "description": "每次首领攻击后为自身恢复8点生命，输出不足将永远耗不死它。"
+      "amount": 6,
+      "description": "每次首领攻击后为自身恢复6点生命，需要持续攻击压过再生。"
     },
     "locations": [
       "mystic"

@@ -977,11 +977,11 @@ async function generateBossGuide() {
     },
     {
       title: "2 · 通过重量判定",
-      text: "下一竿必定呼出当地首领。咬钩后先回复「收竿」，鱼线承重仍需过关。",
+      text: "下一竿必定呼出当地首领。回复「收竿」后先判致盲命中，再判鱼线承重。",
     },
     {
       title: "3 · 60 秒战斗",
-      text: "「拉」拉近距离并升张力；「溜」降张力但拉远；「攻」每 5 秒一次。",
+      text: "「拉」拉近距离并升张力；「溜」降张力但拉远；「攻」冷却 4 秒。",
     },
     {
       title: "4 · 双条件收尾",
@@ -1010,7 +1010,7 @@ async function generateBossGuide() {
 
   drawSectionTitle(ctx, "战斗共通规则", 96, 988, WIDTH - 192, {
     color: PALETTE.blue,
-    subtitle: "鱼线耐久仅存在于本场，战斗结束后不保留",
+    subtitle: "控制张力避免断线，鱼竿损伤会影响后续战斗",
   });
   drawPanel(ctx, 96, 1068, WIDTH - 192, 410, {
     fill: "rgba(248, 250, 253, 0.94)",
@@ -1023,7 +1023,7 @@ async function generateBossGuide() {
       ["溜", "降低张力、增加距离；用来避免张力达到 100 断线。"],
     ],
     [
-      ["临时鱼线耐久", "按承重余量生成（承重越接近首领体重越薄）；打到 0 会立即断线。"],
+      ["鱼线承重", "收竿时判定是否承受鱼重；战斗中张力达到100仍会断线。"],
       ["失败条件", "60 秒超时、鱼线断裂、距离回到 100，或鱼竿损毁。"],
       ["首领反击", "每 5 秒自动发生；击倒首领后停止继续反击。"],
     ],
@@ -1103,9 +1103,9 @@ const NIGHTMARE_TEXT = Object.freeze({
     effect: "鱼竿耐久直接损耗 20 点。",
     counter: "事后用修理工具箱恢复；预防只能靠完整免疫。",
   },
-  rod_control_loss: {
-    effect: "当前鱼竿留下暗伤，控制力永久 -20；严重时鱼竿会断。",
-    counter: "修理工具箱可恢复暗伤与耐久。",
+  rod_damage_percent: {
+    effect: "损失鱼竿最大耐久的20%（向上取整），耗尽时直接断竿。",
+    counter: "工具箱修复耐久；完整噩梦免疫可挡下损伤与断线。",
   },
   steal_coins_flat: {
     effect: "偷走 1～200 樱花币；身无分文时改为鱼竿 -20 耐久。",
@@ -1127,9 +1127,9 @@ const NIGHTMARE_TEXT = Object.freeze({
     effect: "偷走背包里价值最高的鱼饵 ×1；没鱼饵时改为鱼竿 -20 耐久。",
     counter: "提前整理鱼饵只能降损；完整免疫可彻底挡下。",
   },
-  stamina_crush: {
-    effect: "按当前体力等额反噬鱼竿，不封顶；并把钓鱼体力强制压到 1。",
-    counter: "低体力可降低竿损；工具箱负责修竿。",
+  blindness: {
+    effect: "致盲增加1层；此后收竿命中率为0.9的层数次方，失手则空钩。",
+    counter: "净化圣水清除全部致盲；好运护符不跳过空钩判定。",
   },
   ghost_debt: {
     effect: `先给 200 币并欠 200；渔获先抵债，每竿未清部分 ×${GHOST_DEBT_INTEREST_RATE}，到 ${GHOST_DEBT_WRITE_OFF_THRESHOLD} 后改为永久 -${Math.round(GHOST_DEBT_MARK_PENALTY_RATE * 100)}% 垂钓收益。`,
@@ -1262,8 +1262,8 @@ async function generateNightmareGuide() {
     ["1 · 雾灯", "35 分钟内个人天气固定为雾，宝藏权重×2、噩梦×0.5、垃圾归零；只降低遭遇率，钓上来照样生效。"],
     ["2 · 深渊猎手", "充能触发时，噩梦伤害、偷取、状态与断线全部免疫；1级最多1次/24小时，2级最多2次/12小时恢复1次。"],
     ["3 · 河神垂青", "只保住鱼线并给予折现奖励，噩梦本体效果照常生效。"],
-    ["4 · 净化圣水", "清诅咒、花嫁印记、亡者债务/抽成印记与深压；不修鱼竿暗伤。"],
-    ["5 · 修理工具箱", "修满耐久、修复鱼竿暗伤，并清除全部深压；不清花嫁、诅咒或债务。"],
+    ["4 · 净化圣水", "清诅咒、花嫁印记、亡者债务/抽成印记、深压与致盲。"],
+    ["5 · 修理工具箱", "修满鱼竿耐久，并清除全部深压；不清花嫁、诅咒或债务。"],
   ];
   for (const [index, [label, text]] of counters.entries()) {
     const column = index % 2;
@@ -1288,9 +1288,9 @@ async function generateNightmareGuide() {
 }
 
 const ITEM_GUIDE_TEXT = Object.freeze({
-  item_charm_lucky: "35分钟内必定上钩，可跳过普通渔获的重量与难度判定；仍需5秒内操作才算完美收竿。",
-  item_toolkit_repair: "立即修满当前鱼竿耐久、修复鱼竿暗伤，并清除全部深压回响。",
-  item_holy_water: "立即清除骷髅诅咒、花嫁印记、亡者债务/抽成印记与深压回响。",
+  item_charm_lucky: "35分钟内，非首领渔获命中后跳过重量与难度判定；致盲仍可能空钩，完美收竿仍需5秒内操作。",
+  item_toolkit_repair: "立即修满当前鱼竿耐久，并清除全部深压回响。",
+  item_holy_water: "立即清除骷髅诅咒、花嫁印记、亡者债务/抽成印记、深压回响与致盲。",
   item_sand_time: "35分钟内把每竿钓鱼冷却从5分钟缩短到2分30秒。",
   bait_boss: "宝箱非卖品。装备后下一竿必定呼出当前钓点首领；每次消耗1个。",
   torpedo: `每个钓点各限埋1枚。被别人钓中：鱼竿-${TORPEDO_ROD_DAMAGE}、断线，钓点鱼价35分钟×${TORPEDO_PRICE_BOOST_MULTIPLIER}；满${Math.round(TORPEDO_ARM_DURATION_MS / 3600000)}小时可自爆，获得当地随机${TORPEDO_BLAST_CATCH_COUNT}条鱼并使鱼价×${TORPEDO_DETONATE_PRICE_MULTIPLIER}。`,

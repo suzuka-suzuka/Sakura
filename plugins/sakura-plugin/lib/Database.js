@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { plugindata } from './path.js';
+import { clearLegacyRodControlLoss } from '../scripts/clear-legacy-rod-control-loss.mjs';
 
 const KOI_WISH_ITEM_ID = 'item_sign_koi';
 const LEGACY_KOI_WISH_INVENTORY_ITEMS = Object.freeze([
@@ -151,6 +152,7 @@ class DB {
         ghost_debt INTEGER DEFAULT 0,
         ghost_debt_mark INTEGER DEFAULT 0,
         deep_pressure_layers INTEGER DEFAULT 0,
+        blindness_layers INTEGER DEFAULT 0,
         nightmare_immunity_charges INTEGER DEFAULT 0,
         nightmare_immunity_updated_at INTEGER DEFAULT 0,
         koi_wish INTEGER DEFAULT 0,
@@ -189,7 +191,6 @@ class DB {
         rod_id TEXT NOT NULL,
         damage INTEGER DEFAULT 0,
         mastery INTEGER DEFAULT 0,
-        control_loss INTEGER DEFAULT 0,
         PRIMARY KEY (group_id, user_id, rod_id)
       );
 
@@ -307,6 +308,9 @@ class DB {
     if (!fishingStatsColumns.some((column) => column.name === 'deep_pressure_layers')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN deep_pressure_layers INTEGER DEFAULT 0');
     }
+    if (!fishingStatsColumns.some((column) => column.name === 'blindness_layers')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN blindness_layers INTEGER DEFAULT 0');
+    }
     if (!fishingStatsColumns.some((column) => column.name === 'nightmare_immunity_charges')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN nightmare_immunity_charges INTEGER DEFAULT 0');
     }
@@ -339,10 +343,8 @@ class DB {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN location TEXT');
     }
 
-    const rodStatsColumns = this.db.prepare('PRAGMA table_info(rod_stats)').all();
-    if (!rodStatsColumns.some((column) => column.name === 'control_loss')) {
-      this.db.exec('ALTER TABLE rod_stats ADD COLUMN control_loss INTEGER DEFAULT 0');
-    }
+    // 旧暗伤不折算成耐久，启动时直接删除整列及其数据。
+    clearLegacyRodControlLoss(this.db);
 
     const torpedoColumns = this.db.prepare('PRAGMA table_info(pond_torpedoes)').all();
     if (!torpedoColumns.some((column) => column.name === 'location')) {

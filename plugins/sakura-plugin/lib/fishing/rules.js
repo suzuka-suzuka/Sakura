@@ -55,37 +55,29 @@ export const BOSS_ATTACK_INTERVAL_MS = 5000;
 // 行动预算刚好被冷却填满，攻/拉/溜之间没有取舍。4:5 不整除，攻击窗口相对反击持续漂移。
 export const BOSS_PLAYER_ATTACK_COOLDOWN_MS = 4000;
 export const BOSS_FIGHT_TIMEOUT_MS = 60 * 1000;
-// 首领困难度按「顶级鱼竿 + 熟练度加成 +10 → 溜鱼通过率 100%」反推：190 + 10 + 25。
-// 控制力每 +5 抬 20 个百分点；熟练度按 getMasteryControlBonus 折半，+10 对应熟练度 20。
-export const BOSS_MIN_DIFFICULTY = 225;
-export const BOSS_MASTERY_FOR_FULL_CONTROL = 10;
+// 六名首领共用同一拉距门槛；为满传说竿、熟练20的战中损耗预留余量。
+// 该基准必须通过全胜验收，强度差异由反击机制体现。
+export const BOSS_BASE_DIFFICULTY = 215;
+export const BOSS_PLAYER_CONTROL_DAMAGE_DIVISOR = 6;
 export const BOSS_MIN_HP = 150;
 export const BOSS_MIN_ATTACK = 8;
 // 首领售价 = base ×(FLOOR + 重量进度 × RANGE)，即 0.75～1.25 倍，比常规鱼的 0.5～1.5 倍窄一半。
 export const BOSS_PRICE_WEIGHT_FLOOR = 0.75;
 export const BOSS_PRICE_WEIGHT_RANGE = 0.5;
-// 本场鱼线耐久 = 承重的 30% 打底 + 超出首领体重的富余承重。挂余量而不是挂承重，
-// 是为了让「线越勉强越容易断」成立：秘银线打 190 公斤剩 83 点，打满 210 公斤只剩 63 点。
-export const BOSS_LINE_BASE_DURABILITY_RATIO = 0.3;
-// 赤潮锯刑：线绷得越紧锯齿咬得越深，伤害随当前张力放大 1 + 张力/100 × 该系数。
-export const BOSS_LINE_REND_TENSION_SCALE = 2;
 // 探囊鬼手：偷的是钱包余额而不是战利品——扣战利品的话失败一场等于零损耗。
 // 余额不足一次偷取上限时直接掏空；身无分文则改砸鱼竿，于是它成了唯一一个
 // 「兜里得有钱才打得过」的首领：11 次攻击最多偷走 550，垫够这个数就绝不会被砸竿。
 export const BOSS_COIN_STEAL_MAX = 50;
-export const BOSS_STEAL_BROKE_ROD_DAMAGE = 20;
-// 吞舟重撞：鱼竿伤害走固定倍率而不是当前耐久的比例——按比例扣的话竿越破挨得越轻，
-// 带残竿挑战反而更安全，不合常理。固定值则相反：耐久不够的竿会当场被打断。
-export const BOSS_ROD_CRUSH_ROD_MULTIPLIER = 3;
-// 同时留下当场生效的永久暗伤：前几击轻、之后加重，越拖越难打。
-export const BOSS_ROD_CRUSH_SCAR_RAMP_AFTER = 6;
-export const BOSS_ROD_CRUSH_SCAR_EARLY = 1;
-export const BOSS_ROD_CRUSH_SCAR_LATE = 2;
+export const BOSS_STEAL_BROKE_ROD_DAMAGE = 8;
+// 吞舟重撞按本场反击次数递增耐久伤害，上限约束长战斗的损耗。
+export const BOSS_ROD_CRUSH_INITIAL_DAMAGE = 1;
+export const BOSS_ROD_CRUSH_DAMAGE_STEP = 1;
+export const BOSS_ROD_CRUSH_MAX_DAMAGE = 5;
 export const BOSS_MECHANIC_TYPES = Object.freeze([
-  "stamina_drain",
+  "distance_damage",
   "steal_coins",
   "tension_surge",
-  "line_rend",
+  "tension_rod_damage",
   "rod_crush",
   "regenerate",
 ]);
@@ -96,15 +88,31 @@ export function deepPressureMultiplierFromLayers(layers) {
   const safeLayers = Math.max(0, Math.floor(Number(layers) || 0));
   return DEEP_PRESSURE_CONTROL_FACTOR ** safeLayers;
 }
+export const BLIND_REEL_HIT_FACTOR = 0.9;
+
+export function getBlindReelHitRate(layers) {
+  return BLIND_REEL_HIT_FACTOR ** Math.max(0, Math.floor(Number(layers) || 0));
+}
+
+export function calculateRodDurabilityControl(baseControl, currentDurability, maxDurability) {
+  const maximum = Math.max(0, Number(maxDurability) || 0);
+  if (maximum <= 0) return 0;
+  const ratio = Math.max(0, Math.min(1, (Number(currentDurability) || 0) / maximum));
+  return Math.max(0, Number(baseControl) || 0) * ratio;
+}
+
+export function calculateRodPercentDamage(maxDurability, ratio) {
+  return Math.ceil(Math.max(0, Number(maxDurability) || 0) * Math.max(0, Number(ratio) || 0));
+}
 export const NIGHTMARE_EFFECT_TYPES = Object.freeze([
   "rod_damage",
-  "rod_control_loss",
+  "rod_damage_percent",
   "steal_coins_flat",
   "steal_coins_percent",
   "curse",
   "nightmare_weight_multiplier",
   "steal_bait",
-  "stamina_crush",
+  "blindness",
   "ghost_debt",
   "deep_pressure",
   "devour_inventory",
@@ -112,7 +120,7 @@ export const NIGHTMARE_EFFECT_TYPES = Object.freeze([
 export const LOCAL_NIGHTMARE_EFFECT_BY_LOCATION = Object.freeze({
   pond: "nightmare_weight_multiplier",
   river: "steal_bait",
-  lake: "stamina_crush",
+  lake: "blindness",
   coast: "ghost_debt",
   abyss: "deep_pressure",
   mystic: "devour_inventory",
@@ -230,72 +238,10 @@ export function selectBossFromData(
   };
 }
 
-export function calculateBossLineDurability(lineCapacity, bossWeight = 0) {
-  const capacity = Math.max(0, Number(lineCapacity) || 0);
-  const weight = Math.max(0, Number(bossWeight) || 0);
-  return Math.max(1, Math.round(
-    capacity * BOSS_LINE_BASE_DURABILITY_RATIO + Math.max(0, capacity - weight),
-  ));
-}
-
-// Boss 鱼线耐久只存在于当前战斗，会话结束后不写入玩家数据。
-export function resolveBossLineDamage({
-  currentDurability,
-  maxDurability,
-  damage,
-  protectFromBreak = false,
-} = {}) {
-  const safeMax = Math.max(1, Math.floor(Number(maxDurability) || 1));
-  const safeCurrent = Math.max(
-    0,
-    Math.min(safeMax, Math.floor(Number(currentDurability) || 0)),
-  );
-  const safeDamage = Math.max(0, Math.floor(Number(damage) || 0));
-
-  if (safeDamage <= 0) {
-    return {
-      applied: false,
-      isBroken: safeCurrent <= 0,
-      breakPrevented: false,
-      currentDurability: safeCurrent,
-      maxDurability: safeMax,
-    };
-  }
-
-  const nextDurability = Math.max(0, safeCurrent - safeDamage);
-  if (nextDurability > 0) {
-    return {
-      applied: true,
-      isBroken: false,
-      breakPrevented: false,
-      currentDurability: nextDurability,
-      maxDurability: safeMax,
-    };
-  }
-
-  if (protectFromBreak) {
-    return {
-      applied: true,
-      isBroken: false,
-      breakPrevented: true,
-      currentDurability: 1,
-      maxDurability: safeMax,
-    };
-  }
-
-  return {
-    applied: true,
-    isBroken: true,
-    breakPrevented: false,
-    currentDurability: 0,
-    maxDurability: safeMax,
-  };
-}
-
 export function rollBossPlayerDamage(effectiveControl, random = Math.random) {
   const control = Math.max(0, Number(effectiveControl) || 0);
   const roll = Math.max(0, Math.min(0.999999999999, Number(random()) || 0));
-  return Math.max(6, Math.floor(control / 10) + 5 + Math.floor(roll * 5));
+  return Math.max(6, Math.floor(control / BOSS_PLAYER_CONTROL_DAMAGE_DIVISOR) + 5 + Math.floor(roll * 5));
 }
 
 export function getBossAttackCooldownRemaining(
@@ -310,30 +256,30 @@ export function getBossAttackCooldownRemaining(
   return Math.max(0, Math.ceil(cooldown - (current - last)));
 }
 
-// context.tension 为当前张力，赤潮锯刑按它放大鱼线伤害；context.attackRound 供吞舟重撞
-// 判断暗伤是否进入加重阶段；context.coinBalance 为玩家余额，探囊鬼手据此决定偷多少、
-// 或在身无分文时改砸鱼竿。均不传时按第 1 击、零张力、余额充足处理（保证纯函数在没有
-// 战斗状态时也能用）。
+// 按命中前的距离、张力、当前反击次数和余额结算；不改变玩家「攻」的伤害。
 export function resolveBossAttack(boss, random = Math.random, context = {}) {
   const attack = Math.max(1, Math.floor(Number(boss?.attack) || 1));
   const mechanic = boss?.boss_mechanic || {};
-  const baseGearDamage = Math.max(1, Math.ceil(attack / 2));
+  // 鱼竿损伤会降低控制力和玩家伤害；鱼线只判承重和既有断线事件。
+  const baseRodDamage = Math.max(1, Math.ceil(attack / 4));
   const result = {
-    lineDamage: baseGearDamage,
-    rodDamage: baseGearDamage,
+    rodDamage: baseRodDamage,
     distanceGain: Math.max(1, Math.floor(attack / 4)),
-    staminaDrain: 0,
     coinSteal: 0,
     stealFallback: false,
-    rodControlLoss: 0,
     tensionGain: 0,
     heal: 0,
   };
 
   switch (mechanic.type) {
-    case "stamina_drain":
-      result.staminaDrain = Math.max(1, Math.floor(Number(mechanic.amount) || 1));
+    case "distance_damage": {
+      const distance = Math.max(0, Math.min(100, Number(context.distance) || 0));
+      const multiplier = distance > mechanic.far_distance
+        ? mechanic.far_multiplier
+        : distance > mechanic.near_distance ? mechanic.mid_multiplier : 1;
+      result.rodDamage = Math.ceil(baseRodDamage * multiplier);
       break;
+    }
     case "steal_coins": {
       const balance = Number(context?.coinBalance);
       const brokeRodDamage = Number.isSafeInteger(mechanic.broke_rod_damage)
@@ -361,34 +307,19 @@ export function resolveBossAttack(boss, random = Math.random, context = {}) {
     case "tension_surge":
       result.tensionGain = Math.max(1, Math.floor(Number(mechanic.amount) || 1));
       break;
-    case "line_rend": {
-      const configuredScale = Number(mechanic.tension_scale);
-      const scale = Number.isFinite(configuredScale)
-        ? Math.max(0, configuredScale)
-        : BOSS_LINE_REND_TENSION_SCALE;
+    case "tension_rod_damage": {
       const tension = Math.max(0, Math.min(100, Number(context?.tension) || 0));
-      result.lineDamage = Math.max(
-        1,
-        Math.ceil(baseGearDamage * (1 + (tension / 100) * scale)),
-      );
+      result.rodDamage = tension >= mechanic.high_tension
+        ? mechanic.high_damage
+        : tension >= mechanic.mid_tension ? mechanic.mid_damage : mechanic.low_damage;
       break;
     }
     case "rod_crush": {
-      const multiplier = Number.isFinite(Number(mechanic.multiplier))
-        ? Math.max(1, Number(mechanic.multiplier))
-        : BOSS_ROD_CRUSH_ROD_MULTIPLIER;
-      result.rodDamage = Math.max(1, Math.round(baseGearDamage * multiplier));
-      const rampAfter = Number.isSafeInteger(mechanic.scar_ramp_after)
-        ? Math.max(0, mechanic.scar_ramp_after)
-        : BOSS_ROD_CRUSH_SCAR_RAMP_AFTER;
-      const earlyScar = Number.isSafeInteger(mechanic.scar_early)
-        ? Math.max(0, mechanic.scar_early)
-        : BOSS_ROD_CRUSH_SCAR_EARLY;
-      const lateScar = Number.isSafeInteger(mechanic.scar_late)
-        ? Math.max(0, mechanic.scar_late)
-        : BOSS_ROD_CRUSH_SCAR_LATE;
       const round = Math.max(1, Math.floor(Number(context?.attackRound) || 1));
-      result.rodControlLoss = round <= rampAfter ? earlyScar : lateScar;
+      const initial = mechanic.initial_damage ?? BOSS_ROD_CRUSH_INITIAL_DAMAGE;
+      const step = mechanic.damage_step ?? BOSS_ROD_CRUSH_DAMAGE_STEP;
+      const maximum = mechanic.max_damage ?? BOSS_ROD_CRUSH_MAX_DAMAGE;
+      result.rodDamage = Math.min(maximum, initial + (round - 1) * step);
       break;
     }
     case "regenerate":
@@ -603,12 +534,6 @@ export function calculateGhostDebtPayment(earnings, debt, {
     remainingDebt,
     writtenOff,
   };
-}
-
-// 捞尸人按当前体力等额反噬鱼竿，不封顶：体力上限随钓鱼等级增长，
-// 等级越高、越舍不得那身体力，这一钩就越疼。
-export function calculateCorpseFisherRodDamage(stamina) {
-  return Math.max(0, Math.floor(Number(stamina) || 0));
 }
 
 export const FISH_FIGHT_STATE = Object.freeze({
@@ -1195,8 +1120,8 @@ export function validateLegacyFishData(fishData) {
       if ((RARITY_CONFIG[fish.rarity]?.level ?? -1) < RARITY_CONFIG["传说"].level) {
         errors.push(`${label}: 首领稀有度至少须为传说`);
       }
-      if (Number.isFinite(fish.difficulty) && fish.difficulty < BOSS_MIN_DIFFICULTY) {
-        errors.push(`${label}: 首领难度低于传说级下限`);
+      if (Number.isFinite(fish.difficulty) && fish.difficulty !== BOSS_BASE_DIFFICULTY) {
+        errors.push(`${label}: 首领基础困难度必须统一为 ${BOSS_BASE_DIFFICULTY}`);
       }
       if (!Number.isFinite(fish.hp) || fish.hp <= 0) {
         errors.push(`${label}: 首领生命值无效`);
@@ -1232,7 +1157,7 @@ export function validateLegacyFishData(fishData) {
       ) {
         errors.push(`${label}: 首领机制缺失或类型无效`);
       } else if (
-        ["stamina_drain", "tension_surge", "regenerate"].includes(mechanic.type) &&
+        ["tension_surge", "regenerate"].includes(mechanic.type) &&
         (!Number.isFinite(mechanic.amount) || mechanic.amount <= 0)
       ) {
         errors.push(`${label}: 首领机制数值无效`);
@@ -1248,23 +1173,32 @@ export function validateLegacyFishData(fishData) {
       ) {
         errors.push(`${label}: 首领偷钱区间或砸竿伤害无效`);
       } else if (
-        mechanic.type === "line_rend" &&
-        (!Number.isFinite(mechanic.tension_scale) || mechanic.tension_scale <= 0)
-      ) {
-        errors.push(`${label}: 首领鱼线张力系数无效`);
-      } else if (
-        mechanic.type === "rod_crush" && (
-          !Number.isFinite(mechanic.multiplier) ||
-          mechanic.multiplier < 1 ||
-          !Number.isSafeInteger(mechanic.scar_ramp_after) ||
-          mechanic.scar_ramp_after < 0 ||
-          !Number.isSafeInteger(mechanic.scar_early) ||
-          mechanic.scar_early < 0 ||
-          !Number.isSafeInteger(mechanic.scar_late) ||
-          mechanic.scar_late < mechanic.scar_early
+        mechanic.type === "tension_rod_damage" && (
+          !Number.isFinite(mechanic.mid_tension) || mechanic.mid_tension <= 0 ||
+          !Number.isFinite(mechanic.high_tension) || mechanic.high_tension <= mechanic.mid_tension || mechanic.high_tension >= 100 ||
+          !Number.isSafeInteger(mechanic.low_damage) || mechanic.low_damage <= 0 ||
+          !Number.isSafeInteger(mechanic.mid_damage) || mechanic.mid_damage < mechanic.low_damage ||
+          !Number.isSafeInteger(mechanic.high_damage) || mechanic.high_damage < mechanic.mid_damage
         )
       ) {
-        errors.push(`${label}: 首领鱼竿伤害倍率或暗伤配置无效`);
+        errors.push(`${label}: 首领张力竿损配置无效`);
+      } else if (
+        mechanic.type === "rod_crush" && (
+          !Number.isSafeInteger(mechanic.initial_damage) || mechanic.initial_damage <= 0 ||
+          !Number.isSafeInteger(mechanic.damage_step) || mechanic.damage_step <= 0 ||
+          !Number.isSafeInteger(mechanic.max_damage) || mechanic.max_damage < mechanic.initial_damage
+        )
+      ) {
+        errors.push(`${label}: 首领递增鱼竿损伤配置无效`);
+      } else if (
+        mechanic.type === "distance_damage" && (
+          !Number.isFinite(mechanic.near_distance) || mechanic.near_distance < 0 ||
+          !Number.isFinite(mechanic.far_distance) || mechanic.far_distance <= mechanic.near_distance || mechanic.far_distance >= 100 ||
+          !Number.isFinite(mechanic.mid_multiplier) || mechanic.mid_multiplier < 1 ||
+          !Number.isFinite(mechanic.far_multiplier) || mechanic.far_multiplier < mechanic.mid_multiplier
+        )
+      ) {
+        errors.push(`${label}: 首领距离增伤配置无效`);
       }
     } else if (
       fish?.hp != null ||
@@ -1317,6 +1251,8 @@ export function validateLegacyFishData(fishData) {
         !NIGHTMARE_EFFECT_TYPES.includes(effect.type)
       ) {
         errors.push(`${label}: 噩梦机制缺失或类型无效`);
+      } else if (effect.type === "rod_damage_percent" && (!Number.isFinite(effect.ratio) || effect.ratio <= 0 || effect.ratio > 1)) {
+        errors.push(`${label}: 鱼竿比例损伤必须在 0 到 1 之间`);
       }
     } else if (fish?.nightmare_effect != null) {
       errors.push(`${label}: 非噩梦渔获不能配置噩梦机制`);

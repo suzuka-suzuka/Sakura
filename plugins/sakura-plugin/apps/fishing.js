@@ -19,6 +19,7 @@ import {
   FishingSessionStore,
   FISHING_PHASE,
   parseFishingAction,
+  resolveBlindReel,
   shouldRecordFishEncounter,
 } from "../lib/fishing/session.js";
 import {
@@ -48,9 +49,8 @@ import {
   TORPEDO_PRICE_BOOST_MULTIPLIER,
   TORPEDO_ROD_DAMAGE,
   WEATHER_CONFIG,
-  calculateBossLineDurability,
   calculateBossCatchReward,
-  calculateCorpseFisherRodDamage,
+  calculateRodPercentDamage,
   calculateEffectiveFishWeight,
   calculateForcePullSuccessRate,
   calculateLegacyFishPrice,
@@ -70,7 +70,6 @@ import {
   isBossFish,
   isPerfectCatch,
   resolveBossAttack,
-  resolveBossLineDamage,
   resolveKoiWishShiny,
   rollFishExp,
   rollFishingBiteWaitMs,
@@ -148,11 +147,9 @@ function formatCatchTail(expGain, isPerfect, settleResult, dexProgress) {
   const perfectMsg = isPerfect ? `\n⚡ 完美收竿！经验×${PERFECT_EXP_MULTIPLIER}！` : "";
   const levelUp = settleResult?.levelUp;
   const levelUpMsg = levelUp ? `\n🎉 钓鱼等级提升至 Lv.${levelUp.to}` : "";
-  const staminaResetMsg = Number.isFinite(levelUp?.staminaForcedTo)
-    ? `\n🪝 捞尸人的力量压过升级恢复，体力仍被强制为 ${levelUp.staminaForcedTo}`
-    : Number.isFinite(levelUp?.staminaResetTo)
-      ? `\n⚡ 升级后体力已回满：${levelUp.staminaResetTo}/${levelUp.staminaResetTo}`
-      : "";
+  const staminaResetMsg = Number.isFinite(levelUp?.staminaResetTo)
+    ? `\n⚡ 升级后体力已回满：${levelUp.staminaResetTo}/${levelUp.staminaResetTo}`
+    : "";
   const dexMsg = dexProgress
     ? `\n📖 图鉴新收录！(${dexProgress.collected}/${dexProgress.total})`
     : "";
@@ -233,21 +230,18 @@ function computeRiverBlessRefundValue(state, fishingManager) {
 }
 
 function getEffectiveRodControl(fishingManager, userId, state, rodMastery = 0) {
-  // 深压回响是持久连乘减益，作用于「基础控制力（已减竿身暗伤）+ 熟练度加成」之后的实际控制力。
-  // 熟练度走对数折算，练得越久收益越薄，不会堆到全图自动上岸。
+  // 竿身控制力先按当前耐久百分比折算，再加熟练度；深压回响最后作用于实际控制力。
+  // 熟练度保持每 2 点增加 1 点控制力。
   const deepPressureMultiplier = Number(state.deepPressureMultiplier) || 1;
-  const baseControl = fishingManager.getRodControl(userId, state.rodConfig.id) +
+  const effectiveControl = fishingManager.getRodControl(userId, state.rodConfig.id) +
     getMasteryControlBonus(rodMastery);
-  return baseControl * deepPressureMultiplier;
+  return effectiveControl * deepPressureMultiplier;
 }
 
 function formatBossCombatStatus(state, fishingManager, userId) {
   const hpBar = createProgressBar(state.bossHp, state.bossMaxHp, 10);
   const distanceBar = createProgressBar(state.distance, 100, 10);
   const tensionBar = createProgressBar(state.tension, 100, 10);
-  const lineCurrent = Math.max(0, Number(state.bossLineDurability) || 0);
-  const lineMax = Math.max(1, Number(state.bossLineMaxDurability) || 1);
-  const lineBar = createProgressBar(lineCurrent, lineMax, 10);
   const rod = fishingManager.getRodDurabilityInfo(userId, state.rodConfig.id);
   const rodBar = createProgressBar(rod.currentDurability, rod.maxDurability, 10);
   const coinStolen = Math.max(0, Number(state.bossCoinStolen) || 0);
@@ -255,7 +249,6 @@ function formatBossCombatStatus(state, fishingManager, userId) {
     `👑 生命\n${hpBar} ${state.bossHp}/${state.bossMaxHp}`,
     `📏 距离\n${distanceBar} ${Math.max(0, Math.round(state.distance))}/100`,
     `⚡ 张力\n${tensionBar} ${Math.max(0, Math.round(state.tension))}/100`,
-    `🧵 鱼线\n${lineBar} ${lineCurrent}/${lineMax}`,
     `🎣 鱼竿\n${rodBar} ${rod.currentDurability}/${rod.maxDurability}`,
     ...(coinStolen > 0 ? [`💸 已被偷走 ${coinStolen} 樱花币`] : []),
   ].join("\n");
@@ -519,13 +512,14 @@ export default class Fishing extends plugin {
   async executeBossAttack(e, state) {
     const fishingManager = new FishingManager(e.group_id);
     const economyManager = new EconomyManager(e);
-    // 赤潮锯刑按命中瞬间的张力放大鱼线伤害，所以要在张力结算之前把当前值取出来；
-    // 吞舟重撞的暗伤在第几击之后加重，也要按本次命中的轮次算；
+    // 赤潮锯刑按命中瞬间的张力决定竿损，所以要在张力结算之前把当前值取出来；
+    // 鲤王按命中前距离增伤，吞舟重撞按本次反击轮次递增；
     // 探囊鬼手按当前余额决定偷多少、还是改砸鱼竿。
     const tensionAtAttack = state.tension;
     const attackRound = (state.bossAttackRounds || 0) + 1;
     const attackResult = resolveBossAttack(state.fish, Math.random, {
       tension: tensionAtAttack,
+      distance: state.distance,
       attackRound,
       coinBalance: economyManager.getCoins(e),
     });
@@ -533,17 +527,6 @@ export default class Fishing extends plugin {
     const effectMessages = [];
 
     state.bossAttackRounds = attackRound;
-    const lineDamage = resolveBossLineDamage({
-      currentDurability: state.bossLineDurability,
-      maxDurability: state.bossLineMaxDurability,
-      damage: attackResult.lineDamage,
-      protectFromBreak: Boolean(state.hasRiverBless),
-    });
-    state.bossLineDurability = lineDamage.currentDurability;
-    state.bossLineMaxDurability = lineDamage.maxDurability;
-    if (lineDamage.isBroken) {
-      fishingManager.breakLine(e.user_id, state.lineConfig.id);
-    }
     state.distance = Math.min(100, state.distance + attackResult.distanceGain);
     state.tension = Math.min(100, state.tension + attackResult.tensionGain);
 
@@ -553,33 +536,6 @@ export default class Fishing extends plugin {
       state.rodConfig,
       attackResult.rodDamage,
     );
-
-    // 暗伤直接写进 rod_stats，而溜鱼每次都会重新读取控制力，所以本场立刻生效。
-    // 只报"留下了暗伤"，不报点数和剩余控制力；每一击的措辞也保持一致，
-    // 这样连暗伤在第几击开始加重都看不出来，只能从手感变差里察觉。
-    let scarBrokeRod = false;
-    if (attackResult.rodControlLoss > 0) {
-      const scarResult = fishingManager.applyRodControlLoss(
-        e.user_id,
-        state.rodConfig.id,
-        attackResult.rodControlLoss,
-      );
-      scarBrokeRod = Boolean(scarResult.isBroken);
-      if (scarResult.controlResult.lost > 0) {
-        effectMessages.push(`🩹 ${mechanic.name}在竿身内部又碾出一道暗伤`);
-      }
-    }
-
-    let staminaResult = null;
-    if (attackResult.staminaDrain > 0) {
-      staminaResult = fishingManager.drainFishingStamina(
-        e.user_id,
-        attackResult.staminaDrain,
-      );
-      effectMessages.push(
-        `⚡ ${mechanic.name}抽走 ${staminaResult.drained} 点体力，剩余 ${staminaResult.current}/${staminaResult.max}`,
-      );
-    }
 
     if (attackResult.stealFallback) {
       effectMessages.push(
@@ -611,30 +567,25 @@ export default class Fishing extends plugin {
       effectMessages.push(`✨ ${mechanic.name}恢复 ${state.bossHp - before} 点生命`);
     }
 
-    if (attackResult.lineDamage > Math.ceil(state.fish.attack / 2)) {
+    if (mechanic.type === "distance_damage") {
+      effectMessages.push(`🌸 ${mechanic.name}随距离增强，本次鱼竿损失 ${attackResult.rodDamage} 点耐久`);
+    }
+    if (mechanic.type === "tension_rod_damage") {
       effectMessages.push(
-        `🪚 ${mechanic.name}顺着 ${tensionAtAttack} 点张力加深了本次鱼线伤害`,
+        `🪚 ${mechanic.name}沿绷紧的鱼线震伤竿身，当前张力 ${tensionAtAttack}，本次竿损 ${attackResult.rodDamage} 点`,
       );
     }
-    // 偷钱兜底的提示已经说明了鱼竿挨打的缘由，不再重复。
-    if (!attackResult.stealFallback && attackResult.rodDamage > Math.ceil(state.fish.attack / 2)) {
+    // 吞舟重撞超过普通反击的竿损时补充提示。
+    if (mechanic.type === "rod_crush" && attackResult.rodDamage > Math.ceil(state.fish.attack / 4)) {
       effectMessages.push(`💥 ${mechanic.name}强化了本次鱼竿伤害`);
     }
 
-    const lineDestroyed = lineDamage.isBroken || lineDamage.breakPrevented || (
-      !lineDamage.applied && lineDamage.currentDurability <= 0
-    );
     const tensionBroken = state.tension >= 100;
-    const exhausted = Boolean(staminaResult?.exhausted);
-    const rodBroken = rodDamage.isBroken || scarBrokeRod;
+    const rodBroken = rodDamage.isBroken;
 
-    if (lineDestroyed || tensionBroken || exhausted || rodBroken || state.distance >= 100) {
+    if (tensionBroken || rodBroken || state.distance >= 100) {
       let lineBreak = null;
-      if (lineDamage.breakPrevented) {
-        lineBreak = { saved: true };
-      } else if (lineDamage.isBroken) {
-        lineBreak = { saved: false };
-      } else if (tensionBroken) {
+      if (tensionBroken) {
         lineBreak = this.breakLineWithBlessing(
           state,
           fishingManager,
@@ -643,7 +594,7 @@ export default class Fishing extends plugin {
         );
       }
 
-      // 河神在首领战中保住鱼线（本场耐久归零被挡下，或张力崩断被挡下）同样折现补偿。
+      // 河神挡下张力崩断时保留鱼线并折现补偿，本次挑战仍按失败结算。
       const refundMsg = lineBreak?.saved
         ? this.grantRiverBlessRefund(e, state, fishingManager)
         : "";
@@ -653,22 +604,12 @@ export default class Fishing extends plugin {
         masteryGain: rodBroken ? 0 : 1,
       });
       const reasons = [];
-      if (scarBrokeRod) {
-        reasons.push(`🎣 暗伤吃光了控制力，【${state.rodConfig.name}】彻底报废`);
-      } else if (rodBroken) {
+      if (rodBroken) {
         reasons.push(`🎣 【${state.rodConfig.name}】被击断了`);
       }
-      if (lineDamage.isBroken) {
-        reasons.push(`🧵 本场耐久归零，【${state.lineConfig.name}】当场断裂`);
-      } else if (lineDamage.breakPrevented) {
-        reasons.push(`🌊 河神在最后一刻护住了【${state.lineConfig.name}】，鱼线没有断裂`);
-      } else if (lineDestroyed) {
-        reasons.push("🧵 当前鱼线已经不可用");
-      }
       if (tensionBroken) reasons.push("⚡ 张力达到极限");
-      if (exhausted) reasons.push("🥵 体力耗尽");
       if (state.distance >= 100) reasons.push("🌊 首领逃回了深水区");
-      if (tensionBroken && !lineDestroyed) {
+      if (tensionBroken) {
         if (lineBreak?.saved) reasons.push(`🌊 河神保住了【${state.lineConfig.name}】`);
         else if (lineBreak) reasons.push(`💔 失去了【${state.lineConfig.name}】`);
       }
@@ -676,7 +617,7 @@ export default class Fishing extends plugin {
 
       await e.reply([
         `👑 【${state.fish.name}】发动了【${mechanic.name}】！\n`,
-        `🧵 鱼线本场耐久 -${attackResult.lineDamage}｜🎣 鱼竿 -${attackResult.rodDamage}\n`,
+        `🎣 鱼竿耐久 -${attackResult.rodDamage}\n`,
         effectMessages.length > 0 ? `${effectMessages.join("\n")}\n` : "",
         `${reasons.join("\n")}\n❌ 首领挑战失败！`,
         formatShinyEscape(state.fish),
@@ -686,7 +627,7 @@ export default class Fishing extends plugin {
 
     await e.reply([
       `👑 【${state.fish.name}】发动了【${mechanic.name}】！\n`,
-      `🧵 鱼线本场耐久 -${attackResult.lineDamage}｜🎣 鱼竿 -${attackResult.rodDamage}\n`,
+      `🎣 鱼竿耐久 -${attackResult.rodDamage}\n`,
       effectMessages.length > 0 ? `${effectMessages.join("\n")}\n` : "",
       formatBossCombatStatus(state, fishingManager, e.user_id),
     ]);
@@ -719,11 +660,6 @@ export default class Fishing extends plugin {
     if (boss) {
       state.bossHp = Math.max(1, Math.floor(Number(state.fish.hp) || 1));
       state.bossMaxHp = state.bossHp;
-      state.bossLineMaxDurability = calculateBossLineDurability(
-        state.lineConfig.capacity,
-        state.fish.actualWeight,
-      );
-      state.bossLineDurability = state.bossLineMaxDurability;
       state.bossLastPlayerAttackAt = 0;
       state.bossAttackRounds = 0;
       state.bossCoinStolen = 0;
@@ -734,7 +670,7 @@ export default class Fishing extends plugin {
         `${formatBossCombatStatus(state, fishingManager, e.user_id)}\n\n`,
         `📝 指令：\n  「拉」拉近距离并增加张力\n  「溜」降低张力但会拉远距离\n  「攻」发起攻击（${BOSS_PLAYER_ATTACK_COOLDOWN_MS / 1000}秒冷却）\n`,
         `🏆 必须同时把首领生命与距离降到 0；首领每5秒反击一次！\n`,
-        `🧵 鱼线本场临时耐久按「承重余量」生成（承重越接近首领体重越薄），归零立即断线；战斗结束后不保留损伤！\n`,
+        `🧵 张力达到100会断线；鱼竿耐久损伤会保留到战斗结束后。\n`,
         `⚠️ 限时 ${Math.floor(timeoutMs / 1000)} 秒，当前为单人挑战。`,
       ]);
       this.scheduleBossAttack(e, stateKey, state.id);
@@ -1062,6 +998,9 @@ export default class Fishing extends plugin {
         nightmareStatus.ghostMarked
           ? `\n🩸 亡者抽成印记生效中，垂钓所得 -${Math.round(GHOST_DEBT_MARK_PENALTY_RATE * 100)}%`
           : "",
+        nightmareStatus.blindnessLayers > 0
+          ? `\n👁️ 致盲 ${nightmareStatus.blindnessLayers} 层 · 收竿命中率 ${Number((nightmareStatus.reelHitRate * 100).toFixed(2))}%`
+          : "",
         nightmareStatus.deepPressureLayers > 0
           ? `\n🔔 ${nightmareStatus.deepPressureLayers} 层深压回响生效中`
           : "",
@@ -1261,6 +1200,14 @@ export default class Fishing extends plugin {
       if (state.confirmTimer) {
         clearTimeout(state.confirmTimer);
         state.confirmTimer = null;
+      }
+
+      // 当前层数在有效收竿时读取；结果留在会话里，重试也不会重新判定。
+      const reelAccuracy = resolveBlindReel(state, fishingManager.getNightmareStatus(userId).blindnessLayers);
+      if (!reelAccuracy.hit) {
+        await this.finishFailedAttempt(e, state, { recordCatch: false });
+        await e.reply(`🌫️ 致盲让你错过了收竿时机，只收回一枚空钩。\n👁️ 致盲 ${reelAccuracy.layers} 层 · 收竿命中率 ${Number((reelAccuracy.hitRate * 100).toFixed(2))}%\n本次鱼饵已消耗，鱼竿和鱼线没有额外损伤。`);
+        return;
       }
 
       if (fish.isTorpedo) {
@@ -1763,7 +1710,6 @@ export default class Fishing extends plugin {
       Math.round(Number(value)),
     );
     let rodBroken = false;
-    let forceStaminaToOne = false;
     // 放贷这一竿不能立刻计息，否则玩家还没机会还就已经欠更多。
     let ghostLoanIssued = false;
     const fallbackRodDamage = (amount, prefix) => {
@@ -1783,22 +1729,12 @@ export default class Fishing extends plugin {
         break;
       }
 
-      case "rod_control_loss": {
-        const controlLoss = normalizePenalty(effect.control_loss || 20);
-        const effectResult = fishingManager.applyRodControlLoss(
-          e.user_id,
-          rodConfig.id,
-          controlLoss,
+      case "rod_damage_percent": {
+        const { maxDurability } = fishingManager.getRodDurabilityInfo(e.user_id, rodConfig.id);
+        message = fallbackRodDamage(
+          calculateRodPercentDamage(maxDurability, effect.ratio),
+          `🦈 骸骨鲨啃蚀鱼竿，损失最大耐久的 ${Math.round(effect.ratio * 100)}%！`,
         );
-        rodBroken ||= effectResult.isBroken;
-        if (effectResult.isBroken) {
-          message = `🦈 骨刺留下的暗伤彻底侵蚀了竿身，【${rodConfig.name}】应声断裂！` +
-            `\n🎣 失去了【${rodConfig.name}】`;
-        } else if (effectResult.controlResult.applied && !effectResult.isBroken) {
-          message = "🦈 骨刺划过竿身，鱼竿内部留下了一处难以修复的暗伤。";
-        } else {
-          message = "🦈 骨刺狠狠划过竿身，却没有留下新的暗伤。";
-        }
         break;
       }
 
@@ -1877,18 +1813,10 @@ export default class Fishing extends plugin {
         break;
       }
 
-      case "stamina_crush": {
-        const staminaStatus = fishingManager.getFishingStaminaStatus(e.user_id);
-        const baseDamage = calculateCorpseFisherRodDamage(staminaStatus.current);
-        const damage = baseDamage > 0 ? normalizePenalty(baseDamage) : 0;
-        const damageResult = damage > 0
-          ? applyRodDamage(fishingManager, e.user_id, rodConfig, damage)
-          : { msg: "", isBroken: false };
-        rodBroken ||= damageResult.isBroken;
-        fishingManager.forceFishingStaminaToOne(e.user_id);
-        forceStaminaToOne = true;
-        message = `🪝 捞尸人以你当前的 ${staminaStatus.current} 点体力反噬鱼竿` +
-          `，造成 ${damage} 点损耗，并将体力强制压到 1！${damageResult.msg}`;
+      case "blindness": {
+        const result = fishingManager.addBlindnessLayers(e.user_id, 1);
+        message = `🌫️ 捞尸人的迷雾遮住了双眼，致盲增加 1 层，当前 ${result.layers} 层！` +
+          `\n👁️ 此后收竿命中率 ${Number((result.hitRate * 100).toFixed(2))}%，可用净化圣水清除。`;
         break;
       }
 
@@ -1940,7 +1868,7 @@ export default class Fishing extends plugin {
         break;
     }
 
-    return { message, expGain, rodBroken, forceStaminaToOne, ghostLoanIssued };
+    return { message, expGain, rodBroken, ghostLoanIssued };
   }
 
   async finishSuccess(e, state, fishingManager) {
@@ -2006,7 +1934,6 @@ export default class Fishing extends plugin {
             message: "🛡️ 本次噩梦的伤害、偷取与附加状态全部未生效。",
             expGain,
             rodBroken: false,
-            forceStaminaToOne: false,
             ghostLoanIssued: false,
           }
           : await this.applyNightmareEffect({
@@ -2044,10 +1971,6 @@ export default class Fishing extends plugin {
           weight: fish.actualWeight,
           accrueGhostInterest: !effectResult.ghostLoanIssued,
         });
-        if (effectResult.forceStaminaToOne) {
-          fishingManager.forceFishingStaminaToOne(userId);
-          if (settleResult.levelUp) settleResult.levelUp.staminaForcedTo = 1;
-        }
         const dexProgress = getDexProgress(fishingManager, userId, settleResult);
 
         await e.reply([
@@ -2614,6 +2537,14 @@ export default class Fishing extends plugin {
         name: "深压回响",
         detail: `${nightmareStatus.deepPressureLayers} 层 · 鱼竿实际控制力 ×${Number(nightmareStatus.deepPressureMultiplier.toFixed(3))}`,
         tone: "warning",
+      });
+    }
+    if (nightmareStatus.blindnessLayers > 0) {
+      effects.push({
+        icon: "👁️",
+        name: "致盲",
+        detail: `${nightmareStatus.blindnessLayers} 层 · 收竿命中率 ${Number((nightmareStatus.reelHitRate * 100).toFixed(2))}%`,
+        tone: "danger",
       });
     }
     const nightmareImmunity = fishingManager.getNightmareImmunityStatus(userId);

@@ -3,6 +3,8 @@ import InventoryManager from "./InventoryManager.js";
 import db from "../Database.js";
 import {
   calculateFishingStamina,
+  calculateRodDurabilityControl,
+  getBlindReelHitRate,
   FISHING_BENEFIT_DURATION_SECONDS,
   FISHING_LOCATIONS,
   FISHING_STAMINA_COST,
@@ -619,7 +621,20 @@ export default class FishingManager {
       ghostMarked: Boolean(userData.ghost_debt_mark),
       deepPressureLayers: Math.max(0, Math.floor(Number(userData.deep_pressure_layers) || 0)),
       deepPressureMultiplier: deepPressureMultiplierFromLayers(userData.deep_pressure_layers),
+      blindnessLayers: Math.max(0, Math.floor(Number(userData.blindness_layers) || 0)),
+      reelHitRate: getBlindReelHitRate(userData.blindness_layers),
     };
+  }
+
+  addBlindnessLayers(userId, layers = 1) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    const amount = Math.max(0, Math.floor(Number(layers) || 0));
+    const row = db.prepare(`
+        UPDATE fishing_stats SET blindness_layers = COALESCE(blindness_layers, 0) + ?
+        WHERE group_id = ? AND user_id = ? RETURNING blindness_layers
+    `).get(amount, this.groupId, userId);
+    return { layers: row.blindness_layers, hitRate: getBlindReelHitRate(row.blindness_layers) };
   }
 
   applyBrideNightmareMultiplier(userId, multiplier = 2) {
@@ -692,7 +707,7 @@ export default class FishingManager {
     };
   }
 
-  // 修理工具箱可单独解除深压回响（与竿身暗伤一样属于「鱼竿控制」范畴的修复）。
+  // 修理工具箱可单独解除深压回响。
   clearDeepPressure(userId) {
     userId = String(userId);
     this._ensureUser(userId);
@@ -723,11 +738,12 @@ export default class FishingManager {
       deepPressureMarked,
       deepPressureLayers: status.deepPressureLayers,
       deepPressureMultiplier: status.deepPressureMultiplier,
+      blindnessLayers: status.blindnessLayers,
       total: Number(status.curse.actualLayers > 0) +
         Number(brideMarked) +
         Number(status.ghostDebt > 0) +
         Number(status.ghostMarked) +
-        Number(deepPressureMarked),
+        Number(deepPressureMarked) + Number(status.blindnessLayers > 0),
     };
   }
 
@@ -796,7 +812,7 @@ export default class FishingManager {
     return getNightmareCurseDisplay(userData.nightmare_curse_layers);
   }
 
-  // 净化圣水清除所有仍会影响后续垂钓的噩梦减益；鱼竿控制力损失属于鱼竿状态，另由工具箱修复。
+  // 净化圣水清除仍会影响后续垂钓的噩梦减益；鱼竿耐久损伤仍需工具箱修复。
   clearNightmareDebuffs(userId) {
     userId = String(userId);
     this._ensureUser(userId);
@@ -810,7 +826,8 @@ export default class FishingManager {
               bride_nightmare_multiplier = 1,
               ghost_debt = 0,
               ghost_debt_mark = 0,
-              deep_pressure_layers = 0
+              deep_pressure_layers = 0,
+              blindness_layers = 0
           WHERE group_id = ? AND user_id = ?
       `).run(this.groupId, userId);
       return { cleared: status.total, ...status };
@@ -952,13 +969,14 @@ export default class FishingManager {
     const rodConfig = this.getRodConfig(rodId);
     if (!rodConfig) return 0;
     const baseControl = Math.max(0, Number(rodConfig.control) || 0);
-    return Math.max(0, baseControl - this.getRodStats(userId, rodId).controlLoss);
+    const { currentDurability, maxDurability } = this.getRodDurabilityInfo(userId, rodId);
+    return calculateRodDurabilityControl(baseControl, currentDurability, maxDurability);
   }
 
   getRodStats(userId, rodId) {
     userId = String(userId);
     const row = db.prepare(`
-        SELECT damage, mastery, control_loss
+        SELECT damage, mastery
         FROM rod_stats
         WHERE group_id = ? AND user_id = ? AND rod_id = ?
     `)
@@ -966,44 +984,7 @@ export default class FishingManager {
     return {
       damage: Math.max(0, Number(row?.damage) || 0),
       mastery: Math.max(0, Number(row?.mastery) || 0),
-      controlLoss: Math.max(0, Number(row?.control_loss) || 0),
     };
-  }
-
-  reduceRodControl(userId, rodId, amount) {
-    userId = String(userId);
-    const safeAmount = Math.max(0, Math.floor(Number(amount) || 0));
-    const rodConfig = this.getRodConfig(rodId);
-    const baseControl = Math.max(0, Number(rodConfig?.control) || 0);
-    const currentControl = rodConfig ? this.getRodControl(userId, rodId) : 0;
-    if (!rodConfig || safeAmount <= 0 || currentControl <= 0) {
-      return { applied: false, lost: 0, currentControl, baseControl };
-    }
-
-    const transaction = db.transaction(() => {
-      const owned = db.prepare(`
-          SELECT 1 FROM inventory
-          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count > 0
-      `).get(this.groupId, userId, rodId);
-      if (!owned) return { applied: false, lost: 0, currentControl: 0, baseControl };
-
-      const before = this.getRodControl(userId, rodId);
-      const lost = Math.min(before, safeAmount);
-      if (lost <= 0) return { applied: false, lost: 0, currentControl: before, baseControl };
-      db.prepare(`
-          INSERT INTO rod_stats (group_id, user_id, rod_id, damage, mastery, control_loss)
-          VALUES (?, ?, ?, 0, 0, ?)
-          ON CONFLICT(group_id, user_id, rod_id)
-          DO UPDATE SET control_loss = control_loss + ?
-      `).run(this.groupId, userId, rodId, lost, lost);
-      return {
-        applied: true,
-        lost,
-        currentControl: Math.max(0, before - lost),
-        baseControl,
-      };
-    });
-    return transaction.immediate();
   }
 
   getRodDurabilityInfo(userId, rodId) {
@@ -1118,19 +1099,6 @@ export default class FishingManager {
     return transaction.immediate();
   }
 
-  // 施加竿身暗伤；本次暗伤耗尽剩余控制力时直接断竿。
-  applyRodControlLoss(userId, rodId, controlLoss) {
-    const safeControlLoss = Math.max(0, Math.floor(Number(controlLoss) || 0));
-    const controlResult = this.reduceRodControl(userId, rodId, safeControlLoss);
-    const controlBroken = safeControlLoss > 0 &&
-      controlResult.currentControl <= 0 &&
-      this.breakRod(userId, rodId);
-    return {
-      controlResult,
-      isBroken: Boolean(controlBroken),
-    };
-  }
-
   clearRodDamage(userId, rodId) {
     userId = String(userId);
     db.prepare(`
@@ -1145,12 +1113,11 @@ export default class FishingManager {
     const before = this.getRodStats(userId, rodId);
     db.prepare(`
         UPDATE rod_stats
-        SET damage = 0, control_loss = 0
+        SET damage = 0
         WHERE group_id = ? AND user_id = ? AND rod_id = ?
     `).run(this.groupId, userId, rodId);
     return {
       durabilityRepaired: before.damage,
-      controlRestored: before.controlLoss,
     };
   }
 

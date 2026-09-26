@@ -1,0 +1,1511 @@
+[
+  {
+    "scenario": "传说满耐久_熟练0",
+    "bosses": [
+      {
+        "name": "绯樱鲤王",
+        "winRate": 0.6851,
+        "winRatePerCast": 0.6851,
+        "averageRodDamage": 7.6473,
+        "winRodDamage": 7.067289446796088,
+        "winSeconds": 22.047292366077944,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 6851,
+          "tension": 3137,
+          "timeout": 12
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "青柳猿王",
+        "winRate": 0.7557,
+        "winRatePerCast": 0.7557,
+        "averageRodDamage": 6.0006,
+        "winRodDamage": 6.000529310572979,
+        "winSeconds": 22.20127034537515,
+        "averageCoinsLost": 74.8385,
+        "outcomes": {
+          "win": 7557,
+          "tension": 2431,
+          "timeout": 12
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "雾甲鳄龟",
+        "winRate": 0.7483,
+        "winRatePerCast": 0.7483,
+        "averageRodDamage": 6.0348,
+        "winRodDamage": 6.015501804089269,
+        "winSeconds": 24.243485233195244,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 7483,
+          "tension": 2517
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "赤潮锯鲨皇",
+        "winRate": 0.6389,
+        "winRatePerCast": 0.6389,
+        "averageRodDamage": 8.7009,
+        "winRodDamage": 9.028016904053842,
+        "winSeconds": 22.29237752386915,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 6389,
+          "tension": 3571,
+          "timeout": 40
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "海沟吞舟兽",
+        "winRate": 0.7544,
+        "winRatePerCast": 0.7544,
+        "averageRodDamage": 6.0016,
+        "winRodDamage": 6.002120890774125,
+        "winSeconds": 22.054745493107106,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 7544,
+          "tension": 2438,
+          "timeout": 18
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "星渊古龙",
+        "winRate": 0.6748,
+        "winRatePerCast": 0.6748,
+        "averageRodDamage": 7.9964,
+        "winRodDamage": 7.9961470065204505,
+        "winSeconds": 25.939537640782454,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 6748,
+          "tension": 2938,
+          "timeout": 314
+        },
+        "iterations": 10000
+      }
+    ]
+  },
+  {
+    "scenario": "传说满耐久_熟练10",
+    "bosses": [
+      {
+        "name": "绯樱鲤王",
+        "winRate": 0.8822,
+        "winRatePerCast": 0.8822,
+        "averageRodDamage": 7.2239,
+        "winRodDamage": 7.049421899795965,
+        "winSeconds": 21.447857628655633,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 8822,
+          "tension": 1170,
+          "timeout": 8
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "青柳猿王",
+        "winRate": 0.9566,
+        "winRatePerCast": 0.9566,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 21.711373614886053,
+        "averageCoinsLost": 74.9568,
+        "outcomes": {
+          "win": 9566,
+          "tension": 428,
+          "timeout": 6
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "雾甲鳄龟",
+        "winRate": 0.9566,
+        "winRatePerCast": 0.9566,
+        "averageRodDamage": 6.0304,
+        "winRodDamage": 6.012126280577044,
+        "winSeconds": 23.197470206983066,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 9566,
+          "tension": 434
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "赤潮锯鲨皇",
+        "winRate": 0.834,
+        "winRatePerCast": 0.834,
+        "averageRodDamage": 8.7952,
+        "winRodDamage": 8.87242206235012,
+        "winSeconds": 21.57613908872902,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 8340,
+          "tension": 1621,
+          "timeout": 39
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "海沟吞舟兽",
+        "winRate": 0.9606,
+        "winRatePerCast": 0.9606,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 21.463043930876534,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 9606,
+          "tension": 393,
+          "timeout": 1
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "星渊古龙",
+        "winRate": 0.8903,
+        "winRatePerCast": 0.8903,
+        "averageRodDamage": 7.8424,
+        "winRodDamage": 7.829271032236325,
+        "winSeconds": 25.02381219813546,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 8903,
+          "timeout": 268,
+          "tension": 829
+        },
+        "iterations": 10000
+      }
+    ]
+  },
+  {
+    "scenario": "传说满耐久_熟练20",
+    "bosses": [
+      {
+        "name": "绯樱鲤王",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 7.016,
+        "winRodDamage": 7.016,
+        "winSeconds": 20.6593,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "青柳猿王",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 20.4767,
+        "averageCoinsLost": 74.8553,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "雾甲鳄龟",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 21.5957,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "赤潮锯鲨皇",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 8.8065,
+        "winRodDamage": 8.8065,
+        "winSeconds": 20.8628,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "海沟吞舟兽",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 20.2948,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "星渊古龙",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 6.8848,
+        "winRodDamage": 6.8848,
+        "winSeconds": 22.2616,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      }
+    ]
+  },
+  {
+    "scenario": "传说满耐久_熟练40",
+    "bosses": [
+      {
+        "name": "绯樱鲤王",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 6.7982,
+        "winRodDamage": 6.7982,
+        "winSeconds": 19.1668,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "青柳猿王",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 19.1488,
+        "averageCoinsLost": 74.7942,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "雾甲鳄龟",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 19.5261,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "赤潮锯鲨皇",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 8.8599,
+        "winRodDamage": 8.8599,
+        "winSeconds": 19.1322,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "海沟吞舟兽",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 19.0459,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "星渊古龙",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 6.0048,
+        "winRodDamage": 6.0048,
+        "winSeconds": 19.1285,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      }
+    ]
+  },
+  {
+    "scenario": "传说满耐久_熟练80",
+    "bosses": [
+      {
+        "name": "绯樱鲤王",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 6.0193,
+        "winRodDamage": 6.0193,
+        "winSeconds": 17.4875,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "青柳猿王",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 5.1412,
+        "winRodDamage": 5.1412,
+        "winSeconds": 16.9535,
+        "averageCoinsLost": 64.198,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "雾甲鳄龟",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 5.1348,
+        "winRodDamage": 5.1348,
+        "winSeconds": 17.0357,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "赤潮锯鲨皇",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 8.9819,
+        "winRodDamage": 8.9819,
+        "winSeconds": 17.7914,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "海沟吞舟兽",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 4.7019,
+        "winRodDamage": 4.7019,
+        "winSeconds": 16.9563,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "星渊古龙",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 18.5854,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      }
+    ]
+  },
+  {
+    "scenario": "传说90%耐久_熟练20",
+    "bosses": [
+      {
+        "name": "绯樱鲤王",
+        "winRate": 0.2881,
+        "winRatePerCast": 0.2881,
+        "averageRodDamage": 10.443,
+        "winRodDamage": 7.653592502603263,
+        "winSeconds": 24.913224574800417,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "tension": 7056,
+          "win": 2881,
+          "timeout": 63
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "青柳猿王",
+        "winRate": 0.3651,
+        "winRatePerCast": 0.3651,
+        "averageRodDamage": 6.6552,
+        "winRodDamage": 6.549986305121885,
+        "winSeconds": 25.07422623938647,
+        "averageCoinsLost": 83.2819,
+        "outcomes": {
+          "win": 3651,
+          "tension": 6252,
+          "timeout": 97
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "雾甲鳄龟",
+        "winRate": 0.3697,
+        "winRatePerCast": 0.3697,
+        "averageRodDamage": 6.6778,
+        "winRodDamage": 6.584798485258317,
+        "winSeconds": 27.895050040573437,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 3697,
+          "tension": 6274,
+          "timeout": 29
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "赤潮锯鲨皇",
+        "winRate": 0.2188,
+        "winRatePerCast": 0.2188,
+        "averageRodDamage": 9.7195,
+        "winRodDamage": 10.035191956124315,
+        "winSeconds": 25.578610603290677,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "tension": 7564,
+          "win": 2188,
+          "timeout": 248
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "海沟吞舟兽",
+        "winRate": 0.3718,
+        "winRatePerCast": 0.3718,
+        "averageRodDamage": 6.5568,
+        "winRodDamage": 6.381925766541151,
+        "winSeconds": 24.077461000537923,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 3718,
+          "tension": 6184,
+          "timeout": 98
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "星渊古龙",
+        "winRate": 0.3084,
+        "winRatePerCast": 0.3084,
+        "averageRodDamage": 8,
+        "winRodDamage": 8,
+        "winSeconds": 27.97697795071336,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 3084,
+          "tension": 6605,
+          "timeout": 311
+        },
+        "iterations": 10000
+      }
+    ]
+  },
+  {
+    "scenario": "传说95%耐久_熟练20",
+    "bosses": [
+      {
+        "name": "绯樱鲤王",
+        "winRate": 0.6851,
+        "winRatePerCast": 0.6851,
+        "averageRodDamage": 7.6473,
+        "winRodDamage": 7.067289446796088,
+        "winSeconds": 22.047292366077944,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 6851,
+          "tension": 3137,
+          "timeout": 12
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "青柳猿王",
+        "winRate": 0.7557,
+        "winRatePerCast": 0.7557,
+        "averageRodDamage": 6.0006,
+        "winRodDamage": 6.000529310572979,
+        "winSeconds": 22.20127034537515,
+        "averageCoinsLost": 74.8385,
+        "outcomes": {
+          "win": 7557,
+          "tension": 2431,
+          "timeout": 12
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "雾甲鳄龟",
+        "winRate": 0.7483,
+        "winRatePerCast": 0.7483,
+        "averageRodDamage": 6.0348,
+        "winRodDamage": 6.015501804089269,
+        "winSeconds": 24.243485233195244,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 7483,
+          "tension": 2517
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "赤潮锯鲨皇",
+        "winRate": 0.6389,
+        "winRatePerCast": 0.6389,
+        "averageRodDamage": 8.7009,
+        "winRodDamage": 9.028016904053842,
+        "winSeconds": 22.29237752386915,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 6389,
+          "tension": 3571,
+          "timeout": 40
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "海沟吞舟兽",
+        "winRate": 0.7544,
+        "winRatePerCast": 0.7544,
+        "averageRodDamage": 6.0016,
+        "winRodDamage": 6.002120890774125,
+        "winSeconds": 22.054745493107106,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 7544,
+          "tension": 2438,
+          "timeout": 18
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "星渊古龙",
+        "winRate": 0.6748,
+        "winRatePerCast": 0.6748,
+        "averageRodDamage": 7.9964,
+        "winRodDamage": 7.9961470065204505,
+        "winSeconds": 25.939537640782454,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 6748,
+          "tension": 2938,
+          "timeout": 314
+        },
+        "iterations": 10000
+      }
+    ]
+  },
+  {
+    "scenario": "传说90%耐久_熟练40",
+    "bosses": [
+      {
+        "name": "绯樱鲤王",
+        "winRate": 0.7262,
+        "winRatePerCast": 0.7262,
+        "averageRodDamage": 7.5448,
+        "winRodDamage": 7.058110713302121,
+        "winSeconds": 21.885293307628753,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 7262,
+          "tension": 2730,
+          "timeout": 8
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "青柳猿王",
+        "winRate": 0.7905,
+        "winRatePerCast": 0.7905,
+        "averageRodDamage": 6.0004,
+        "winRodDamage": 6.000253004427577,
+        "winSeconds": 22.096015180265656,
+        "averageCoinsLost": 74.7408,
+        "outcomes": {
+          "win": 7905,
+          "tension": 2086,
+          "timeout": 9
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "雾甲鳄龟",
+        "winRate": 0.7895,
+        "winRatePerCast": 0.7895,
+        "averageRodDamage": 6.0376,
+        "winRodDamage": 6.0187460417986065,
+        "winSeconds": 24.17821405953135,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 7895,
+          "tension": 2105
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "赤潮锯鲨皇",
+        "winRate": 0.6795,
+        "winRatePerCast": 0.6795,
+        "averageRodDamage": 8.7275,
+        "winRodDamage": 9.010154525386314,
+        "winSeconds": 22.125827814569536,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 6795,
+          "tension": 3165,
+          "timeout": 40
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "海沟吞舟兽",
+        "winRate": 0.8011,
+        "winRatePerCast": 0.8011,
+        "averageRodDamage": 6.0008,
+        "winRodDamage": 6.000499313444014,
+        "winSeconds": 21.94420172263138,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 8011,
+          "tension": 1976,
+          "timeout": 13
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "星渊古龙",
+        "winRate": 0.7211,
+        "winRatePerCast": 0.7211,
+        "averageRodDamage": 7.9966,
+        "winRodDamage": 7.996949105533213,
+        "winSeconds": 25.880183053668006,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 7211,
+          "tension": 2509,
+          "timeout": 280
+        },
+        "iterations": 10000
+      }
+    ]
+  },
+  {
+    "scenario": "传说80%耐久_熟练20",
+    "bosses": [
+      {
+        "name": "绯樱鲤王",
+        "winRate": 0,
+        "winRatePerCast": 0,
+        "averageRodDamage": 15,
+        "winRodDamage": null,
+        "winSeconds": null,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "tension": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "青柳猿王",
+        "winRate": 0,
+        "winRatePerCast": 0,
+        "averageRodDamage": 8,
+        "winRodDamage": null,
+        "winSeconds": null,
+        "averageCoinsLost": 99.7694,
+        "outcomes": {
+          "tension": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "雾甲鳄龟",
+        "winRate": 0,
+        "winRatePerCast": 0,
+        "averageRodDamage": 8,
+        "winRodDamage": null,
+        "winSeconds": null,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "tension": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "赤潮锯鲨皇",
+        "winRate": 0,
+        "winRatePerCast": 0,
+        "averageRodDamage": 11.0917,
+        "winRodDamage": null,
+        "winSeconds": null,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "tension": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "海沟吞舟兽",
+        "winRate": 0,
+        "winRatePerCast": 0,
+        "averageRodDamage": 10,
+        "winRodDamage": null,
+        "winSeconds": null,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "tension": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "星渊古龙",
+        "winRate": 0,
+        "winRatePerCast": 0,
+        "averageRodDamage": 9.826,
+        "winRodDamage": null,
+        "winSeconds": null,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "tension": 8583,
+          "escape": 1417
+        },
+        "iterations": 10000
+      }
+    ]
+  },
+  {
+    "scenario": "传说80%耐久_熟练80",
+    "bosses": [
+      {
+        "name": "绯樱鲤王",
+        "winRate": 0.7607,
+        "winRatePerCast": 0.7607,
+        "averageRodDamage": 7.4624,
+        "winRodDamage": 7.052846062836861,
+        "winSeconds": 21.736164059418957,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 7607,
+          "tension": 2387,
+          "timeout": 6
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "青柳猿王",
+        "winRate": 0.8467,
+        "winRatePerCast": 0.8467,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 21.930317704027402,
+        "averageCoinsLost": 74.743,
+        "outcomes": {
+          "win": 8467,
+          "tension": 1521,
+          "timeout": 12
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "雾甲鳄龟",
+        "winRate": 0.8317,
+        "winRatePerCast": 0.8317,
+        "averageRodDamage": 6.0352,
+        "winRodDamage": 6.01298545148491,
+        "winSeconds": 23.765059516652638,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 8317,
+          "tension": 1683
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "赤潮锯鲨皇",
+        "winRate": 0.7182,
+        "winRatePerCast": 0.7182,
+        "averageRodDamage": 8.7315,
+        "winRodDamage": 8.961709830130882,
+        "winSeconds": 21.93358395989975,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 7182,
+          "tension": 2794,
+          "timeout": 24
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "海沟吞舟兽",
+        "winRate": 0.8363,
+        "winRatePerCast": 0.8363,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 21.78476623221332,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 8363,
+          "tension": 1623,
+          "timeout": 14
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "星渊古龙",
+        "winRate": 0.7576,
+        "winRatePerCast": 0.7576,
+        "averageRodDamage": 7.9648,
+        "winRodDamage": 7.96013727560718,
+        "winSeconds": 25.64545934530095,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 7576,
+          "tension": 2074,
+          "timeout": 350
+        },
+        "iterations": 10000
+      }
+    ]
+  },
+  {
+    "scenario": "传说60%耐久_熟练40",
+    "bosses": [
+      {
+        "name": "绯樱鲤王",
+        "winRate": 0,
+        "winRatePerCast": 0,
+        "averageRodDamage": 18.87,
+        "winRodDamage": null,
+        "winSeconds": null,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "tension": 8520,
+          "escape": 1480
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "青柳猿王",
+        "winRate": 0,
+        "winRatePerCast": 0,
+        "averageRodDamage": 9.933,
+        "winRodDamage": null,
+        "winSeconds": null,
+        "averageCoinsLost": 124.192,
+        "outcomes": {
+          "escape": 1494,
+          "tension": 8506
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "雾甲鳄龟",
+        "winRate": 0,
+        "winRatePerCast": 0,
+        "averageRodDamage": 8.644,
+        "winRodDamage": null,
+        "winSeconds": null,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "tension": 7944,
+          "escape": 2056
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "赤潮锯鲨皇",
+        "winRate": 0,
+        "winRatePerCast": 0,
+        "averageRodDamage": 14.1451,
+        "winRodDamage": null,
+        "winSeconds": null,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "tension": 8513,
+          "escape": 1487
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "海沟吞舟兽",
+        "winRate": 0,
+        "winRatePerCast": 0,
+        "averageRodDamage": 14.8395,
+        "winRodDamage": null,
+        "winSeconds": null,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "tension": 8509,
+          "escape": 1491
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "星渊古龙",
+        "winRate": 0,
+        "winRatePerCast": 0,
+        "averageRodDamage": 9.9412,
+        "winRodDamage": null,
+        "winSeconds": null,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "tension": 8555,
+          "escape": 1445
+        },
+        "iterations": 10000
+      }
+    ]
+  },
+  {
+    "scenario": "星穹满耐久_熟练0",
+    "bosses": [
+      {
+        "name": "绯樱鲤王",
+        "winRate": 0.9326,
+        "winRatePerCast": 0.9326,
+        "averageRodDamage": 7.4818,
+        "winRodDamage": 7.375723782972336,
+        "winSeconds": 21.970941453999572,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 9326,
+          "tension": 674
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "青柳猿王",
+        "winRate": 0.9509,
+        "winRatePerCast": 0.9509,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 22.227573877379324,
+        "averageCoinsLost": 75.2372,
+        "outcomes": {
+          "win": 9509,
+          "tension": 491
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "雾甲鳄龟",
+        "winRate": 0.9523,
+        "winRatePerCast": 0.9523,
+        "averageRodDamage": 6.0382,
+        "winRodDamage": 6.04011340963982,
+        "winSeconds": 24.01438622282894,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 9523,
+          "tension": 477
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "赤潮锯鲨皇",
+        "winRate": 0.9375,
+        "winRatePerCast": 0.9375,
+        "averageRodDamage": 8.5996,
+        "winRodDamage": 8.64768,
+        "winSeconds": 22.038186666666668,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 9375,
+          "tension": 625
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "海沟吞舟兽",
+        "winRate": 0.9537,
+        "winRatePerCast": 0.9537,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 22.03449722134843,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 9537,
+          "tension": 463
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "星渊古龙",
+        "winRate": 0.9362,
+        "winRatePerCast": 0.9362,
+        "averageRodDamage": 7.9884,
+        "winRodDamage": 7.988677632984405,
+        "winSeconds": 25.814462721640677,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 9362,
+          "tension": 585,
+          "timeout": 53
+        },
+        "iterations": 10000
+      }
+    ]
+  },
+  {
+    "scenario": "传说满耐久_熟练20_每2秒操作",
+    "bosses": [
+      {
+        "name": "绯樱鲤王",
+        "winRate": 0.9696,
+        "winRatePerCast": 0.9696,
+        "averageRodDamage": 9.7651,
+        "winRodDamage": 9.773514851485148,
+        "winSeconds": 37.46266501650165,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 9696,
+          "timeout": 304
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "青柳猿王",
+        "winRate": 0.9839,
+        "winRatePerCast": 0.9839,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 35.38042483992275,
+        "averageCoinsLost": 74.7491,
+        "outcomes": {
+          "win": 9839,
+          "timeout": 161
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "雾甲鳄龟",
+        "winRate": 0.9564,
+        "winRatePerCast": 0.9564,
+        "averageRodDamage": 6.3222,
+        "winRodDamage": 6.336888331242158,
+        "winSeconds": 39.7952739439565,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 9564,
+          "timeout": 436
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "赤潮锯鲨皇",
+        "winRate": 0.9815,
+        "winRatePerCast": 0.9815,
+        "averageRodDamage": 7.4032,
+        "winRodDamage": 7.391951095262353,
+        "winSeconds": 35.51319409067754,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 9815,
+          "timeout": 185
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "海沟吞舟兽",
+        "winRate": 0.986,
+        "winRatePerCast": 0.986,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 35.33529411764706,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 9860,
+          "timeout": 140
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "星渊古龙",
+        "winRate": 0.9731,
+        "winRatePerCast": 0.9731,
+        "averageRodDamage": 7.124,
+        "winRodDamage": 7.114376734148597,
+        "winSeconds": 37.287020861165345,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 9731,
+          "timeout": 269
+        },
+        "iterations": 10000
+      }
+    ]
+  },
+  {
+    "scenario": "传说满耐久_熟练20_通用打法",
+    "bosses": [
+      {
+        "name": "绯樱鲤王",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 7.016,
+        "winRodDamage": 7.016,
+        "winSeconds": 20.6593,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "青柳猿王",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 20.4767,
+        "averageCoinsLost": 74.8553,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "雾甲鳄龟",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 21.5957,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "赤潮锯鲨皇",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 9.0395,
+        "winRodDamage": 9.0395,
+        "winSeconds": 20.8699,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "海沟吞舟兽",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 20.2948,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "星渊古龙",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 6.8848,
+        "winRodDamage": 6.8848,
+        "winSeconds": 22.2616,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      }
+    ]
+  },
+  {
+    "scenario": "传说满耐久_熟练80_异色",
+    "bosses": [
+      {
+        "name": "绯樱鲤王",
+        "winRate": 0.1399,
+        "winRatePerCast": 0.1399,
+        "averageRodDamage": 9.2324,
+        "winRodDamage": 6.7998570407433885,
+        "winSeconds": 24.240886347390994,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "tension": 8591,
+          "win": 1399,
+          "timeout": 10
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "青柳猿王",
+        "winRate": 0.2318,
+        "winRatePerCast": 0.2318,
+        "averageRodDamage": 5.1278,
+        "winRodDamage": 4.960310612597066,
+        "winSeconds": 23.86367558239862,
+        "averageCoinsLost": 64.1999,
+        "outcomes": {
+          "tension": 7679,
+          "win": 2318,
+          "timeout": 3
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "雾甲鳄龟",
+        "winRate": 0.2131,
+        "winRatePerCast": 0.2131,
+        "averageRodDamage": 5.2416,
+        "winRodDamage": 5.307367433129986,
+        "winSeconds": 27.30173627404974,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "tension": 7869,
+          "win": 2131
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "赤潮锯鲨皇",
+        "winRate": 0.1409,
+        "winRatePerCast": 0.1409,
+        "averageRodDamage": 7.215,
+        "winRodDamage": 7.068843151171043,
+        "winSeconds": 24.56210078069553,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "tension": 8573,
+          "win": 1409,
+          "timeout": 18
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "海沟吞舟兽",
+        "winRate": 0.2614,
+        "winRatePerCast": 0.2614,
+        "averageRodDamage": 4.6899,
+        "winRodDamage": 4.31866870696251,
+        "winSeconds": 23.878347360367254,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "tension": 7376,
+          "win": 2614,
+          "timeout": 10
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "星渊古龙",
+        "winRate": 0.2081,
+        "winRatePerCast": 0.2081,
+        "averageRodDamage": 6,
+        "winRodDamage": 6,
+        "winSeconds": 25.0297933685728,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "tension": 7911,
+          "win": 2081,
+          "timeout": 8
+        },
+        "iterations": 10000
+      }
+    ]
+  },
+  {
+    "scenario": "传说满耐久_熟练120_异色",
+    "bosses": [
+      {
+        "name": "绯樱鲤王",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 5.0722,
+        "winRodDamage": 5.0722,
+        "winSeconds": 19.041,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "青柳猿王",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 4,
+        "winRodDamage": 4,
+        "winSeconds": 18.6628,
+        "averageCoinsLost": 50.13,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "雾甲鳄龟",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 4.0622,
+        "winRodDamage": 4.0622,
+        "winSeconds": 20.2857,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "赤潮锯鲨皇",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 5.9167,
+        "winRodDamage": 5.9167,
+        "winSeconds": 19.1323,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "海沟吞舟兽",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 3,
+        "winRodDamage": 3,
+        "winSeconds": 18.4424,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "星渊古龙",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 4.8752,
+        "winRodDamage": 4.8752,
+        "winSeconds": 19.9904,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      }
+    ]
+  },
+  {
+    "scenario": "传说满耐久_熟练160_异色",
+    "bosses": [
+      {
+        "name": "绯樱鲤王",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 4.5973,
+        "winRodDamage": 4.5973,
+        "winSeconds": 15.0888,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "青柳猿王",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 4,
+        "winRodDamage": 4,
+        "winSeconds": 15.0524,
+        "averageCoinsLost": 50.0543,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "雾甲鳄龟",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 4,
+        "winRodDamage": 4,
+        "winSeconds": 15.0737,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "赤潮锯鲨皇",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 6.6406,
+        "winRodDamage": 6.6406,
+        "winSeconds": 15.123,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "海沟吞舟兽",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 3,
+        "winRodDamage": 3,
+        "winSeconds": 14.9921,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      },
+      {
+        "name": "星渊古龙",
+        "winRate": 1,
+        "winRatePerCast": 1,
+        "averageRodDamage": 4,
+        "winRodDamage": 4,
+        "winSeconds": 15.0403,
+        "averageCoinsLost": 0,
+        "outcomes": {
+          "win": 10000
+        },
+        "iterations": 10000
+      }
+    ]
+  }
+]

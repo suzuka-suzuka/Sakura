@@ -1,0 +1,149 @@
+{
+  "requirements": {
+    "rod": "rod_legendary",
+    "durabilityRatio": 1,
+    "lineCapacity": 210,
+    "mastery": 20,
+    "actionIntervalMs": 1000,
+    "coinBalance": 1000,
+    "shiny": false,
+    "blindnessLayers": 0
+  },
+  "passed": true,
+  "baseline": [
+    {
+      "name": "绯樱鲤王",
+      "winRate": 1,
+      "winRatePerCast": 1,
+      "averageRodDamage": 7.016,
+      "winRodDamage": 7.016,
+      "winSeconds": 20.6593,
+      "averageCoinsLost": 0,
+      "outcomes": {
+        "win": 10000
+      },
+      "iterations": 10000
+    },
+    {
+      "name": "青柳猿王",
+      "winRate": 1,
+      "winRatePerCast": 1,
+      "averageRodDamage": 6,
+      "winRodDamage": 6,
+      "winSeconds": 20.4767,
+      "averageCoinsLost": 74.8553,
+      "outcomes": {
+        "win": 10000
+      },
+      "iterations": 10000
+    },
+    {
+      "name": "雾甲鳄龟",
+      "winRate": 1,
+      "winRatePerCast": 1,
+      "averageRodDamage": 6,
+      "winRodDamage": 6,
+      "winSeconds": 21.5957,
+      "averageCoinsLost": 0,
+      "outcomes": {
+        "win": 10000
+      },
+      "iterations": 10000
+    },
+    {
+      "name": "赤潮锯鲨皇",
+      "winRate": 1,
+      "winRatePerCast": 1,
+      "averageRodDamage": 8.8065,
+      "winRodDamage": 8.8065,
+      "winSeconds": 20.8628,
+      "averageCoinsLost": 0,
+      "outcomes": {
+        "win": 10000
+      },
+      "iterations": 10000
+    },
+    {
+      "name": "海沟吞舟兽",
+      "winRate": 1,
+      "winRatePerCast": 1,
+      "averageRodDamage": 6,
+      "winRodDamage": 6,
+      "winSeconds": 20.2948,
+      "averageCoinsLost": 0,
+      "outcomes": {
+        "win": 10000
+      },
+      "iterations": 10000
+    },
+    {
+      "name": "星渊古龙",
+      "winRate": 1,
+      "winRatePerCast": 1,
+      "averageRodDamage": 6.8848,
+      "winRodDamage": 6.8848,
+      "winSeconds": 22.2616,
+      "averageCoinsLost": 0,
+      "outcomes": {
+        "win": 10000
+      },
+      "iterations": 10000
+    }
+  ],
+  "boundaries": [
+    {
+      "name": "绯樱鲤王",
+      "cases": 35072,
+      "wins": 35072,
+      "failed": 0,
+      "maxSeconds": 44,
+      "maxRodDamage": 9,
+      "failures": []
+    },
+    {
+      "name": "青柳猿王",
+      "cases": 35072,
+      "wins": 35072,
+      "failed": 0,
+      "maxSeconds": 42,
+      "maxRodDamage": 6,
+      "failures": []
+    },
+    {
+      "name": "雾甲鳄龟",
+      "cases": 35072,
+      "wins": 35072,
+      "failed": 0,
+      "maxSeconds": 44,
+      "maxRodDamage": 6,
+      "failures": []
+    },
+    {
+      "name": "赤潮锯鲨皇",
+      "cases": 35072,
+      "wins": 35072,
+      "failed": 0,
+      "maxSeconds": 44,
+      "maxRodDamage": 10,
+      "failures": []
+    },
+    {
+      "name": "海沟吞舟兽",
+      "cases": 35072,
+      "wins": 35072,
+      "failed": 0,
+      "maxSeconds": 42,
+      "maxRodDamage": 6,
+      "failures": []
+    },
+    {
+      "name": "星渊古龙",
+      "cases": 35072,
+      "wins": 35072,
+      "failed": 0,
+      "maxSeconds": 44,
+      "maxRodDamage": 8,
+      "failures": []
+    }
+  ]
+}

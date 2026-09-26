@@ -344,13 +344,11 @@ export default class Economy extends plugin {
 
       if (itemId.startsWith("rod_")) {
         const durability = fishingManager.getRodDurabilityInfo(e.user_id, itemId);
-        const rodStats = fishingManager.getRodStats(e.user_id, itemId);
         entry.kind = "rod";
         entry.mastery = fishingManager.getRodMastery(e.user_id, itemId);
         entry.control = {
           current: fishingManager.getRodControl(e.user_id, itemId),
           base: Number(item?.control) || 0,
-          loss: rodStats.controlLoss,
         };
         entry.durability = {
           current: durability.currentDurability,
@@ -1224,12 +1222,11 @@ export default class Economy extends plugin {
           return true;
         }
         const durability = fishingManager.getRodDurabilityInfo(userId, rodId);
-        const rodStats = fishingManager.getRodStats(userId, rodId);
         const deepPressureLayers = fishingManager.getDeepPressureLayers(userId);
         const hasDeepPressure = deepPressureLayers > 0;
-        if (durability.damage <= 0 && rodStats.controlLoss <= 0 && !hasDeepPressure) {
+        if (durability.damage <= 0 && !hasDeepPressure) {
           await e.reply(
-            `🔧 【${rodConfig.name}】耐久完好，没有暗伤，也没有深压回响需要修复~`,
+            `🔧 【${rodConfig.name}】耐久完好，也没有深压回响需要修复~`,
             10,
           );
           return true;
@@ -1243,9 +1240,6 @@ export default class Economy extends plugin {
         const repairDetails = [
           repaired.durabilityRepaired > 0
             ? `耐久损耗 -${repaired.durabilityRepaired}`
-            : "",
-          repaired.controlRestored > 0
-            ? "竿身暗伤已修复"
             : "",
           deepPressureCleared.cleared
             ? `深压回响 ${deepPressureCleared.before} 层已解除（控制力 ×${Number(deepPressureCleared.beforeMultiplier.toFixed(3))} → ×1）`
@@ -1276,6 +1270,7 @@ export default class Economy extends plugin {
             : "",
           result.ghostDebt > 0 ? `${result.ghostDebt} 樱花币亡者高利贷` : "",
           result.ghostMarked ? "亡者抽成印记" : "",
+          result.blindnessLayers > 0 ? `${result.blindnessLayers} 层致盲` : "",
           result.deepPressureMarked
             ? `${result.deepPressureLayers} 层深压回响（控制力 ×${Number(result.deepPressureMultiplier.toFixed(3))}）`
             : "",

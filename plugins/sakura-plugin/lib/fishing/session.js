@@ -1,3 +1,15 @@
+import { getBlindReelHitRate } from "./rules.js";
+
+// 一次咬钩只抽取一次；后续重试或重复消息沿用结果，不能重新抽签。
+export function resolveBlindReel(state, layers, random = Math.random) {
+  if (!state.reelAccuracy) {
+    const safeLayers = Math.max(0, Math.floor(Number(layers) || 0));
+    const hitRate = getBlindReelHitRate(safeLayers);
+    state.reelAccuracy = { layers: safeLayers, hitRate, hit: safeLayers === 0 || random() < hitRate };
+  }
+  return state.reelAccuracy;
+}
+
 export const FISHING_PHASE = Object.freeze({
   starting: "starting",
   waiting: "waiting",
