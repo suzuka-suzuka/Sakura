@@ -1326,11 +1326,8 @@ export default class Fishing extends plugin {
         hasAssist: state.hasLucky,
       });
 
-      if (qualifiesForPerfect) {
-        state.isPerfect = true;
-        await this.finishSuccess(e, state, fishingManager);
-        return;
-      }
+      // 完美收竿只标记经验奖励；是否捕获仍由后续重量与难度判定决定。
+      state.isPerfect = qualifiesForPerfect;
 
       if (!isBossFish(fish) && state.hasLucky) {
         await e.reply(`🍀 好运护符发挥了作用，轻松把鱼拉了上来！`);
