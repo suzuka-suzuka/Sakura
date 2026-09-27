@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test:config-input": "node scripts/test-config-input.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

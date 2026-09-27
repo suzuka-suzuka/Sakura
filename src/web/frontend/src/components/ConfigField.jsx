@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import DraftInput from './DraftInput';
 import { readAuthToken } from '../utils/authStorage';
 import { useDynamicOptions } from '../hooks/useDynamicOptions';
 
@@ -232,28 +233,22 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
                     )}
                 </label>
                 {help && <div className="field-help">{help}</div>}
-                <input
+                <DraftInput
                     type={hideSpinner ? 'text' : 'number'}
-                    inputMode="numeric"
+                    inputMode="decimal"
                     className="field-input"
-                    value={value ?? ''}
-                    step={meta.step || undefined}
+                    value={value}
+                    step={meta.step ?? 'any'}
                     min={meta.min ?? undefined}
                     max={meta.max ?? undefined}
-                    onChange={(e) => {
-                        const v = e.target.value;
-                        if (v === '' || v === '-') {
-                            onChange(v === '' ? 0 : v);
-                            return;
-                        }
-                        const num = Number(v);
-                        if (!isNaN(num)) {
-                            let clamped = num;
-                            if (meta.min != null && clamped < meta.min) clamped = meta.min;
-                            if (meta.max != null && clamped > meta.max) clamped = meta.max;
-                            onChange(clamped);
-                        }
+                    parse={(text) => {
+                        if (!text.trim() || !Number.isFinite(Number(text))) return undefined;
+                        let number = Number(text);
+                        if (meta.min != null) number = Math.max(meta.min, number);
+                        if (meta.max != null) number = Math.min(meta.max, number);
+                        return number;
                     }}
+                    onChange={onChange}
                 />
             </div>
         );
@@ -375,20 +370,18 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
                     onChange={onChange}
                 />
             ) : (
-                <input
+                <DraftInput
                     type="text"
                     className="field-input"
-                    value={value ?? ''}
-                    onChange={(e) => {
-                        const v = e.target.value;
-                        // Union (number|string): 如果能转为数字就转
+                    value={value}
+                    parse={(text) => {
                         if (type === 'number|string' || type === 'string|number') {
-                            const num = Number(v);
-                            onChange(!isNaN(num) && v.trim() !== '' ? num : v);
-                        } else {
-                            onChange(v);
+                            const number = Number(text);
+                            return text.trim() !== '' && Number.isFinite(number) ? number : text;
                         }
+                        return text;
                     }}
+                    onChange={onChange}
                 />
             )}
         </div>
@@ -642,8 +635,9 @@ function ArrayField({ name, displayName, help, value, onChange, itemType }) {
 
         let newValue = trimmed;
         if (numericItem) {
-            newValue = Number(trimmed);
-            if (isNaN(newValue)) return;
+            const number = Number(trimmed);
+            if (Number.isFinite(number)) newValue = number;
+            else if (itemType === 'number') return;
         }
 
         if (!items.includes(newValue)) {
@@ -690,7 +684,7 @@ function ArrayField({ name, displayName, help, value, onChange, itemType }) {
                 <input
                     ref={inputRef}
                     type="text"
-                    inputMode={numericItem ? 'numeric' : 'text'}
+                    inputMode={itemType === 'number' ? 'decimal' : 'text'}
                     className="array-input"
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
@@ -2063,7 +2057,7 @@ function CommandCostField({ name, displayName, help, value, onChange }) {
         const currentValue = Array.isArray(value) ? [...value] : [];
         const existingIndex = currentValue.findIndex(item => item.command === commandDisplayName);
 
-        const costNum = parseInt(newCost, 10) || 0;
+        const costNum = newCost;
 
         if (existingIndex >= 0) {
             if (costNum > 0) {
@@ -2130,13 +2124,20 @@ function CommandCostField({ name, displayName, help, value, onChange }) {
                         {row.map(cmdName => (
                             <div key={cmdName} className="command-cost-item">
                                 <span className="command-cost-label">{cmdName}：</span>
-                                <input
+                                <DraftInput
                                     type="number"
+                                    inputMode="numeric"
                                     className="command-cost-input"
                                     min="0"
+                                    step="1"
                                     placeholder="0"
-                                    value={costMap.get(cmdName) || ''}
-                                    onChange={(e) => handleCostChange(cmdName, e.target.value)}
+                                    value={costMap.get(cmdName) ?? 0}
+                                    parse={(text) => {
+                                        const number = Number(text);
+                                        return text.trim() && Number.isSafeInteger(number) && number >= 0
+                                            ? number : undefined;
+                                    }}
+                                    onChange={(cost) => handleCostChange(cmdName, cost)}
                                 />
                             </div>
                         ))}
@@ -2152,7 +2153,7 @@ function CommandCostField({ name, displayName, help, value, onChange }) {
  * 支持 5 段标准格式（分 时 日 月 周）
  */
 function CronField({ name, displayName, help, value, onChange }) {
-    const cronValue = value || '0 * * * *';
+    const cronValue = value ?? '0 * * * *';
     const parts = cronValue.trim().split(/\s+/);
 
     const fieldDefs = [
@@ -2296,12 +2297,13 @@ function CronField({ name, displayName, help, value, onChange }) {
                 {fieldDefs.map((fd) => (
                     <div key={fd.key} className="cron-segment">
                         <span className="cron-segment-label">{fd.label}</span>
-                        <input
+                        <DraftInput
                             type="text"
                             className={`cron-segment-input ${!isValidSegment(segments[fd.key]) ? 'cron-input-error' : ''}`}
                             value={segments[fd.key]}
                             placeholder={fd.placeholder}
-                            onChange={(e) => updateSegment(fd.key, e.target.value)}
+                            parse={(text) => text || '*'}
+                            onChange={(text) => updateSegment(fd.key, text)}
                             title={`${fd.label}: ${fd.allowed}, 支持 * , - /`}
                         />
                         <span className="cron-segment-range">{fd.allowed}</span>
