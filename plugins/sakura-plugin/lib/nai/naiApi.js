@@ -1,6 +1,8 @@
 import AdmZip from "adm-zip";
 import { createHash } from "node:crypto";
 import Setting from "../setting.js";
+import { getCurrentBotSelfId } from "../../../../src/api/client.js";
+import { getNaiApis, selectNaiApi } from "./apiPool.js";
 
 const DEFAULT_MODEL = "nai-diffusion-4-5-full";
 const DEFAULT_NEGATIVE =
@@ -275,6 +277,27 @@ export async function getNaiQuota(token, { fetchImpl = global.fetch } = {}) {
         purchasedAnlas,
         totalAnlas: subscriptionAnlas + purchasedAnlas,
     };
+}
+
+export async function getNaiQuotas(config, options = {}) {
+    const apis = getNaiApis(config);
+    if (!apis.length) throw new Error("当前绘图配置中未设置 NovelAI API Key");
+    const results = new Array(apis.length);
+    let next = 0;
+    // 限制并发，保留配置顺序；查询不占用绘图轮询次数。
+    await Promise.all(Array.from({ length: Math.min(4, apis.length) }, async () => {
+        while (next < apis.length) {
+            const index = next++;
+            const { name, token, weight } = apis[index];
+            try {
+                const quota = await getNaiQuota(token, options);
+                results[index] = { name, weight, quota };
+            } catch (error) {
+                results[index] = { name, weight, error: error.message };
+            }
+        }
+    }));
+    return results;
 }
 
 export async function checkNaiUsageLimit(
@@ -620,7 +643,7 @@ async function processQueue() {
             if (task.onStart) {
                 task.onStart(queue.length);
             }
-            const result = await _generateImage(...params);
+            const result = await _generateImage(task.config, task.scope, ...params);
             resolve(result);
         } catch (error) {
             reject(error);
@@ -650,6 +673,9 @@ export function generateImage(
         queue.push({
             resolve,
             reject,
+            // 入队时保存请求所属账号，避免共享队列沿用上一任务的异步上下文。
+            config: structuredClone(Setting.getConfig("nai")),
+            scope: getCurrentBotSelfId() ?? "default",
             params: [prompt, model, negative, parameters, image, characters],
         });
         processQueue();
@@ -669,6 +695,8 @@ export function generateImageWithCallback(
         queue.push({
             resolve,
             reject,
+            config: structuredClone(Setting.getConfig("nai")),
+            scope: getCurrentBotSelfId() ?? "default",
             params: [prompt, model, negative, parameters, image, characters],
             onStart,
         });
@@ -788,6 +816,8 @@ async function requestNaiImageWithRetry(payload, token) {
 }
 
 async function _generateImage(
+    config,
+    scope,
     prompt,
     model = null,
     negative = null,
@@ -795,10 +825,7 @@ async function _generateImage(
     image = null,
     characters = [],
 ) {
-    const config = Setting.getConfig("nai");
-    if (!config || !config.token) {
-        throw new Error("请先在配置中设置 NovelAI Token");
-    }
+    const { token } = selectNaiApi(config, scope);
 
     const requestedModel = model || config.model || DEFAULT_MODEL;
     const useNegative = negative || config.negative || DEFAULT_NEGATIVE;
@@ -832,7 +859,7 @@ async function _generateImage(
 
     if (getNaiModelProfile(useModel).family === "v5") {
         try {
-            await checkNaiUsageLimit(config.token);
+            await checkNaiUsageLimit(token);
         } catch (error) {
             if (!canUseFreeNai45Fallback(payload, error)) {
                 if (error.code === "NAI_USAGE_LIMIT") {
@@ -866,7 +893,7 @@ async function _generateImage(
         }
     }
 
-    return requestNaiImageWithRetry(payload, config.token);
+    return requestNaiImageWithRetry(payload, token);
 }
 
 /**
@@ -876,9 +903,7 @@ async function _generateImage(
  */
 export async function encodeVibe(imageBase64) {
     const config = Setting.getConfig("nai");
-    if (!config || !config.token) {
-        throw new Error("请先在配置中设置 NovelAI Token");
-    }
+    const { token } = selectNaiApi(config, getCurrentBotSelfId() ?? "default");
 
     const configuredModel = config.model || DEFAULT_MODEL;
     const useModel = getNaiModelProfile(configuredModel).supportsVibe
@@ -895,7 +920,7 @@ export async function encodeVibe(imageBase64) {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${config.token}`,
+            Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
             image: imageBase64,

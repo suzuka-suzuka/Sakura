@@ -76,7 +76,7 @@ config/sakura-plugin/
 - `EditImage.yaml`：图片编辑触发词及默认图片、视频路由。
 - `economy.yaml`：经济系统、启用群、指令消耗价格。
 - `pixiv.yaml`：Pixiv cookie、refresh token、订阅推送。
-- `nai.yaml`：NovelAI 绘图 token、模型和负面提示词。
+- `nai.yaml`：NovelAI API 列表、轮询权重、模型和负面提示词。
 
 配置加载与网页保存校验通过后会按当前 schema 归一化并回写 YAML，自动移除已废弃字段；校验失败时保留原文件以避免丢失有效内容。插件启动扫描或运行中检测到未注册的 YAML 模块时会直接删除该文件（包括账号配置目录）。
 - `VoxCPMVoice.yaml`：语音角色和默认语音角色。
@@ -148,10 +148,24 @@ config/sakura-plugin/
 
 ### NovelAI
 
-1. 在 `nai.token` 中填写 NovelAI token。
+1. 在 Web 面板的 NovelAI API 列表（`nai.apis`）中添加一个或多个 Key，每项设置名称、`token` 和 `weight`（默认 1）。旧版单个 `nai.token` 会自动迁移。
 2. 根据需要调整 `nai.model` 和 `nai.negative`。
 3. 使用 `#绘图 提示词`。
-4. 主人发送 `查询nai额度`，可同时查看 NAI5 剩余用量与剩余 Anlas 点数（使用当前绘图账号的 `nai.token`）。
+4. 主人发送 `查询nai余额` 或 `查询nai额度`（均支持加 `#`），返回一张 Canvas 余额总览图：包含当前绘图账号配置的全部 Key、Anlas 总余额、每个 Key 的订阅与购买余额，以及 NAI5 剩余额度进度条。个别 Key 查询失败时会单独标记，合计仅统计成功结果。
+
+多 Key 使用平滑加权轮询：相同权重依次使用，权重为 2 和 1 时请求按 2∶1 分配。权重范围为 0–1000 的整数，0 表示暂停轮询但仍查询余额。重复填写同一 Key 时合并权重、余额只计一次；新 API 列表优先于旧 `token`，清空列表后不会重新启用旧 Key。
+
+绘图指令、聊天绘图、AI 绘图工具和画风编码共用轮询池。每张图选择一次 Key，网络错误和 429 的 10／20／30 秒重试仍使用该 Key，不额外推进轮询。NAI5 低额度保护及符合条件时的 V4.5 免费降级按所选 Key 独立生效。
+
+```yaml
+apis:
+  - name: 主账号
+    token: "填写第一个 Key"
+    weight: 2
+  - name: 备用账号
+    token: "填写第二个 Key"
+    weight: 1
+```
 
 ### VoxCPM 语音
 

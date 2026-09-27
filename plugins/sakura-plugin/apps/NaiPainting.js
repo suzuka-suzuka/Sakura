@@ -2,8 +2,9 @@ import {
     generateImageWithCallback,
     getQueueLength,
     getIsProcessing,
-    getNaiQuota,
+    getNaiQuotas,
 } from "../lib/nai/naiApi.js";
+import { renderNaiQuotaImage } from "../lib/nai/quotaImage.js";
 import Setting from "../lib/setting.js";
 import { getImg } from "../lib/utils.js";
 import { saveVibe, getVibe, deleteVibe as removeVibe, listVibes as getAllVibes } from "../lib/nai/vibeStore.js";
@@ -18,17 +19,14 @@ export class NaiPainting extends plugin {
         });
     }
 
-    queryNaiQuota = Command(/^#?查询nai额度$/i, "master", async (e) => {
+    queryNaiQuota = Command(/^#?查询nai(?:余额|额度)$/i, "master", async (e) => {
         try {
-            const { token } = Setting.getConfig("nai", { selfId: e.self_id });
-            const quota = await getNaiQuota(token);
-            await e.reply(
-                `NAI5 剩余用量：${quota.percent}%\n` +
-                `剩余 Anlas：${quota.totalAnlas} 点` +
-                `（订阅 ${quota.subscriptionAnlas}，购买 ${quota.purchasedAnlas}）`,
-            );
+            const config = Setting.getConfig("nai", { selfId: e.self_id });
+            const quotas = await getNaiQuotas(config);
+            const image = await renderNaiQuotaImage(quotas);
+            await e.reply(segment.image(image));
         } catch (error) {
-            await e.reply(`查询 NAI 额度失败：${error.message}`);
+            await e.reply(`查询 NAI 余额失败：${error.message}`);
         }
         return true;
     });

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CronExpressionParser } from 'cron-parser';
+import { migrateNaiConfig } from './lib/nai/apiPool.js';
 import {
     DEFAULT_TAVILY_MAX_RESULTS,
     DEFAULT_TAVILY_MCP_URL,
@@ -494,8 +495,14 @@ export const CoolSchema = z.object({
     randomIntervalMax: z.number().default(60).describe('最大间隔(秒)|随机冷却的最大间隔'),
 }).describe('冷群发图');
 
-export const NaiSchema = z.object({
-    token: z.string().default('').describe('Token|#textarea'),
+const NaiApiSchema = z.object({
+    name: z.string().trim().max(80).default('').describe('名称|用于区分 API 和余额卡片，留空时自动编号'),
+    token: z.string().trim().default('').describe('API Key|填写 NovelAI Token'),
+    weight: z.number().int().min(0).max(1000).default(1).describe('轮询权重|#min:0|#max:1000|#step:1|按权重比例分配请求；相同权重依次轮询，0 暂停使用但仍查询余额'),
+});
+
+const NaiObjectSchema = z.object({
+    apis: z.array(NaiApiSchema).default([]).describe('NovelAI API 列表|#nameField:name|可添加多个 Key，每个配置独立权重；相同 Key 合并权重并只统计一次余额'),
     model: z.string().default('nai-diffusion-4-5-full').describe('模型'),
     quality: z.string().default('very aesthetic, masterpiece').describe('质量提示词|#textarea|默认追加到正面提示词末尾，逗号分隔；留空则不追加'),
     negative: z.string().default('nsfw, lowres, artistic error, scan artifacts, worst quality, bad quality, jpeg artifacts, multiple views, very displeasing, too many watermarks, negative space, blank page').describe('负面提示词|默认负面提示词'),
@@ -520,6 +527,9 @@ Rules:
 Example:
 <draw>1girl, original character, long silver hair, blue eyes, oversized white shirt, sitting on the edge of a bed, leaning toward viewer, one hand reaching forward, warm blush, gentle smile, looking at viewer, cozy bedroom at night, bedside lamp, cowboy shot, eye-level, slightly left of center, warm backlighting, shallow depth of field</draw>`).describe('聊天自动绘图指令|#textarea|角色开启NAI绘图时追加到系统提示词；只追加绘图标签并按聊天绘图数量异步生成，不调用绘图工具；留空则不追加'),
 }).describe('NovelAI 绘画');
+
+export const NaiSchema = z.preprocess(migrateNaiConfig, NaiObjectSchema);
+NaiSchema.configInputMigration = migrateNaiConfig;
 
 const CommandCostSchema = z.object({
     command: z.string().describe('指令名称'),
