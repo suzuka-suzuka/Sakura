@@ -359,7 +359,7 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
     }
 
     // String / Union / Default
-    const isApiKey = /api.?key/i.test(name);
+    const isApiKey = /api.?key/i.test(name) || /api.?key/i.test(displayName);
     const isPassword = !isApiKey && /(password|token|secret)/i.test(name);
 
     return (
