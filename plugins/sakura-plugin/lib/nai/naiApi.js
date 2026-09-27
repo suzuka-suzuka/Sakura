@@ -825,7 +825,10 @@ async function _generateImage(
     image = null,
     characters = [],
 ) {
-    const { token } = selectNaiApi(config, scope);
+    const { token, name } = selectNaiApi(config, scope);
+    if (getNaiApis(config).length > 1) {
+        global.logger?.info?.(`[NAI] 本次绘图使用 API Key：${name}`);
+    }
 
     const requestedModel = model || config.model || DEFAULT_MODEL;
     const useNegative = negative || config.negative || DEFAULT_NEGATIVE;
