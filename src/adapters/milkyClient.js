@@ -84,7 +84,8 @@ function detectMilkyReactionType(reactionId, explicitType) {
   }
 
   const normalizedId = String(reactionId ?? "").trim();
-  if (/^\d{6}$/.test(normalizedId)) {
+  // QQ 自带表情使用短 ID，Unicode 表情可能是四位或五位十进制码点。
+  if (/^\d{4,}$/.test(normalizedId)) {
     return "emoji";
   }
 
