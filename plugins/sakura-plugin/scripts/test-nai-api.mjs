@@ -216,12 +216,17 @@ test("相同 Key 在不同 URL 下的用量冷却互相独立且不泄露密钥"
 });
 
 test("单接口余额卡片支持官方、Relay 和零体力，输出 PNG", async () => {
-    const previews = [["official", quota(86.5)], ["relay", quota(0, true)]];
+    const previews = [
+        ["official", quota(86.5)],
+        ["relay", quota(0, true)],
+        ["low", quota(4)],
+        ["full", { ...quota(100), totalAnlas: 1234567890.12 }],
+    ];
     for (const [name, value] of previews) {
-        const buffer = await renderNaiQuotaImage(value, { generatedAt: new Date("2026-10-03T08:30:00Z") });
+        const buffer = await renderNaiQuotaImage(value);
         const image = await loadImage(buffer);
-        assert.equal(image.width, 1160);
-        assert.equal(image.height, 738);
+        assert.equal(image.width, 760);
+        assert.equal(image.height, 384);
         if (process.env.NAI_PREVIEW_DIR) {
             await mkdir(process.env.NAI_PREVIEW_DIR, { recursive: true });
             await writeFile(path.join(process.env.NAI_PREVIEW_DIR, `nai-quota-${name}.png`), buffer);
