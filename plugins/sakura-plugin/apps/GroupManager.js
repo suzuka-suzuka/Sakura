@@ -599,7 +599,7 @@ export class GroupManager extends plugin {
       let content = match[1].trim();
 
       let image = null;
-      const imgList = await getImg(e, false);
+      const imgList = await getImg(e, { mode: "priority" });
       if (imgList && imgList.length > 0) {
         image = imgList[0];
       }

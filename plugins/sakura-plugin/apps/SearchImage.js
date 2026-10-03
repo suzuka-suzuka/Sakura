@@ -24,7 +24,7 @@ export class SearchImage extends plugin {
   }
 
   imageSearch = Command(/^#?(?:(?:谷歌|google|googlelens|lens|as|ascii|ascii2d|sa|sauce|saucenao)\s*)?(?:搜图|以图搜图|二次元搜图)$/i, async (e) => {
-    const imgs = await getImg(e, true)
+    const imgs = await getImg(e, { mode: 'priority', getAvatar: true })
     if (!imgs || imgs.length === 0) {
       return false
     }

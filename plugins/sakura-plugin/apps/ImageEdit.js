@@ -75,7 +75,11 @@ export class EditImage extends plugin {
       return false;
     }
 
-    const inputImages = await getImg(e, true, true);
+    const inputImages = (await getImg(e, {
+      mode: "priority",
+      getAvatar: true,
+      toBase64: true,
+    }))?.slice(0, 1);
     if (!inputImages || inputImages.length === 0) {
       return false;
     }
@@ -125,7 +129,11 @@ export class EditImage extends plugin {
   }
 
   async dynamicImageHandler(e, matchedTask, match, cachedInputImages = null) {
-    const inputImages = cachedInputImages || await getImg(e, true, true);
+    const inputImages = (cachedInputImages || await getImg(e, {
+      mode: "priority",
+      getAvatar: true,
+      toBase64: true,
+    }))?.slice(0, 1);
 
     if (!inputImages || inputImages.length === 0) {
       return false;
@@ -188,7 +196,11 @@ export class EditImage extends plugin {
 
   async editImageHandler(e) {
     const msg = e.msg.replace(IMAGE_COMMAND_PATTERN, "").trim();
-    const inputImages = await getImg(e, true, true);
+    const inputImages = await getImg(e, {
+      mode: "mixed",
+      getAvatar: true,
+      toBase64: true,
+    });
     const {
       aspectRatio,
       imageSize: parsedSize,

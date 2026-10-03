@@ -39,7 +39,7 @@ export class NaiPainting extends plugin {
 
         let imageBase64 = null;
         try {
-            const images = await getImg(e, false, true);
+            const images = await getImg(e, { mode: "priority", toBase64: true });
             if (images && images.length > 0) {
                 imageBase64 = images[0].base64;
             }
@@ -176,7 +176,7 @@ export class NaiPainting extends plugin {
 
         let imageBase64 = null;
         try {
-            const images = await getImg(e, true, true);
+            const images = await getImg(e, { mode: "priority", getAvatar: true, toBase64: true });
             if (images && images.length > 0) {
                 imageBase64 = images[0].base64;
             }

@@ -696,7 +696,7 @@ export class memesPlugin extends plugin {
     if (info.params.max_images > 0) {
       let imgUrls = [];
 
-      const imgs = await getImg(e, true, false);
+      const imgs = await getImg(e, { mode: "priority", getAvatar: true });
       if (imgs && imgs.length > 0) {
         imgUrls = imgs;
       }

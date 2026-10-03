@@ -46,43 +46,61 @@ export async function urlToBase64(imageUrl) {
 /**
  * 获取消息中的图片
  * @param {object} e - 消息事件对象
- * @param {boolean} getAvatar - 是否获取头像
- * @param {boolean} toBase64 - 是否转换为 base64
+ * @param {boolean|object} getAvatar - 是否获取头像，或 { getAvatar, toBase64, mode }
+ * @param {boolean} toBase64 - 是否转换为 base64（布尔参数写法）
+ * @param {string} getAvatar.mode - mixed：引用图片或多个头像在前，当前图片在后；priority：保留原先的来源优先规则
  * @returns {Promise<Array|null>} 图片 URL 数组 或 base64 对象数组
  */
 export async function getImg(e, getAvatar = false, toBase64 = false) {
+  const options = getAvatar && typeof getAvatar === "object" ? getAvatar : null;
+  const mode = options?.mode || "mixed";
+  if (options) {
+    getAvatar = options.getAvatar ?? false;
+    toBase64 = options.toBase64 ?? false;
+  }
+
   if (!e.message || !Array.isArray(e.message)) {
     return null;
   }
 
+  const collectImageUrls = (segments) => Array.isArray(segments)
+    ? segments
+      .filter((segment) => segment.type === "image" && segment.data?.url)
+      .map((segment) => segment.data.url)
+    : [];
+  const directImageUrls = collectImageUrls(e.message);
+  const getRepliedImageUrls = async () => {
+    try {
+      const sourceMessageData = await e.getReplyMsg();
+      return collectImageUrls(sourceMessageData?.message);
+    } catch (error) {
+      logger.warn(`获取引用图片失败: ${error.message}`);
+      return [];
+    }
+  };
+
   let imageUrls = [];
-
-  const directImageUrls = e.message
-    .filter((segment) => segment.type === "image" && segment.data?.url)
-    .map((segment) => segment.data.url);
-
-  if (directImageUrls.length > 0) {
+  if (mode === "priority") {
+    // 单图功能和表情包保留当前图片、引用图片、首个头像的原先选择逻辑。
     imageUrls = directImageUrls;
-  } else if (e.reply_id) {
-    const sourceMessageData = await e.getReplyMsg();
-    const messageSegments = sourceMessageData?.message;
-
-    if (messageSegments && Array.isArray(messageSegments)) {
-      const repliedImageUrls = messageSegments
-        .filter((segment) => segment.type === "image" && segment.data?.url)
-        .map((segment) => segment.data.url);
-
-      if (repliedImageUrls.length > 0) {
-        imageUrls = repliedImageUrls;
-      }
+    if (imageUrls.length === 0 && e.reply_id) {
+      imageUrls = await getRepliedImageUrls();
     }
-  }
-
-  if (imageUrls.length === 0 && getAvatar) {
-    const atMsg = e.at;
-    if (atMsg) {
-      imageUrls = [`https://q1.qlogo.cn/g?b=qq&s=640&nk=${atMsg}`];
+    if (imageUrls.length === 0 && getAvatar && e.at) {
+      imageUrls = [`https://q1.qlogo.cn/g?b=qq&s=640&nk=${e.at}`];
     }
+  } else {
+    // 引用会自动附带 @，因此有引用时不从当前消息提取任何头像。
+    if (e.reply_id) {
+      imageUrls = await getRepliedImageUrls();
+    } else if (getAvatar) {
+      imageUrls = e.message
+        .filter((segment) => segment.type === "at")
+        .map((segment) => String(segment.data?.qq ?? ""))
+        .filter((qq) => /^[1-9]\d*$/.test(qq) && qq !== String(e.self_id))
+        .map((qq) => `https://q1.qlogo.cn/g?b=qq&s=640&nk=${qq}`);
+    }
+    imageUrls = [...new Set([...imageUrls, ...directImageUrls])];
   }
 
   if (imageUrls.length === 0) {

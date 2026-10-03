@@ -39,7 +39,11 @@ export class VideoGeneration extends plugin {
 
     try {
       const { channel, prompt, options } = parseVideoCommandArgs(match[1]);
-      const imageRefs = (await getImg(e, true, true)) || [];
+      const imageRefs = (await getImg(e, {
+        mode: "mixed",
+        getAvatar: true,
+        toBase64: true,
+      })) || [];
       if (!prompt && imageRefs.length === 0) return false;
 
       await e.react(124);

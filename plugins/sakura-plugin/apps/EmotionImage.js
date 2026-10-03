@@ -63,7 +63,7 @@ export class EmotionImage extends plugin {
       return false;
     }
 
-    const imgUrls = await getImg(e);
+    const imgUrls = await getImg(e, { mode: "priority" });
 
     if (!imgUrls || imgUrls.length === 0) {
       return false;
@@ -211,7 +211,7 @@ export class EmotionImage extends plugin {
   });
 
   deleteEmoji = Command(/^#?删表情(.*)$/, "white", async (e) => {
-    const imgUrls = await getImg(e);
+    const imgUrls = await getImg(e, { mode: "priority" });
 
     if (imgUrls && imgUrls.length > 0) {
       try {

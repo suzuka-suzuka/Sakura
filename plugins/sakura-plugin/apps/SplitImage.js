@@ -28,7 +28,7 @@ export class SplitImage extends plugin {
       return true;
     }
 
-    const imgUrls = await getImg(e);
+    const imgUrls = await getImg(e, { mode: "priority" });
     if (!imgUrls || imgUrls.length === 0) {
       return false;
     }
