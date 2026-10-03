@@ -1,8 +1,7 @@
 import AdmZip from "adm-zip";
 import { createHash } from "node:crypto";
 import Setting from "../setting.js";
-import { getCurrentBotSelfId } from "../../../../src/api/client.js";
-import { getNaiApis, selectNaiApi } from "./apiPool.js";
+import { getNaiApiConfig } from "./apiConfig.js";
 
 const DEFAULT_MODEL = "nai-diffusion-4-5-full";
 const DEFAULT_NEGATIVE =
@@ -10,13 +9,12 @@ const DEFAULT_NEGATIVE =
 const DEFAULT_QUALITY = "very aesthetic, masterpiece";
 const DEFAULT_STEPS = 28;
 const NO_TEXT_TAG = "no text";
-const NAI_SUBSCRIPTION_URL = "https://image.novelai.net/user/subscription";
 const NAI_USAGE_MIN_PERCENT = 5;
 const NAI_USAGE_FALLBACK_COOLDOWN_SECONDS = 60;
 const NAI_OPUS_TIER = 3;
 const NAI_FREE_MAX_PIXELS = 1024 * 1024;
 const NAI_FREE_MAX_STEPS = 28;
-const NAI_IMAGE_RETRY_DELAYS_MS = [10_000, 20_000, 30_000];
+const NAI_IMAGE_RETRY_DELAYS_MS = [2_000, 2_000, 2_000];
 const NAI_RETRYABLE_NETWORK_CODES = new Set([
     "ABORT_ERR",
     "EAI_AGAIN",
@@ -187,9 +185,9 @@ export function wantsNaiTransparentBackground(prompt) {
     );
 }
 
-function getNaiUsageCooldownKey(token) {
+function getNaiUsageCooldownKey({ key, url }) {
     const tokenHash = createHash("sha256")
-        .update(String(token))
+        .update(JSON.stringify([url, key]))
         .digest("hex")
         .slice(0, 24);
     return `sakura:nai:usage-limit:${tokenHash}`;
@@ -234,16 +232,16 @@ function createUsageLimitError(
     return error;
 }
 
-export async function getNaiQuota(token, { fetchImpl = global.fetch } = {}) {
-    if (!token) throw new Error("当前绘图配置中未设置 NovelAI Token");
+export async function getNaiQuota(config, { fetchImpl = global.fetch } = {}) {
+    const { key, url } = getNaiApiConfig(config);
     if (typeof fetchImpl !== "function") throw new Error("无法请求 NovelAI 额度接口");
 
     let response;
     try {
-        response = await fetchImpl(NAI_SUBSCRIPTION_URL, {
+        response = await fetchImpl(`${url}/user/subscription`, {
             headers: {
                 Accept: "application/json",
-                Authorization: `Bearer ${token}`,
+                Authorization: `Bearer ${key}`,
             },
             signal: AbortSignal.timeout(20_000),
         });
@@ -276,37 +274,19 @@ export async function getNaiQuota(token, { fetchImpl = global.fetch } = {}) {
         subscriptionAnlas,
         purchasedAnlas,
         totalAnlas: subscriptionAnlas + purchasedAnlas,
+        isRelay: subscription?.relay?.billing === "local",
     };
 }
 
-export async function getNaiQuotas(config, options = {}) {
-    const apis = getNaiApis(config);
-    if (!apis.length) throw new Error("当前绘图配置中未设置 NovelAI API Key");
-    const results = new Array(apis.length);
-    let next = 0;
-    // 限制并发，保留配置顺序；查询不占用绘图轮询次数。
-    await Promise.all(Array.from({ length: Math.min(4, apis.length) }, async () => {
-        while (next < apis.length) {
-            const index = next++;
-            const { name, token, weight } = apis[index];
-            try {
-                const quota = await getNaiQuota(token, options);
-                results[index] = { name, weight, quota };
-            } catch (error) {
-                results[index] = { name, weight, error: error.message };
-            }
-        }
-    }));
-    return results;
-}
-
 export async function checkNaiUsageLimit(
-    token,
+    config,
     {
         redisClient = global.redis,
         fetchImpl = global.fetch,
     } = {},
 ) {
+    const api = getNaiApiConfig(config);
+    const { key, url } = api;
     if (!redisClient) {
         throw new Error("Redis 未连接，无法验证 NovelAI 用量，已停止生图");
     }
@@ -314,7 +294,7 @@ export async function checkNaiUsageLimit(
         throw new Error("无法请求 NovelAI 用量接口，已停止生图");
     }
 
-    const cooldownKey = getNaiUsageCooldownKey(token);
+    const cooldownKey = getNaiUsageCooldownKey(api);
     let cooldown;
     try {
         cooldown = await redisClient.get(cooldownKey);
@@ -347,10 +327,10 @@ export async function checkNaiUsageLimit(
 
     let response;
     try {
-        response = await fetchImpl(NAI_SUBSCRIPTION_URL, {
+        response = await fetchImpl(`${url}/user/subscription`, {
             headers: {
                 Accept: "application/json",
-                Authorization: `Bearer ${token}`,
+                Authorization: `Bearer ${key}`,
             },
         });
     } catch (error) {
@@ -387,7 +367,8 @@ export async function checkNaiUsageLimit(
         usage.timeUntilNextPercent,
     );
 
-    if (percent <= NAI_USAGE_MIN_PERCENT) {
+    // Relay 自行处理体力和本地点数计费，普通下游 Key 的 0% 不代表不能生图。
+    if (percent <= NAI_USAGE_MIN_PERCENT && subscription?.relay?.billing !== "local") {
         const lockValue = JSON.stringify({
             percent,
             timeUntilNextPercent: cooldownSeconds,
@@ -643,7 +624,7 @@ async function processQueue() {
             if (task.onStart) {
                 task.onStart(queue.length);
             }
-            const result = await _generateImage(task.config, task.scope, ...params);
+            const result = await _generateImage(task.config, ...params);
             resolve(result);
         } catch (error) {
             reject(error);
@@ -675,7 +656,6 @@ export function generateImage(
             reject,
             // 入队时保存请求所属账号，避免共享队列沿用上一任务的异步上下文。
             config: structuredClone(Setting.getConfig("nai")),
-            scope: getCurrentBotSelfId() ?? "default",
             params: [prompt, model, negative, parameters, image, characters],
         });
         processQueue();
@@ -696,7 +676,6 @@ export function generateImageWithCallback(
             resolve,
             reject,
             config: structuredClone(Setting.getConfig("nai")),
-            scope: getCurrentBotSelfId() ?? "default",
             params: [prompt, model, negative, parameters, image, characters],
             onStart,
         });
@@ -731,7 +710,7 @@ function getNaiErrorStatus(error) {
 }
 
 function isRetryableNaiImageError(error) {
-    if (getNaiErrorStatus(error) === 429) return true;
+    if ([429, 502, 503, 504].includes(getNaiErrorStatus(error))) return true;
 
     return getNaiErrorChain(error).some((item) => {
         const code = String(item?.code || "").toUpperCase();
@@ -749,12 +728,12 @@ function waitForNaiImageRetry(delayMs) {
     return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
-async function performNaiImageRequest(payload, token) {
-    const response = await fetch("https://image.novelai.net/ai/generate-image", {
+async function performNaiImageRequest(payload, { key, url }) {
+    const response = await fetch(`${url}/ai/generate-image`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${key}`,
         },
         body: JSON.stringify(payload),
     });
@@ -790,10 +769,10 @@ async function performNaiImageRequest(payload, token) {
     throw new Error("生成失败，未收到图片数据");
 }
 
-async function requestNaiImageWithRetry(payload, token) {
+async function requestNaiImageWithRetry(payload, api) {
     for (let retryIndex = 0; ; retryIndex += 1) {
         try {
-            return await performNaiImageRequest(payload, token);
+            return await performNaiImageRequest(payload, api);
         } catch (error) {
             const retryDelayMs = NAI_IMAGE_RETRY_DELAYS_MS[retryIndex];
             if (
@@ -804,8 +783,9 @@ async function requestNaiImageWithRetry(payload, token) {
             }
 
             const retryNumber = retryIndex + 1;
-            const reason = getNaiErrorStatus(error) === 429
-                ? "HTTP 429"
+            const status = getNaiErrorStatus(error);
+            const reason = status != null
+                ? `HTTP ${status}`
                 : (error?.message || String(error));
             global.logger?.warn?.(
                 `[NAI] 生图请求失败（${reason}），${retryDelayMs / 1000} 秒后进行第 ${retryNumber}/${NAI_IMAGE_RETRY_DELAYS_MS.length} 次重试`,
@@ -817,7 +797,6 @@ async function requestNaiImageWithRetry(payload, token) {
 
 async function _generateImage(
     config,
-    scope,
     prompt,
     model = null,
     negative = null,
@@ -825,10 +804,7 @@ async function _generateImage(
     image = null,
     characters = [],
 ) {
-    const { token, name } = selectNaiApi(config, scope);
-    if (getNaiApis(config).length > 1) {
-        global.logger?.info?.(`[NAI] 本次绘图使用 API Key：${name}`);
-    }
+    const api = getNaiApiConfig(config);
 
     const requestedModel = model || config.model || DEFAULT_MODEL;
     const useNegative = negative || config.negative || DEFAULT_NEGATIVE;
@@ -862,7 +838,7 @@ async function _generateImage(
 
     if (getNaiModelProfile(useModel).family === "v5") {
         try {
-            await checkNaiUsageLimit(token);
+            await checkNaiUsageLimit(api);
         } catch (error) {
             if (!canUseFreeNai45Fallback(payload, error)) {
                 if (error.code === "NAI_USAGE_LIMIT") {
@@ -896,7 +872,7 @@ async function _generateImage(
         }
     }
 
-    return requestNaiImageWithRetry(payload, token);
+    return requestNaiImageWithRetry(payload, api);
 }
 
 /**
@@ -906,7 +882,7 @@ async function _generateImage(
  */
 export async function encodeVibe(imageBase64) {
     const config = Setting.getConfig("nai");
-    const { token } = selectNaiApi(config, getCurrentBotSelfId() ?? "default");
+    const { key, url } = getNaiApiConfig(config);
 
     const configuredModel = config.model || DEFAULT_MODEL;
     const useModel = getNaiModelProfile(configuredModel).supportsVibe
@@ -919,11 +895,11 @@ export async function encodeVibe(imageBase64) {
         );
     }
 
-    const response = await fetch("https://image.novelai.net/ai/encode-vibe", {
+    const response = await fetch(`${url}/ai/encode-vibe`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${key}`,
         },
         body: JSON.stringify({
             image: imageBase64,

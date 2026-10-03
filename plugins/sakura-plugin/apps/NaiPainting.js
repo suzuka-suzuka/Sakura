@@ -2,7 +2,7 @@ import {
     generateImageWithCallback,
     getQueueLength,
     getIsProcessing,
-    getNaiQuotas,
+    getNaiQuota,
 } from "../lib/nai/naiApi.js";
 import { renderNaiQuotaImage } from "../lib/nai/quotaImage.js";
 import Setting from "../lib/setting.js";
@@ -22,8 +22,8 @@ export class NaiPainting extends plugin {
     queryNaiQuota = Command(/^#?查询nai(?:余额|额度)$/i, "master", async (e) => {
         try {
             const config = Setting.getConfig("nai", { selfId: e.self_id });
-            const quotas = await getNaiQuotas(config);
-            const image = await renderNaiQuotaImage(quotas);
+            const quota = await getNaiQuota(config);
+            const image = await renderNaiQuotaImage(quota);
             await e.reply(segment.image(image));
         } catch (error) {
             await e.reply(`查询 NAI 余额失败：${error.message}`);
