@@ -496,7 +496,7 @@ export const CoolSchema = z.object({
 }).describe('冷群发图');
 
 export const NaiSchema = z.object({
-    key: z.string().trim().default('').describe('API Key|填写官方 Key 或 Relay 下游 Key'),
+    key: z.string().trim().default('').describe('API Key|填写官方或第三方接口的 API Key'),
     url: z.string().trim().default(DEFAULT_NAI_URL).refine((value) => {
         try { normalizeNaiUrl(value); return true; } catch { return false; }
     }, '请填写 HTTP 或 HTTPS 基础地址，不含账号、查询参数或片段').describe('API URL|填写官方或第三方基础地址，接口路径会自动追加'),

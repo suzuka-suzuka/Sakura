@@ -148,20 +148,20 @@ config/sakura-plugin/
 
 ### NovelAI
 
-1. 在 Web 面板中填写一个 `nai.key` 和 `nai.url`。官方地址为 `https://image.novelai.net`；连接 Sakura Relay 时填写中转基础地址和 `skr_` 下游 Key，接口路径会自动追加。基础地址支持路径前缀和末尾斜杠。
+1. 在 Web 面板中填写一个 `nai.key` 和 `nai.url`，支持官方及兼容 NovelAI 协议的第三方接口。官方地址为 `https://image.novelai.net`；使用第三方接口时填写其基础地址和 API Key，接口路径会自动追加。基础地址支持路径前缀和末尾斜杠。
 2. 根据需要调整 `nai.model` 和 `nai.negative`。
 3. 使用 `#绘图 提示词`。
-4. 主人发送 `查询nai余额` 或 `查询nai额度`（均支持加 `#`），返回当前接口的 Anlas 余额和 NAI5 剩余额度卡片。Sakura Relay 显示下游 Key 的可用本地点数。
+4. 主人发送 `查询nai余额` 或 `查询nai额度`（均支持加 `#`），返回当前接口的 Anlas 余额和 NAI5 剩余额度卡片。接口提供可用点数时，卡片显示对应余额。
 
 旧版 `nai.apis`、`nai.token`、名称和权重配置不再支持，也不会迁移，需重新填写 `key` 和 `url`。
 
 绘图指令、聊天绘图、AI 绘图工具、画风编码和余额查询统一使用该 URL 和 Key。生图网络错误或 HTTP 429、502、503、504 时，每隔 2 秒重试，最多重试 3 次；重试保留同一接口、Key 和生成参数。
 
-官方账户保留 NAI5 低额度保护及符合条件时的 V4.5 免费降级。Sakura Relay 返回本地计费标记时，由 Relay 处理体力、点数和上游分配；普通 Key 返回 0% 体力仍可使用本地点数生成。
+官方账户保留 NAI5 低额度保护及符合条件时的 V4.5 免费降级。接口返回本地计费标记时，由接口服务处理体力和点数；返回 0% 体力仍可使用可用点数生成。
 
 ```yaml
-key: "填写 Relay 下游 Key"
-url: "https://relay.example.com"
+key: "填写 API Key"
+url: "https://api.example.com"
 ```
 
 ### VoxCPM 语音

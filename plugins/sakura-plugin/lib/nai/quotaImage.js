@@ -48,12 +48,12 @@ function drawCard(ctx, quota, x, y, width) {
     ctx.restore();
     const left = x + 26;
     const right = x + width - 26;
-    text(ctx, quota.isRelay ? "Relay 点数" : "NovelAI 账户", left, y + 54, 25, INK, 600);
+    text(ctx, "当前绘图接口", left, y + 54, 25, INK, 600);
     statusPill(ctx, "查询成功", right, y + 30, MUTED, "#f2f4f7");
 
     text(ctx, "Anlas 余额", left, y + 101, 19, MUTED);
     text(ctx, fitText(ctx, number(quota.totalAnlas), width - 70, 43, 600), left, y + 149, 43, INK, 600);
-    text(ctx, fitText(ctx, quota.isRelay ? "可用点数 · Relay 本地计费" : `订阅 ${number(quota.subscriptionAnlas)}   /   购买 ${number(quota.purchasedAnlas)}`, width - 52, 19),
+    text(ctx, fitText(ctx, quota.isRelay ? "可用点数" : `订阅 ${number(quota.subscriptionAnlas)}   /   购买 ${number(quota.purchasedAnlas)}`, width - 52, 19),
         left, y + 185, 19, MUTED);
     const percent = Math.max(0, Math.min(100, quota.percent));
     const color = percent < 5 ? "#cb7871" : percent < 25 ? "#c49a50" : "#4f9d97";
@@ -75,7 +75,7 @@ function drawCard(ctx, quota, x, y, width) {
 /** 用公开的查询结果绘制余额卡片；数据对象不包含 API Key。 */
 export async function renderNaiQuotaImage(quota, {
     generatedAt = new Date(),
-    scopeLabel = "当前绘图账号",
+    scopeLabel = "当前绘图接口",
 } = {}) {
     if (!quota) throw new Error("没有可绘制的 NAI 余额数据");
     if (!fontReady) {
@@ -113,7 +113,7 @@ export async function renderNaiQuotaImage(quota, {
     box(ctx, 40, 180, 1080, 162, 24, panel);
     text(ctx, quota.isRelay ? "可用点数 · ANLAS" : "总余额 · ANLAS", 70, 220, 21, "#b6cfcd");
     text(ctx, fitText(ctx, number(quota.totalAnlas), 490, 53, 600), 68, 289, 53, "#ffffff", 600);
-    const metrics = [["计费来源", quota.isRelay ? "Relay" : "NovelAI"], ["NAI5 剩余额度", `${number(quota.percent)}%`]];
+    const metrics = [["余额类型", quota.isRelay ? "可用点数" : "账户余额"], ["NAI5 剩余额度", `${number(quota.percent)}%`]];
     metrics.forEach(([label, value], index) => {
         const x = 620 + index * 240;
         text(ctx, label, x, 229, 18, "#b6cfcd");

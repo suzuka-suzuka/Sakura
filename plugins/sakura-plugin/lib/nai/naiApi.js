@@ -367,7 +367,7 @@ export async function checkNaiUsageLimit(
         usage.timeUntilNextPercent,
     );
 
-    // Relay 自行处理体力和本地点数计费，普通下游 Key 的 0% 不代表不能生图。
+    // 接口服务自行处理体力和点数计费，0% 体力不代表不能生图。
     if (percent <= NAI_USAGE_MIN_PERCENT && subscription?.relay?.billing !== "local") {
         const lockValue = JSON.stringify({
             percent,
