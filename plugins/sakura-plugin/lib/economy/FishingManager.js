@@ -67,20 +67,9 @@ export default class FishingManager {
     if (professionId !== 'abyss_hunter' || professionLevel <= 0) return null;
     const config = FishingManager.getProfessionConfig('abyss_hunter');
     const levelConfig = config?.levels?.[professionLevel];
-    const maxCharges = Math.max(
-      0,
-      Math.floor(Number(levelConfig?.nightmare_immunity_max_charges) || 0),
-    );
-    const rechargeHours = Math.max(
-      0,
-      Number(levelConfig?.nightmare_immunity_recharge_hours) || 0,
-    );
-    if (maxCharges <= 0 || rechargeHours <= 0) return null;
-    return {
-      maxCharges,
-      rechargeHours,
-      rechargeMs: rechargeHours * 60 * 60 * 1000,
-    };
+    const chance = Number(levelConfig?.nightmare_immunity_chance);
+    if (!Number.isFinite(chance)) return null;
+    return { chance: Math.max(0, Math.min(1, chance)) };
   }
 
   _ensureUser(userId) {
@@ -342,16 +331,12 @@ export default class FishingManager {
     }
 
     const levelConfig = professionConfig.levels[1];
-    const immunityRules = FishingManager.getNightmareImmunityRules(professionId, 1);
     db.prepare(`
         UPDATE fishing_stats
-        SET profession = ?, profession_level = 1,
-            nightmare_immunity_charges = ?, nightmare_immunity_updated_at = ?
+        SET profession = ?, profession_level = 1
         WHERE group_id = ? AND user_id = ?
     `).run(
       professionId,
-      immunityRules?.maxCharges || 0,
-      immunityRules ? Date.now() : 0,
       this.groupId,
       userId,
     );
@@ -388,16 +373,11 @@ export default class FishingManager {
     const professionConfig = FishingManager.getProfessionConfig(userData.profession);
 
     const levelConfig = professionConfig.levels[2];
-    const immunityRules = FishingManager.getNightmareImmunityRules(userData.profession, 2);
-    // 进阶时将新的储存上限充满，让二级职业的差异立即可见。
     db.prepare(`
         UPDATE fishing_stats
-        SET profession_level = 2,
-            nightmare_immunity_charges = ?, nightmare_immunity_updated_at = ?
+        SET profession_level = 2
         WHERE group_id = ? AND user_id = ?
     `).run(
-      immunityRules?.maxCharges || 0,
-      immunityRules ? Date.now() : 0,
       this.groupId,
       userId,
     );
@@ -452,161 +432,25 @@ export default class FishingManager {
     return 1 + bonus;
   }
 
-  _calculateNightmareImmunityState(userData, now = Date.now()) {
+  getNightmareImmunityStatus(userId) {
+    const userData = this.getUserData(userId);
     const rules = FishingManager.getNightmareImmunityRules(
       userData?.profession,
       Math.max(0, Math.floor(Number(userData?.profession_level) || 0)),
     );
-    const numericNow = Number(now);
-    const safeNow = Number.isFinite(numericNow) && numericNow >= 0
-      ? Math.floor(numericNow)
-      : Date.now();
-    if (!rules) {
-      return {
-        active: false,
-        ready: false,
-        charges: 0,
-        maxCharges: 0,
-        rechargeHours: 0,
-        rechargeMs: 0,
-        nextRecoveryMs: 0,
-        nextRecoveryAt: 0,
-        updatedAt: 0,
-        now: safeNow,
-        changed: false,
-        recovered: 0,
-      };
-    }
-
-    const rawCharges = Math.max(
-      0,
-      Math.floor(Number(userData?.nightmare_immunity_charges) || 0),
-    );
-    let charges = Math.min(rules.maxCharges, rawCharges);
-    let updatedAt = Math.max(
-      0,
-      Math.floor(Number(userData?.nightmare_immunity_updated_at) || 0),
-    );
-    let changed = charges !== rawCharges;
-    let recovered = 0;
-
-    // 旧职业数据没有充能时间戳，首次读取时按当前职业等级补满。
-    if (updatedAt <= 0) {
-      charges = rules.maxCharges;
-      updatedAt = safeNow;
-      changed = true;
-    } else if (charges < rules.maxCharges) {
-      const elapsed = Math.max(0, safeNow - updatedAt);
-      const recoverable = Math.floor(elapsed / rules.rechargeMs);
-      if (recoverable > 0) {
-        recovered = Math.min(rules.maxCharges - charges, recoverable);
-        charges += recovered;
-        updatedAt = charges >= rules.maxCharges
-          ? safeNow
-          : updatedAt + recovered * rules.rechargeMs;
-        changed = true;
-      }
-    }
-
-    const elapsedSinceTick = Math.max(0, safeNow - updatedAt);
-    const nextRecoveryMs = charges < rules.maxCharges
-      ? Math.max(1, rules.rechargeMs - Math.min(rules.rechargeMs, elapsedSinceTick))
-      : 0;
     return {
-      active: true,
-      ready: charges > 0,
-      charges,
-      maxCharges: rules.maxCharges,
-      rechargeHours: rules.rechargeHours,
-      rechargeMs: rules.rechargeMs,
-      nextRecoveryMs,
-      nextRecoveryAt: nextRecoveryMs > 0 ? safeNow + nextRecoveryMs : 0,
-      updatedAt,
-      now: safeNow,
-      changed,
-      recovered,
+      active: Boolean(rules),
+      chance: rules?.chance || 0,
     };
   }
 
-  _writeNightmareImmunityState(userId, charges, updatedAt) {
-    db.prepare(`
-        UPDATE fishing_stats
-        SET nightmare_immunity_charges = ?, nightmare_immunity_updated_at = ?
-        WHERE group_id = ? AND user_id = ?
-    `).run(charges, updatedAt, this.groupId, String(userId));
-  }
-
-  _formatNightmareImmunityStatus(status) {
+  rollNightmareImmunity(userId, random = Math.random) {
+    const status = this.getNightmareImmunityStatus(userId);
     return {
-      active: status.active,
-      ready: status.ready,
-      charges: status.charges,
-      maxCharges: status.maxCharges,
-      rechargeHours: status.rechargeHours,
-      rechargeMs: status.rechargeMs,
-      nextRecoveryMs: status.nextRecoveryMs,
-      nextRecoveryAt: status.nextRecoveryAt,
-      recovered: status.recovered,
+      ...status,
+      immune: status.active && status.chance > 0 &&
+        (status.chance >= 1 || random() < status.chance),
     };
-  }
-
-  getNightmareImmunityStatus(userId, now = Date.now()) {
-    userId = String(userId);
-    this._ensureUser(userId);
-    const transaction = db.transaction(() => {
-      const userData = db.prepare(`
-          SELECT profession, profession_level,
-                 nightmare_immunity_charges, nightmare_immunity_updated_at
-          FROM fishing_stats
-          WHERE group_id = ? AND user_id = ?
-      `).get(this.groupId, userId);
-      const status = this._calculateNightmareImmunityState(userData, now);
-      if (status.active && status.changed) {
-        this._writeNightmareImmunityState(userId, status.charges, status.updatedAt);
-      }
-      return this._formatNightmareImmunityStatus(status);
-    });
-    return transaction.immediate();
-  }
-
-  consumeNightmareImmunity(userId, now = Date.now()) {
-    userId = String(userId);
-    this._ensureUser(userId);
-    const transaction = db.transaction(() => {
-      const userData = db.prepare(`
-          SELECT profession, profession_level,
-                 nightmare_immunity_charges, nightmare_immunity_updated_at
-          FROM fishing_stats
-          WHERE group_id = ? AND user_id = ?
-      `).get(this.groupId, userId);
-      const before = this._calculateNightmareImmunityState(userData, now);
-      if (!before.active || before.charges <= 0) {
-        if (before.active && before.changed) {
-          this._writeNightmareImmunityState(userId, before.charges, before.updatedAt);
-        }
-        return {
-          ...this._formatNightmareImmunityStatus(before),
-          consumed: false,
-          immune: false,
-        };
-      }
-
-      const updatedAt = before.charges >= before.maxCharges
-        ? before.now
-        : before.updatedAt;
-      this._writeNightmareImmunityState(userId, before.charges - 1, updatedAt);
-      const after = this._calculateNightmareImmunityState({
-        ...userData,
-        nightmare_immunity_charges: before.charges - 1,
-        nightmare_immunity_updated_at: updatedAt,
-      }, before.now);
-      return {
-        ...this._formatNightmareImmunityStatus(after),
-        consumed: true,
-        immune: true,
-      };
-    });
-    return transaction.immediate();
   }
 
   getNightmareStatus(userId) {

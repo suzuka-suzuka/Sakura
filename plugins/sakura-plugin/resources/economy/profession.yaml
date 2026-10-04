@@ -56,16 +56,14 @@ professions:
   abyss_hunter:
     name: "深渊猎手"
     icon: "🗡️"
-    description: "储存能够完整免疫一次噩梦的猎魔守护"
+    description: "成功钓到噩梦时，有概率完整免疫本次惩罚"
     effect_type: "nightmare_immunity"
     levels:
       1:
         title: "猎魔新人"
-        nightmare_immunity_max_charges: 1
-        nightmare_immunity_recharge_hours: 24
-        description: "最多储存1次完整噩梦免疫，每24小时恢复1次"
+        nightmare_immunity_chance: 0.3
+        description: "每次成功钓到噩梦时，30%概率免疫断线、伤害、偷取与附加状态"
       2:
         title: "深渊克星"
-        nightmare_immunity_max_charges: 2
-        nightmare_immunity_recharge_hours: 12
-        description: "最多储存2次完整噩梦免疫，每12小时恢复1次"
+        nightmare_immunity_chance: 0.5
+        description: "每次成功钓到噩梦时，50%概率免疫断线、伤害、偷取与附加状态"

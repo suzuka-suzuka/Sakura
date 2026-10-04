@@ -78,7 +78,7 @@ test("玩家攻击随实时控制力变化，首领只伤鱼竿，锯鲨在40和
 });
 
 async function harness() {
-  const calls = { settlements: [], replies: [], breaks: 0, rodDamage: 0, cooldown: 0, rolls: 0, refunds: 0 };
+  const calls = { settlements: [], replies: [], breaks: 0, rodDamage: 0, cooldown: 0, rolls: 0, refunds: 0, immunityRolls: 0, curseResets: 0 };
   const player = { layers: 1, immune: false, roll: 0.95, durability: 190, coins: 1000 };
   class Manager {
     static async migrateLegacyWishKeys() { return { koiWish: 0, starWish: 0 }; }
@@ -87,8 +87,8 @@ async function harness() {
     getRodControl() { return player.durability; }
     getRodDurabilityInfo() { return { currentDurability: player.durability, maxDurability: 190 }; }
     getLineBonusFromMastery() { return 0; }
-    consumeNightmareImmunity() { return { immune: player.immune, active: false }; }
-    resetNightmareCurse() {}
+    rollNightmareImmunity() { calls.immunityRolls++; return { immune: player.immune, active: true, chance: 0.3 }; }
+    resetNightmareCurse() { calls.curseResets++; }
     addBlindnessLayers(user, amount) { player.layers += amount; return { layers: player.layers, hitRate: rules.getBlindReelHitRate(player.layers) }; }
     breakLine() { calls.breaks++; }
     damageRod(user, rod, amount) { calls.rodDamage += amount; player.durability = Math.max(0, player.durability - amount); return { applied: true, isBroken: player.durability <= 0, currentDurability: player.durability, maxDurability: 190 }; }
@@ -163,6 +163,7 @@ test("真实收竿入口：致盲空钩先于护符、超重、噩梦和首领�
     await Promise.all([h.instance.handleFishing(h.e), h.instance.handleFishing(h.e)]);
     assert.equal(h.calls.rolls, 1);
     assert.equal(h.calls.settlements.length, 1);
+    assert.equal(h.calls.immunityRolls, 0);
     assert.equal(h.calls.settlements[0].success, false);
     assert.equal(h.calls.settlements[0].earnings, 0);
     assert.equal(h.calls.settlements[0].recordCatch, false);
@@ -174,6 +175,41 @@ test("真实收竿入口：致盲空钩先于护符、超重、噩梦和首领�
     assert.equal(state.reelAccuracy.hit, false);
     assert.equal(h.sessions.get(h.key), null);
   }
+});
+
+test("完整免疫覆盖所有噩梦，河神在免疫未触发时仍只保线", async () => {
+  for (const entry of fish.filter(entry => entry.rarity === "噩梦")) {
+    const h = await harness();
+    h.player.immune = true;
+    const state = h.create(entry, { hasRiverBless: true });
+    h.instance.applyNightmareEffect = async () => assert.fail("免疫触发后不应执行任何噩梦惩罚");
+    await h.instance.finishSuccess(h.e, state, new h.Manager());
+    assert.equal(h.calls.immunityRolls, 1);
+    assert.equal(h.calls.curseResets, 1);
+    assert.equal(h.calls.breaks, 0);
+    assert.equal(h.calls.rodDamage, 0);
+    assert.equal(h.calls.refunds, 0);
+    assert.equal(h.calls.settlements.length, 1);
+    assert.equal(h.player.coins, 1000);
+  }
+  const h = await harness();
+  const state = h.create(fish.find(entry => entry.id === "nightmare_lake_corpse_fisher"), { hasRiverBless: true });
+  await h.instance.finishSuccess(h.e, state, new h.Manager());
+  assert.equal(h.calls.immunityRolls, 1);
+  assert.equal(h.calls.breaks, 0);
+  assert.equal(h.calls.refunds, 1);
+  assert.equal(h.player.layers, 2);
+});
+
+test("重复收竿消息只判定一次噩梦免疫", async () => {
+  const h = await harness();
+  h.player.layers = 0;
+  h.player.immune = true;
+  h.create(fish.find(entry => entry.id === "nightmare_lake_corpse_fisher"), { hasLucky: true });
+  await Promise.all([h.instance.handleFishing(h.e), h.instance.handleFishing(h.e)]);
+  assert.equal(h.calls.immunityRolls, 1);
+  assert.equal(h.calls.settlements.length, 1);
+  assert.equal(h.calls.breaks, 0);
 });
 
 test("命中后进入首领战；战中攻不重复抽致盲，净化后的新收竿不受旧层数影响", async () => {
@@ -207,6 +243,14 @@ test("真实噩梦结算：捞尸人叠层并断线，完整免疫挡下两者�
     assert.equal(h.calls.breaks, immune ? 0 : 1);
     assert.equal(h.calls.rodDamage, 0);
     assert.equal(h.calls.settlements.length, 1);
+    assert.equal(h.calls.immunityRolls, 1);
+    assert.equal(h.calls.curseResets, 1);
+    const message = h.calls.replies.flat(2).join("\n");
+    assert.equal(message.includes("概率完整免疫"), false);
+    assert.equal(message.includes("本次已触发"), false);
+    assert.equal(message.includes("本次未触发"), false);
+    assert.equal(message.includes("猎魔守护完全隔绝了这次噩梦"), immune);
+    assert.equal(message.includes("免疫储存"), false);
   }
   const h = await harness();
   h.player.durability = 30;

@@ -174,22 +174,9 @@ function formatFishingStaminaUnavailable(status) {
   return `⚡体力不足：${formatFishingStamina(status)}`;
 }
 
-function formatDurationMs(durationMs) {
-  const minutes = Math.max(1, Math.ceil((Number(durationMs) || 0) / 60000));
-  if (minutes < 60) return `${minutes} 分钟`;
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return remainingMinutes > 0
-    ? `${hours} 小时 ${remainingMinutes} 分钟`
-    : `${hours} 小时`;
-}
-
 function formatNightmareImmunityDetail(status) {
   if (!status?.active) return "";
-  const capacity = `${status.charges}/${status.maxCharges} 次`;
-  return status.nextRecoveryMs > 0
-    ? `${capacity} · ${formatDurationMs(status.nextRecoveryMs)}后恢复1次`
-    : `${capacity} · 已充满（每${status.rechargeHours}小时恢复1次）`;
+  return `${Number((status.chance * 100).toFixed(2))}% 概率完整免疫 · 每次独立判定`;
 }
 
 // 高利贷结算播报：还了多少、滚了多少、有没有滚到上限被撕借条。
@@ -1921,8 +1908,8 @@ export default class Fishing extends plugin {
         // 钓到任意噩梦即清空诅咒（无论是否被免疫挡下）；若这条噩梦本身是诅咒骷髅，
         // 其效果会在下面重新从 1 层起累加，实现「重新计算」。
         fishingManager.resetNightmareCurse(userId);
-        // 深渊猎手先消耗一次完整免疫；没有充能时才进入断线与噩梦效果结算。
-        const immunity = fishingManager.consumeNightmareImmunity(userId);
+        // 深渊猎手每次独立判定完整免疫；未触发时照常结算断线与噩梦效果。
+        const immunity = fishingManager.rollNightmareImmunity(userId);
         const immunityTriggered = Boolean(immunity.immune);
         const lineSaved = immunityTriggered || Boolean(state.hasRiverBless);
         if (!lineSaved) {
@@ -1956,10 +1943,6 @@ export default class Fishing extends plugin {
             ? `🗡️ 猎魔守护完全隔绝了这次噩梦，鱼线安然无恙！\n`
             : `🌊 河神的祝福护住了鱼线！${refundMsg}\n`)
           : `💥 崩！鱼线被扯断了！\n🧵 失去了【${lineConfig.name}】\n`;
-        const professionBonusMsg = immunity.active
-          ? `🛡️ 噩梦免疫储存：${formatNightmareImmunityDetail(immunity)}\n`
-          : "";
-
         const settleResult = settlement.settleAttempt({
           sessionId: state.id,
           fishId: fish.id,
@@ -1979,7 +1962,6 @@ export default class Fishing extends plugin {
           `📝 ${fish.description}\n`,
           `📊 稀有度：${rarity.color}${fish.rarity}${weatherTag}\n`,
           lineResultMsg,
-          professionBonusMsg,
           // 高利贷结算段自带尾换行、formatCatchTail 自带首换行，若无结算段直接相接会多出空行。
           punishmentMsg +
             (() => {
@@ -2553,7 +2535,7 @@ export default class Fishing extends plugin {
         icon: "🛡️",
         name: "猎魔守护",
         detail: formatNightmareImmunityDetail(nightmareImmunity),
-        tone: nightmareImmunity.ready ? "positive" : "warning",
+        tone: "positive",
       });
     }
 
@@ -3050,7 +3032,7 @@ export default class Fishing extends plugin {
           break;
         case 'abyss_hunter': {
           const immunity = fishingManager.getNightmareImmunityStatus(e.user_id);
-          bonusInfo = `\n🛡️ 噩梦免疫储存: ${formatNightmareImmunityDetail(immunity)}`;
+          bonusInfo = `\n🛡️ 猎魔守护: ${formatNightmareImmunityDetail(immunity)}`;
           break;
         }
       }
