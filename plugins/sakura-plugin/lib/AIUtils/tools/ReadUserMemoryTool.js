@@ -29,16 +29,7 @@ export class ReadUserMemoryTool extends AbstractTool {
     try {
       const location = getMemoryLocation({ groupId: e.group_id, userId: qq, scope: "user" });
       const document = readMemoryDocument(location.memoryFile, { throwOnError: true });
-      const totalCount = document.memories.length;
-      return {
-        qq,
-        groupId: e.group_id ? String(e.group_id) : null,
-        totalCount,
-        memories: document.memories,
-        ...(totalCount === 0 ? {
-          message: e.group_id ? "该成员在当前群暂无详细记忆记录。" : "当前用户暂无私聊记忆记录。",
-        } : {}),
-      };
+      return document.memories.map((memory) => memory.content);
     } catch (error) {
       logger.warn(`[Memory] 查询个人记忆失败：${error.message}`);
       return { error: "记忆查询失败，无法读取已有个人记忆。" };

@@ -90,12 +90,44 @@ test("普通聊天复用Memory配置开放读写两种工具，并通过真实�
   const response = result.historyContents[0].parts[0].functionResponse;
   assert.equal(response.id, "read-normal");
   assert.equal(response.name, "ReadUserMemory");
-  assert.equal(response.response.qq, "4");
-  assert.equal(response.response.groupId, "3");
-  assert.equal(response.response.totalCount, 1);
-  assert.equal(response.response.summary, undefined);
-  assert.deepEqual(response.response.memories.map((item) => item.content), ["成员喜欢茶"]);
+  assert.deepEqual(response.response, ["成员喜欢茶"]);
   assert.deepEqual(result.queryParts, []);
+});
+
+test("记忆文字数组和空数组可回传OpenAI及Gemini，原始工具结果与历史保持简洁", async () => {
+  toolGroups = [{ name: "记忆", tools: ["Memory"] }];
+  const event = { self_id: 1, user_id: 2, group_id: 7, isMaster: false };
+  const contents = ["成员喜欢茶", "成员习惯早起"];
+  const location = memory.getMemoryLocation({ groupId: 7, userId: 8 });
+  let document = memory.createEmptyMemoryDocument();
+  for (const content of contents) document = memory.appendMemory(document, { content }).document;
+  memory.writeMemoryDocument(location.memoryFile, document);
+  for (const [qq, expected] of [["8", contents], ["9", []]]) {
+    const call = { id: `read-${qq}`, name: "ReadUserMemory", args: { qq } };
+    const result = await executeToolCalls(event, [call], null, "记忆");
+    assert.deepEqual(result.historyContents[0].parts[0].functionResponse.response, expected);
+    const history = [
+      { role: "user", parts: [{ text: "查询成员记忆" }] },
+      { role: "model", sourceProtocol: "openai", parts: [{ functionCall: call }] },
+      ...result.historyContents,
+    ];
+    const before = structuredClone(history);
+    for (const provider of ["openai", "gemini"]) {
+      protocol = provider;
+      await getAI("test", event, [], "读取工具结果", false, "记忆", history, { disableNativeWebSearch: true });
+      const payload = payloads.at(-1);
+      if (provider === "openai") {
+        assert.equal(payload.messages.find((item) => item.role === "tool").content, JSON.stringify(expected));
+      } else {
+        const response = payload.contents.flatMap((item) => item.parts).find((part) => part.functionResponse).functionResponse;
+        assert.deepEqual(response.response, { result: expected });
+        assert.equal(response.id, call.id);
+        assert.equal(response.name, call.name);
+      }
+      assert.deepEqual(history, before);
+    }
+  }
+  protocol = "openai";
 });
 
 test("OpenAI 后台群任务只注入记忆读写工具，个人JSON无工具，正常请求保留原生搜索", async () => {

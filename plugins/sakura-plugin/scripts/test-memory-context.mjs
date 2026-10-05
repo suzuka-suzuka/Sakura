@@ -121,8 +121,7 @@ test("群聊个人记忆只注入摘要，工具按QQ读取全部记录，少量
     },
     async (...args) => {
       const result = response(args[6]);
-      assert.equal(result.summary, undefined);
-      assert.deepEqual(result.memories.map((item) => item.content), ["个人细节：不喝咖啡", "个人细节：习惯早起"]);
+      assert.deepEqual(result, ["个人细节：不喝咖啡", "个人细节：习惯早起"]);
       assert.equal(vectorCalls.length, count);
       return { text: "已完成" };
     },
@@ -141,13 +140,12 @@ test("大量个人记忆也不自动检索，同一轮重复查询仍返回全�
       return { functionCalls: [call(e.user_id, "首次")] };
     },
     async (...args) => {
-      assert.equal(response(args[6]).memories.length, 25);
+      assert.equal(response(args[6]).length, 25);
       return { functionCalls: [call(e.user_id, "再次")] };
     },
     async (...args) => {
       const result = response(args[6]);
-      assert.equal(result.memories.length, 25);
-      assert.deepEqual(Object.keys(result), ["qq", "groupId", "totalCount", "memories"]);
+      assert.deepEqual(result, ["个人细节：不喝咖啡", ...Array.from({ length: 24 }, (_, i) => `个人细节${i}`)]);
       assert.equal(vectorCalls.length, count);
       return { text: "已完成" };
     },
@@ -166,7 +164,7 @@ test("私聊同样仅注入摘要，工具读取全部记录而不请求向量",
       return { functionCalls: [call(e.user_id)] };
     },
     async (...args) => {
-      assert.deepEqual(response(args[6]).memories.map((item) => item.content), contents);
+      assert.deepEqual(response(args[6]), contents);
       assert.equal(vectorCalls.length, count);
       return { text: "已完成" };
     },
@@ -184,7 +182,7 @@ test("个人摘要为空时不回退注入原始记录，记录仍可通过工�
       return { functionCalls: [call(e.user_id)] };
     },
     async (...args) => {
-      assert.deepEqual(response(args[6]).memories.map((item) => item.content), ["个人细节：不喝咖啡"]);
+      assert.deepEqual(response(args[6]), ["个人细节：不喝咖啡"]);
       assert.equal(vectorCalls.length, count);
       return { text: "已完成" };
     },
@@ -224,7 +222,7 @@ test("群召回失败或无查询文字时只回退最新10条群记录，个人
   }
 });
 
-test("只有个人摘要且无详细记录时仍注入摘要，查询明确无详细记录", async () => {
+test("只有个人摘要且无详细记录时仍注入摘要，查询返回空数组", async () => {
   const e = event(961007, null);
   seed(e, [], "保留的个人摘要");
   const count = vectorCalls.length;
@@ -235,9 +233,7 @@ test("只有个人摘要且无详细记录时仍注入摘要，查询明确无�
     },
     async (...args) => {
       const result = response(args[6]);
-      assert.deepEqual(result.memories, []);
-      assert.equal(result.summary, undefined);
-      assert.match(result.message, /暂无私聊记忆记录/);
+      assert.deepEqual(result, []);
       assert.equal(vectorCalls.length, count);
       return { text: "已完成" };
     },

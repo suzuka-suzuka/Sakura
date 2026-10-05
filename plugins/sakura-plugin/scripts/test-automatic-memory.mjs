@@ -163,13 +163,10 @@ test("查询其他成员只读取当前群个人记忆，参数不能指定其�
     [target, "group", "本群公共规则"],
   ]) await storeMemories({ e: event, scope, contents: [content] });
   const result = await readTool.func({ qq: String(target.user_id), groupId: "920101", scope: "group", userId: String(caller.user_id) }, caller);
-  assert.equal(result.qq, String(target.user_id));
-  assert.equal(result.groupId, String(caller.group_id));
-  assert.equal(result.totalCount, 1);
-  assert.deepEqual(result.memories.map((item) => item.content), ["当前群成员的喜好"]);
+  assert.deepEqual(result, ["当前群成员的喜好"]);
 });
 
-test("按QQ返回全部记录且不附摘要，不写文件、不计数、不整理", async () => {
+test("按QQ只返回全部记忆文字数组，不附元数据、不写文件、不计数、不整理", async () => {
   const event = e(940103);
   const location = memory.getMemoryLocation({ groupId: event.group_id, userId: event.user_id });
   let data = memory.createEmptyMemoryDocument();
@@ -182,23 +179,18 @@ test("按QQ返回全部记录且不附摘要，不写文件、不计数、不整
   const before = fs.readFileSync(location.memoryFile, "utf8");
   const count = aiCalls.length;
   const result = await readTool.func({ qq: String(event.user_id) }, e(940101));
-  assert.equal(result.summary, undefined);
-  assert.equal(result.totalCount, 25);
-  assert.deepEqual(result.memories, data.memories);
+  assert.deepEqual(result, data.memories.map((item) => item.content));
   assert.equal(fs.readFileSync(location.memoryFile, "utf8"), before);
   assert.equal(aiCalls.length, count);
   assert.equal(document(event).revision, 25);
   assert.equal(document(event).summary.sourceRevision, 5);
 });
 
-test("暂无记忆返回明确提示且不创建文件，拒绝非法QQ与缺少对话信息", async () => {
+test("暂无记忆返回空数组且不创建文件，拒绝非法QQ与缺少对话信息", async () => {
   const event = e(940104);
   const location = memory.getMemoryLocation({ groupId: event.group_id, userId: event.user_id });
   const result = await readTool.func({ qq: String(event.user_id) }, e(940101));
-  assert.equal(result.message, "该成员在当前群暂无详细记忆记录。");
-  assert.equal(result.summary, undefined);
-  assert.equal(result.totalCount, 0);
-  assert.deepEqual(result.memories, []);
+  assert.deepEqual(result, []);
   assert.equal(fs.existsSync(location.memoryFile), false);
   for (const qq of [undefined, null, 940104, "../940104", "", " 940104", "940104 "]) {
     assert.match((await readTool.func({ qq }, event)).error, /QQ号/);
@@ -211,10 +203,9 @@ test("私聊可查本人记忆，不能读取其他人的私聊记忆", async ()
   await storeMemories({ e: event, scope: "user", contents: ["本人的私聊信息"] });
   await storeMemories({ e: e(940106, null), scope: "user", contents: ["其他人的私聊信息"] });
   const result = await readTool.func({ qq: String(event.user_id) }, event);
-  assert.equal(result.groupId, null);
-  assert.deepEqual(result.memories.map((item) => item.content), ["本人的私聊信息"]);
+  assert.deepEqual(result, ["本人的私聊信息"]);
   assert.match((await readTool.func({ qq: "940106", groupId: "920001" }, event)).error, /只能查询当前用户/);
-  assert.equal((await readTool.func({ qq: "940107" }, e(940107, null))).message, "当前用户暂无私聊记忆记录。");
+  assert.deepEqual(await readTool.func({ qq: "940107" }, e(940107, null)), []);
 });
 
 test("损坏的记忆文件报告查询失败，不当作空记忆或覆盖原文件", async () => {
@@ -277,10 +268,7 @@ test("群任务先查询个人记忆再写入，正确回传工具名和ID，仍
       const { functionResponse } = args[6].at(-1).parts[0];
       assert.equal(functionResponse.name, "ReadUserMemory");
       assert.equal(functionResponse.id, "read-user");
-      assert.equal(functionResponse.response.qq, "930004");
-      assert.equal(functionResponse.response.groupId, "920004");
-      assert.equal(functionResponse.response.totalCount, 0);
-      assert.deepEqual(functionResponse.response.memories, []);
+      assert.deepEqual(functionResponse.response, []);
       assert.equal(addedMemories.length, 0);
       return { text: "", functionCalls: [
         { name: "Memory", args: { scope: "group", content: "本群每周六活动" } },

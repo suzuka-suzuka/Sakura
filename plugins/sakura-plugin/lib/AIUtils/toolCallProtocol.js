@@ -47,6 +47,13 @@ export function prepareHistoryForGemini(history = []) {
     .map((item) => ({
       role: item.role,
       parts: item.parts.map((part) => {
+        // Gemini 的工具响应要求 JSON 对象，数组仅在发送请求时做最小包装。
+        if (Array.isArray(part?.functionResponse?.response)) {
+          return { ...part, functionResponse: {
+            ...part.functionResponse,
+            response: { result: part.functionResponse.response },
+          } };
+        }
         const needsExternalSignature =
           item.role === "model" &&
           item.sourceProtocol === "openai" &&
