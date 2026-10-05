@@ -54,6 +54,11 @@ mock.module(moduleUrl("../lib/AIUtils/getAI.js"), { namedExports: { getAI: async
   }
   throw new Error("测试禁止真实 AI 请求");
 } } });
+// 隔离外部向量请求；个人记忆读取不应使用向量。
+mock.module(moduleUrl("../lib/AIUtils/embeddingProvider.js"), { namedExports: {
+  DEFAULT_EMBEDDING_VERSION: "test-memory-v1",
+  generateTextEmbedding: async () => { throw new Error("读取个人记忆不应请求向量"); },
+} });
 
 mock.module(moduleUrl("../lib/AIUtils/AgentRunner.js"), { namedExports: { runAgentLoop: async ({ history, queryParts }) => {
   agentHistoryLengths.push(history.length);
@@ -73,6 +78,7 @@ mock.module(moduleUrl("../lib/utils.js"), { namedExports: {
 const memory = await import("../lib/AIUtils/memoryStore.js");
 const { storeMemories } = await import("../lib/AIUtils/memoryWriter.js");
 const { MemoryTool } = await import("../lib/AIUtils/tools/MemoryTool.js");
+const { ReadUserMemoryTool } = await import("../lib/AIUtils/tools/ReadUserMemoryTool.js");
 const automatic = await import("../lib/AIUtils/automaticMemory.js");
 const mimic = await import("../lib/AIUtils/mimicHistory.js");
 const historyStore = await import("../lib/AIUtils/ConversationHistory.js");
@@ -81,6 +87,7 @@ const { AutomaticMemory } = await import("../apps/AutomaticMemory.js");
 const { AIChat } = await import("../apps/chat.js");
 const { Mimic } = await import("../apps/Mimic.js");
 const tool = new MemoryTool();
+const readTool = new ReadUserMemoryTool();
 const e = (userId, groupId = 920001) => ({ self_id: 910001, group_id: groupId, user_id: userId, sender: { nickname: `成员${userId}` } });
 const conversation = (text = "我希望被称为小夜") => [
   { role: "user", parts: [{ text }] }, { role: "model", parts: [{ text: "好的" }] },
@@ -135,6 +142,83 @@ test("批量和并发写入不重复计数、不丢记忆", async () => {
   assert.equal(document(event).memories.length, 3);
 });
 
+test("查询其他成员只读取当前群个人记忆，参数不能指定其他群或作用域", async () => {
+  const caller = e(940101, 924101);
+  const target = e(940102, 924101);
+  for (const [event, scope, content] of [
+    [target, "user", "当前群成员的喜好"],
+    [caller, "user", "调用者的个人信息"],
+    [e(target.user_id, 920101), "user", "另一个群的个人信息"],
+    [e(target.user_id, null), "user", "成员的私聊信息"],
+    [target, "group", "本群公共规则"],
+  ]) await storeMemories({ e: event, scope, contents: [content] });
+  const result = await readTool.func({ qq: String(target.user_id), groupId: "920101", scope: "group", userId: String(caller.user_id) }, caller);
+  assert.equal(result.qq, String(target.user_id));
+  assert.equal(result.groupId, String(caller.group_id));
+  assert.equal(result.totalCount, 1);
+  assert.deepEqual(result.memories.map((item) => item.content), ["当前群成员的喜好"]);
+});
+
+test("按QQ返回全部记录且不附摘要，不写文件、不计数、不整理", async () => {
+  const event = e(940103);
+  const location = memory.getMemoryLocation({ groupId: event.group_id, userId: event.user_id });
+  let data = memory.createEmptyMemoryDocument();
+  for (let index = 0; index < 25; index++) {
+    data = memory.appendMemory(data, { content: `事实${index}`, now: index + 1 }).document;
+  }
+  data.memories[0].updatedAt = 999;
+  data.summary = { text: "已整理的成员摘要", updatedAt: 10, sourceRevision: 5 };
+  memory.writeMemoryDocument(location.memoryFile, data);
+  const before = fs.readFileSync(location.memoryFile, "utf8");
+  const count = aiCalls.length;
+  const result = await readTool.func({ qq: String(event.user_id) }, e(940101));
+  assert.equal(result.summary, undefined);
+  assert.equal(result.totalCount, 25);
+  assert.deepEqual(result.memories, data.memories);
+  assert.equal(fs.readFileSync(location.memoryFile, "utf8"), before);
+  assert.equal(aiCalls.length, count);
+  assert.equal(document(event).revision, 25);
+  assert.equal(document(event).summary.sourceRevision, 5);
+});
+
+test("暂无记忆返回明确提示且不创建文件，拒绝非法QQ与缺少对话信息", async () => {
+  const event = e(940104);
+  const location = memory.getMemoryLocation({ groupId: event.group_id, userId: event.user_id });
+  const result = await readTool.func({ qq: String(event.user_id) }, e(940101));
+  assert.equal(result.message, "该成员在当前群暂无详细记忆记录。");
+  assert.equal(result.summary, undefined);
+  assert.equal(result.totalCount, 0);
+  assert.deepEqual(result.memories, []);
+  assert.equal(fs.existsSync(location.memoryFile), false);
+  for (const qq of [undefined, null, 940104, "../940104", "", " 940104", "940104 "]) {
+    assert.match((await readTool.func({ qq }, event)).error, /QQ号/);
+  }
+  assert.match((await readTool.func({ qq: "940104" }, null)).error, /对话信息/);
+});
+
+test("私聊可查本人记忆，不能读取其他人的私聊记忆", async () => {
+  const event = e(940105, null);
+  await storeMemories({ e: event, scope: "user", contents: ["本人的私聊信息"] });
+  await storeMemories({ e: e(940106, null), scope: "user", contents: ["其他人的私聊信息"] });
+  const result = await readTool.func({ qq: String(event.user_id) }, event);
+  assert.equal(result.groupId, null);
+  assert.deepEqual(result.memories.map((item) => item.content), ["本人的私聊信息"]);
+  assert.match((await readTool.func({ qq: "940106", groupId: "920001" }, event)).error, /只能查询当前用户/);
+  assert.equal((await readTool.func({ qq: "940107" }, e(940107, null))).message, "当前用户暂无私聊记忆记录。");
+});
+
+test("损坏的记忆文件报告查询失败，不当作空记忆或覆盖原文件", async () => {
+  const event = e(940108);
+  const location = memory.getMemoryLocation({ groupId: event.group_id, userId: event.user_id });
+  fs.mkdirSync(path.dirname(location.memoryFile), { recursive: true });
+  const broken = "{损坏的记忆";
+  fs.writeFileSync(location.memoryFile, broken, "utf8");
+  const result = await readTool.func({ qq: String(event.user_id) }, e(940101));
+  assert.match(result.error, /记忆查询失败/);
+  assert.equal(result.totalCount, undefined);
+  assert.equal(fs.readFileSync(location.memoryFile, "utf8"), broken);
+});
+
 async function append(groupId, count, endTime, offset = 0, { userId = 930003, senderName = "小夜" } = {}) {
   for (let index = 0; index < count; index++) {
     await messages.appendGroupMessage({ post_type: "message", message_type: "group", self_id: currentSelfId, group_id: groupId,
@@ -163,26 +247,44 @@ test("一小时内文字、图片、表情与语音合计满100条，取最新10
   assert.ok(records.every((record) => record.time >= endTime - 3600));
 });
 
-test("群任务只注入 Memory，可分别写群记忆和指定发言者的个人记忆", async () => {
+test("群任务先查询个人记忆再写入，正确回传工具名和ID，仍限制个人写入目标", async () => {
   const event = e(910001, 920004);
   const records = Array.from({ length: 100 }, (_, index) => ({ messageId: String(index), userId: "930004", senderName: "小夜", content: "聊天", time: index, isBot: false }));
   let round = 0;
   const original = structuredClone(records);
-  const success = await automatic.collectGroupMemories(event, records, { aiRequest: async (...args) => {
+  const addedMemories = [];
+  const success = await automatic.collectGroupMemories(event, records, { addedMemories, aiRequest: async (...args) => {
     assert.equal(args[4], false);
     assert.deepEqual(args[5], { memoryOnly: true, memoryTargets: ["930004"] });
     assert.equal(args[7].disableNativeWebSearch, true);
+    assert.match(args[3], /先调用 ReadUserMemory，qq 填该成员的 QQ/);
+    assert.doesNotMatch(args[3], /query/);
     if (round++ === 0) return { text: "", functionCalls: [
-      { name: "Memory", args: { scope: "group", content: "本群每周六活动" } },
-      { name: "Memory", args: { scope: "user", userId: "930004", content: "用户希望被称为小夜" } },
+      { id: "read-user", name: "ReadUserMemory", args: { qq: "930004" } },
     ] };
     assert.equal(args[6].at(-1).role, "function");
+    if (round === 2) {
+      const { functionResponse } = args[6].at(-1).parts[0];
+      assert.equal(functionResponse.name, "ReadUserMemory");
+      assert.equal(functionResponse.id, "read-user");
+      assert.equal(functionResponse.response.qq, "930004");
+      assert.equal(functionResponse.response.groupId, "920004");
+      assert.equal(functionResponse.response.totalCount, 0);
+      assert.deepEqual(functionResponse.response.memories, []);
+      assert.equal(addedMemories.length, 0);
+      return { text: "", functionCalls: [
+        { name: "Memory", args: { scope: "group", content: "本群每周六活动" } },
+        { name: "Memory", args: { scope: "user", userId: "930004", content: "用户希望被称为小夜" } },
+      ] };
+    }
+    assert.deepEqual(args[6].at(-1).parts.map((part) => part.functionResponse.name), ["Memory", "Memory"]);
     return { text: "已完成" };
   } });
   assert.equal(success, true);
   assert.equal(document(event, "group").memories[0].content, "本群每周六活动");
   assert.equal(document(e(930004, 920004)).memories[0].content, "用户希望被称为小夜");
   assert.equal(document(event).memories.length, 0);
+  assert.equal(addedMemories.length, 2);
   assert.deepEqual(records, original);
   assert.match(await tool.func({ scope: "user", content: "错误目标", userId: "999999" }, event, { memoryTargets: ["930004"] }), /发送者 QQ/);
   await assert.rejects(automatic.collectGroupMemories(event, records, { aiRequest: async () => ({ functionCalls: [{ name: "RunCommand", args: {} }] }) }), /只允许/);

@@ -21,6 +21,7 @@ function toContextMemory(target, memory) {
 
 export function getDirectMemoryMatches(targets = []) {
   return targets.flatMap((target) => {
+    if (target.location.scope !== "group") return [];
     const memories = target.document?.memories || [];
     if (memories.length === 0 || memories.length > DIRECT_MEMORY_INJECTION_LIMIT) {
       return [];
@@ -31,13 +32,14 @@ export function getDirectMemoryMatches(targets = []) {
 
 export function getVectorMemoryTargets(targets = []) {
   return targets.filter(
-    (target) => target.document?.memories?.length > DIRECT_MEMORY_INJECTION_LIMIT
+    (target) => target.location.scope === "group"
+      && target.document?.memories?.length > DIRECT_MEMORY_INJECTION_LIMIT
   );
 }
 
-// 向量召回不可用时的兜底：每个作用域直接取最新的若干条记忆
+// 群公共记忆召回不可用时，回退到最新记录；个人记忆只注入摘要。
 export function getLatestMemoryMatches(targets = []) {
-  return targets.flatMap((target) =>
+  return targets.filter((target) => target.location.scope === "group").flatMap((target) =>
     getLatestMemories(target.document, VECTOR_MEMORY_RESULTS_PER_SCOPE)
       .map((memory) => toContextMemory(target, memory))
   );
@@ -76,12 +78,13 @@ export function formatMemoryContext(targets, matches) {
     "【长期记忆背景】\n以下内容是保存的背景记忆",
   ];
   for (const target of targets) {
-    if (target.document.memories.length === 0) continue;
+    if (target.location.scope === "group" && target.document.memories.length === 0) continue;
     if (!target.document.summary.text.trim()) continue;
     parts.push(`【${target.location.title}摘要】\n${target.document.summary.text.trim()}`);
   }
-  if (matches.length > 0) {
-    const lines = matches.map((match) => `- [${match.title}] ${match.content}`);
+  const groupMatches = matches.filter((match) => match.scope === "group");
+  if (groupMatches.length > 0) {
+    const lines = groupMatches.map((match) => `- [${match.title}] ${match.content}`);
     parts.push(`【相关的长期记忆】\n${lines.join("\n")}`);
   }
   return parts.length > 1 ? parts.join("\n\n") : "";
