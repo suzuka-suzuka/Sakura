@@ -45,7 +45,15 @@ export class AutomaticMemory extends plugin {
           const nodes = buildGroupMemoryForwardNodes(e, messages, addedMemories);
           if (nodes.length > 0) {
             try {
-              const sent = await currentBot.sendForwardMsg(nodes, Number(group.groupId));
+              const sent = await currentBot.sendForwardMsg({
+                group_id: Number(group.groupId),
+                messages: nodes,
+                source: "新增记忆",
+                news: [
+                  { text: `群记忆${addedMemories.filter((memory) => memory.scope === "group").length}条` },
+                  { text: `个人记忆${addedMemories.filter((memory) => memory.scope === "user").length}条` },
+                ],
+              });
               if (!sent) throw new Error("发送接口未返回成功结果");
             } catch (error) {
               logger.warn(`[Memory] 群 ${group.groupId} 记忆结果转发失败：${error.message}`);

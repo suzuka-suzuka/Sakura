@@ -5,11 +5,11 @@ import { getLatestMemories, getMemoryLocation, readMemoryDocument } from "./memo
 import { storeMemories } from "./memoryWriter.js";
 import { MemoryTool } from "./tools/MemoryTool.js";
 import { ensureToolCallIds } from "./toolCallProtocol.js";
+import { getMimicHistoryKey, MIMIC_HISTORY_TTL_SECONDS, touchMimicHistory } from "./mimicHistory.js";
 
-export const PERSONAL_MEMORY_DELAY_MS = 10 * 60 * 1000;
+export const PERSONAL_MEMORY_DELAY_MS = MIMIC_HISTORY_TTL_SECONDS * 1000;
 export const GROUP_MEMORY_MESSAGE_COUNT = 100;
 export const AUTOMATIC_MEMORY_PREFIX = "sakura:automatic-memory:v1";
-const QUEUE_TTL_SECONDS = 24 * 60 * 60;
 const memoryTool = new MemoryTool();
 
 async function resolveRedis(redis) {
@@ -50,8 +50,9 @@ local job = cjson.decode(ARGV[2])
 if previous then job.history = cjson.decode(previous).history end
 redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(job))
 redis.call('ZADD', KEYS[2], job.dueAt, ARGV[1])
-redis.call('EXPIRE', KEYS[1], ARGV[3])
-redis.call('EXPIRE', KEYS[2], ARGV[3])
+redis.call('PERSIST', KEYS[1])
+redis.call('PERSIST', KEYS[2])
+if KEYS[3] ~= '' then redis.call('PERSIST', KEYS[3]) end
 return 1
 `;
 
@@ -61,18 +62,19 @@ if not raw then return 0 end
 local job = cjson.decode(raw)
 if job.token ~= ARGV[2] then return 0 end
 if ARGV[3] ~= '' then job.history = cjson.decode(ARGV[3]) end
-if not job.history or #job.history == 0 then
+if (not job.history or #job.history == 0) and job.source ~= 'Mimic' then
   redis.call('HDEL', KEYS[1], ARGV[1])
   redis.call('ZREM', KEYS[2], ARGV[1])
   return 1
 end
 job.busy = false
 job.dueAt = tonumber(ARGV[4])
+job.idleTimeoutMs = tonumber(ARGV[5])
 if ARGV[6] and ARGV[6] ~= '' then job.attempts = tonumber(ARGV[6]) end
 redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(job))
 redis.call('ZADD', KEYS[2], job.dueAt, ARGV[1])
-redis.call('EXPIRE', KEYS[1], ARGV[5])
-redis.call('EXPIRE', KEYS[2], ARGV[5])
+redis.call('PERSIST', KEYS[1])
+redis.call('PERSIST', KEYS[2])
 return 1
 `;
 
@@ -85,8 +87,33 @@ redis.call('ZREM', KEYS[2], ARGV[1])
 return 1
 `;
 
+// 检查会话代次并原子删除：新对话已经开始时，旧提取任务不能清空它的历史。
+const COMPLETE_JOB = `
+local raw = redis.call('HGET', KEYS[1], ARGV[1])
+if not raw or cjson.decode(raw).token ~= ARGV[2] then return 0 end
+if KEYS[3] ~= '' then redis.call('DEL', KEYS[3]) end
+redis.call('HDEL', KEYS[1], ARGV[1])
+redis.call('ZREM', KEYS[2], ARGV[1])
+return 1
+`;
+
+const RENEW_BUSY_JOB = `
+local raw = redis.call('HGET', KEYS[1], ARGV[1])
+if not raw then return 0 end
+local job = cjson.decode(raw)
+if job.token ~= ARGV[2] or not job.busy then return 0 end
+job.busyUntil = tonumber(ARGV[3])
+redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(job))
+return 1
+`;
+
+function getJobHistoryKey(job) {
+  return job.source === "Mimic" ? getMimicHistoryKey({ self_id: job.selfId, group_id: job.groupId, user_id: job.userId }) : "";
+}
+
 export async function beginPersonalMemory(e, source, { redis = null, now = Date.now() } = {}) {
-  if (Setting.getConfig("Memory", { selfId: e.self_id })?.personalEnabled === false) return null;
+  const cleanupOnly = Setting.getConfig("Memory", { selfId: e.self_id })?.personalEnabled === false;
+  if (cleanupOnly && source !== "Mimic") return null;
   const client = await resolveRedis(redis);
   const keys = getPersonalMemoryKeys(e.self_id);
   const id = getPersonalMemoryJobId(e, source);
@@ -94,14 +121,31 @@ export async function beginPersonalMemory(e, source, { redis = null, now = Date.
   const job = {
     token, selfId: String(e.self_id), groupId: e.group_id ? String(e.group_id) : null,
     userId: String(e.user_id), source, senderName: e.sender?.card || e.sender?.nickname || String(e.user_id),
+    cleanupOnly, idleTimeoutMs: PERSONAL_MEMORY_DELAY_MS,
     busy: true, busyUntil: now + 2 * 60 * 1000, dueAt: now + PERSONAL_MEMORY_DELAY_MS, history: [],
   };
-  await client.eval(BEGIN_JOB, 2, keys.jobs, keys.due, id, JSON.stringify(job), QUEUE_TTL_SECONDS);
-  return { id, token, selfId: e.self_id };
+  await client.eval(BEGIN_JOB, 3, keys.jobs, keys.due, getJobHistoryKey(job), id, JSON.stringify(job));
+  // 长回复仍在进行时续期处理中状态；进程中断后则让它自然失效，后台可以接续。
+  let renewing = false;
+  const busyTimer = setInterval(async () => {
+    if (renewing) return;
+    renewing = true;
+    try {
+      const renewed = await client.eval(RENEW_BUSY_JOB, 1, keys.jobs, id, token, Date.now() + 2 * 60 * 1000);
+      if (!renewed) clearInterval(busyTimer);
+    } catch (error) {
+      logger.warn(`[Memory] 续期聊天处理中状态失败：${error.message}`);
+    } finally {
+      renewing = false;
+    }
+  }, 30 * 1000);
+  busyTimer.unref();
+  return { id, token, selfId: e.self_id, jobsKey: keys.jobs, busyTimer };
 }
 
 export async function finishPersonalMemory(handle, history = null, { redis = null, now = Date.now() } = {}) {
   if (!handle) return false;
+  clearInterval(handle.busyTimer);
   const client = await resolveRedis(redis);
   const keys = getPersonalMemoryKeys(handle.selfId);
   let conversation = "";
@@ -113,7 +157,7 @@ export async function finishPersonalMemory(handle, history = null, { redis = nul
     conversation = JSON.stringify(mergeMemoryConversation(Array.isArray(job.history) ? job.history : [], getMemoryConversationText(history)));
   }
   return Boolean(await client.eval(FINISH_JOB, 2, keys.jobs, keys.due, handle.id, handle.token,
-    conversation, now + PERSONAL_MEMORY_DELAY_MS, QUEUE_TTL_SECONDS));
+    conversation, now + PERSONAL_MEMORY_DELAY_MS, PERSONAL_MEMORY_DELAY_MS));
 }
 
 export async function cancelPersonalMemory(e, source = null, { redis = null } = {}) {
@@ -131,10 +175,18 @@ export async function cancelPersonalMemory(e, source = null, { redis = null } = 
   }
 }
 
-export async function clearPersonalMemoryQueue(selfId, { redis = null } = {}) {
+export async function clearPersonalMemoryQueue(selfId, { redis = null, keepMimic = false } = {}) {
   const client = await resolveRedis(redis);
   const keys = getPersonalMemoryKeys(selfId);
-  await client.del(keys.jobs, keys.due);
+  if (!keepMimic) {
+    await client.del(keys.jobs, keys.due);
+    return;
+  }
+  const jobs = await client.hgetall(keys.jobs);
+  for (const [id, raw] of Object.entries(jobs)) {
+    const job = JSON.parse(raw);
+    if (job.source !== "Mimic") await client.eval(DELETE_JOB, 2, keys.jobs, keys.due, id, job.token);
+  }
 }
 
 export async function clearAllPersonalMemoryQueues({ redis = null } = {}) {
@@ -191,11 +243,11 @@ export async function withAutomaticMemoryLock(client, key, action) {
 
 export async function runDuePersonalMemories(selfId, { redis = null, now = Date.now(), aiRequest = getAI, store = storeMemories } = {}) {
   const client = await resolveRedis(redis);
-  if (Setting.getConfig("Memory", { selfId })?.personalEnabled === false) {
-    await clearPersonalMemoryQueue(selfId, { redis: client });
-    return;
-  }
+  const personalEnabled = Setting.getConfig("Memory", { selfId })?.personalEnabled !== false;
+  if (!personalEnabled) await clearPersonalMemoryQueue(selfId, { redis: client, keepMimic: true });
   const keys = getPersonalMemoryKeys(selfId);
+  // 待处理会话必须保留到提取成功，不再靠独立 TTL 抢先删除。
+  await client.pipeline().persist(keys.jobs).persist(keys.due).exec();
   const ids = await client.zrangebyscore(keys.due, "-inf", now, "LIMIT", 0, 50);
   for (const id of ids) {
     await withAutomaticMemoryLock(client, `${AUTOMATIC_MEMORY_PREFIX}:personal-lock:${selfId}:${id}`, async (hasLease) => {
@@ -204,17 +256,27 @@ export async function runDuePersonalMemories(selfId, { redis = null, now = Date.
       const job = JSON.parse(raw);
       if (job.dueAt > now) return;
       if (job.busy && job.busyUntil > now) { await client.zadd(keys.due, now + 60 * 1000, id); return; }
-      if (!Array.isArray(job.history) || job.history.length === 0) {
-        await client.eval(DELETE_JOB, 2, keys.jobs, keys.due, id, job.token);
-        return;
-      }
       const e = { self_id: selfId, group_id: job.groupId, user_id: job.userId, sender: { user_id: job.userId, nickname: job.senderName } };
+      if (job.source === "Mimic") {
+        await touchMimicHistory(e, { redis: client, memoryTask: { id, token: job.token, jobsKey: keys.jobs } });
+      }
+      // 接续旧版已排队的10分钟任务，剩余等待时间延长到20分钟。
+      if (!job.idleTimeoutMs) {
+        if (!job.attempts) job.dueAt += PERSONAL_MEMORY_DELAY_MS - 10 * 60 * 1000;
+        await client.eval(FINISH_JOB, 2, keys.jobs, keys.due, id, job.token,
+          JSON.stringify(job.history), job.dueAt, PERSONAL_MEMORY_DELAY_MS);
+        if (job.dueAt > now) return;
+      }
       const isCurrent = async () => {
         if (!await hasLease()) return false;
         const latest = await client.hget(keys.jobs, id);
         return latest && JSON.parse(latest).token === job.token;
       };
       try {
+        if (!personalEnabled || job.cleanupOnly || !Array.isArray(job.history) || job.history.length === 0) {
+          if (await isCurrent()) await client.eval(COMPLETE_JOB, 3, keys.jobs, keys.due, getJobHistoryKey(job), id, job.token);
+          return;
+        }
         const route = Setting.getConfig("AI", { selfId })?.utilityRoute;
         if (!route) throw new Error("未配置通用辅助路由");
         const prompt = [
@@ -228,14 +290,16 @@ export async function runDuePersonalMemories(selfId, { redis = null, now = Date.
         const result = await aiRequest(route, e, [{ text: "请提取以上本次对话值得保存的个人长期记忆。" }], prompt, false, false, structuredClone(job.history), { disableNativeWebSearch: true });
         if (!result || typeof result === "string") throw new Error(String(result || "个人记忆模型未返回内容"));
         const contents = parsePersonalMemoryResponse(result.text);
-        await store({ e, scope: "user", userId: job.userId, contents }, { shouldWrite: isCurrent });
-        if (await isCurrent()) await client.eval(DELETE_JOB, 2, keys.jobs, keys.due, id, job.token);
+        const stored = await store({ e, scope: "user", userId: job.userId, contents }, { shouldWrite: isCurrent });
+        if (!stored?.skipped && await isCurrent()) {
+          await client.eval(COMPLETE_JOB, 3, keys.jobs, keys.due, getJobHistoryKey(job), id, job.token);
+        }
       } catch (error) {
         logger.warn(`[Memory] 个人记忆提取失败，稍后重试：${error.message}`);
         if (await isCurrent()) {
           job.attempts = (job.attempts || 0) + 1;
           job.dueAt = Math.max(now, Date.now()) + Math.min(60, 2 ** Math.min(job.attempts, 6)) * 60 * 1000;
-          await client.eval(FINISH_JOB, 2, keys.jobs, keys.due, id, job.token, JSON.stringify(job.history), job.dueAt, QUEUE_TTL_SECONDS, job.attempts);
+          await client.eval(FINISH_JOB, 2, keys.jobs, keys.due, id, job.token, JSON.stringify(job.history), job.dueAt, PERSONAL_MEMORY_DELAY_MS, job.attempts);
         }
       }
     });
@@ -250,7 +314,7 @@ export function buildGroupMemoryInput(messages) {
   })));
 }
 
-// 使用实际新增记录生成转发，群记忆在前，每位成员各占一个节点。
+// 类别标题单独成节点，群记忆集中展示，个人记忆按成员分别展示。
 export function buildGroupMemoryForwardNodes(e, messages, addedMemories) {
   const names = new Map(messages.map((record) => [String(record.userId), record.senderName]));
   const groupMemories = [];
@@ -267,17 +331,24 @@ export function buildGroupMemoryForwardNodes(e, messages, addedMemories) {
     }
   }
   const sections = [];
-  if (groupMemories.length > 0) sections.push({ nickname: "群记忆", title: "群记忆", contents: groupMemories });
+  const formatContents = (contents) => contents.map((content, index) => `${index + 1}. ${content}`).join("\n");
+  if (groupMemories.length > 0) {
+    sections.push(
+      { nickname: "群记忆", text: "群记忆" },
+      { nickname: "群记忆内容", text: formatContents(groupMemories) },
+    );
+  }
+  if (personalMemories.size > 0) sections.push({ nickname: "个人记忆", text: "个人记忆" });
   for (const [userId, contents] of personalMemories) {
     const name = names.get(userId) || userId;
-    sections.push({ nickname: `个人记忆 · ${name}`, title: `个人记忆：${name}（QQ：${userId}）`, contents });
+    sections.push({ nickname: name, text: `${name}（QQ：${userId}）\n\n${formatContents(contents)}` });
   }
-  return sections.map(({ nickname, title, contents }) => ({
+  return sections.map(({ nickname, text }) => ({
     type: "node",
     data: {
       user_id: Number(e.self_id),
       nickname,
-      content: [{ type: "text", data: { text: `${title}\n\n${contents.map((content, index) => `${index + 1}. ${content}`).join("\n")}` } }],
+      content: [{ type: "text", data: { text } }],
     },
   }));
 }

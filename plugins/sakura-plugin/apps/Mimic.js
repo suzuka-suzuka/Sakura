@@ -277,13 +277,13 @@ export class Mimic extends plugin {
     let memoryHistory = null;
     try {
       if (shouldUseHistory) {
-        currentFullHistory = await loadMimicHistory(e);
-        await touchMimicHistory(e);
         try {
           memoryTask = await beginPersonalMemory(e, "Mimic");
         } catch (error) {
           logger.warn(`[Memory] 登记拟态个人记忆任务失败：${error.message}`);
         }
+        await touchMimicHistory(e, { memoryTask });
+        currentFullHistory = await loadMimicHistory(e);
       }
 
       const imgBase64List = (await getImg(e, false, true)) || [];
@@ -310,7 +310,7 @@ export class Mimic extends plugin {
       }
 
       if (shouldUseHistory) {
-        await saveMimicHistory(e, currentFullHistory);
+        await saveMimicHistory(e, currentFullHistory, { memoryTask });
       }
 
       if (agentResult.status === "stopped") {

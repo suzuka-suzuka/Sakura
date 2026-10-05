@@ -36,8 +36,9 @@ mock.module(moduleUrl("../../../src/api/client.js"), { namedExports: {
   getCurrentBotSelfId: () => currentSelfId,
   getBot: (selfId) => selfId ? {
     self_id: selfId,
-    sendForwardMsg: async (nodes, groupId) => {
-      forwardCalls.push({ selfId, groupId, nodes: structuredClone(nodes) });
+    sendForwardMsg: async (payload) => {
+      forwardCalls.push({ selfId, groupId: payload.group_id, nodes: structuredClone(payload.messages),
+        source: payload.source, news: structuredClone(payload.news) });
       if (forwardError) throw forwardError;
       return { message_id: "测试转发消息" };
     },
@@ -187,23 +188,28 @@ test("群任务只注入 Memory，可分别写群记忆和指定发言者的个�
   await assert.rejects(automatic.collectGroupMemories(event, records, { aiRequest: async () => ({ functionCalls: [{ name: "RunCommand", args: {} }] }) }), /只允许/);
 });
 
-test("个人10分钟空闲触发，新对话重新计时，旧完成回调不能覆盖新任务", async () => {
+test("个人20分钟空闲触发，新对话重新计时，旧完成回调不能覆盖新任务", async () => {
   const event = e(930005);
   const now = Date.now();
+  const delay = automatic.PERSONAL_MEMORY_DELAY_MS;
+  assert.equal(delay, 20 * 60 * 1000);
+  assert.equal(delay, mimic.MIMIC_HISTORY_TTL_SECONDS * 1000);
   const first = await automatic.beginPersonalMemory(event, "chat:test", { redis, now });
   await automatic.finishPersonalMemory(first, conversation(), { redis, now });
   let calls = 0;
-  await automatic.runDuePersonalMemories(event.self_id, { redis, now: now + 599999, aiRequest: () => { calls++; } });
+  await automatic.runDuePersonalMemories(event.self_id, { redis, now: now + 600001, aiRequest: () => { calls++; } });
+  await automatic.runDuePersonalMemories(event.self_id, { redis, now: now + delay - 1, aiRequest: () => { calls++; } });
   assert.equal(calls, 0);
-  const second = await automatic.beginPersonalMemory(event, "chat:test", { redis, now: now + 540000 });
+  const renewedAt = now + delay - 60000;
+  const second = await automatic.beginPersonalMemory(event, "chat:test", { redis, now: renewedAt });
   assert.equal(await automatic.finishPersonalMemory(first, conversation("旧结果"), { redis, now }), false);
   const input = conversation("我喜欢简洁的界面");
   input[0].parts.push({ inlineData: { data: "图片" } });
   input.push({ role: "function", parts: [{ functionResponse: { name: "test" } }] });
-  await automatic.finishPersonalMemory(second, input, { redis, now: now + 540000 });
-  await automatic.runDuePersonalMemories(event.self_id, { redis, now: now + 600001, aiRequest: () => { calls++; } });
+  await automatic.finishPersonalMemory(second, input, { redis, now: renewedAt });
+  await automatic.runDuePersonalMemories(event.self_id, { redis, now: now + delay + 1, aiRequest: () => { calls++; } });
   assert.equal(calls, 0);
-  await automatic.runDuePersonalMemories(event.self_id, { redis, now: now + 1140001, aiRequest: async (...args) => {
+  await automatic.runDuePersonalMemories(event.self_id, { redis, now: renewedAt + delay + 1, aiRequest: async (...args) => {
     calls++;
     assert.equal(args[4], false);
     assert.equal(args[5], false);
@@ -223,17 +229,25 @@ test("提取期间继续聊天，旧结果不写入、不删除新任务", async
   const event = e(930006);
   const now = Date.now();
   const handle = await automatic.beginPersonalMemory(event, "Mimic", { redis, now });
+  await mimic.saveMimicHistory(event, conversation(), { redis, memoryTask: handle });
   await automatic.finishPersonalMemory(handle, conversation(), { redis, now });
   let newer;
-  await automatic.runDuePersonalMemories(event.self_id, { redis, now: now + 600001, aiRequest: async () => {
-    newer = await automatic.beginPersonalMemory(event, "Mimic", { redis, now: now + 600001 });
+  const dueAt = now + automatic.PERSONAL_MEMORY_DELAY_MS + 1;
+  const newerHistory = [...conversation(), ...conversation("新的对话")];
+  await automatic.runDuePersonalMemories(event.self_id, { redis, now: dueAt, aiRequest: async () => {
+    newer = await automatic.beginPersonalMemory(event, "Mimic", { redis, now: dueAt });
+    await mimic.saveMimicHistory(event, newerHistory, { redis, memoryTask: newer });
+    await automatic.finishPersonalMemory(newer, newerHistory, { redis, now: dueAt });
     return { text: '{"memories":[{"content":"过期提取结果"}]}' };
   } });
   assert.equal(document(event).memories.length, 0);
   const job = JSON.parse(await redis.hget(automatic.getPersonalMemoryKeys(event.self_id).jobs, handle.id));
   assert.equal(job.token, newer.token);
-  await automatic.finishPersonalMemory(newer, null, { redis, now: now + 600001 });
+  assert.deepEqual(await mimic.loadMimicHistory(event, { redis }), newerHistory);
+  assert.equal(await mimic.saveMimicHistory(event, conversation("过期聊天回调"), { redis, memoryTask: handle }), false);
+  assert.deepEqual(await mimic.loadMimicHistory(event, { redis }), newerHistory);
   await automatic.cancelPersonalMemory(event, "Mimic", { redis });
+  await mimic.clearMimicHistory(event, { redis });
 });
 
 test("个人格式错误保留任务并退避，空数组成功完成且不增加计数", async () => {
@@ -241,11 +255,12 @@ test("个人格式错误保留任务并退避，空数组成功完成且不增�
   const now = Date.now();
   const handle = await automatic.beginPersonalMemory(event, "chat:test", { redis, now });
   await automatic.finishPersonalMemory(handle, conversation(), { redis, now });
-  await automatic.runDuePersonalMemories(event.self_id, { redis, now: now + 600001, aiRequest: async () => ({ text: '{"memories":[{"content":"不允许", "scope":"group"}]}' }) });
+  const dueAt = now + automatic.PERSONAL_MEMORY_DELAY_MS + 1;
+  await automatic.runDuePersonalMemories(event.self_id, { redis, now: dueAt, aiRequest: async () => ({ text: '{"memories":[{"content":"不允许", "scope":"group"}]}' }) });
   const keys = automatic.getPersonalMemoryKeys(event.self_id);
   const job = JSON.parse(await redis.hget(keys.jobs, handle.id));
   assert.equal(job.attempts, 1);
-  assert.ok(job.dueAt > now + 600001);
+  assert.ok(job.dueAt > dueAt);
   assert.equal(document(event).revision, 0);
   await automatic.runDuePersonalMemories(event.self_id, { redis, now: job.dueAt + 1, aiRequest: async () => ({ text: '{"memories":[]}' }) });
   assert.equal(await redis.hget(keys.jobs, handle.id), null);
@@ -273,7 +288,7 @@ test("未处理会话合并去除上下文重叠，历史裁剪不会丢掉早�
   assert.deepEqual(automatic.mergeMemoryConversation(first, second), [...first, ...second]);
 });
 
-test("Mimic 不按轮数裁剪，真实聊天续期20分钟，后台读取不续期", async () => {
+test("Mimic 不按轮数裁剪，未登记流程时仍以20分钟 TTL 兜底，后台读取不续期", async () => {
   const event = e(930010);
   const input = Array.from({ length: 50 }, (_, index) => conversation(`第${index}轮`)).flat();
   await mimic.saveMimicHistory(event, input, { redis });
@@ -288,6 +303,177 @@ test("Mimic 不按轮数裁剪，真实聊天续期20分钟，后台读取不续
   await redis.pexpire(key, 1);
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.deepEqual(await mimic.loadMimicHistory(event, { redis }), []);
+});
+
+test("拟态提取或写入失败时保留历史和任务，成功写入后才清空", async () => {
+  const event = e(930020);
+  const now = Date.now();
+  const handle = await automatic.beginPersonalMemory(event, "Mimic", { redis, now });
+  const input = conversation("我喜欢安静的环境");
+  await mimic.saveMimicHistory(event, input, { redis, memoryTask: handle });
+  await automatic.finishPersonalMemory(handle, input, { redis, now });
+  const keys = automatic.getPersonalMemoryKeys(event.self_id);
+  const key = mimic.getMimicHistoryKey(event);
+  assert.equal(await redis.ttl(key), -1);
+  assert.equal(await redis.ttl(keys.jobs), -1);
+  let requested = 0;
+  await automatic.runDuePersonalMemories(event.self_id, { redis, now: now + automatic.PERSONAL_MEMORY_DELAY_MS - 1, aiRequest: () => { requested++; } });
+  assert.equal(requested, 0);
+  await automatic.runDuePersonalMemories(event.self_id, { redis, now: now + automatic.PERSONAL_MEMORY_DELAY_MS + 1, aiRequest: async () => { throw new Error("模拟网络失败"); } });
+  let job = JSON.parse(await redis.hget(keys.jobs, handle.id));
+  assert.equal(job.attempts, 1);
+  assert.deepEqual(await mimic.loadMimicHistory(event, { redis }), input);
+  const result = { text: '{"memories":[{"content":"用户喜欢安静的环境"}]}' };
+  await automatic.runDuePersonalMemories(event.self_id, { redis, now: job.dueAt + 1,
+    aiRequest: async () => result, store: async () => { throw new Error("模拟磁盘写入失败"); },
+  });
+  job = JSON.parse(await redis.hget(keys.jobs, handle.id));
+  assert.equal(job.attempts, 2);
+  assert.deepEqual(await mimic.loadMimicHistory(event, { redis }), input);
+  await automatic.runDuePersonalMemories(event.self_id, { redis, now: job.dueAt + 1, aiRequest: async () => result,
+    store: async (...args) => {
+      assert.equal(await redis.exists(key), 1);
+      const stored = await storeMemories(...args);
+      assert.equal(document(event).memories[0].content, "用户喜欢安静的环境");
+      assert.equal(await redis.exists(key), 1, "记忆写入完成之前不能删历史");
+      return stored;
+    },
+  });
+  assert.equal(await redis.exists(key), 0);
+  assert.equal(await redis.hget(keys.jobs, handle.id), null);
+  assert.equal(await redis.zscore(keys.due, handle.id), null);
+});
+
+test("拟态没有可记信息也完成流程，成功返回空数组后才删历史", async () => {
+  const event = e(930021);
+  const now = Date.now();
+  const handle = await automatic.beginPersonalMemory(event, "Mimic", { redis, now });
+  await mimic.saveMimicHistory(event, conversation(), { redis, memoryTask: handle });
+  await automatic.finishPersonalMemory(handle, conversation(), { redis, now });
+  await automatic.runDuePersonalMemories(event.self_id, { redis, now: now + automatic.PERSONAL_MEMORY_DELAY_MS + 1,
+    aiRequest: async () => {
+      assert.equal(await redis.exists(mimic.getMimicHistoryKey(event)), 1);
+      return { text: '{"memories":[]}' };
+    },
+  });
+  assert.deepEqual(await mimic.loadMimicHistory(event, { redis }), []);
+  assert.equal(document(event).revision, 0);
+});
+
+test("回复耗时超过20分钟时保持处理中，空闲计时从真正结束后开始", async (context) => {
+  const event = e(930026);
+  const now = Date.now();
+  context.mock.timers.enable({ apis: ["setInterval", "Date"], now });
+  const handle = await automatic.beginPersonalMemory(event, "Mimic", { redis });
+  await mimic.saveMimicHistory(event, conversation(), { redis, memoryTask: handle });
+  context.mock.timers.tick(automatic.PERSONAL_MEMORY_DELAY_MS);
+  await redis.ping();
+  const keys = automatic.getPersonalMemoryKeys(event.self_id);
+  assert.ok(JSON.parse(await redis.hget(keys.jobs, handle.id)).busyUntil > Date.now());
+  let requested = 0;
+  await automatic.runDuePersonalMemories(event.self_id, { redis, aiRequest: async () => { requested++; } });
+  assert.equal(requested, 0);
+  assert.equal(await redis.exists(mimic.getMimicHistoryKey(event)), 1);
+  await automatic.finishPersonalMemory(handle, conversation(), { redis });
+  assert.equal(JSON.parse(await redis.hget(keys.jobs, handle.id)).dueAt, Date.now() + automatic.PERSONAL_MEMORY_DELAY_MS);
+  context.mock.timers.reset();
+  await automatic.cancelPersonalMemory(event, "Mimic", { redis });
+  await mimic.clearMimicHistory(event, { redis });
+});
+
+test("记忆写入后、删除之前开始新对话，原子检查仍保护新会话", async () => {
+  const event = e(930022);
+  const now = Date.now();
+  const dueAt = now + automatic.PERSONAL_MEMORY_DELAY_MS + 1;
+  const handle = await automatic.beginPersonalMemory(event, "Mimic", { redis, now });
+  await mimic.saveMimicHistory(event, conversation(), { redis, memoryTask: handle });
+  await automatic.finishPersonalMemory(handle, conversation(), { redis, now });
+  let newer;
+  const input = [...conversation(), ...conversation("我刚开始新的对话")];
+  const racingRedis = new Proxy(redis, { get(target, property) {
+    if (property === "eval") return async (script, ...args) => {
+      if (!newer && script.includes("if KEYS[3] ~= '' then redis.call('DEL', KEYS[3])")) {
+        newer = await automatic.beginPersonalMemory(event, "Mimic", { redis, now: dueAt });
+        await mimic.saveMimicHistory(event, input, { redis, memoryTask: newer });
+        await automatic.finishPersonalMemory(newer, input, { redis, now: dueAt });
+      }
+      return target.eval(script, ...args);
+    };
+    const value = target[property];
+    return typeof value === "function" ? value.bind(target) : value;
+  } });
+  await automatic.runDuePersonalMemories(event.self_id, { redis: racingRedis, now: dueAt,
+    aiRequest: async () => ({ text: '{"memories":[{"content":"用户希望被称为小夜"}]}' }),
+  });
+  assert.ok(newer);
+  assert.deepEqual(await mimic.loadMimicHistory(event, { redis }), input);
+  assert.equal(JSON.parse(await redis.hget(automatic.getPersonalMemoryKeys(event.self_id).jobs, handle.id)).token, newer.token);
+  await automatic.cancelPersonalMemory(event, "Mimic", { redis });
+  await mimic.clearMimicHistory(event, { redis });
+});
+
+test("关闭个人记忆仍在空闲20分钟后清理拟态，不调用 AI", async () => {
+  const event = e(930023);
+  const now = Date.now();
+  memoryConfig = { personalEnabled: false };
+  try {
+    assert.equal(await automatic.beginPersonalMemory(event, "chat:test", { redis, now }), null);
+    const handle = await automatic.beginPersonalMemory(event, "Mimic", { redis, now });
+    await mimic.saveMimicHistory(event, conversation(), { redis, memoryTask: handle });
+    await automatic.finishPersonalMemory(handle, conversation(), { redis, now });
+    let requested = 0;
+    const aiRequest = async () => { requested++; throw new Error("关闭时不应请求 AI"); };
+    await automatic.runDuePersonalMemories(event.self_id, { redis, now: now + automatic.PERSONAL_MEMORY_DELAY_MS - 1, aiRequest });
+    assert.equal(await redis.exists(mimic.getMimicHistoryKey(event)), 1);
+    await automatic.runDuePersonalMemories(event.self_id, { redis, now: now + automatic.PERSONAL_MEMORY_DELAY_MS + 1, aiRequest });
+    assert.equal(requested, 0);
+    assert.deepEqual(await mimic.loadMimicHistory(event, { redis }), []);
+    assert.equal(await redis.hget(automatic.getPersonalMemoryKeys(event.self_id).jobs, handle.id), null);
+  } finally {
+    memoryConfig = {};
+  }
+});
+
+test("中断的首轮拟态没有可提取对话，仍登记20分钟清理流程", async () => {
+  const event = e(930024);
+  const now = Date.now();
+  const handle = await automatic.beginPersonalMemory(event, "Mimic", { redis, now });
+  await mimic.saveMimicHistory(event, conversation("中断对话"), { redis, memoryTask: handle });
+  await automatic.finishPersonalMemory(handle, null, { redis, now });
+  const keys = automatic.getPersonalMemoryKeys(event.self_id);
+  assert.equal(Object.keys(JSON.parse(await redis.hget(keys.jobs, handle.id)).history).length, 0);
+  await automatic.runDuePersonalMemories(event.self_id, { redis, now: now + automatic.PERSONAL_MEMORY_DELAY_MS + 1,
+    aiRequest: async () => { throw new Error("中断对话不应提取记忆"); },
+  });
+  assert.equal(await redis.exists(mimic.getMimicHistoryKey(event)), 0);
+  assert.equal(await redis.hget(keys.jobs, handle.id), null);
+});
+
+test("重启接续旧版10分钟任务，延长到20分钟并保留历史至提取完成", async () => {
+  const event = e(930025);
+  const now = Date.now();
+  const handle = await automatic.beginPersonalMemory(event, "Mimic", { redis, now });
+  await mimic.saveMimicHistory(event, conversation(), { redis, memoryTask: handle });
+  await automatic.finishPersonalMemory(handle, conversation(), { redis, now });
+  const keys = automatic.getPersonalMemoryKeys(event.self_id);
+  const job = JSON.parse(await redis.hget(keys.jobs, handle.id));
+  delete job.idleTimeoutMs;
+  job.dueAt = now + 10 * 60 * 1000;
+  await redis.hset(keys.jobs, handle.id, JSON.stringify(job));
+  await redis.zadd(keys.due, job.dueAt, handle.id);
+  await redis.expire(mimic.getMimicHistoryKey(event), 1200);
+  await redis.expire(keys.jobs, 86400);
+  await redis.expire(keys.due, 86400);
+  let requested = 0;
+  const aiRequest = async () => { requested++; return { text: '{"memories":[]}' }; };
+  await automatic.runDuePersonalMemories(event.self_id, { redis, now: job.dueAt + 1, aiRequest });
+  assert.equal(requested, 0);
+  assert.equal(JSON.parse(await redis.hget(keys.jobs, handle.id)).dueAt, now + automatic.PERSONAL_MEMORY_DELAY_MS);
+  assert.equal(await redis.ttl(mimic.getMimicHistoryKey(event)), -1);
+  assert.equal(await redis.ttl(keys.jobs), -1);
+  await automatic.runDuePersonalMemories(event.self_id, { redis, now: now + automatic.PERSONAL_MEMORY_DELAY_MS + 1, aiRequest });
+  assert.equal(requested, 1);
+  assert.equal(await redis.exists(mimic.getMimicHistoryKey(event)), 0);
 });
 
 test("清空对话同时清理 Redis 拟态历史和延迟任务", async () => {
@@ -327,7 +513,7 @@ test("小时任务不足100条不请求 AI，多账号同群同小时只采集�
   aiHandler = null;
 });
 
-test("小时任务转发实际新增记忆，群节点在前，每人一个节点，重复记忆不展示", async () => {
+test("小时任务转发按类别标题与内容分节点，每人一个内容节点，重复记忆不展示", async () => {
   const now = new Date();
   const seconds = Math.floor(now.getTime() / 1000);
   memoryConfig = { Groups: [920016] };
@@ -349,12 +535,16 @@ test("小时任务转发实际新增记忆，群节点在前，每人一个节�
     const sent = forwardCalls.at(-1);
     assert.equal(sent.selfId, currentSelfId);
     assert.equal(sent.groupId, 920016);
-    assert.deepEqual(sent.nodes.map((node) => node.data.nickname), ["群记忆", "个人记忆 · 小花", "个人记忆 · 小夜"]);
+    assert.equal(sent.source, "新增记忆");
+    assert.deepEqual(sent.news, [{ text: "群记忆1条" }, { text: "个人记忆3条" }]);
+    assert.deepEqual(sent.nodes.map((node) => node.data.nickname), ["群记忆", "群记忆内容", "个人记忆", "小花", "小夜"]);
     assert.ok(sent.nodes.every((node) => node.type === "node" && node.data.user_id === currentSelfId));
     assert.deepEqual(sent.nodes.map((node) => node.data.content[0].data.text), [
-      "群记忆\n\n1. 本群周六举行活动",
-      "个人记忆：小花（QQ：930016）\n\n1. 小花喜欢绘画\n2. 小花希望使用小花这个称呼",
-      "个人记忆：小夜（QQ：930003）\n\n1. 小夜喜欢猫",
+      "群记忆",
+      "1. 本群周六举行活动",
+      "个人记忆",
+      "小花（QQ：930016）\n\n1. 小花喜欢绘画\n2. 小花希望使用小花这个称呼",
+      "小夜（QQ：930003）\n\n1. 小夜喜欢猫",
     ]);
     await task.groupMemoryTask(now);
     assert.equal(forwardCalls.length, start + 1);
@@ -374,16 +564,18 @@ test("小时任务转发实际新增记忆，群节点在前，每人一个节�
   }
 });
 
-test("转发省略没有新增内容的群节点或个人节点，空结果不生成节点", () => {
+test("转发省略没有新增内容的类别标题与内容节点，空结果不生成节点", () => {
   const event = e(910001);
   const records = [{ userId: "930017", senderName: "小明" }];
   const userOnly = automatic.buildGroupMemoryForwardNodes(event, records, [
     { scope: "group", content: " " },
     { scope: "user", userId: "930017", content: "小明喜欢音乐" },
   ]);
-  assert.deepEqual(userOnly.map((node) => node.data.nickname), ["个人记忆 · 小明"]);
+  assert.deepEqual(userOnly.map((node) => node.data.nickname), ["个人记忆", "小明"]);
+  assert.deepEqual(userOnly.map((node) => node.data.content[0].data.text), ["个人记忆", "小明（QQ：930017）\n\n1. 小明喜欢音乐"]);
   const groupOnly = automatic.buildGroupMemoryForwardNodes(event, records, [{ scope: "group", content: "本群的约定" }]);
-  assert.deepEqual(groupOnly.map((node) => node.data.nickname), ["群记忆"]);
+  assert.deepEqual(groupOnly.map((node) => node.data.nickname), ["群记忆", "群记忆内容"]);
+  assert.deepEqual(groupOnly.map((node) => node.data.content[0].data.text), ["群记忆", "1. 本群的约定"]);
   assert.deepEqual(automatic.buildGroupMemoryForwardNodes(event, records, []), []);
 });
 
@@ -405,6 +597,7 @@ test("结果转发失败仍保留已写入记忆，同小时不重复采集或�
     await task.groupMemoryTask(now);
     assert.equal(round, 2);
     assert.equal(forwardCalls.length, start + 1);
+    assert.deepEqual(forwardCalls.at(-1).news, [{ text: "群记忆1条" }, { text: "个人记忆0条" }]);
   } finally {
     forwardError = null;
     memoryConfig = {};
@@ -445,6 +638,8 @@ test("拟态入口承接完整 Redis 连续历史，随机插话保持独立且�
   const keys = automatic.getPersonalMemoryKeys(event.self_id);
   const id = automatic.getPersonalMemoryJobId(event, "Mimic");
   const beforeJob = await redis.hget(keys.jobs, id);
+  assert.equal(await redis.ttl(mimic.getMimicHistoryKey(event)), -1);
+  assert.ok(JSON.parse(beforeJob).dueAt - Date.now() >= automatic.PERSONAL_MEMORY_DELAY_MS - 1000);
   await redis.expire(mimic.getMimicHistoryKey(event), 5);
   event._mimicPreflight = { config, query: "随机插话", mustReply: false };
   await instance.doMimic(event);

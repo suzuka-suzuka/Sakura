@@ -237,7 +237,7 @@ export const TavilyMCPSchema = z.object({
 export const MemorySchema = z.object({
     groupEnabled: z.boolean().default(true).describe('启用群记忆采集|每小时检查最近一小时的消息，满100条才提取记忆'),
     Groups: z.array(z.number()).default([]).describe('群记忆采集群|#groupSelect|留空时检查当前账号所有有记录的群'),
-    personalEnabled: z.boolean().default(true).describe('启用个人记忆采集|聊天结束10分钟后提取个人记忆，新对话会重新计时'),
+    personalEnabled: z.boolean().default(true).describe('启用个人记忆采集|聊天结束20分钟后提取个人记忆，拟态对话提取成功后清空，新对话会重新计时'),
 }).describe('自动记忆');
 
 export const ActiveChatSchema = z.object({
