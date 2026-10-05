@@ -14,6 +14,34 @@ import {
 const DEFAULT_MARKDOWN_PLAIN_TEXT_LIMIT = 300;
 const DEFAULT_MARKDOWN_SPLIT_IMAGE_LIMIT = 0;
 
+// Markdown 不能呈现 QQ 的 at 段，解析前改成当前群名片，同一 QQ 只查询一次。
+export async function replaceMarkdownGroupMentions(e, text) {
+  if (!e?.group_id) return text;
+  const mentionPattern = /(?<![\w@])@(\d+)\b/g;
+  const userIds = [...new Set([...text.matchAll(mentionPattern)].map((match) => match[1]))];
+  const names = new Map(await Promise.all(userIds.map(async (userId) => {
+    try {
+      const member = typeof e.getInfo === "function"
+        ? await e.getInfo(userId)
+        : await e.bot?.getGroupMemberInfo({ group_id: e.group_id, user_id: userId });
+      return [userId, member?.card?.trim() || member?.nickname?.trim()];
+    } catch (error) {
+      logger.warn(`[Markdown] 获取群成员 ${userId} 名片失败：${error.message}`);
+      return [userId, null];
+    }
+  })));
+  return text.replace(mentionPattern, (mention, userId) => {
+    const name = names.get(userId);
+    if (!name) return mention;
+    // 名片中的 Markdown、HTML 和公式符号作为普通文字显示。
+    const escaped = name.replace(/[\\`*_[\]{}()#+\-.!|~$&<>]/g, (char) => {
+      const entities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "$": "&#36;" };
+      return entities[char] || `\\${char}`;
+    });
+    return `@${escaped}`;
+  });
+}
+
 /**
  * 将图片 URL 转换为 base64 格式（自动将 GIF 转为 PNG）
  * @param {string} imageUrl - 图片 URL
@@ -425,6 +453,7 @@ export async function sendMarkdownMsg(e, markdownContent, opts = {}) {
     let content = Array.isArray(fallbackContent) ? [...fallbackContent] : [];
 
     if (content.length === 0) {
+      markdownContent = await replaceMarkdownGroupMentions(e, markdownContent);
       const imgBuffer = await renderMarkdownToImage(markdownContent).catch(() => null);
       if (imgBuffer) {
         content = [segment.image(imgBuffer)];
@@ -505,11 +534,12 @@ export async function smartReplyMsg(e, text, opts = {}) {
 
     let imgBuffer = null;
     try {
+      const markdownText = await replaceMarkdownGroupMentions(e, text);
       let fallbackNodes = null;
       let fallbackContent = [];
 
-      if (markdownSplitImageLimit > 0 && text.length >= markdownSplitImageLimit) {
-        const parts = splitMarkdownIntoBalancedParts(text);
+      if (markdownSplitImageLimit > 0 && markdownText.length >= markdownSplitImageLimit) {
+        const parts = splitMarkdownIntoBalancedParts(markdownText);
         if (parts?.length === 2) {
           const defaultNickname = bot.nickname || String(e.self_id);
           fallbackNodes = await renderMarkdownPartsToImageNodes(parts, e.self_id, defaultNickname);
@@ -517,15 +547,15 @@ export async function smartReplyMsg(e, text, opts = {}) {
       }
 
       if (!fallbackNodes) {
-        imgBuffer = await renderMarkdownToImage(text).catch(() => null);
+        imgBuffer = await renderMarkdownToImage(markdownText).catch(() => null);
         if (imgBuffer) {
           fallbackContent.push(segment.image(imgBuffer));
         } else {
-          fallbackContent.push({ type: "text", data: { text: text } });
+          fallbackContent.push({ type: "text", data: { text: markdownText } });
         }
       }
 
-      const result = await sendMarkdownMsg(e, text, {
+      const result = await sendMarkdownMsg(e, markdownText, {
         source: botname ? `${botname}回复` : "消息",
         fallbackContent,
         fallbackNodes,
