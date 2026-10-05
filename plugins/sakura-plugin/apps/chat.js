@@ -235,7 +235,7 @@ export class AIChat extends plugin {
 
     try {
       try {
-        memoryTask = await beginPersonalMemory(e, `chat:${getPrimaryPrefix(matchedProfile)}`);
+        memoryTask = await beginPersonalMemory(e, `chat:${getPrimaryPrefix(matchedProfile)}`, { toolGroup });
       } catch (error) {
         logger.warn(`[Memory] 登记个人记忆任务失败：${error.message}`);
       }

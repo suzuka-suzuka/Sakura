@@ -16,7 +16,7 @@ mock.module(url("../lib/path.js"), { namedExports: {
   plugindata: fixture, pluginRoot: fileURLToPath(new URL("../", import.meta.url)),
 } });
 mock.module(url("../lib/setting.js"), { defaultExport: { getConfig: () => ({
-  utilityRoute: "测试", toolGroups: [{ name: "记忆", tools: ["Memory"] }],
+  utilityRoute: "测试", toolGroups: [{ name: "记忆", tools: ["Memory"] }, { name: "关闭记忆", tools: [] }],
 }) } });
 mock.module(url("../lib/AIUtils/getAI.js"), { namedExports: { getAI: async (...args) => {
   assert.ok(aiHandler, "测试禁止真实 AI 请求");
@@ -71,7 +71,7 @@ function response(history) {
   return history.at(-1).parts[0].functionResponse.response;
 }
 
-async function runScenario(e, query, steps) {
+async function runScenario(e, query, steps, options = {}) {
   let step = 0;
   aiHandler = async (...args) => {
     assert.ok(step < steps.length, "模型调用次数超过测试步骤");
@@ -79,7 +79,7 @@ async function runScenario(e, query, steps) {
   };
   try {
     const result = await runAgentLoop({ e, route: "测试", queryParts: [{ text: query }],
-      prompt: "角色提示词", toolGroup: "记忆", history: [] });
+      prompt: "角色提示词", toolGroup: "记忆", history: [], ...options });
     assert.equal(result.status, "completed");
     assert.equal(step, steps.length);
     assert.equal(activeAiTasks.size, 0);
@@ -91,6 +91,18 @@ async function runScenario(e, query, steps) {
 after(() => {
   assert.ok(path.resolve(fixture).startsWith(path.resolve(os.tmpdir()) + path.sep));
   fs.rmSync(fixture, { recursive: true, force: true });
+});
+
+test("未开启记忆工具的工具组不会把个人摘要或群记录放入系统提示词", async () => {
+  const e = event(961008, 962008);
+  seed(e, ["个人咖啡喜好"], "个人摘要");
+  seed(e, Array.from({ length: 12 }, (_, i) => `群咖啡记忆${i}`), "群摘要", "group");
+  const count = vectorCalls.length;
+  await runScenario(e, "饮食", [async (...args) => {
+    assert.equal(args[3], "角色提示词");
+    assert.equal(vectorCalls.length, count);
+    return { text: "已完成" };
+  }], { toolGroup: "关闭记忆" });
 });
 
 test("群聊个人记忆只注入摘要，工具按QQ读取全部记录，少量群公共记忆仍直接注入", async () => {

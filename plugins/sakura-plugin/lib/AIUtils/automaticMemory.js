@@ -5,6 +5,8 @@ import { getLatestMemories, getMemoryLocation, readMemoryDocument } from "./memo
 import { storeMemories } from "./memoryWriter.js";
 import { MemoryTool } from "./tools/MemoryTool.js";
 import { ReadUserMemoryTool } from "./tools/ReadUserMemoryTool.js";
+import { toolGroupHasTool } from "./tools/tools.js";
+import { getPrimaryPrefix } from "./profileTriggers.js";
 import { ensureToolCallIds } from "./toolCallProtocol.js";
 import { getMimicHistoryKey, MIMIC_HISTORY_TTL_SECONDS, touchMimicHistory } from "./mimicHistory.js";
 
@@ -113,16 +115,30 @@ function getJobHistoryKey(job) {
   return job.source === "Mimic" ? getMimicHistoryKey({ self_id: job.selfId, group_id: job.groupId, user_id: job.userId }) : "";
 }
 
-export async function beginPersonalMemory(e, source, { redis = null, now = Date.now() } = {}) {
-  const cleanupOnly = Setting.getConfig("Memory", { selfId: e.self_id })?.personalEnabled === false;
-  if (cleanupOnly && source !== "Mimic") return null;
+function resolvePersonalMemoryToolGroup(e, source) {
+  if (source === "Mimic") {
+    const config = Setting.getConfig("mimic", { selfId: e.self_id }) || {};
+    const override = (config.GroupConfigs || []).find((item) => item.group &&
+      (Array.isArray(item.group) ? item.group : [item.group]).map(String).includes(String(e.group_id)));
+    return (override ? { ...config, ...override } : config).toolGroup;
+  }
+  const config = Setting.getConfig("AI", { selfId: e.self_id }) || {};
+  return (config.profiles || []).find((profile) => `chat:${getPrimaryPrefix(profile)}` === source)?.toolGroup;
+}
+
+export async function beginPersonalMemory(e, source, { redis = null, now = Date.now(), toolGroup = resolvePersonalMemoryToolGroup(e, source) } = {}) {
+  const cleanupOnly = !toolGroupHasTool(toolGroup, "Memory");
+  if (cleanupOnly && source !== "Mimic") {
+    await cancelPersonalMemory(e, source, { redis });
+    return null;
+  }
   const client = await resolveRedis(redis);
   const keys = getPersonalMemoryKeys(e.self_id);
   const id = getPersonalMemoryJobId(e, source);
   const token = crypto.randomUUID();
   const job = {
     token, selfId: String(e.self_id), groupId: e.group_id ? String(e.group_id) : null,
-    userId: String(e.user_id), source, senderName: e.sender?.card || e.sender?.nickname || String(e.user_id),
+    userId: String(e.user_id), source, toolGroup: toolGroup || "", senderName: e.sender?.card || e.sender?.nickname || String(e.user_id),
     cleanupOnly, idleTimeoutMs: PERSONAL_MEMORY_DELAY_MS,
     busy: true, busyUntil: now + 2 * 60 * 1000, dueAt: now + PERSONAL_MEMORY_DELAY_MS, history: [],
   };
@@ -245,8 +261,6 @@ export async function withAutomaticMemoryLock(client, key, action) {
 
 export async function runDuePersonalMemories(selfId, { redis = null, now = Date.now(), aiRequest = getAI, store = storeMemories } = {}) {
   const client = await resolveRedis(redis);
-  const personalEnabled = Setting.getConfig("Memory", { selfId })?.personalEnabled !== false;
-  if (!personalEnabled) await clearPersonalMemoryQueue(selfId, { redis: client, keepMimic: true });
   const keys = getPersonalMemoryKeys(selfId);
   // 待处理会话必须保留到提取成功，不再靠独立 TTL 抢先删除。
   await client.pipeline().persist(keys.jobs).persist(keys.due).exec();
@@ -275,7 +289,8 @@ export async function runDuePersonalMemories(selfId, { redis = null, now = Date.
         return latest && JSON.parse(latest).token === job.token;
       };
       try {
-        if (!personalEnabled || job.cleanupOnly || !Array.isArray(job.history) || job.history.length === 0) {
+        const toolGroup = job.toolGroup ?? resolvePersonalMemoryToolGroup(e, job.source);
+        if (!toolGroupHasTool(toolGroup, "Memory") || job.cleanupOnly || !Array.isArray(job.history) || job.history.length === 0) {
           if (await isCurrent()) await client.eval(COMPLETE_JOB, 3, keys.jobs, keys.due, getJobHistoryKey(job), id, job.token);
           return;
         }

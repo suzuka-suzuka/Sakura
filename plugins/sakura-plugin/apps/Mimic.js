@@ -278,7 +278,7 @@ export class Mimic extends plugin {
     try {
       if (shouldUseHistory) {
         try {
-          memoryTask = await beginPersonalMemory(e, "Mimic");
+          memoryTask = await beginPersonalMemory(e, "Mimic", { toolGroup });
         } catch (error) {
           logger.warn(`[Memory] 登记拟态个人记忆任务失败：${error.message}`);
         }
