@@ -4,7 +4,7 @@ import path from "node:path";
 import { plugindata } from "../path.js";
 
 export const MEMORY_SCHEMA_VERSION = 2;
-export const MEMORY_MAINTENANCE_INTERVAL = 5;
+export const MEMORY_MAINTENANCE_INTERVAL = 10;
 export const memoryRoot = path.join(plugindata, "memory");
 
 const documentLocks = new Map();

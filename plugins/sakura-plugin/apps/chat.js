@@ -9,6 +9,7 @@ import { getQuoteContent } from "../lib/AIUtils/messaging.js";
 import { checkForNaiTags } from "../lib/AIUtils/naiChatDraw.js";
 import { buildMultimodalQueryParts } from "../lib/AIUtils/messageParts.js";
 import { randomReact, getImg, smartReplyMsg } from "../lib/utils.js";
+import { beginPersonalMemory, finishPersonalMemory, getMemoryConversationText } from "../lib/AIUtils/automaticMemory.js";
 import {
   getPrimaryPrefix,
   matchProfilePrefix,
@@ -229,8 +230,15 @@ export class AIChat extends plugin {
 
     let currentFullHistory = [];
     const naiDrawState = { scheduled: false };
+    let memoryTask = null;
+    let memoryHistory = null;
 
     try {
+      try {
+        memoryTask = await beginPersonalMemory(e, `chat:${getPrimaryPrefix(matchedProfile)}`);
+      } catch (error) {
+        logger.warn(`[Memory] 登记个人记忆任务失败：${error.message}`);
+      }
       if (history) {
         currentFullHistory = await loadConversationHistory(
           e,
@@ -285,6 +293,7 @@ export class AIChat extends plugin {
         return true;
       }
 
+      const completedHistory = getMemoryConversationText(currentFullHistory);
       if (history) {
         await saveConversationHistory(e, currentFullHistory, prefix);
       }
@@ -297,10 +306,17 @@ export class AIChat extends plugin {
       );
       // 最后回复也走 smartReply
       await this.smartReply(e, finalResponseText);
+      if (agentResult.status === "completed") memoryHistory = completedHistory;
       return true;
     } catch (err) {
       logger.error(`[Chat] 处理出错: ${err.message}`);
       await e.reply("出错啦！请稍后再试。");
+    } finally {
+      try {
+        await finishPersonalMemory(memoryTask, memoryHistory);
+      } catch (error) {
+        logger.warn(`[Memory] 保存个人记忆待处理对话失败：${error.message}`);
+      }
     }
   }
 

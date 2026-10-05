@@ -1,9 +1,6 @@
 import { runAgentLoop } from "../lib/AIUtils/AgentRunner.js";
-import {
-  loadConversationHistory,
-  saveConversationHistory,
-  trimConversationHistoryByRounds,
-} from "../lib/AIUtils/ConversationHistory.js";
+import { loadMimicHistory, saveMimicHistory, touchMimicHistory } from "../lib/AIUtils/mimicHistory.js";
+import { beginPersonalMemory, finishPersonalMemory, getMemoryConversationText } from "../lib/AIUtils/automaticMemory.js";
 import { resolveToolConfirmation } from "../lib/AIUtils/tools/tools.js";
 import {
   splitAndReplyMessages,
@@ -14,16 +11,6 @@ import Setting from "../lib/setting.js";
 import { buildMultimodalQueryParts } from "../lib/AIUtils/messageParts.js";
 import { getMessageIdentifier } from "../lib/AIUtils/messageIdentifiers.js";
 import { getImg, randomReact, smartReplyMsg } from "../lib/utils.js";
-
-const MIMIC_HISTORY_PREFIX = "Mimic";
-const MIMIC_HISTORY_MAX_ROUNDS = 1;
-
-function trimMimicHistory(history) {
-  return trimConversationHistoryByRounds(
-    history,
-    MIMIC_HISTORY_MAX_ROUNDS
-  );
-}
 
 export class Mimic extends plugin {
   constructor() {
@@ -286,11 +273,17 @@ export class Mimic extends plugin {
     let currentFullHistory = [];
     const route = config.route;
     const toolGroup = config.toolGroup || '';
+    let memoryTask = null;
+    let memoryHistory = null;
     try {
       if (shouldUseHistory) {
-        currentFullHistory = trimMimicHistory(
-          await loadConversationHistory(e, MIMIC_HISTORY_PREFIX)
-        );
+        currentFullHistory = await loadMimicHistory(e);
+        await touchMimicHistory(e);
+        try {
+          memoryTask = await beginPersonalMemory(e, "Mimic");
+        } catch (error) {
+          logger.warn(`[Memory] 登记拟态个人记忆任务失败：${error.message}`);
+        }
       }
 
       const imgBase64List = (await getImg(e, false, true)) || [];
@@ -317,17 +310,7 @@ export class Mimic extends plugin {
       }
 
       if (shouldUseHistory) {
-        const trimmedHistory = trimMimicHistory(currentFullHistory);
-        currentFullHistory.splice(
-          0,
-          currentFullHistory.length,
-          ...trimmedHistory
-        );
-        await saveConversationHistory(
-          e,
-          currentFullHistory,
-          MIMIC_HISTORY_PREFIX
-        );
+        await saveMimicHistory(e, currentFullHistory);
       }
 
       if (agentResult.status === "stopped") {
@@ -350,9 +333,16 @@ export class Mimic extends plugin {
           }
         },
       });
+      if (shouldUseHistory && agentResult.status === "completed") memoryHistory = getMemoryConversationText(currentFullHistory);
     } catch (error) {
       logger.error(`处理过程中出现错误: ${error.message}`);
       return true;
+    } finally {
+      try {
+        await finishPersonalMemory(memoryTask, memoryHistory);
+      } catch (error) {
+        logger.warn(`[Memory] 保存拟态个人记忆待处理对话失败：${error.message}`);
+      }
     }
     return true;
   }

@@ -1,12 +1,5 @@
 import { AbstractTool } from "./AbstractTool.js";
-import {
-  appendMemory,
-  getMemoryLocation,
-  readMemoryDocument,
-  withMemoryDocumentLock,
-  writeMemoryDocument,
-} from "../memoryStore.js";
-import { scheduleMemoryMaintenance } from "../memoryMaintenance.js";
+import { storeMemories } from "../memoryWriter.js";
 
 function formatStoreResult(scope, result, maintenanceScheduled) {
   const scopeName = scope === "group" ? "群公共记忆" : "用户记忆";
@@ -33,7 +26,26 @@ export class MemoryTool extends AbstractTool {
     required: ["scope", "content"],
   };
 
-  func = async function (opts, e) {
+  function(e, context = {}) {
+    const definition = super.function();
+    if (!Array.isArray(context.memoryTargets)) return definition;
+    return {
+      ...definition,
+      parameters: {
+        ...definition.parameters,
+        properties: {
+          ...definition.parameters.properties,
+          userId: {
+            type: "string",
+            ...(context.memoryTargets.length > 0 ? { enum: context.memoryTargets } : {}),
+            description: "写入 user 记忆时必须指定对应消息发送者的 QQ；group 记忆不填写。",
+          },
+        },
+      },
+    };
+  }
+
+  func = async function (opts, e, context = {}) {
     const { scope, content } = opts || {};
     if (!e?.user_id) return "无法获取用户信息。";
     if (!["user", "group"].includes(scope)) return "不支持的记忆作用域。";
@@ -43,22 +55,23 @@ export class MemoryTool extends AbstractTool {
     }
 
     try {
-      const location = getMemoryLocation({
-        groupId: e.group_id,
-        userId: e.user_id,
-        scope,
+      let userId = e.user_id;
+      if (scope === "user" && Array.isArray(context.memoryTargets)) {
+        userId = String(opts.userId || "").trim();
+        if (!context.memoryTargets.includes(userId)) {
+          return "个人记忆必须指定本批群消息中的发送者 QQ。";
+        }
+      }
+      const result = await storeMemories({
+        e, scope, userId, contents: [String(content).trim()],
       });
-      const storeResult = await withMemoryDocumentLock(location.memoryFile, () => {
-        const document = readMemoryDocument(location.memoryFile, { throwOnError: true });
-        const result = appendMemory(document, { content });
-        if (result.error) return result;
-        writeMemoryDocument(location.memoryFile, result.document);
-        return result;
-      });
-      if (storeResult.error) return storeResult.error;
-
-      const maintenanceScheduled = scheduleMemoryMaintenance({ location, e });
-      return formatStoreResult(scope, storeResult, maintenanceScheduled);
+      if (result.added.length === 0) return `该记忆已存在，未重复添加：「${String(content).trim()}」`;
+      if (Array.isArray(context.addedMemories)) {
+        context.addedMemories.push(...result.added.map((memory) => ({
+          scope, userId: String(userId), content: memory.content,
+        })));
+      }
+      return formatStoreResult(scope, { content: result.added[0].content }, result.maintenanceScheduled);
     } catch (error) {
       return `记忆操作失败：${error.message}`;
     }

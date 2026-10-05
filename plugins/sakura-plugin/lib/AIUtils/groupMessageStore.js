@@ -607,6 +607,33 @@ export async function getGroupMessagesByTimeRange({
   }));
 }
 
+// 群记忆按最近一小时的消息取样；图片、表情、语音等占位符也占一条。
+export async function getGroupMemoryMessages({ selfId, groupId, startTime, endTime, limit = 100, redis = null }) {
+  if (groupId == null || !Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime < startTime) return [];
+  const client = await resolveRedis(redis);
+  const { timelineKey, dataKey } = getGroupMessageStoreKeys(selfId, groupId);
+  const resultLimit = clampInteger(limit, 100, 1, 200);
+  const records = [];
+  for (let offset = 0; records.length < resultLimit;) {
+    const ids = await client.zrevrangebyscore(timelineKey, String(Math.floor(endTime)), String(Math.floor(startTime)), "LIMIT", offset, resultLimit);
+    if (ids.length === 0) break;
+    const payloads = await client.hmget(dataKey, ...ids);
+    for (const payload of payloads) {
+      const record = parseStoredGroupMessage(payload);
+      if (record?.content?.trim()) records.push(record);
+      if (records.length >= resultLimit) break;
+    }
+    offset += ids.length;
+    if (ids.length < resultLimit) break;
+  }
+  records.reverse();
+  const replyIds = [...new Set(records.map((record) => record.replyToMessageId).filter(Boolean))];
+  if (replyIds.length === 0) return records;
+  const replies = await client.hmget(dataKey, ...replyIds);
+  const byId = new Map(replyIds.map((id, index) => [id, parseStoredGroupMessage(replies[index])]));
+  return records.map((record) => ({ ...record, repliedMessage: byId.get(record.replyToMessageId) || null }));
+}
+
 export async function getActiveRecordedGroups({
   selfId,
   startTime,

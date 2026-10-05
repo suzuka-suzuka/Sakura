@@ -280,6 +280,13 @@ function resolveToolContext(e, toolGroupName) {
 }
 
 export async function getToolsSchema(e, toolGroupName) {
+  // 后台群记忆任务显式只开放 Memory，不依赖角色工具组，也不开放 MCP。
+  if (toolGroupName?.memoryOnly === true) {
+    return {
+      localTools: [toolMap.get("Memory").function(e, { memoryTargets: toolGroupName.memoryTargets || [] })],
+      allowedMcpServerIds: [],
+    };
+  }
   if (!toolGroupName) return { localTools: [], allowedMcpServerIds: [] };
 
   const { allowedTools, allowedMcpServerIds } = resolveToolGroup(toolGroupName);

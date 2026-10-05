@@ -234,6 +234,12 @@ export const TavilyMCPSchema = z.object({
     maxResults: z.number().int().min(1).max(MAX_TAVILY_SEARCH_RESULTS).default(DEFAULT_TAVILY_MAX_RESULTS).describe('默认结果数量|当前 Tavily 搜索结果上限为 20'),
 }).describe('Tavily MCP');
 
+export const MemorySchema = z.object({
+    groupEnabled: z.boolean().default(true).describe('启用群记忆采集|每小时检查最近一小时的消息，满100条才提取记忆，图片与表情占位符也计数'),
+    Groups: z.array(z.number()).default([]).describe('群记忆采集群|#groupSelect|留空时检查当前账号所有有记录的群'),
+    personalEnabled: z.boolean().default(true).describe('启用个人记忆采集|聊天结束10分钟后提取个人记忆，新对话会重新计时'),
+}).describe('自动记忆');
+
 export const ActiveChatSchema = z.object({
     Groups: z.array(z.number()).default([]).describe('主动聊天群号|#groupSelect|在这些群中启用主动聊天功能'),
 }).describe('主动聊天');
@@ -790,6 +796,7 @@ export const configSchema = {
     '60sNews': News60sSchema,
     'GroupInsight': GroupInsightSchema,
     'AI': AISchema,
+    'Memory': MemorySchema,
     'TavilyMCP': TavilyMCPSchema,
     'ActiveChat': ActiveChatSchema,
     'AutoCleanup': AutoCleanupSchema,
@@ -825,7 +832,7 @@ export const schemaCategories = {
     '基础设定': ['bot'],
     'AI路由': ['Providers', 'Routes', 'ImageRoutes', 'VideoRoutes'],
     'AI角色': ['roles'],
-    'AI设定': ['AI', 'TavilyMCP', 'mimic', 'ActiveChat'],
+    'AI设定': ['AI', 'Memory', 'TavilyMCP', 'mimic', 'ActiveChat'],
     '戳一戳': ['poke'],
     '图片功能': ['EditImage', 'nai', 'pixiv', 'r18', 'summary', 'SearchImage', 'cool', 'teatime', 'EmojiThief'],
     '经济系统': ['economy'],
@@ -838,6 +845,7 @@ export const schemaLabels = {
     '60sNews': '60秒新闻推送',
     'GroupInsight': '群聊洞见',
     'AI': 'AI 对话设定',
+    'Memory': '自动记忆',
     'ActiveChat': '主动聊天',
     'AutoCleanup': '自动清理',
     'Providers': 'AI 供应商管理',

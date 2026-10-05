@@ -377,6 +377,12 @@ export async function saveConversationHistory(e, currentFullHistory, profilePref
 }
 
 export async function clearConversationHistory(e, profilePrefix) {
+  const { cancelPersonalMemory } = await import("./automaticMemory.js");
+  await cancelPersonalMemory(e, profilePrefix === "Mimic" ? "Mimic" : `chat:${profilePrefix}`);
+  if (profilePrefix === "Mimic") {
+    const { clearMimicHistory } = await import("./mimicHistory.js");
+    await clearMimicHistory(e);
+  }
   const filePath = getEventFilePath(e);
   const userData = await readUserFile(filePath);
   if (!userData[profilePrefix]) {
@@ -393,10 +399,18 @@ export async function clearConversationHistory(e, profilePrefix) {
 }
 
 export async function clearAllPrefixesForUser(e) {
+  const { cancelPersonalMemory } = await import("./automaticMemory.js");
+  const { clearMimicHistory } = await import("./mimicHistory.js");
+  await cancelPersonalMemory(e);
+  await clearMimicHistory(e);
   await deleteHistoryFile(getEventFilePath(e));
 }
 
 export async function clearAllConversationHistories() {
+  const { clearAllPersonalMemoryQueues } = await import("./automaticMemory.js");
+  const { clearAllMimicHistories } = await import("./mimicHistory.js");
+  await clearAllPersonalMemoryQueues();
+  await clearAllMimicHistories();
   try {
     await fs.promises.rm(HISTORY_DIR, { recursive: true, force: true });
     await fs.promises.mkdir(HISTORY_DIR, { recursive: true });

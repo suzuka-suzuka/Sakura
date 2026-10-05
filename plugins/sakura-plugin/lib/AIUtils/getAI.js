@@ -908,7 +908,9 @@ export async function getAI(
   let lastError = null;
   for (let index = 0; index < plan.attempts.length; index++) {
     const attempt = plan.attempts[index];
-    const config = attempt.requestConfig;
+    const config = routingContext?.disableNativeWebSearch === true
+      ? { ...attempt.requestConfig, nativeWebSearch: false }
+      : attempt.requestConfig;
     logger.info(
       `[AI Router] route=${routeId} target=${attempt.target.id} provider=${attempt.provider.id} credential=${attempt.credential.id} model=${config.model} timeoutMs=${config.timeoutMs}`
     );
