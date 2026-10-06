@@ -107,21 +107,22 @@ test("未开启记忆工具的工具组不会把个人摘要或群记录放入�
 
 test("群聊个人记忆只注入摘要，工具按QQ读取全部记录，少量群公共记忆仍直接注入", async () => {
   const e = event(961001);
-  seed(e, ["个人细节：不喝咖啡", "个人细节：习惯早起"], "小夜重视生活习惯");
+  seed(e, ["不喝咖啡", "习惯早起"], "重视生活习惯");
   seed(e, ["本群每周五组织活动"], "群活动摘要", "group");
   const count = vectorCalls.length;
   await runScenario(e, "饮食", [
     async (...args) => {
-      assert.match(args[3], /小夜重视生活习惯/);
+      assert.match(args[3], /重视生活习惯/);
+      assert.match(args[3], /所属 QQ：961001/);
       assert.match(args[3], /群活动摘要/);
       assert.match(args[3], /本群每周五组织活动/);
-      assert.doesNotMatch(args[3], /个人细节/);
+      assert.doesNotMatch(args[3], /不喝咖啡|习惯早起/);
       assert.equal(vectorCalls.length, count);
       return { functionCalls: [call(e.user_id)] };
     },
     async (...args) => {
       const result = response(args[6]);
-      assert.deepEqual(result, ["个人细节：不喝咖啡", "个人细节：习惯早起"]);
+      assert.deepEqual(result, ["不喝咖啡", "习惯早起"]);
       assert.equal(vectorCalls.length, count);
       return { text: "已完成" };
     },

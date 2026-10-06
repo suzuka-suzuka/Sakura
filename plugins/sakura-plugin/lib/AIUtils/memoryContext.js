@@ -80,7 +80,10 @@ export function formatMemoryContext(targets, matches) {
   for (const target of targets) {
     if (target.location.scope === "group" && target.document.memories.length === 0) continue;
     if (!target.document.summary.text.trim()) continue;
-    parts.push(`【${target.location.title}摘要】\n${target.document.summary.text.trim()}`);
+    const ownerHint = target.location.scope === "user"
+      ? `所属 QQ：${target.location.scopeKey.split(":").at(-1)}（省略主语指此人）\n`
+      : "";
+    parts.push(`【${target.location.title}摘要】\n${ownerHint}${target.document.summary.text.trim()}`);
   }
   const groupMatches = matches.filter((match) => match.scope === "group");
   if (groupMatches.length > 0) {

@@ -10,7 +10,7 @@ function formatStoreResult(scope, result, maintenanceScheduled) {
 
 export class MemoryTool extends AbstractTool {
   name = "Memory";
-  description = "记录值得跨对话长期记住的信息。只要出现以下情况就应主动调用：用户的自我介绍、称呼、身份、喜好与厌恶、习惯、目标、约定、承诺、重要经历，或本群共同确立的规则、梗、称呼和设定等。宁可多记也不要遗漏，遇到稳定、可复用的信息就随手存下，不必等用户明确要求“记住”。每条只存一件独立、清晰的事实。";
+  description = "主动保存可长期复用的身份、称呼、喜好、禁忌、习惯、目标、约定、重要经历及群规则、梗、设定。每条一件事，无需用户要求。";
   parameters = {
     properties: {
       scope: {
@@ -20,7 +20,7 @@ export class MemoryTool extends AbstractTool {
       },
       content: {
         type: "string",
-        description: "需要长期记住的一条简洁、明确且可独立理解的事实。scope=user 时，本人是记忆所属用户（指定 userId 时以 userId 为准），正文统一用“用户”指代本人，不要用本人的群昵称、群名片等作为主语，也不要附加或重复标注本人 QQ；仅为提到的其他群友标注已确认的 QQ，使用“昵称（QQ：号码）”。scope=group 时，提到具体群成员也应按此格式标注已确认的 QQ。不得猜测或编造 QQ。用户与其他成员的关系、共同约定可记入该用户的个人记忆，但不要写入他人的独立信息。",
+        description: "一条完整事实。user：本人以 userId（未指定时为当前用户）为准，省略本人主语和QQ；可记本人关系、约定，不记他人独立信息。涉及他人或写group时，已知QQ用“昵称（QQ：号码）”，未知不编造。",
       },
     },
     required: ["scope", "content"],

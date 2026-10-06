@@ -3,7 +3,7 @@ import { getMemoryLocation, readMemoryDocument } from "../memoryStore.js";
 
 export class ReadUserMemoryTool extends AbstractTool {
   name = "ReadUserMemory";
-  description = "读取指定QQ的全部个人记忆。群聊限当前群，私聊限本人。";
+  description = "读取指定QQ的全部个人记忆，返回正文数组；省略主语指该QQ。群聊限当前群，私聊限本人。";
   parameters = {
     properties: {
       qq: {
