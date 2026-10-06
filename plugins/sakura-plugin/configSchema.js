@@ -577,6 +577,7 @@ const EconomyObjectSchema = z.object({
     enable: z.boolean().default(true).describe('启用经济系统'),
     Groups: z.array(z.number()).default([]).describe('经济群号|#groupSelect|启用后指令将消耗樱花币'),
     gamegroups: z.array(z.number()).default([]).describe('游戏群号|#groupSelect|启用经济游戏功能的群'),
+    fishingEncounterChance: z.number().min(0).max(1).default(0.1).describe('钓鱼遭遇概率|#step:0.01|通过重量判定、困难度判定前的水路遭遇概率；好运护符和首领不触发，0关闭，1每次触发'),
     commandCosts: z.array(CommandCostSchema).default(defaultCommandCosts).describe('指令消耗配置|#commandCost|配置各指令消耗的樱花币数量'),
 }).describe('经济系统');
 

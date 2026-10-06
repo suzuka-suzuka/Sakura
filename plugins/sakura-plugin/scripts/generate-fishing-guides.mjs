@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
+import { buildEncounterGuideHtml, FISHING_ENCOUNTER_GUIDE_FILE } from "../lib/fishing/encounterGuide.js";
+import { closeFishingEncounterBrowser, getEncounterFontData, renderFishingHtml } from "../lib/fishing/encounterImages.js";
 import {
   FISHING_LOCATIONS,
   GHOST_DEBT_INTEREST_RATE,
@@ -1718,6 +1720,17 @@ async function generateRewardsGuide() {
   return savePoster(canvas, "04-dex-level-rewards.jpg");
 }
 
+async function generateEncounterGuide() {
+  const fontData = await getEncounterFontData();
+  const backgroundData = fs.readFileSync(path.join(guideRoot, "guide-background-light.png")).toString("base64");
+  const image = await renderFishingHtml(buildEncounterGuideHtml({ fontData, backgroundData }), { selector: ".guide", width: 1200, height: 2600, scale: 1, type: "jpeg", quality: 94 });
+  const outputPath = path.join(guideRoot, FISHING_ENCOUNTER_GUIDE_FILE);
+  fs.writeFileSync(outputPath, image);
+  console.log(`generated ${path.relative(pluginRoot, outputPath)}`);
+  return outputPath;
+}
+
+const encounterOnly = process.argv.includes("--encounter-only");
 const obsoleteGuideImages = [
   "02-fish-location.jpg",
   "03-weather-multipliers.jpg",
@@ -1727,7 +1740,7 @@ const obsoleteGuideImages = [
   "07-location-unlocks.jpg",
   "08-dex-level-rewards.jpg",
 ];
-for (const filename of obsoleteGuideImages) {
+for (const filename of encounterOnly ? [] : obsoleteGuideImages) {
   const obsoletePath = path.join(guideRoot, filename);
   if (!fs.existsSync(obsoletePath)) continue;
   fs.rmSync(obsoletePath);
@@ -1735,9 +1748,13 @@ for (const filename of obsoleteGuideImages) {
 }
 
 const outputs = [];
+if (!encounterOnly) {
 outputs.push(await generateTimeGuide());
 outputs.push(await generateLocationWeatherGuide());
 outputs.push(await generateUnlockGuide());
 outputs.push(await generateRewardsGuide());
+}
+try { outputs.push(await generateEncounterGuide()); }
+finally { await closeFishingEncounterBrowser(); }
 
 console.log(`done: ${outputs.length} fishing guide images`);

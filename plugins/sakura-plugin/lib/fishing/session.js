@@ -16,6 +16,8 @@ export const FISHING_PHASE = Object.freeze({
   weightCheck: "weight_check",
   difficultyCheck: "difficulty_check",
   fighting: "fighting",
+  encounterPreparing: "encounter_preparing",
+  encounter: "encounter",
   settling: "settling",
 });
 
@@ -62,6 +64,8 @@ export function shouldRecordFishEncounter(state) {
     FISHING_PHASE.weightCheck,
     FISHING_PHASE.difficultyCheck,
     FISHING_PHASE.fighting,
+    FISHING_PHASE.encounterPreparing,
+    FISHING_PHASE.encounter,
   ].includes(state.phase);
 }
 
@@ -157,6 +161,7 @@ export class FishingSessionStore {
       "confirmTimer",
       "fishStateTimer",
       "bossAttackTimer",
+      "encounterTimer",
     ]) {
       if (session[timerName]) this.clearTimer(session[timerName]);
       session[timerName] = null;

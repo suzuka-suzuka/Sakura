@@ -8,6 +8,7 @@ import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import * as rules from "../lib/fishing/rules.js";
 import * as session from "../lib/fishing/session.js";
+import * as encounter from "../lib/fishing/encounter.js";
 import { createBossBoundaryReport, readBossBalanceInputs, simulateBossScenario } from "./fishing-boss-balance.mjs";
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -107,6 +108,8 @@ async function harness() {
   });
   const imports = {
     "../lib/fishing/rules.js": rules,
+    "../lib/fishing/encounter.js": encounter,
+    "../lib/setting.js": { default: { getConfig: () => ({ fishingEncounterChance: 0 }) } },
     "../lib/fishing/session.js": { ...session, FishingSessionStore: SessionStore, resolveBlindReel: (state, layers) => session.resolveBlindReel(state, layers, () => { calls.rolls++; return player.roll; }) },
     "../lib/economy/FishingManager.js": { default: Manager },
     "../lib/economy/EconomyManager.js": { default: class {

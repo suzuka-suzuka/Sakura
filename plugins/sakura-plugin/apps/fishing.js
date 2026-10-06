@@ -14,6 +14,15 @@ import { pluginresources } from "../lib/path.js";
 import Setting from "../lib/setting.js";
 import FishingSettlementService from "../lib/fishing/SettlementService.js";
 import {
+  ENCOUNTER_TIME_LIMIT_MS,
+  applyEncounterReward,
+  createEncounterAttempt,
+  rollFishingEncounter,
+  submitEncounterAttempt,
+} from "../lib/fishing/encounter.js";
+import { createFishingEncounterImage, closeFishingEncounterBrowser } from "../lib/fishing/encounterImages.js";
+import { FISHING_ENCOUNTER_GUIDE_FILE } from "../lib/fishing/encounterGuide.js";
+import {
   FISHING_ACTION,
   FIGHT_ESCAPE_SETTLEMENT_OPTIONS,
   FishingSessionStore,
@@ -143,7 +152,7 @@ function getDexProgress(fishingManager, userId, settleResult) {
 }
 
 // 渔获消息统一尾部：完美收竿提示 + 经验数值 + 升级提示 + 图鉴新收录提示
-function formatCatchTail(expGain, isPerfect, settleResult, dexProgress) {
+function formatCatchTail(expGain, isPerfect, settleResult, dexProgress, encounterResult) {
   const perfectMsg = isPerfect ? `\n⚡ 完美收竿！经验×${PERFECT_EXP_MULTIPLIER}！` : "";
   const levelUp = settleResult?.levelUp;
   const levelUpMsg = levelUp ? `\n🎉 钓鱼等级提升至 Lv.${levelUp.to}` : "";
@@ -154,7 +163,10 @@ function formatCatchTail(expGain, isPerfect, settleResult, dexProgress) {
     ? `\n📖 图鉴新收录！(${dexProgress.collected}/${dexProgress.total})`
     : "";
   const shinyDexMsg = settleResult?.newlyShiny ? `\n🌈 图鉴异色标记点亮！` : "";
-  return `${perfectMsg}\n✨ 经验：+${expGain}${levelUpMsg}${staminaResetMsg}${dexMsg}${shinyDexMsg}`;
+  const encounterMsg = encounterResult?.success
+    ? `\n🌊 水路遭遇成功！用时 ${(encounterResult.elapsedMs / 1000).toFixed(1)} 秒，奖励 ×${Number(encounterResult.multiplier.toFixed(3))}`
+    : "";
+  return `${perfectMsg}${encounterMsg}\n✨ 经验：+${expGain}${levelUpMsg}${staminaResetMsg}${dexMsg}${shinyDexMsg}`;
 }
 
 // 异色个体逃走时的专属惋惜提示
@@ -341,6 +353,7 @@ const FISHING_GUIDE_IMAGES = Object.freeze([
   Object.freeze({ title: "② 限定出没地点与天气", filename: "02-fish-location-weather.jpg" }),
   Object.freeze({ title: "③ 钓点解锁等级", filename: "03-location-unlocks.jpg" }),
   Object.freeze({ title: "④ 图鉴与等级奖励", filename: "04-dex-level-rewards.jpg" }),
+  Object.freeze({ title: "⑤ 水路遭遇玩法", filename: FISHING_ENCOUNTER_GUIDE_FILE }),
 ]);
 const FISHING_GUIDE_LOCK_TTL_SECONDS = 5 * 60;
 
@@ -693,6 +706,10 @@ export default class Fishing extends plugin {
     sessionId,
     { expectedPhase = null, timerName = "confirmTimer", message = "" } = {},
   ) {
+    // 先处理截止前已收到的答案，不能因上一条收竿回复尚未结束而判超时。
+    if (expectedPhase === FISHING_PHASE.encounter) {
+      await this.runPendingEncounterInput(stateKey, sessionId);
+    }
     const state = fishingSessions.get(stateKey);
     if (!state || state.id !== sessionId || (expectedPhase && state.phase !== expectedPhase)) {
       return false;
@@ -842,7 +859,7 @@ export default class Fishing extends plugin {
     const stateKey = this.buildFishingStateKey(groupId, userId);
     const lockKey = this.buildFishingLockKey(groupId, userId);
     const sessionId = randomUUID();
-    const acquired = await acquireRedisLock(redis, lockKey, sessionId, 7 * 60);
+    const acquired = await acquireRedisLock(redis, lockKey, sessionId, 12 * 60);
     if (!acquired) {
       await e.reply("一心不可二用！你已经在钓鱼啦，专心盯着浮漂~", 10);
       return true;
@@ -1151,6 +1168,17 @@ export default class Fishing extends plugin {
       return;
     }
 
+    if (state.phase === FISHING_PHASE.encounterPreparing) return true;
+    if (state.phase === FISHING_PHASE.encounter) {
+      // 到达时立即锁定首次消息，包含空消息、格式错误与发图回执之前的快速作答。
+      if (!state.encounter.inputReceived) {
+        state.encounter.inputReceived = true;
+        state.encounter.pendingInput = { event: e, receivedAt: Date.now() };
+        await this.runPendingEncounterInput(stateKey, state.id);
+      }
+      return true;
+    }
+
     const action = parseFishingAction(state.phase, msg);
     if (!action) {
       return;
@@ -1337,27 +1365,11 @@ export default class Fishing extends plugin {
         return;
       }
 
-      state.phase = FISHING_PHASE.difficultyCheck;
-      const updatedControl = getEffectiveRodControl(fishingManager, userId, state, rodMastery);
-
-      if (fishDifficulty > updatedControl) {
-        await e.reply([
-          `😵 这条鱼劲好大！完全拉不动！\n`,
-          `⚠️ 看来是条暴脾气的鱼！\n`,
-          `📝 怎么处理？\n`,
-          `  「强拉」- 大力出奇迹！\n`,
-          `  「溜鱼」- 和它比拼耐力！`,
-        ]);
-
-        this.setContext("handleFishing", true, 30);
-        state.confirmTimer = setTimeout(() => {
-          void this.handleFishingTimeout(e, stateKey, state.id, {
-            expectedPhase: FISHING_PHASE.difficultyCheck,
-            message: "⏰ 犹豫太久... 鱼挣脱了！",
-          });
-        }, 30 * 1000);
+      // 重量判定通过后、困难度判定之前抽遭遇；护符和首领已由前面的分支排除。
+      if (rollFishingEncounter(state, this.appconfig?.fishingEncounterChance)) {
+        await this.startFishingEncounter(e, state, fishingManager);
       } else {
-        await this.finishSuccess(e, state, fishingManager);
+        await this.resumeFishingDifficulty(e, state, fishingManager);
       }
       return;
     }
@@ -1614,6 +1626,101 @@ export default class Fishing extends plugin {
     }
     } finally {
       fishingSessions.releaseAction(stateKey, state.id);
+      await this.runPendingEncounterInput(stateKey, state.id);
+    }
+  }
+
+  async resumeFishingDifficulty(e, state, fishingManager) {
+    const stateKey = this.buildFishingStateKey(e.group_id, e.user_id);
+    if (fishingSessions.get(stateKey) !== state || state.settled) return false;
+    state.phase = FISHING_PHASE.difficultyCheck;
+    const rodMastery = fishingManager.getRodMastery(e.user_id, state.rodConfig.id);
+    const control = getEffectiveRodControl(fishingManager, e.user_id, state, rodMastery);
+    if (state.fish.difficulty <= control) return this.finishSuccess(e, state, fishingManager);
+    await e.reply([
+      `😵 这条鱼劲好大！完全拉不动！\n`,
+      `⚠️ 看来是条暴脾气的鱼！\n`,
+      `📝 怎么处理？\n`,
+      `  「强拉」- 大力出奇迹！\n`,
+      `  「溜鱼」- 和它比拼耐力！`,
+    ]);
+    this.setContext("handleFishing", true, 30);
+    state.confirmTimer = setTimeout(() => {
+      void this.handleFishingTimeout(e, stateKey, state.id, {
+        expectedPhase: FISHING_PHASE.difficultyCheck,
+        message: "⏰ 犹豫太久... 鱼挣脱了！",
+      });
+    }, 30_000);
+    return true;
+  }
+
+  async startFishingEncounter(e, state, fishingManager) {
+    const stateKey = this.buildFishingStateKey(e.group_id, e.user_id);
+    const previousPhase = state.phase;
+    state.phase = FISHING_PHASE.encounterPreparing;
+    for (const name of ["waitingTimer", "totalTimer", "confirmTimer", "fishStateTimer", "bossAttackTimer"]) {
+      if (state[name]) clearTimeout(state[name]);
+      state[name] = null;
+    }
+    this.setContext("handleFishing", true, 180, true);
+    try {
+      const { map, image } = await createFishingEncounterImage();
+      if (fishingSessions.get(stateKey) !== state || state.settled) return false;
+      state.encounter = { map, attempt: null, inputReceived: false, pendingInput: null };
+      state.phase = FISHING_PHASE.encounter;
+      // 图上只有地图和行动数；先取得发送回执，再开始 60 秒计时。
+      const receipt = await e.reply(segment.image(image));
+      if (!receipt || receipt.status === "failed" || (receipt.retcode != null && Number(receipt.retcode) !== 0)) {
+        throw new Error("遭遇图片发送未成功");
+      }
+      if (fishingSessions.get(stateKey) !== state || state.settled) return false;
+      // 正式进入水路遭遇后取消完美收竿，经验与提示都只按遭遇奖励计算。
+      // 生图或发送失败没有实际进入遭遇，继续保留原来的收竿判定。
+      state.isPerfect = false;
+      state.encounter.attempt = createEncounterAttempt(map, Date.now());
+      this.setContext("handleFishing", true, ENCOUNTER_TIME_LIMIT_MS / 1000 + 5, true);
+      state.encounterTimer = setTimeout(() => {
+        void this.handleFishingTimeout(e, stateKey, state.id, {
+          expectedPhase: FISHING_PHASE.encounter,
+          timerName: "encounterTimer",
+          message: "⏰ 水路遭遇超时，鱼逃走了！",
+        });
+      }, ENCOUNTER_TIME_LIMIT_MS);
+    } catch (err) {
+      logger.warn(`[钓鱼] 遭遇生成或发图失败，按原奖励收鱼: ${err.stack || err}`);
+      if (fishingSessions.get(stateKey) !== state || state.settled) return false;
+      state.encounter = null;
+      state.phase = previousPhase;
+      // 基础设施故障不能算玩家答错；已抽过遭遇，不会再次生成。
+      return this.resumeFishingDifficulty(e, state, fishingManager);
+    }
+    await this.runPendingEncounterInput(stateKey, state.id);
+    return true;
+  }
+
+  async runPendingEncounterInput(stateKey, sessionId) {
+    const state = fishingSessions.get(stateKey);
+    if (!state || state.id !== sessionId || state.phase !== FISHING_PHASE.encounter ||
+        !state.encounter?.attempt || !state.encounter.pendingInput ||
+        !fishingSessions.claimAction(stateKey, sessionId)) return false;
+    const { event: e, receivedAt } = state.encounter.pendingInput;
+    state.encounter.pendingInput = null;
+    try {
+      return await eventStorage.run(e, async () => {
+        // 客户端已看到图片但发送回执尚未返回时收到的答案按 0 秒处理。
+        const result = submitEncounterAttempt(state.encounter.attempt, e.msg ?? "", Math.max(receivedAt, state.encounter.attempt.startedAt));
+        if (state.encounterTimer) clearTimeout(state.encounterTimer);
+        state.encounterTimer = null;
+        if (!result.success) {
+          const settled = await this.finishFailedAttempt(e, state);
+          if (settled) await e.reply(`🌊 水路遭遇失败：${result.reason}，鱼逃走了！${formatShinyEscape(state.fish)}`, false, true);
+          return settled;
+        }
+        state.encounterResult = result;
+        return this.resumeFishingDifficulty(e, state, new FishingManager(e.group_id));
+      });
+    } finally {
+      fishingSessions.releaseAction(stateKey, sessionId);
     }
   }
 
@@ -1680,6 +1787,7 @@ export default class Fishing extends plugin {
     for (const [stateKey, state] of fishingSessions.entries()) {
       this.cleanupFishingSession(stateKey, state.id);
     }
+    void closeFishingEncounterBrowser();
     super.destroy();
   }
 
@@ -1864,6 +1972,9 @@ export default class Fishing extends plugin {
     const stateKey = this.buildFishingStateKey(groupId, userId);
     const { fish, rodConfig, lineConfig } = state;
 
+    if (fishingSessions.get(stateKey) !== state || state.settled) return false;
+    if ([FISHING_PHASE.encounterPreparing, FISHING_PHASE.encounter].includes(state.phase) && !state.encounterResult?.success) return false;
+
     if (!fishingSessions.beginSettlement(stateKey, state.id)) return false;
     this.finish("handleFishing", true);
 
@@ -1899,6 +2010,9 @@ export default class Fishing extends plugin {
         (isShiny ? SHINY_EXP_MULTIPLIER : 1) *
         (state.environment?.expMultiplier || 1),
       ));
+    // 噩梦和宝藏也触发遭遇，但只增加经验；首领不会触发。
+    const encounterMultiplier = !bossVictory && state.encounterResult?.success ? state.encounterResult.multiplier : 1;
+    expGain = applyEncounterReward(expGain, encounterMultiplier);
     const weatherTag = Array.isArray(fish.weather) && fish.weather.length > 0
       ? `（${fish.weather.map((name) => `${WEATHER_CONFIG[name]?.emoji || ""}${name}`).join("/")}限定）`
       : "";
@@ -1968,7 +2082,7 @@ export default class Fishing extends plugin {
               const ghostSettle = formatGhostDebtSettlement(settleResult).replace(/\n+$/, "");
               return ghostSettle ? "\n" + ghostSettle : "";
             })() +
-            formatCatchTail(expGain, isPerfect, settleResult, dexProgress),
+            formatCatchTail(expGain, isPerfect, settleResult, dexProgress, state.encounterResult),
         ]);
         return true;
       }
@@ -1991,7 +2105,7 @@ export default class Fishing extends plugin {
           `📝 ${fish.description}\n`,
           `📊 稀有度：${rarity.color}${fish.rarity}${weatherTag}\n`,
           `📈 熟练度：${newMastery}\n`,
-          `🗝️ 宝箱已放入背包，发送「#开宝箱」开启它！${formatCatchTail(expGain, isPerfect, addResult, dexProgress)}`,
+          `🗝️ 宝箱已放入背包，发送「#开宝箱」开启它！${formatCatchTail(expGain, isPerfect, addResult, dexProgress, state.encounterResult)}`,
         ]);
         return true;
       }
@@ -2014,7 +2128,7 @@ export default class Fishing extends plugin {
         : fishingManager.getMerchantCoinMultiplier(userId);
       // 首领的异色倍率已在独立奖励包中计算，普通渔获在这里计算。
       const shinyMultiplier = bossVictory || !isShiny ? 1 : SHINY_PRICE_MULTIPLIER;
-      const finalPrice = Math.round(price * buffMultiplier * merchantMultiplier * shinyMultiplier);
+      const finalPrice = applyEncounterReward(Math.round(price * buffMultiplier * merchantMultiplier * shinyMultiplier), encounterMultiplier);
 
       const settleResult = settlement.settleCoinCatch({
         sessionId: state.id,
@@ -2096,7 +2210,7 @@ export default class Fishing extends plugin {
         bossRewardMsg,
         debtPenaltyMsg,
         debtMsg,
-        `${earningsMsg}${formatCatchTail(expGain, isPerfect, settleResult, dexProgress)}`,
+        `${earningsMsg}${formatCatchTail(expGain, isPerfect, settleResult, dexProgress, state.encounterResult)}`,
       ];
       await e.reply(resultMsg);
       return true;
@@ -2186,6 +2300,7 @@ export default class Fishing extends plugin {
             { text: "📍 限定出没地点与天气" },
             { text: "🗺️ 钓点解锁等级" },
             { text: "🎁 图鉴与等级奖励" },
+            { text: "🌊 水路遭遇玩法" },
           ],
         },
       );
