@@ -1276,7 +1276,7 @@ export default class Economy extends plugin {
             : "",
         ].filter(Boolean).join("、");
         await e.reply(
-          `💧 使用了【${item.name}】！\n☀️ 已彻底洗净：${cleared}。\n` 
+          `💧 使用了【${item.name}】！\n☀️ 已彻底洗净：${cleared}。`,
         );
         return true;
       }
