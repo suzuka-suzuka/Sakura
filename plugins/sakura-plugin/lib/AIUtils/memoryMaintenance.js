@@ -61,6 +61,7 @@ async function generateMemoryOrganization(snapshot, e, title) {
       "每个输入 ID 必须且只能出现一次：要么出现在某个 memories.sourceIds 中，要么出现在 discarded.id 中。",
       "discarded 只用于被更新事实取代的旧记忆，supersededBy 必须填写被保留的较新输入 ID。",
       "summary 应基于整理后的有效记忆，保留稳定身份、偏好、禁忌、关系、长期目标、持续事项和重要约定。",
+      "整理后的 content 和 summary 提到群成员时，必须保留输入中已明确的 QQ 身份标注，使用“昵称（QQ：号码）”；不得仅凭昵称合并不同 QQ 的成员，不得猜测或编造 QQ。",
       "只输出合法 JSON，不要 Markdown、解释或额外文本。格式：",
       '{"memories":[{"sourceIds":["输入ID"],"content":"整理后的原子记忆"}],"discarded":[{"id":"旧输入ID","supersededBy":"较新输入ID"}],"summary":"记忆摘要"}',
     ].join("\n"),

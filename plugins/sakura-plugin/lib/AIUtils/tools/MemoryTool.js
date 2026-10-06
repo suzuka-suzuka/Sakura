@@ -20,7 +20,7 @@ export class MemoryTool extends AbstractTool {
       },
       content: {
         type: "string",
-        description: "需要长期记住的一条简洁、明确且可独立理解的事实。",
+        description: "需要长期记住的一条简洁、明确且可独立理解的事实。提到其他群成员时，若上下文能明确确认其 QQ，必须使用“昵称（QQ：号码）”标明身份；不得猜测或编造 QQ。用户与其他成员的关系、共同约定可记入该用户的个人记忆，但不要写入他人的独立信息。",
       },
     },
     required: ["scope", "content"],
