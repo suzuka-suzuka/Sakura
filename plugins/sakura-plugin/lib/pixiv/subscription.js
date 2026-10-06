@@ -1,6 +1,7 @@
 import { getPixivClient } from "./api.js"
 import { getRedis } from "../../../../src/utils/redis.js"
 import axios from "axios"
+import { resolvePixivImageUrl } from "./imageUrls.js"
 
 const WEB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
@@ -341,12 +342,7 @@ export function getIllustImageUrls(illust, proxy, maxImages = 3) {
   }
 
   // 应用反代
-  return pages.slice(0, maxImages).map(url => {
-    if (!proxy) return url
-    const u = new URL(url)
-    u.hostname = proxy
-    return u.href
-  })
+  return pages.slice(0, maxImages).map(url => resolvePixivImageUrl(url, proxy))
 }
 
 /**

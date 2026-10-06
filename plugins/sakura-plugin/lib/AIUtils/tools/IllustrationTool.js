@@ -1,7 +1,6 @@
 import { AbstractTool } from "./AbstractTool.js";
 import { sendPixivImages } from "../../pixiv/sendImages.js";
 import setting from "../../setting.js";
-import { DEFAULT_IMAGE_PROXY } from "../../pixiv/constants.js";
 
 export class IllustrationTool extends AbstractTool {
   name = "Illustration";
@@ -47,7 +46,7 @@ export class IllustrationTool extends AbstractTool {
       const params = new URLSearchParams({
         size: "original",
         r18: isR18 ? "1" : "0",
-        proxy: this.pixivConfig.proxy || DEFAULT_IMAGE_PROXY,
+        proxy: "",
         excludeAI: "true",
       });
       if (processedTags.length > 0) {
@@ -84,16 +83,9 @@ export class IllustrationTool extends AbstractTool {
         return "API返回的数据中没有有效的图片URL。";
       }
 
-      // Lolicon 返回的是代理地址；标准原图路径可还原为 Pixiv 原站，供代理失败时重试。
-      const originalUrl = new URL(imageUrl);
-      if (originalUrl.pathname.startsWith("/img-original/")) {
-        originalUrl.protocol = "https:";
-        originalUrl.hostname = "i.pximg.net";
-        originalUrl.port = "";
-      }
       const sent = await sendPixivImages(e, {
         imageUrls: [imageUrl],
-        originalUrls: [originalUrl.href],
+        proxy: this.pixivConfig.proxy,
         pid: imageInfo.pid,
         initialRecallTime: isR18 ? 10 : 0,
         fallbackRecallTime: isR18 ? 10 : 0,

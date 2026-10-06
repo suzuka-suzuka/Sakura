@@ -1,6 +1,5 @@
-import { FlipImage } from "../lib/ImageUtils/ImageUtils.js";
+import { sendPixivImages } from "../lib/pixiv/sendImages.js";
 import setting from "../lib/setting.js";
-import { DEFAULT_IMAGE_PROXY } from "../lib/pixiv/constants.js";
 
 export class setuPlugin extends plugin {
   constructor() {
@@ -46,51 +45,24 @@ export class setuPlugin extends plugin {
       const messageText = `${imageInfo.id ? "pid:" + imageInfo.id : ""}${imageInfo.tags?.length ? "\n标签: " + imageInfo.tags.join(", ") : ""
         }`;
 
-      await this.sendImageWithRetry(e, imageInfo.url, messageText, isR18);
+      await this.sendImageWithRetry(e, imageInfo.url, messageText, isR18, imageInfo.id);
     } catch (err) {
       logger.error(`处理API请求时出错 (${apiType}): ${err.message}`);
       await e.reply(`获取图片时出错: ${err.message}`, 10, true);
     }
   });
 
-  async sendImageWithRetry(e, imageUrl, messageText, isR18) {
+  async sendImageWithRetry(e, imageUrl, messageText, isR18, pid) {
     const config = this.pixivConfig;
     const initialRecallTime = isR18 ? (config.recallTime ?? 10) : 0;
 
-    let sendResult;
-    try {
-      sendResult = await e.reply(segment.image(imageUrl), initialRecallTime, false);
-    } catch (err) {
-      logger.error(`初次发送图片失败 (URL): ${err.message}`);
-      sendResult = null;
-    }
-
-    let finalSuccess = !!sendResult?.message_id;
-
-    if (!finalSuccess) {
-      await e.reply(
-        "图片发送失败，可能被风控，正在尝试翻转后重发...",
-        10,
-        true
-      );
-
-      const flippedImageBuffer = await FlipImage(imageUrl);
-
-      if (flippedImageBuffer) {
-        const fallbackRecallTime = config.recallTime ?? 10;
-        sendResult = await e
-          .reply(segment.image(flippedImageBuffer), fallbackRecallTime, false)
-          .catch((err) => {
-            logger.error(`第二次尝试发送图片失败 (flipped): ${err.message}`);
-            return null;
-          });
-        finalSuccess = !!sendResult?.message_id;
-      } else {
-        logger.error("翻转图片失败，很可能是源图片链接已失效");
-        await e.reply("图片链接已失效，无法获取。", 10, true);
-        return false;
-      }
-    }
+    const finalSuccess = await sendPixivImages(e, {
+      imageUrls: [imageUrl],
+      proxy: config.proxy,
+      pid,
+      initialRecallTime,
+      fallbackRecallTime: config.recallTime ?? 10,
+    });
 
     if (finalSuccess) {
       if (messageText) {
@@ -99,8 +71,8 @@ export class setuPlugin extends plugin {
       await e.reply("图片已发送", 10, true);
     } else {
       await e.reply(
-        `图片发送仍然失败，请自行查看图片链接：\n${imageUrl}`,
-        60,
+        "图片和备用链接均发送失败，请稍后再试。",
+        10,
         true
       );
     }
@@ -133,7 +105,7 @@ export class setuPlugin extends plugin {
     const params = new URLSearchParams({
       size: "original",
       r18: isR18 ? "1" : "0",
-      proxy: this.pixivConfig.proxy || DEFAULT_IMAGE_PROXY,
+      proxy: "",
       excludeAI: "true",
     });
 

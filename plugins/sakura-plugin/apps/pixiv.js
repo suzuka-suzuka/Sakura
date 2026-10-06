@@ -156,21 +156,13 @@ export class pixivSearch extends plugin {
     const startIndex = (pageNum - 1) * imagesPerPage
     const imagesToSend = pages.slice(startIndex, startIndex + imagesPerPage)
 
-    const imageUrls = imagesToSend.map(page => {
-      let proxiedUrl = page.urls.original
-      if (config.proxy) {
-        const u = new URL(page.urls.original)
-        u.hostname = config.proxy
-        proxiedUrl = u.href
-      }
-      return proxiedUrl
-    })
+    const imageUrls = imagesToSend.map(page => page.urls.original)
 
     const tags = illust.tags?.slice(0, 5).map(t => `#${t.name}`).join(" ") || "无"
 
     await sendPixivImages(e, {
       imageUrls,
-      originalUrls: imagesToSend.map(page => page.urls.original),
+      proxy: config.proxy,
       pid: illust.id,
       initialRecallTime: isR18 ? (config.recallTime ?? 10) : 0,
       fallbackRecallTime: config.recallTime ?? 10,
@@ -343,21 +335,13 @@ export class pixivSearch extends plugin {
     const startIndex = 0
     const imagesToSend = pages.slice(startIndex, startIndex + imagesPerPage)
 
-    const imageUrls = imagesToSend.map(page => {
-      let proxiedUrl = page.urls.original
-      if (config.proxy) {
-        const u = new URL(page.urls.original)
-        u.hostname = config.proxy
-        proxiedUrl = u.href
-      }
-      return proxiedUrl
-    })
+    const imageUrls = imagesToSend.map(page => page.urls.original)
 
     const tags = illust.tags?.slice(0, 5).map(t => `#${t.name}`).join(" ") || "无"
 
     await sendPixivImages(e, {
       imageUrls,
-      originalUrls: imagesToSend.map(page => page.urls.original),
+      proxy: config.proxy,
       pid: illust.id,
       initialRecallTime: isR18 ? (config.recallTime ?? 10) : 0,
       fallbackRecallTime: config.recallTime ?? 10,

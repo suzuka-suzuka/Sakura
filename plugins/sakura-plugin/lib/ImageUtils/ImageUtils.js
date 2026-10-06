@@ -112,16 +112,21 @@ export async function FlipImage(imageUrl) {
     return false
   }
 
+  const imageBuffer = await downloadImage(imageUrl)
+  if (!imageBuffer) return false
+  return FlipImageBuffer(imageBuffer)
+}
+
+export async function FlipImageBuffer(imageBuffer) {
+  if (!Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0) {
+    logger.warn("翻转图片失败：未提供有效的图片数据。")
+    return false
+  }
   try {
-    const imageBuffer = await downloadImage(imageUrl)
-    if (!imageBuffer) {
-      return false
-    }
-    const flippedImageBuffer = await sharp(imageBuffer)
+    return await sharp(imageBuffer)
       .autoOrient()
       .flip()
       .toBuffer()
-    return flippedImageBuffer
   } catch (error) {
     logger.error(`使用 sharp 翻转图片失败: ${error}`)
     return false

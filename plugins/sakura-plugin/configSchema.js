@@ -664,7 +664,7 @@ const ArtistSubscriptionSchema = z.object({
 export const PixivSchema = z.object({
     refresh_token: z.string().default('').describe('Pixiv Refresh Token|#textarea'),
     cookie: z.string().default('').describe('Pixiv Cookie|#textarea|用于 Web API 搜索，支持深层分页'),
-    proxy: z.string().default('').describe('图片反代域名|如 i.pixiv.re，留空则不使用'),
+    proxy: z.string().default('').describe('图片反代域名|填写则通过该域名下载图片，留空则从 Pixiv 原站下载'),
     recallTime: z.number().default(30).describe('自动撤回时间(秒)|R18作品及风控翻转图片的撤回时间，设为0则不撤回'),
     excludeAI: z.boolean().default(true).describe('排除AI作品|是否过滤AI生成的作品'),
     minBookmarks: z.number().default(600).describe('最低收藏数|低于此值的作品不显示'),

@@ -1,4 +1,5 @@
-import { FlipImage } from "../ImageUtils/ImageUtils.js"
+import { downloadImage, FlipImageBuffer } from "../ImageUtils/ImageUtils.js"
+import { resolvePixivImageUrl } from "./imageUrls.js"
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -60,9 +61,10 @@ export async function verifyImageMessage(e, result, expectedCount, {
 }
 
 export async function sendPixivImages(e, {
-  imageUrls, originalUrls = imageUrls, pid, initialRecallTime = 0, fallbackRecallTime = 10,
-}, { flipImage = FlipImage, verify = verifyImageMessage } = {}) {
+  imageUrls, proxy = "", pid, initialRecallTime = 0, fallbackRecallTime = 10,
+}, { download = downloadImage, flipImage = FlipImageBuffer, verify = verifyImageMessage } = {}) {
   const prefix = `[P站发图][PID:${pid}][目标:${e.group_id || e.user_id}]`
+  const downloadUrls = imageUrls.map(url => resolvePixivImageUrl(url, proxy))
   const send = async (images, recallTime, stage) => {
     if (!images.length) return false
     try {
@@ -76,25 +78,38 @@ export async function sendPixivImages(e, {
     }
   }
 
-  if (await send(imageUrls, initialRecallTime, "原图")) return true
-
-  if (imageUrls.length) {
-    await e.reply("图片发送失败，正在尝试翻转后重发...", 10, true)
-    const flipped = []
-    for (const [index, url] of imageUrls.entries()) {
-      let buffer
-      for (const source of [...new Set([url, originalUrls[index]].filter(Boolean))]) {
-        try { buffer = await flipImage(source) }
-        catch (error) { logger.warn(`${prefix} 第 ${index + 1} 张图片翻转失败：${error.message || error}`) }
-        if (buffer) break
-      }
-      if (buffer) flipped.push(buffer)
+  // 每张图片只下载一次；OneBot 只接收图片数据，翻转时复用同一份数据。
+  const buffers = []
+  for (const [index, url] of downloadUrls.entries()) {
+    try {
+      const buffer = await download(url)
+      if (Buffer.isBuffer(buffer) && buffer.length > 0) buffers.push(buffer)
+      else logger.warn(`${prefix} 第 ${index + 1} 张图片下载失败`)
+    } catch (error) {
+      logger.warn(`${prefix} 第 ${index + 1} 张图片下载失败：${error.message || error}`)
     }
-    if (await send(flipped, fallbackRecallTime, "翻转图片")) return true
   }
 
-  const links = [...new Set([`https://www.pixiv.net/artworks/${pid}`, ...imageUrls])]
+  // 缺图时直接提供完整链接，避免把部分图片发送成功当成全部发送成功。
+  if (buffers.length && buffers.length === imageUrls.length) {
+    if (await send(buffers, initialRecallTime, "原图")) return true
+    await e.reply("图片发送失败，正在尝试翻转后重发...", 10, true)
+    const flipped = []
+    for (const [index, buffer] of buffers.entries()) {
+      try {
+        const result = await flipImage(buffer)
+        if (Buffer.isBuffer(result) && result.length > 0) flipped.push(result)
+      } catch (error) {
+        logger.warn(`${prefix} 第 ${index + 1} 张图片翻转失败：${error.message || error}`)
+      }
+    }
+    if (flipped.length === buffers.length && await send(flipped, fallbackRecallTime, "翻转图片")) return true
+  }
+
+  const links = [...new Set([
+    ...(pid ? [`https://www.pixiv.net/artworks/${pid}`] : []), ...downloadUrls, ...imageUrls,
+  ])]
   const result = await e.reply("图片最终发送失败，请点击链接查看：\n" + links.join("\n"), 60, false)
   logger[result?.message_id ? "info" : "warn"](`${prefix} 链接兜底 message_id=${result?.message_id ?? "无"}`)
-  return !!result?.message_id
+  return !!result?.message_id && String(result.message_id) !== "0"
 }

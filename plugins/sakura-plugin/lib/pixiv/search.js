@@ -146,7 +146,7 @@ async function randomSampleSearch(tag, isR18, config) {
  * @param {boolean} isR18 是否搜索 R18 内容
  * @returns {Promise<{
  *   illust: object,        // 作品详情对象（含 id、title、user、tags、create_date、x_restrict 等）
- *   imageUrls: string[],   // 已应用反代的图片链接数组（最多3张）
+ *   imageUrls: string[],   // 原站图片链接数组（最多3张）
  * } | null>} 未找到时返回 null
  */
 export async function searchPixivImage(tag, isR18 = false) {
@@ -180,14 +180,7 @@ export async function searchPixivImage(tag, isR18 = false) {
         }
     }
 
-    // 应用反代域名（最多取前3张）
-    const proxy = config.proxy
-    const imageUrls = pages.slice(0, 3).map(originalUrl => {
-        if (!proxy) return originalUrl
-        const u = new URL(originalUrl)
-        u.hostname = proxy
-        return u.href
-    })
+    const imageUrls = pages.slice(0, 3)
 
     return { illust, imageUrls }
 }

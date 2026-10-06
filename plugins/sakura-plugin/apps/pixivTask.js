@@ -9,7 +9,7 @@ import {
   getIllustImageUrls,
   buildIllustInfoText
 } from "../lib/pixiv/subscription.js"
-import { FlipImage } from "../lib/ImageUtils/ImageUtils.js"
+import { sendPixivImages } from "../lib/pixiv/sendImages.js"
 
 function getTaskBot() {
   const selfId = getCurrentBotSelfId()
@@ -373,7 +373,7 @@ export class PixivTask extends plugin {
       return
     }
 
-    const imageUrls = getIllustImageUrls(illust, config.proxy, 3)
+    const imageUrls = getIllustImageUrls(illust, "", 3)
 
     if (imageUrls.length === 0) {
       logger.warn(`[订阅推送] 作品 ${illust.id} 无图片链接`)
@@ -404,35 +404,26 @@ export class PixivTask extends plugin {
     })
 
 
-    const sendImages = async (imgs) => taskBot.sendGroupMsg(groupId, imgs)
-
-    const initialRecallTime = isR18 ? (config.recallTime ?? 10) : 0
-    let imgSendResult = await sendImages(imageUrls.map(url => segment.image(url)))
-    let recallTimeToUse = initialRecallTime
-
-    if (!imgSendResult?.message_id) {
-      const flippedBuffers = []
-      for (const url of imageUrls) {
-        const buf = await FlipImage(url)
-        if (buf) flippedBuffers.push(buf)
-      }
-
-      if (flippedBuffers.length > 0) {
-        recallTimeToUse = config.recallTime ?? 10
-        imgSendResult = await sendImages(flippedBuffers.map(buf => segment.image(buf)))
-      }
-
-      if (!imgSendResult?.message_id) {
-        imgSendResult = await taskBot.sendGroupMsg(groupId, "图片发送失败，请点击链接查看：\n" + imageUrls.join("\n"))
-        recallTimeToUse = 60
-      }
-    }
-
-    if (recallTimeToUse > 0 && imgSendResult?.message_id) {
-      setTimeout(() => {
-        taskBot.deleteMsg(imgSendResult.message_id).catch(() => { })
-      }, recallTimeToUse * 1000)
-    }
+    await sendPixivImages({
+      bot: taskBot,
+      self_id: taskBot.self_id,
+      group_id: groupId,
+      reply: async (message, recall = 0) => {
+        const result = await taskBot.sendGroupMsg(groupId, message)
+        if (recall > 0 && result?.message_id) {
+          setTimeout(() => {
+            taskBot.deleteMsg(result.message_id).catch(() => { })
+          }, recall * 1000)
+        }
+        return result
+      },
+    }, {
+      imageUrls,
+      proxy: config.proxy,
+      pid: illust.id,
+      initialRecallTime: isR18 ? (config.recallTime ?? 10) : 0,
+      fallbackRecallTime: config.recallTime ?? 10,
+    })
   }
 
 

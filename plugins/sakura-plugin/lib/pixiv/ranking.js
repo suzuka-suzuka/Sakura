@@ -4,6 +4,7 @@ import axios from "axios"
 import sharp from "sharp"
 import { getRedis } from "../../../../src/utils/redis.js"
 import { downloadImage } from "../ImageUtils/ImageUtils.js"
+import { resolvePixivImageUrl } from "./imageUrls.js"
 import path from 'path'
 import fs from 'fs'
 import { plugindata } from "../path.js"
@@ -286,12 +287,7 @@ async function downloadThumbnail(url, config, modeKey = '', illustId = '') {
 
   try {
     // 应用反代
-    let fetchUrl = url
-    if (config.proxy) {
-      const u = new URL(url)
-      u.hostname = config.proxy
-      fetchUrl = u.href
-    }
+    const fetchUrl = resolvePixivImageUrl(url, config.proxy)
 
     const buffer = await downloadImage(fetchUrl)
     if (!buffer) return null
