@@ -152,6 +152,28 @@ test("批量和并发写入不重复计数、不丢记忆", async () => {
   assert.equal(document(event).memories.length, 3);
 });
 
+test("记忆整理按实际存储位置区分本人，群任务发起者不是个人记忆本人", async () => {
+  const ownerId = 930027;
+  for (const [scope, groupId] of [["user", 920027], ["user", null], ["group", 920027]]) {
+    const caller = e(910001, groupId);
+    const result = await storeMemories({ e: caller, scope, userId: ownerId,
+      contents: Array.from({ length: 10 }, (_, index) => `身份上下文回归事实${index}`),
+    });
+    const readTarget = () => memory.readMemoryDocument(result.location.memoryFile, { throwOnError: true });
+    for (let attempt = 0; readTarget().summary.sourceRevision < 10 && attempt < 50; attempt++) await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(readTarget().summary.sourceRevision, 10);
+    const request = aiCalls.at(-1);
+    assert.equal(request[1].user_id, caller.user_id);
+    if (scope === "user") {
+      assert.match(request[3], /QQ：930027 的个人记忆/);
+      assert.doesNotMatch(request[3], /QQ：910001 的个人记忆/);
+    } else {
+      assert.match(request[3], /本次整理的是群公共记忆/);
+      assert.doesNotMatch(request[3], /本次整理的是 QQ：/);
+    }
+  }
+});
+
 test("查询其他成员只读取当前群个人记忆，参数不能指定其他群或作用域", async () => {
   const caller = e(940101, 924101);
   const target = e(940102, 924101);
