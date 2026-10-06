@@ -1,5 +1,5 @@
 import { AbstractTool } from "./AbstractTool.js";
-import { FlipImage } from "../../ImageUtils/ImageUtils.js";
+import { sendPixivImages } from "../../pixiv/sendImages.js";
 import setting from "../../setting.js";
 import { DEFAULT_IMAGE_PROXY } from "../../pixiv/constants.js";
 
@@ -78,29 +78,28 @@ export class IllustrationTool extends AbstractTool {
       }
 
       const imageInfo = data.data[0];
-      const imageUrl = imageInfo.urls.original;
+      const imageUrl = imageInfo.urls?.original;
 
       if (!imageUrl) {
         return "API返回的数据中没有有效的图片URL。";
       }
 
-      let sendResult = await e.reply(segment.image(imageUrl));
-
-      if (!sendResult?.message_id) {
-        await e.reply("图片发送失败，正在尝试翻转后重发...");
-        const flippedBuffer = await FlipImage(imageUrl);
-        if (!flippedBuffer) {
-          throw new Error("图片下载失败，链接可能已失效或无法访问");
-        }
-        sendResult = await e.reply(segment.image(flippedBuffer));
+      // Lolicon 返回的是代理地址；标准原图路径可还原为 Pixiv 原站，供代理失败时重试。
+      const originalUrl = new URL(imageUrl);
+      if (originalUrl.pathname.startsWith("/img-original/")) {
+        originalUrl.protocol = "https:";
+        originalUrl.hostname = "i.pximg.net";
+        originalUrl.port = "";
       }
-
-      if (!sendResult?.message_id) {
-        throw new Error("图片因被拦截而发送失败");
-      }
-
-      if (isR18) {
-        e.recall(sendResult.message_id, 10);
+      const sent = await sendPixivImages(e, {
+        imageUrls: [imageUrl],
+        originalUrls: [originalUrl.href],
+        pid: imageInfo.pid,
+        initialRecallTime: isR18 ? 10 : 0,
+        fallbackRecallTime: isR18 ? 10 : 0,
+      });
+      if (!sent) {
+        throw new Error("图片和备用链接均发送失败");
       }
 
       const tagsToFilter = ["萝莉", "loli", "ロリ"];
