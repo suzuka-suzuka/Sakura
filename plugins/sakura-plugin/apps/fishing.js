@@ -1668,9 +1668,11 @@ export default class Fishing extends plugin {
     try {
       const { map, image } = await createFishingEncounterImage();
       if (fishingSessions.get(stateKey) !== state || state.settled) return false;
+      await e.reply("🌊 水路遭遇！鱼钻进了复杂的水道，请按接下来的地图把它引到终点。\n⏱️ 图片发出后有 60 秒，在行动上限内发送完整操作串，只有一次作答机会。\n📖 玩法见「#钓鱼攻略」。");
+      if (fishingSessions.get(stateKey) !== state || state.settled) return false;
       state.encounter = { map, attempt: null, inputReceived: false, pendingInput: null };
       state.phase = FISHING_PHASE.encounter;
-      // 图上只有地图和行动数；先取得发送回执，再开始 60 秒计时。
+      // 图上只有地图和行动上限；提醒发出后再发图，取得图片发送回执后才开始 60 秒计时。
       const receipt = await e.reply(segment.image(image));
       if (!receipt || receipt.status === "failed" || (receipt.retcode != null && Number(receipt.retcode) !== 0)) {
         throw new Error("遭遇图片发送未成功");
