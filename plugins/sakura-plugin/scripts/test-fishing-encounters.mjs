@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { generateEncounterMaps, solveEncounter, analyzeEncounterChoices, validateEncounterInput, parseEncounterInput, createEncounterAttempt, submitEncounterAttempt, getEncounterRewardMultiplier, encounterFingerprint, rollFishingEncounter, applyEncounterReward } from "../lib/fishing/encounter.js";
+import { generateEncounterMaps, solveEncounter, analyzeEncounterChoices, validateEncounterInput, parseEncounterInput, isEncounterAnswerMessage, createEncounterAttempt, submitEncounterAttempt, getEncounterRewardMultiplier, encounterFingerprint, rollFishingEncounter, applyEncounterReward } from "../lib/fishing/encounter.js";
 import { buildEncounterHtml } from "../lib/fishing/encounterRenderer.js";
 
 const fixture = { id: "test-map", rows: ["#S###", "#A..#", "###B#", "###.#", "###G#"], limits: { actions: 9 } };
 const answer = "A下右右B下下下";
 
 test("中文、zysx、大小写及混合输入判同一条路线", () => {
-  for (const input of [answer, "AxYYbXXX", "a下y右Bxx下", " aX yY bX xX ", "A↓→→B↓↓↓"]) {
+  for (const input of [answer, "AxYYbXXX", "a下y右Bxx下", " aXyYbXxX "]) {
     const result = validateEncounterInput(fixture, input);
     assert.equal(result.success, true, input);
     assert.deepEqual([result.moves, result.usedA, result.usedB, result.actions], [6, 1, 1, 9]);
@@ -45,7 +45,7 @@ test("不能回走凑数，也不能再次进入起点", () => {
 
 test("精确行动数相同的不同路线都接受，求解不能合并它们", () => {
   const twoRoutes = { id: "two-routes", rows: ["##S##", "#...#", "#.#.#", "#...#", "##G##"], limits: { actions: 6 } };
-  for (const input of ["xz xxyx", "xyxxzx"]) assert.equal(validateEncounterInput(twoRoutes, input).success, true);
+  for (const input of ["xzxxyx", "xyxxzx"]) assert.equal(validateEncounterInput(twoRoutes, input).success, true);
   assert.equal(solveEncounter(twoRoutes).length, 2);
   const limitedSearch = analyzeEncounterChoices(twoRoutes, { maxPaths: 1 });
   assert.equal(limitedSearch.truncated, true);
@@ -59,9 +59,16 @@ test("30 秒内两倍，之后线性下降，60 秒整失败", () => {
   for (const elapsedMs of [-1, NaN, Infinity, 60_000, 60_001]) assert.equal(getEncounterRewardMultiplier(elapsedMs), 0);
 });
 
-test("首次错误也消耗唯一作答机会，超时不能成功", () => {
+test("非操作消息忽略，首次操作串错误消耗唯一机会，超时不能成功", () => {
   const attempt = createEncounterAttempt(fixture, 1000);
-  assert.equal(submitEncounterAttempt(attempt, "乱填", 2000).success, false);
+  for (const input of ["", "乱填", `答案是${answer}`, "Ax yy Bxxx", "A↓→→B↓↓↓", "AxYYbXXX!"]) {
+    assert.equal(isEncounterAnswerMessage(input), false);
+    assert.equal(submitEncounterAttempt(attempt, input, 2000).accepted, false);
+    assert.equal(attempt.submitted, false);
+  }
+  for (const input of [answer, "AxYYbXXX", "a下y右Bxx下", "abx", "A", " sxzyAB "]) assert.equal(isEncounterAnswerMessage(input), true);
+  assert.equal(submitEncounterAttempt(attempt, "abx", 2000).accepted, true);
+  assert.equal(attempt.submitted, true);
   assert.equal(submitEncounterAttempt(attempt, answer, 3000).accepted, false);
   const expired = submitEncounterAttempt(createEncounterAttempt(fixture, 1000), answer, 61_000);
   assert.equal(expired.success, false);

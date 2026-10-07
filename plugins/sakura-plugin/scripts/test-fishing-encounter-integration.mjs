@@ -205,7 +205,7 @@ test("噩梦与宝藏只增加经验，答错时不执行噩梦效果和宝箱�
       await h.instance.handleFishing(h.e);
       assert.equal(h.calls.effects, 0);
       assert.equal(h.calls.breaks, 0);
-      await h.answer(success ? h.correct() : "这次答错", 30_000);
+      await h.answer(success ? h.correct() : "abx", 30_000);
       const result = h.calls.settlements[0];
       assert.equal(result.expGain, success ? 20 : undefined);
       assert.equal(result.earnings || 0, 0);
@@ -268,8 +268,8 @@ test("遭遇先于困难度判定，成功后难鱼仍需强拉，奖励倍率�
   assert.equal(h.calls.settlements[0].expGain, 15);
 });
 
-test("首次格式错误、空消息和路线错误都使鱼逃走，并发正确答案也不能二次作答", async () => {
-  for (const msg of ["错", "", "x"]) {
+test("首次纯操作串的语法或路线错误使鱼逃走，并发正确答案不能二次作答", async () => {
+  for (const msg of ["abx", "a", "x"]) {
     const h = await harness();
     const state = h.create();
     await h.instance.handleFishing(h.e);
@@ -282,6 +282,41 @@ test("首次格式错误、空消息和路线错误都使鱼逃走，并发正�
     assert.equal(h.calls.cooldown, 1);
     assert.equal(h.timers.size, 0);
   }
+});
+
+test("聊天、空消息和混入其他字符的消息不占用答案机会或刷新计时", async () => {
+  const h = await harness();
+  const state = h.create();
+  await h.instance.handleFishing(h.e);
+  const startedAt = state.encounter.attempt.startedAt;
+  const timerId = state.encounterTimer;
+  const contextsBefore = h.calls.contexts.length;
+  for (const msg of ["", "等等", "帮我看这张图", `答案是${h.correct()}`, "Ax yy Bxxx", "AxyyBxxx!", "#钓鱼攻略", "↑↓"]) {
+    h.clock.now += 1000;
+    await h.instance.handleFishing({ ...h.e, msg });
+    assert.equal(state.encounter.inputReceived, false);
+    assert.equal(state.encounter.pendingInput, null);
+    assert.equal(state.encounter.attempt.submitted, false);
+    assert.equal(state.encounter.attempt.startedAt, startedAt);
+    assert.equal(state.encounterTimer, timerId);
+    assert.equal(h.calls.settlements.length, 0);
+  }
+  assert.equal(h.calls.contexts.length, contextsBefore);
+  await h.answer(h.correct(), 45_000);
+  assert.equal(h.calls.settlements.length, 1);
+  assert.equal(h.calls.settlements[0].earnings, 150);
+});
+
+test("只发聊天消息也会按原截止时间自动超时", async () => {
+  const h = await harness();
+  const state = h.create();
+  await h.instance.handleFishing(h.e);
+  h.clock.now += 59_000;
+  await h.instance.handleFishing({ ...h.e, msg: "再给我一点时间" });
+  h.clock.now += 1000;
+  await h.instance.handleFishingTimeout(h.e, h.key, state.id, { expectedPhase: session.FISHING_PHASE.encounter, timerName: "encounterTimer" });
+  assert.equal(h.calls.settlements.length, 1);
+  assert.equal(h.calls.settlements[0].success, false);
 });
 
 test("60 秒整提交正确答案和无提交自动超时都按失败结算一次", async () => {
@@ -312,9 +347,11 @@ test("发图等待回执时的首条答案不会丢失，回执时间之前的�
   await sending;
   assert.equal(state.encounter.attempt, null);
   assert.equal(state.processing, true);
+  await h.instance.handleFishing({ ...h.e, msg: "图片来了，等我看看" });
+  assert.equal(state.encounter.inputReceived, false);
   h.clock.now += 20_000;
   await h.instance.handleFishing({ ...h.e, msg: h.correct() });
-  await h.instance.handleFishing({ ...h.e, msg: "错误第二次答案" });
+  await h.instance.handleFishing({ ...h.e, msg: "abx" });
   assert.equal(h.calls.settlements.length, 0);
   h.clock.now += 10_000;
   releaseSend({ message_id: "sent" });

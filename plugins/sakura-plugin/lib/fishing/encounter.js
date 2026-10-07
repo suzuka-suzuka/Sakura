@@ -22,7 +22,6 @@ const DIRECTIONS = Object.freeze({
 });
 const ALIASES = Object.freeze({
   z: "左", y: "右", s: "上", x: "下",
-  "↑": "上", "↓": "下", "←": "左", "→": "右",
 });
 const TILES = new Set(["#", ".", "S", "G", "A", "B"]);
 
@@ -49,10 +48,16 @@ export function assertEncounterMap(map) {
   return { width, height: rows.length, start: starts[0], goal: goals[0] };
 }
 
+// 只将整条由操作字符组成的消息视为答案，不从聊天内容中提取方向。
+// 字符合法与动作语法分开判断：例如 abx 会进入判题并消耗唯一作答机会。
+export function isEncounterAnswerMessage(input) {
+  return typeof input === "string" && /^[上下左右zysxab]+$/iu.test(input.trim());
+}
+
 export function parseEncounterInput(input) {
-  if (typeof input !== "string") return null;
-  const normalized = input.normalize("NFKC").toLowerCase().replace(/\s/gu, "")
-    .replace(/[zysx↑↓←→]/gu, value => ALIASES[value]);
+  if (!isEncounterAnswerMessage(input)) return null;
+  const normalized = input.trim().toLowerCase()
+    .replace(/[zysx]/gu, value => ALIASES[value]);
   if (!normalized || normalized.length > 96) return null;
   const tokens = normalized.match(/[ab]?[上下左右]/gu) || [];
   if (tokens.join("") !== normalized) return null;
@@ -103,7 +108,8 @@ export function createEncounterAttempt(map, startedAt) {
 
 export function submitEncounterAttempt(attempt, input, receivedAt) {
   if (attempt.submitted) return { accepted: false, success: false, reason: "本次已经提交" };
-  // 首次输入先锁定，格式错误、错误路线和超时都不能获得第二次机会。
+  if (!isEncounterAnswerMessage(input)) return { accepted: false, success: false, reason: "非操作消息，已忽略" };
+  // 首次操作串先锁定，动作语法错误、错误路线和超时都不能获得第二次机会。
   attempt.submitted = true;
   const elapsedMs = receivedAt - attempt.startedAt;
   const multiplier = getEncounterRewardMultiplier(elapsedMs);

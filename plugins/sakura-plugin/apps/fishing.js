@@ -17,6 +17,7 @@ import {
   ENCOUNTER_TIME_LIMIT_MS,
   applyEncounterReward,
   createEncounterAttempt,
+  isEncounterAnswerMessage,
   rollFishingEncounter,
   submitEncounterAttempt,
 } from "../lib/fishing/encounter.js";
@@ -1170,10 +1171,11 @@ export default class Fishing extends plugin {
 
     if (state.phase === FISHING_PHASE.encounterPreparing) return true;
     if (state.phase === FISHING_PHASE.encounter) {
-      // 到达时立即锁定首次消息，包含空消息、格式错误与发图回执之前的快速作答。
+      if (!isEncounterAnswerMessage(msg)) return true;
+      // 到达时只锁定首条纯操作串，聊天和空消息不会消耗机会或重置计时。
       if (!state.encounter.inputReceived) {
         state.encounter.inputReceived = true;
-        state.encounter.pendingInput = { event: e, receivedAt: Date.now() };
+        state.encounter.pendingInput = { event: e, input: msg, receivedAt: Date.now() };
         await this.runPendingEncounterInput(stateKey, state.id);
       }
       return true;
@@ -1703,12 +1705,12 @@ export default class Fishing extends plugin {
     if (!state || state.id !== sessionId || state.phase !== FISHING_PHASE.encounter ||
         !state.encounter?.attempt || !state.encounter.pendingInput ||
         !fishingSessions.claimAction(stateKey, sessionId)) return false;
-    const { event: e, receivedAt } = state.encounter.pendingInput;
+    const { event: e, input, receivedAt } = state.encounter.pendingInput;
     state.encounter.pendingInput = null;
     try {
       return await eventStorage.run(e, async () => {
         // 客户端已看到图片但发送回执尚未返回时收到的答案按 0 秒处理。
-        const result = submitEncounterAttempt(state.encounter.attempt, e.msg ?? "", Math.max(receivedAt, state.encounter.attempt.startedAt));
+        const result = submitEncounterAttempt(state.encounter.attempt, input, Math.max(receivedAt, state.encounter.attempt.startedAt));
         if (state.encounterTimer) clearTimeout(state.encounterTimer);
         state.encounterTimer = null;
         if (!result.success) {
