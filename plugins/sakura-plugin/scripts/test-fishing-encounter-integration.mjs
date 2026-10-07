@@ -307,6 +307,26 @@ test("聊天、空消息和混入其他字符的消息不占用答案机会或�
   assert.equal(h.calls.settlements[0].earnings, 150);
 });
 
+test("真实遭遇接受未用完行动的路线，超出上限仍使鱼逃走", async () => {
+  for (const success of [true, false]) {
+    const h = await harness();
+    const state = h.create();
+    await h.instance.handleFishing(h.e);
+    const choices = encounter.analyzeEncounterChoices(state.encounter.map);
+    const route = (success ? choices.underRoutes : choices.overRoutes)[0];
+    assert.ok(route);
+    await h.answer(route.sequence, 30_000);
+    assert.equal(h.calls.settlements.length, 1);
+    if (success) {
+      assert.equal(h.calls.settlements[0].earnings, 200);
+      assert.ok(state.encounterResult.actions < state.encounter.map.limits.actions);
+    } else {
+      assert.equal(h.calls.settlements[0].success, false);
+      assert.equal(h.calls.settlements[0].earnings, 0);
+    }
+  }
+});
+
 test("只发聊天消息也会按原截止时间自动超时", async () => {
   const h = await harness();
   const state = h.create();

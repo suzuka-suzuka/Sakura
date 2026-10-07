@@ -45,7 +45,7 @@ export function buildEncounterHtml(map, { fontData = "" } = {}) {
   const cells = map.rows.flatMap((row, y) => [...row].map((type, x) =>
     `<g transform="translate(${x * 120} ${y * 120})">${tileBackground(x, y, type)}${overlays[type] || ""}</g>`)).join("");
   const embeddedFont = fontData ? `@font-face{font-family:Encounter;src:url(data:font/ttf;base64,${fontData}) format('truetype')}` : "";
-  // 图片只含地图与指定行动数，不写规则、奖励、时限、关卡标题或答案。
+  // 图片只含地图与行动上限，不写规则、奖励、时限、关卡标题或答案。
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>
 ${embeddedFont}
 *{box-sizing:border-box}body{margin:0;background:#f6f6eb;color:#325b4d;font-family:Encounter,'Microsoft YaHei',sans-serif}
@@ -53,5 +53,5 @@ ${embeddedFont}
 .limits{display:flex;justify-content:center;padding:20px 20px 9px;font-size:36px;line-height:1.35;font-weight:700}
 .limit{display:flex;align-items:center;justify-content:center;gap:14px;white-space:nowrap}.count{color:#325b4d;font-size:40px}
 </style></head><body><main class="card"><svg class="map" viewBox="0 0 ${width * 120} ${height * 120 + 90}" role="img" aria-label="钓鱼水路">${cells}${shore(width, height, goal[0])}</svg>
-<div class="limits"><div class="limit">行动 = <span class="count">${map.limits.actions}</span></div></div></main></body></html>`;
+<div class="limits"><div class="limit">行动 ≤ <span class="count">${map.limits.actions}</span></div></div></main></body></html>`;
 }

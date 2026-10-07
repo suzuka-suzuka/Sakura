@@ -25,7 +25,7 @@ const manifestPath = path.join(outputDir, "levels.json");
 
 if (options.has("--check") || options.has("--verify")) {
   const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
-  if (manifest.version !== ENCOUNTER_RULE_VERSION) throw new Error("关卡清单不是当前 A/B 行动成本版本，请先重新生成地图");
+  if (manifest.version !== ENCOUNTER_RULE_VERSION) throw new Error("关卡清单不是当前小图与行动上限版本，请先重新生成地图");
   if (options.has("--check")) {
     const map = manifest.maps.find(entry => entry.id === options.get("--check"));
     if (!map) throw new Error("找不到指定关卡");
@@ -40,7 +40,7 @@ if (options.has("--check") || options.has("--verify")) {
       if (!routes.length || routes.some(route => !validateEncounterInput(map, route.sequence).success)) throw new Error(`关卡校验失败：${map.id}`);
       const choices = analyzeEncounterChoices(map);
       if (!choices.hasMeaningfulChoice) throw new Error(`关卡缺少有效路线取舍：${map.id}`);
-      if (choices.routes.some(route => validateEncounterInput(map, route.sequence).success !== (route.actions === map.limits.actions))) throw new Error(`路线行动数判定不一致：${map.id}`);
+      if (choices.routes.some(route => validateEncounterInput(map, route.sequence).success !== (route.actions <= map.limits.actions))) throw new Error(`路线行动数判定不一致：${map.id}`);
       const fingerprint = encounterFingerprint(map);
       if (fingerprints.has(fingerprint)) throw new Error(`关卡或左右镜像重复：${map.id}`);
       fingerprints.add(fingerprint);
@@ -53,7 +53,7 @@ if (options.has("--check") || options.has("--verify")) {
   process.exit(0);
 }
 
-const seed = options.get("--seed") || "sakura-fishing-20261006";
+const seed = options.get("--seed") || "sakura-fishing-small-20261007";
 const count = Number(options.get("--count") || 5);
 const maps = generateEncounterMaps({ count, seed }).map((map, index) => ({ ...map, id: `encounter-${String(index + 1).padStart(2, "0")}`, name: `浅湾 ${index + 1}` }));
 const fontData = (await fs.readFile(path.join(pluginRoot, "resources/sign/font/FZFWZhuZiAYuanJWD.ttf"))).toString("base64");
@@ -80,7 +80,7 @@ try {
     const choices = analyzeEncounterChoices(map);
     results.push({ id: map.id, ...choiceSummary(map, choices), logicalSize: [900, layout.height] });
   }
-  // 清单保存地形与限制；运行时可直接读清单并发送对应本地 PNG。
+  // 清单保存离线示例的地形与上限；机器人每次调用同一生成器重新生图。
   await fs.writeFile(manifestPath, JSON.stringify({ version: ENCOUNTER_RULE_VERSION, seed, maps }, null, 2) + "\n", "utf8");
   if (options.has("--preview")) {
     const previewPath = path.resolve(options.get("--preview"));
@@ -95,10 +95,11 @@ try {
 
 function choiceSummary(map, choices) {
   return {
-    requiredActions: map.limits.actions,
+    maxActions: map.limits.actions,
     geometricRoutes: choices.routes.length,
     validRoutes: choices.validRoutes.length,
     underRoutes: choices.underRoutes.length,
+    atLimitRoutes: choices.atLimitRoutes.length,
     overRoutes: choices.overRoutes.length,
     actionCounts: choices.actionCounts,
     hasMovementObstacleTradeoff: choices.tradeoffPairs.length > 0,

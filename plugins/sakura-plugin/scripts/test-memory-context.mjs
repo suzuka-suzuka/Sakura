@@ -93,16 +93,18 @@ after(() => {
   fs.rmSync(fixture, { recursive: true, force: true });
 });
 
-test("未开启记忆工具的工具组不会把个人摘要或群记录放入系统提示词", async () => {
+test("未开启记忆工具时不注入个人摘要、原文或群记忆", async () => {
   const e = event(961008, 962008);
-  seed(e, ["个人咖啡喜好"], "个人摘要");
   seed(e, Array.from({ length: 12 }, (_, i) => `群咖啡记忆${i}`), "群摘要", "group");
   const count = vectorCalls.length;
-  await runScenario(e, "饮食", [async (...args) => {
-    assert.equal(args[3], "角色提示词");
-    assert.equal(vectorCalls.length, count);
-    return { text: "已完成" };
-  }], { toolGroup: "关闭记忆" });
+  for (const summary of ["个人摘要", ""]) {
+    seed(e, ["个人咖啡喜好"], summary);
+    await runScenario(e, "饮食", [async (...args) => {
+      assert.equal(args[3], "角色提示词");
+      assert.equal(vectorCalls.length, count);
+      return { text: "已完成" };
+    }], { toolGroup: "关闭记忆" });
+  }
 });
 
 test("群聊个人记忆只注入摘要，工具按QQ读取全部记录，少量群公共记忆仍直接注入", async () => {
@@ -172,22 +174,36 @@ test("私聊同样仅注入摘要，工具读取全部记录而不请求向量",
   ]);
 });
 
-test("个人摘要为空时不回退注入原始记录，记录仍可通过工具读取", async () => {
-  const e = event(961004, null);
-  seed(e, ["个人细节：不喝咖啡"], "");
-  const count = vectorCalls.length;
-  await runScenario(e, "饮食", [
-    async (...args) => {
-      assert.equal(args[3], "角色提示词");
-      assert.equal(vectorCalls.length, count);
-      return { functionCalls: [call(e.user_id)] };
-    },
-    async (...args) => {
-      assert.deepEqual(response(args[6]), ["个人细节：不喝咖啡"]);
-      assert.equal(vectorCalls.length, count);
-      return { text: "已完成" };
-    },
-  ]);
+test("个人无摘要时群聊和私聊注入全部记录，空白摘要也回退且不请求向量", async () => {
+  const contents = ["老家在河南", ...Array.from({ length: 24 }, (_, i) => `个人细节${i}结束`)];
+  for (const [groupId, summary] of [[null, ""], [962004, "   "]]) {
+    const e = event(961004, groupId);
+    seed(e, contents, summary);
+    const count = vectorCalls.length;
+    await runScenario(e, "饮食", [
+      async (...args) => {
+        assert.match(args[3], /所属 QQ：961004/);
+        assert.doesNotMatch(args[3], /当前用户记忆摘要/);
+        for (const content of contents) assert.ok(args[3].includes(content));
+        assert.equal(vectorCalls.length, count);
+        return { functionCalls: [call(e.user_id)] };
+      },
+      async (...args) => {
+        assert.deepEqual(response(args[6]), contents);
+        assert.equal(vectorCalls.length, count);
+        return { text: "已完成" };
+      },
+    ]);
+  }
+});
+
+test("个人摘要和记录都为空时不注入空背景", async () => {
+  const e = event(961009, null);
+  seed(e, [], "");
+  await runScenario(e, "饮食", [async (...args) => {
+    assert.equal(args[3], "角色提示词");
+    return { text: "已完成" };
+  }]);
 });
 
 test("大量群公共记忆仍自动召回，向量目标仅包含群公共记忆", async () => {

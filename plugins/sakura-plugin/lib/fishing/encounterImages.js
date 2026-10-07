@@ -6,7 +6,6 @@ import { buildEncounterHtml } from "./encounterRenderer.js";
 import { analyzeEncounterChoices, generateEncounterMaps, validateEncounterInput } from "./encounter.js";
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const repoRoot = path.resolve(pluginRoot, "../..");
 let fontPromise = null;
 let browserPromise = null;
 const recentMaps = [];
@@ -20,7 +19,9 @@ async function getBrowser() {
   if (!browserPromise) browserPromise = (async () => {
     // 顺序加载 CJS 配置，避免 Node 22 在并行导入时的加载器异常。
     const { default: puppeteer } = await import("puppeteer");
-    const { default: config } = await import(pathToFileURL(path.join(repoRoot, ".puppeteerrc.cjs")));
+    // 热重载快照复制代码并用 junction 共用资源；从真实资源目录定位项目配置。
+    const realResources = await fs.realpath(path.join(pluginRoot, "resources"));
+    const { default: config } = await import(pathToFileURL(path.resolve(realResources, "../../..", ".puppeteerrc.cjs")));
     return puppeteer.launch({ headless: true, executablePath: config.executablePath, timeout: 20_000, args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"] });
   })().catch(error => { browserPromise = null; throw error; });
   const browser = await browserPromise;
@@ -55,7 +56,7 @@ export async function renderFishingHtml(html, { selector = ".card", width = 900,
 export async function createFishingEncounterImage({ seed = randomUUID() } = {}) {
   const map = generateEncounterMaps({ count: 1, seed, excluded: recentMaps })[0];
   const choices = analyzeEncounterChoices(map);
-  if (!choices.hasMeaningfulChoice || choices.routes.some(route => validateEncounterInput(map, route.sequence).success !== (route.actions === map.limits.actions))) throw new Error("遭遇地图校验失败");
+  if (!choices.hasMeaningfulChoice || choices.routes.some(route => validateEncounterInput(map, route.sequence).success !== (route.actions <= map.limits.actions))) throw new Error("遭遇地图校验失败");
   // 先保存布局以避免同时触发的玩家获得同图；只缓存近期布局，不复用图片。
   recentMaps.push(map);
   if (recentMaps.length > 32) recentMaps.shift();

@@ -37,7 +37,7 @@ export function getVectorMemoryTargets(targets = []) {
   );
 }
 
-// 群公共记忆召回不可用时，回退到最新记录；个人记忆只注入摘要。
+// 群公共记忆召回不可用时，回退到最新记录；个人记忆不参与向量召回。
 export function getLatestMemoryMatches(targets = []) {
   return targets.filter((target) => target.location.scope === "group").flatMap((target) =>
     getLatestMemories(target.document, VECTOR_MEMORY_RESULTS_PER_SCOPE)
@@ -79,11 +79,15 @@ export function formatMemoryContext(targets, matches) {
   ];
   for (const target of targets) {
     if (target.location.scope === "group" && target.document.memories.length === 0) continue;
-    if (!target.document.summary.text.trim()) continue;
+    const summary = target.document.summary.text.trim();
+    const content = summary || (target.location.scope === "user"
+      ? target.document.memories.map((memory) => `- ${memory.content}`).join("\n")
+      : "");
+    if (!content) continue;
     const ownerHint = target.location.scope === "user"
       ? `所属 QQ：${target.location.scopeKey.split(":").at(-1)}（省略主语指此人）\n`
       : "";
-    parts.push(`【${target.location.title}摘要】\n${ownerHint}${target.document.summary.text.trim()}`);
+    parts.push(`【${target.location.title}${summary ? "摘要" : ""}】\n${ownerHint}${content}`);
   }
   const groupMatches = matches.filter((match) => match.scope === "group");
   if (groupMatches.length > 0) {

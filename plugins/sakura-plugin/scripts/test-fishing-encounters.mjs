@@ -24,14 +24,15 @@ test("必须匹配地形和收鱼点，A/B 不能乱按凑数", () => {
   assert.equal(validateEncounterInput({ ...fixture, limits: { actions: 9 } }, "AxAyyBxxx").reason, "地形与动作不匹配");
 });
 
-test("移动与 A/B 都计行动，达到终点时多一次或少一次都失败", () => {
+test("移动与 A/B 都计行动，低于或等于上限成功，超出上限失败", () => {
   const under = validateEncounterInput({ ...fixture, limits: { actions: 10 } }, answer);
-  assert.equal(under.success, false);
-  assert.equal(under.reason, "少于指定行动数");
+  assert.equal(under.success, true);
+  assert.equal(under.reason, "正确");
   assert.equal(under.actions, 9);
+  assert.equal(validateEncounterInput(fixture, answer).success, true);
   const over = validateEncounterInput({ ...fixture, limits: { actions: 8 } }, answer);
   assert.equal(over.success, false);
-  assert.equal(over.reason, "超过指定行动数");
+  assert.equal(over.reason, "超过行动上限");
   assert.equal(over.actions, 9);
 });
 
@@ -43,7 +44,7 @@ test("不能回走凑数，也不能再次进入起点", () => {
   assert.equal(revisitStart.step, 2);
 });
 
-test("精确行动数相同的不同路线都接受，求解不能合并它们", () => {
+test("上限以内的不同路线都接受，求解不能合并它们", () => {
   const twoRoutes = { id: "two-routes", rows: ["##S##", "#...#", "#.#.#", "#...#", "##G##"], limits: { actions: 6 } };
   for (const input of ["xzxxyx", "xyxxzx"]) assert.equal(validateEncounterInput(twoRoutes, input).success, true);
   assert.equal(solveEncounter(twoRoutes).length, 2);
@@ -80,7 +81,7 @@ test("非操作消息忽略，首次操作串错误消耗唯一机会，超时�
 
 test("单通道的往返绕圈不算路线取舍", () => {
   const padded = { ...fixture, limits: { actions: 14 } };
-  assert.equal(solveEncounter(padded).length, 0);
+  assert.equal(solveEncounter(padded).length, 1);
   const analysis = analyzeEncounterChoices(padded);
   assert.equal(analysis.routes.length, 1);
   assert.equal(analysis.hasMeaningfulChoice, false);
@@ -97,28 +98,34 @@ test("种子可重现，1250 张随机地图都有路线取舍，布局和小批
       const choices = analyzeEncounterChoices(map);
       assert.equal(choices.truncated, false);
       assert.equal(choices.hasMeaningfulChoice, true);
-      assert.ok(choices.routes.length >= 3 && choices.actionCounts.length >= 3);
+      assert.ok(choices.routes.length >= 3 && choices.actionCounts.length >= 2);
+      assert.ok(choices.routes.length <= 4);
       assert.ok(choices.validRoutes.length >= 1 && choices.underRoutes.length >= 1 && choices.overRoutes.length >= 1);
+      assert.ok(choices.validRoutes.length <= 2);
       assert.ok(choices.tradeoffPairs.length >= 1);
       assert.deepEqual(Object.keys(map.limits), ["actions"]);
+      assert.equal(map.rows.length, 6);
+      assert.ok(map.rows.every(row => row.length === 5));
+      assert.ok(map.limits.actions >= 9 && map.limits.actions <= 13);
       for (const route of choices.routes) {
         assert.equal(validateEncounterInput(map, route.sequence).success, choices.validRoutes.includes(route));
       }
       const solutions = solveEncounter(map);
       assert.ok(solutions.length > 0, map.id);
       for (const solution of solutions) assert.equal(validateEncounterInput(map, solution.sequence).success, true);
-      const shortest = solutions[0];
-      assert.ok(shortest.moves >= 8 && shortest.moves <= 16);
-      assert.equal(shortest.actions, map.limits.actions);
-      assert.ok(shortest.a + shortest.b >= 1);
+      for (const solution of solutions) {
+        assert.ok(solution.moves >= 6 && solution.moves <= 9);
+        assert.ok(solution.actions <= map.limits.actions);
+        assert.ok(solution.a + solution.b >= 2 && solution.a + solution.b <= 3);
+      }
     }
   }
 });
 
 test("资源图没有标题、时限、奖励、输入教学或解法", () => {
   const html = buildEncounterHtml(fixture);
-  assert.ok(html.includes('行动 = <span class="count">9</span>'));
-  for (const unwanted of ["倒计时", "奖励", "测试上限", "A＋方向", "一条消息", "浅湾脱困", "≤", " 步", "×", 'class="key"', answer]) assert.equal(html.includes(unwanted), false);
+  assert.ok(html.includes('行动 ≤ <span class="count">9</span>'));
+  for (const unwanted of ["倒计时", "奖励", "测试上限", "A＋方向", "一条消息", "浅湾脱困", "行动 =", " 步", "×", 'class="key"', answer]) assert.equal(html.includes(unwanted), false);
 });
 
 test("逐场生成排除近期布局，并避免行动数连续相同", () => {

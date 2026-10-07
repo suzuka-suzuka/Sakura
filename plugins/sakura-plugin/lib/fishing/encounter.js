@@ -1,7 +1,7 @@
 // 遭遇规则与关卡工具。重量判定通过后、困难度判定前抽取；护符与首领不触发。
 export const ENCOUNTER_TIME_LIMIT_MS = 60_000;
 export const ENCOUNTER_FULL_REWARD_MS = 30_000;
-export const ENCOUNTER_RULE_VERSION = 3;
+export const ENCOUNTER_RULE_VERSION = 4;
 export const ENCOUNTER_DEFAULT_CHANCE = 0.1;
 export const ENCOUNTER_ABILITY_COSTS = Object.freeze({ A: 1, B: 2 });
 
@@ -44,7 +44,7 @@ export function assertEncounterMap(map) {
     throw new TypeError("鱼必须位于地图上方，唯一收鱼点必须位于地图下方");
   }
   const { actions } = map.limits || {};
-  if (!Number.isInteger(actions) || actions < 1 || actions > 96) throw new TypeError("指定行动数必须在 1 至 96 之间");
+  if (!Number.isInteger(actions) || actions < 1 || actions > 96) throw new TypeError("行动上限必须在 1 至 96 之间");
   return { width, height: rows.length, start: starts[0], goal: goals[0] };
 }
 
@@ -85,12 +85,12 @@ export function validateEncounterInput(map, input) {
     usedA += ability === "A" ? 1 : 0;
     usedB += ability === "B" ? 1 : 0;
     actions += 1 + (ENCOUNTER_ABILITY_COSTS[ability] || 0);
-    if (actions > map.limits.actions) return { success: false, reason: "超过指定行动数", step: index + 1, actions, moves: index + 1, usedA, usedB };
+    if (actions > map.limits.actions) return { success: false, reason: "超过行动上限", step: index + 1, actions, moves: index + 1, usedA, usedB };
     if (tile === "G" && index !== tokens.length - 1) return { success: false, reason: "到达收鱼点后仍有操作", step: index + 1 };
   }
   const reachedGoal = map.rows[y][x] === "G";
-  const success = reachedGoal && actions === map.limits.actions;
-  const reason = !reachedGoal ? "未到收鱼点" : success ? "正确" : "少于指定行动数";
+  const success = reachedGoal && actions <= map.limits.actions;
+  const reason = reachedGoal ? "正确" : "未到收鱼点";
   return { success, reason, actions, moves: tokens.length, usedA, usedB };
 }
 
@@ -118,7 +118,7 @@ export function submitEncounterAttempt(attempt, input, receivedAt) {
   return { ...result, accepted: true, elapsedMs, multiplier: result.success ? multiplier : 0 };
 }
 
-// 精确行动数与不重复格子需要保留完整路径，不能按位置和成本合并状态。
+// 不重复格子需要保留完整路径，不能按位置和成本合并状态。
 export function solveEncounter(map) {
   const analysis = analyzeEncounterChoices(map);
   if (analysis.truncated) throw new Error("关卡路线搜索超出预算，不能确定完整解集");
@@ -131,22 +131,22 @@ function routeDifference(left, right) {
 }
 
 function summarizeChoices(routes, limits, truncated = false) {
-  const validRoutes = routes.filter(route => route.actions === limits.actions);
+  const validRoutes = routes.filter(route => route.actions <= limits.actions);
   const underRoutes = routes.filter(route => route.actions < limits.actions);
+  const atLimitRoutes = routes.filter(route => route.actions === limits.actions);
   const overRoutes = routes.filter(route => route.actions > limits.actions);
   const tradeoffPairs = [];
   for (const shorter of routes) {
     for (const longer of routes) {
       // 至少有一组短路障碍多、长路障碍少的完整路线，且走法明显不同。
-      if (shorter.moves < longer.moves && shorter.a + shorter.b * 2 > longer.a + longer.b * 2 && routeDifference(shorter, longer) >= 4) tradeoffPairs.push({ shorter, longer });
+      if (shorter.moves < longer.moves && shorter.a + shorter.b * 2 > longer.a + longer.b * 2 && routeDifference(shorter, longer) >= 2) tradeoffPairs.push({ shorter, longer });
     }
   }
-  const hasDifferentUnderRoute = validRoutes.some(valid => underRoutes.some(under => routeDifference(valid, under) >= 4));
-  const hasDifferentOverRoute = validRoutes.some(valid => overRoutes.some(over => routeDifference(valid, over) >= 4));
+  const hasDifferentOverRoute = validRoutes.some(valid => overRoutes.some(over => routeDifference(valid, over) >= 2));
   return {
-    routes, validRoutes, underRoutes, overRoutes, tradeoffPairs, truncated,
+    routes, validRoutes, underRoutes, atLimitRoutes, overRoutes, tradeoffPairs, truncated,
     actionCounts: [...new Set(routes.map(route => route.actions))].sort((left, right) => left - right),
-    hasMeaningfulChoice: !truncated && routes.length >= 3 && tradeoffPairs.length > 0 && hasDifferentUnderRoute && hasDifferentOverRoute,
+    hasMeaningfulChoice: !truncated && routes.length >= 2 && hasDifferentOverRoute,
   };
 }
 
@@ -220,55 +220,56 @@ export function generateEncounterMaps({ count = 5, seed = "sakura", excluded = [
   const fingerprints = new Set(excluded.map(encounterFingerprint));
   const limitsSeen = new Set();
   const maps = [];
-  for (let attempt = 0; attempt < count * 500 && maps.length < count; attempt++) {
-    const cells = Array.from({ length: 7 }, () => Array(8).fill("#"));
-    const visited = new Set();
-    function carve(x, y) {
-      cells[y][x] = ".";
-      visited.add(`${x},${y}`);
-      for (const [dx, dy] of shuffle([[2, 0], [-2, 0], [0, 2], [0, -2]], random)) {
-        const nx = x + dx, ny = y + dy;
-        if (nx < 1 || nx > 5 || ny < 1 || ny > 5 || visited.has(`${nx},${ny}`)) continue;
-        cells[y + dy / 2][x + dx / 2] = ".";
-        carve(nx, ny);
-      }
+  const width = 5, height = 6;
+  for (let attempt = 0; attempt < count * 2000 && maps.length < count; attempt++) {
+    const cells = Array.from({ length: height }, () => Array(width).fill("#"));
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 0; x < width; x++) if (random() < 0.58) cells[y][x] = ".";
     }
-    carve(1 + 2 * Math.floor(random() * 3), 1);
-    // 给迷宫补足连接，再用真实到岸路径分析排除单通道与假分支。
-    const connectors = [[2, 1], [4, 1], [1, 2], [3, 2], [5, 2], [2, 3], [4, 3], [1, 4], [3, 4], [5, 4], [2, 5], [4, 5]];
-    const closed = connectors.filter(([x, y]) => cells[y][x] === "#");
-    for (const [x, y] of shuffle(closed, random).slice(0, 3 + Math.floor(random() * 2))) cells[y][x] = ".";
-    const startX = 1 + 2 * Math.floor(random() * 3), goalX = 1 + 2 * Math.floor(random() * 3);
-    cells[0][startX] = "S"; cells[6][goalX] = "G";
-    const map = { id: `random-${String(maps.length + 1).padStart(2, "0")}`, name: "随机浅湾", rows: cells.map(row => row.join("")), limits: { actions: 16 } };
+    const startX = Math.floor(random() * width), goalX = Math.floor(random() * width);
+    if (startX === goalX) continue;
+    cells[0][startX] = "S"; cells[1][startX] = ".";
+    cells[height - 1][goalX] = "G"; cells[height - 2][goalX] = ".";
+    const map = { id: `random-${String(maps.length + 1).padStart(2, "0")}`, name: "随机浅湾", rows: cells.map(row => row.join("")), limits: { actions: 10 } };
     const waterRoutes = analyzeEncounterChoices(map);
-    if (waterRoutes.truncated) continue;
+    if (waterRoutes.truncated || waterRoutes.routes.length < 3 || waterRoutes.routes.length > 4) continue;
     const witness = [...waterRoutes.routes].sort((left, right) => left.moves - right.moves)[0];
-    if (!witness || witness.moves < 8 || witness.moves > 14) continue;
+    if (!witness || witness.moves < 6 || witness.moves > 9) continue;
+    // 删除不能出现在任何完整路线里的岔路，避免用死路增加看图负担。
+    const usefulCells = new Set(waterRoutes.routes.flatMap(route => route.cells));
+    cells.forEach((row, y) => row.forEach((tile, x) => { if (!usefulCells.has(y * width + x)) cells[y][x] = "#"; }));
     const path = [];
     let x = startX, y = 0;
     for (const token of parseEncounterInput(witness.sequence)) {
       const [dx, dy] = DIRECTIONS[token.direction]; x += dx; y += dy;
       if (cells[y][x] === ".") path.push([x, y]);
     }
-    const obstacleCells = shuffle(path, random).slice(0, 2 + Math.floor(random() * 3));
+    const obstacleCells = shuffle(path, random).slice(0, 2 + Math.floor(random() * 2));
     obstacleCells.forEach(([px, py], index) => {
-      const type = index === 0 ? "A" : index === 1 ? "B" : random() < 0.5 ? "A" : "B";
+      const type = index === 0 ? "A" : random() < 0.5 ? "A" : "B";
       cells[py][px] = type;
     });
     const pathSet = new Set(path.map(([px, py]) => `${px},${py}`));
     const branches = [];
     cells.forEach((row, py) => row.forEach((type, px) => { if (type === "." && !pathSet.has(`${px},${py}`)) branches.push([px, py]); }));
-    for (const [px, py] of shuffle(branches, random).slice(0, 3 + Math.floor(random() * 3))) cells[py][px] = random() < 0.5 ? "A" : "B";
+    for (const [px, py] of shuffle(branches, random).slice(0, 1 + Math.floor(random() * 2))) cells[py][px] = random() < 0.5 ? "A" : "B";
+    if (!cells.some(row => row.includes("B"))) {
+      if (!branches.length) continue;
+      const [px, py] = branches[Math.floor(random() * branches.length)];
+      cells[py][px] = "B";
+    }
     map.rows = cells.map(row => row.join(""));
     const analysis = analyzeEncounterChoices(map);
     if (analysis.truncated || analysis.routes.length < 3 || !analysis.tradeoffPairs.length) continue;
-    // 指定中间的行动数，地图必须同时存在行动不足、恰好满足和超出要求的路线。
+    // 上限允许省下行动；保留少量可成功路线和至少一条超限路线。
     const candidates = new Map();
-    for (const actions of analysis.actionCounts) {
+    for (let actions = 9; actions <= 13; actions++) {
+      if ((count <= 5 && limitsSeen.has(actions)) ||
+          actions === (maps.at(-1) || excluded.at(-1))?.limits.actions) continue;
       const limits = { actions };
       const choices = summarizeChoices(analysis.routes, limits);
-      if (!choices.hasMeaningfulChoice || choices.validRoutes.some(route => route.moves < 8 || route.moves > 16 || route.a + route.b < 1)) continue;
+      if (!choices.hasMeaningfulChoice || !choices.underRoutes.length || choices.validRoutes.length > 2 ||
+          choices.validRoutes.some(route => route.moves < 6 || route.moves > 9 || route.a + route.b < 2 || route.a + route.b > 3)) continue;
       candidates.set(actions, limits);
     }
     if (!candidates.size) continue;
