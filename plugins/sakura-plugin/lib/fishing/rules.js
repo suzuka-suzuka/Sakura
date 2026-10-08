@@ -37,15 +37,18 @@ export const WEATHER_CONFIG = Object.freeze({
   }),
 });
 
+// 每个后续钓点都要求上一钓点专属图鉴成功收录 15 种，通用鱼不计入。
+export const FISHING_LOCATION_UNLOCK_COUNT = 15;
+
 // 钓点只筛选物种池并控制解锁顺序，不承担强度分层；未填 locations 的鱼视为全钓点通用。
 // 渔获强度由鱼自身稀有度与数值决定，同稀有度不会因钓点而获得额外倍率。
 export const FISHING_LOCATIONS = Object.freeze({
-  pond: Object.freeze({ name: "樱花池塘", emoji: "🌸", unlockLevel: 1, description: "飘着花瓣的新手鱼塘，波光里透着家的味道。" }),
-  river: Object.freeze({ name: "青柳河湾", emoji: "🍃", unlockLevel: 3, description: "垂柳掩映的湍急河湾，洄游鱼的必经之路。" }),
-  lake: Object.freeze({ name: "雾隐湖", emoji: "🌫️", unlockLevel: 5, description: "常年被浓雾笼罩的幽静湖泊，湖底似乎藏着古老的东西。" }),
-  coast: Object.freeze({ name: "落日海岸", emoji: "🌅", unlockLevel: 8, description: "夕阳染红的浅海海岸，浪花里翻涌着热带的气息。" }),
-  abyss: Object.freeze({ name: "深渊海沟", emoji: "🌀", unlockLevel: 12, description: "阳光到不了的深海裂谷，巨物与怪鱼的领域。" }),
-  mystic: Object.freeze({ name: "星辉秘境", emoji: "✨", unlockLevel: 16, description: "现实之外的幻想水域，星光落进水里就活了过来。" }),
+  pond: Object.freeze({ name: "樱花池塘", emoji: "🌸", unlockLocation: null, description: "飘着花瓣的新手鱼塘，波光里透着家的味道。" }),
+  river: Object.freeze({ name: "青柳河湾", emoji: "🍃", unlockLocation: "pond", description: "垂柳掩映的湍急河湾，洄游鱼的必经之路。" }),
+  lake: Object.freeze({ name: "雾隐湖", emoji: "🌫️", unlockLocation: "river", description: "常年被浓雾笼罩的幽静湖泊，湖底似乎藏着古老的东西。" }),
+  coast: Object.freeze({ name: "落日海岸", emoji: "🌅", unlockLocation: "lake", description: "夕阳染红的浅海海岸，浪花里翻涌着热带的气息。" }),
+  abyss: Object.freeze({ name: "深渊海沟", emoji: "🌀", unlockLocation: "coast", description: "阳光到不了的深海裂谷，巨物与怪鱼的领域。" }),
+  mystic: Object.freeze({ name: "星辉秘境", emoji: "✨", unlockLocation: "abyss", description: "现实之外的幻想水域，星光落进水里就活了过来。" }),
 });
 
 export const DEFAULT_FISHING_LOCATION = "pond";

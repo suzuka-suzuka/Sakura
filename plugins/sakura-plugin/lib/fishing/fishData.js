@@ -14,7 +14,7 @@ try {
     throw new Error(validationErrors.slice(0, 5).join("；"));
   }
 } catch (err) {
-  logger.error(`[钓鱼] 加载鱼类数据失败: ${err.message}`);
+  globalThis.logger?.error?.(`[钓鱼] 加载鱼类数据失败: ${err.message}`);
   fishData = [];
 }
 
@@ -33,4 +33,13 @@ export function getFishIdSet() {
 export function getLocationExclusiveFish(locationId) {
   if (!locationId) return [];
   return fishData.filter((fish) => fish.locations?.includes(locationId));
+}
+
+// 开图与图鉴奖励共用口径：只认成功收录的专属条目，跨钓点鱼计入各自图鉴。
+export function getLocationDexProgress(locationId, collectedIds) {
+  const exclusiveFish = getLocationExclusiveFish(locationId);
+  return {
+    collected: exclusiveFish.filter((fish) => collectedIds.has(fish.id)).length,
+    total: exclusiveFish.length,
+  };
 }

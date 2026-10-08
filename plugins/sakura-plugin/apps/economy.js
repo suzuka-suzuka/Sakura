@@ -35,7 +35,6 @@ import {
   RARITY_CONFIG,
   getBrideMarkLayers,
 } from "../lib/fishing/rules.js";
-import { getLocationExclusiveFish } from "../lib/fishing/fishData.js";
 import _ from "lodash";
 import Setting from "../lib/setting.js";
 
@@ -624,24 +623,7 @@ export default class Economy extends plugin {
 
   // 钓点图鉴进度只统计该钓点专属鱼，和「#钓鱼图鉴 <钓点>」的口径保持一致
   buildDexLocationProgress(e, locationIds) {
-    const fishingManager = new FishingManager(e.group_id);
-    const collectedIds = new Set(
-      fishingManager
-        .getUserCatchHistory(e.user_id)
-        .filter((row) => row.successCount > 0)
-        .map((row) => row.fishId),
-    );
-
-    return locationIds.map((locationId) => {
-      const exclusiveFish = getLocationExclusiveFish(locationId);
-      return {
-        locationId,
-        locationName: FISHING_LOCATIONS[locationId]?.name || locationId,
-        emoji: FISHING_LOCATIONS[locationId]?.emoji || "🎣",
-        collected: exclusiveFish.filter((fish) => collectedIds.has(fish.id)).length,
-        total: exclusiveFish.length,
-      };
-    });
+    return new FishingManager(e.group_id).getLocationDexProgress(e.user_id, locationIds);
   }
 
   dexLocationReward = Command(/^#?领取图鉴奖励\s*(.*)$/, async (e) => {

@@ -7,6 +7,7 @@ import { buildEncounterGuideHtml, FISHING_ENCOUNTER_GUIDE_FILE } from "../lib/fi
 import { closeFishingEncounterBrowser, getEncounterFontData, renderFishingHtml } from "../lib/fishing/encounterImages.js";
 import {
   FISHING_LOCATIONS,
+  FISHING_LOCATION_UNLOCK_COUNT,
   GHOST_DEBT_INTEREST_RATE,
   GHOST_DEBT_MARK_PENALTY_RATE,
   GHOST_DEBT_WRITE_OFF_THRESHOLD,
@@ -1463,8 +1464,8 @@ async function generateUnlockGuide() {
 
   drawHeader(
     ctx,
-    "钓点解锁等级",
-    "提升钓鱼等级，依次开放六片水域",
+    "钓点解锁条件",
+    `上一钓点专属图鉴收录 ${FISHING_LOCATION_UNLOCK_COUNT} 种，开放下一片水域`,
     { tag: "解锁篇", accent: PALETTE.green },
   );
   drawSectionTitle(ctx, "水域开放路线", 96, 294, WIDTH - 192, {
@@ -1491,7 +1492,11 @@ async function generateUnlockGuide() {
       background: `${accent}16`,
       inset: 5,
     });
-    drawPill(ctx, `Lv.${location.unlockLevel} 解锁`, x + 218, y + 44, {
+    const previousLocation = FISHING_LOCATIONS[location.unlockLocation];
+    const unlockText = previousLocation
+      ? `${previousLocation.name}图鉴 ${FISHING_LOCATION_UNLOCK_COUNT} 种`
+      : "初始开放";
+    drawPill(ctx, unlockText, x + 218, y + 44, {
       fontSize: 23,
       height: 46,
       fill: `${accent}1C`,
@@ -1505,6 +1510,9 @@ async function generateUnlockGuide() {
       lineHeight: 37,
       color: PALETTE.secondary,
       maxLines: 3,
+    });
+    drawTextBlock(ctx, previousLocation ? "仅专属条目 · 含跨钓点鱼 · 不含通用鱼" : "无需等级或图鉴门槛", x + 218, y + 185, cardWidth - 250, {
+      fontSize: 20, lineHeight: 28, color: PALETTE.secondary, maxLines: 2,
     });
     const localCount = getLocationFish(locationId).length;
     drawPill(ctx, `地点图鉴 ${localCount} 种`, x + 32, y + 353, {
@@ -1731,6 +1739,8 @@ async function generateEncounterGuide() {
 }
 
 const encounterOnly = process.argv.includes("--encounter-only");
+const unlocksOnly = process.argv.includes("--unlocks-only");
+if (encounterOnly && unlocksOnly) throw new Error("--encounter-only 与 --unlocks-only 不能同时使用");
 const obsoleteGuideImages = [
   "02-fish-location.jpg",
   "03-weather-multipliers.jpg",
@@ -1740,7 +1750,7 @@ const obsoleteGuideImages = [
   "07-location-unlocks.jpg",
   "08-dex-level-rewards.jpg",
 ];
-for (const filename of encounterOnly ? [] : obsoleteGuideImages) {
+for (const filename of encounterOnly || unlocksOnly ? [] : obsoleteGuideImages) {
   const obsoletePath = path.join(guideRoot, filename);
   if (!fs.existsSync(obsoletePath)) continue;
   fs.rmSync(obsoletePath);
@@ -1748,13 +1758,17 @@ for (const filename of encounterOnly ? [] : obsoleteGuideImages) {
 }
 
 const outputs = [];
-if (!encounterOnly) {
+if (unlocksOnly) {
+  outputs.push(await generateUnlockGuide());
+} else if (!encounterOnly) {
 outputs.push(await generateTimeGuide());
 outputs.push(await generateLocationWeatherGuide());
 outputs.push(await generateUnlockGuide());
 outputs.push(await generateRewardsGuide());
 }
-try { outputs.push(await generateEncounterGuide()); }
-finally { await closeFishingEncounterBrowser(); }
+if (!unlocksOnly) {
+  try { outputs.push(await generateEncounterGuide()); }
+  finally { await closeFishingEncounterBrowser(); }
+}
 
 console.log(`done: ${outputs.length} fishing guide images`);

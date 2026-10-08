@@ -1,4 +1,4 @@
-import { assertEncounterMap } from "./encounter.js";
+import { assertEncounterMap, ENCOUNTER_FULL_REWARD_MS } from "./encounter.js";
 
 const grass = `<ellipse cx="60" cy="77" rx="39" ry="24" fill="#78ab77" opacity=".32"/>
 <path d="M29 85 Q17 59 25 39 Q42 62 37 87 M44 86 Q31 43 42 23 Q55 44 53 85 M58 89 Q55 53 68 29 Q76 65 69 87 M72 87 Q76 54 94 41 Q95 72 83 90" fill="#4f916d"/>
@@ -45,13 +45,19 @@ export function buildEncounterHtml(map, { fontData = "" } = {}) {
   const cells = map.rows.flatMap((row, y) => [...row].map((type, x) =>
     `<g transform="translate(${x * 120} ${y * 120})">${tileBackground(x, y, type)}${overlays[type] || ""}</g>`)).join("");
   const embeddedFont = fontData ? `@font-face{font-family:Encounter;src:url(data:font/ttf;base64,${fontData}) format('truetype')}` : "";
-  // 图片只含地图与行动上限，不写规则、奖励、时限、关卡标题或答案。
+  // 地图下方仅补充按键与双倍奖励提示，不展示关卡答案。
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>
 ${embeddedFont}
 *{box-sizing:border-box}body{margin:0;background:#f6f6eb;color:#325b4d;font-family:Encounter,'Microsoft YaHei',sans-serif}
 .card{width:900px;padding:16px;background:#f6f6eb}.map{display:block;width:100%;height:auto;border:7px solid #a4c8b4;border-radius:20px;background:#93c6c4;overflow:hidden}
 .limits{display:flex;justify-content:center;padding:20px 20px 9px;font-size:36px;line-height:1.35;font-weight:700}
 .limit{display:flex;align-items:center;justify-content:center;gap:14px;white-space:nowrap}.count{color:#325b4d;font-size:40px}
+.controls{margin-top:10px;padding:14px 8px 4px;border-top:2px solid #d4dfcf;text-align:center;font-size:25px;line-height:1.5}
+.directions,.abilities{display:flex;justify-content:center;align-items:center;gap:30px;white-space:nowrap}.directions{margin-bottom:8px}.directions span{display:flex;align-items:center;gap:9px}
+kbd{display:inline-block;min-width:34px;padding:0 8px;border:2px solid #a4c8b4;border-radius:7px;background:#fffdf3;font:700 25px/1.4 'Microsoft YaHei',sans-serif}.abilities{gap:32px;font-size:23px}.reward{margin-top:12px;color:#477c50;font-size:28px;font-weight:700}
 </style></head><body><main class="card"><svg class="map" viewBox="0 0 ${width * 120} ${height * 120 + 90}" role="img" aria-label="钓鱼水路">${cells}${shore(width, height, goal[0])}</svg>
-<div class="limits"><div class="limit">行动 ≤ <span class="count">${map.limits.actions}</span></div></div></main></body></html>`;
+<div class="limits"><div class="limit">行动 ≤ <span class="count">${map.limits.actions}</span></div></div>
+<div class="controls"><div class="directions"><span>上 <kbd>s</kbd></span><span>下 <kbd>x</kbd></span><span>左 <kbd>z</kbd></span><span>右 <kbd>y</kbd></span></div>
+<div class="abilities"><span><kbd>A</kbd>＋方向：水草（2行动）</span><span><kbd>B</kbd>＋方向：漂木（3行动）</span></div>
+<div class="reward">${ENCOUNTER_FULL_REWARD_MS / 1000}秒内通过，双倍奖励</div></div></main></body></html>`;
 }

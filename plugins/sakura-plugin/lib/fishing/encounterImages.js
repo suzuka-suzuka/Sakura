@@ -40,7 +40,7 @@ export async function renderFishingHtml(html, { selector = ".card", width = 900,
     const work = (async () => {
       await page.setContent(html, { waitUntil: "domcontentloaded", timeout: 20_000 });
       await page.evaluate(() => document.fonts.ready);
-      const overflow = await page.evaluate(selector => [...document.querySelectorAll(`${selector},.limits,.limit`)].some(element => element.scrollWidth > element.clientWidth), selector);
+      const overflow = await page.evaluate(selector => [...document.querySelectorAll(`${selector},.limits,.limit,.directions,.abilities,.reward`)].some(element => element.scrollWidth > element.clientWidth), selector);
       if (overflow) throw new Error("钓鱼图片文字超出布局");
       const element = await page.$(selector);
       if (!element) throw new Error(`钓鱼截图节点不存在：${selector}`);

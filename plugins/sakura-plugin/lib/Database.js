@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { plugindata } from './path.js';
 import { clearLegacyRodControlLoss } from '../scripts/clear-legacy-rod-control-loss.mjs';
+import { resetFishingLocationsOnce } from '../scripts/reset-fishing-locations.mjs';
 
 const KOI_WISH_ITEM_ID = 'item_sign_koi';
 const LEGACY_KOI_WISH_INVENTORY_ITEMS = Object.freeze([
@@ -170,6 +171,14 @@ class DB {
         max_weight REAL DEFAULT 0,
         shiny_count INTEGER DEFAULT 0,
         PRIMARY KEY (group_id, user_id, fish_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS fishing_location_unlocks (
+        group_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        location TEXT NOT NULL,
+        unlocked_at INTEGER NOT NULL,
+        PRIMARY KEY (group_id, user_id, location)
       );
 
       CREATE TABLE IF NOT EXISTS fishing_attempts (
@@ -341,6 +350,14 @@ class DB {
 
     if (!fishingStatsColumns.some((column) => column.name === 'location')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN location TEXT');
+    }
+
+    // 图鉴开图改版：只在首次启动时将所有玩家送回樱花池塘。
+    const locationReset = resetFishingLocationsOnce(this.db);
+    if (!locationReset.skipped) {
+      globalThis.logger?.info?.(
+        `[钓鱼] 图鉴开图迁移完成：已将 ${locationReset.affected} 条玩家地点记录重置为樱花池塘`,
+      );
     }
 
     // 旧暗伤不折算成耐久，启动时直接删除整列及其数据。

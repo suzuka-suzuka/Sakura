@@ -153,7 +153,7 @@ function getDexProgress(fishingManager, userId, settleResult) {
 }
 
 // 渔获消息统一尾部：完美收竿提示 + 经验数值 + 升级提示 + 图鉴新收录提示
-function formatCatchTail(expGain, isPerfect, settleResult, dexProgress, encounterResult) {
+function formatCatchTail(expGain, isPerfect, settleResult, dexProgress) {
   const perfectMsg = isPerfect ? `\n⚡ 完美收竿！经验×${PERFECT_EXP_MULTIPLIER}！` : "";
   const levelUp = settleResult?.levelUp;
   const levelUpMsg = levelUp ? `\n🎉 钓鱼等级提升至 Lv.${levelUp.to}` : "";
@@ -164,10 +164,16 @@ function formatCatchTail(expGain, isPerfect, settleResult, dexProgress, encounte
     ? `\n📖 图鉴新收录！(${dexProgress.collected}/${dexProgress.total})`
     : "";
   const shinyDexMsg = settleResult?.newlyShiny ? `\n🌈 图鉴异色标记点亮！` : "";
-  const encounterMsg = encounterResult?.success
-    ? `\n🌊 水路遭遇成功！用时 ${(encounterResult.elapsedMs / 1000).toFixed(1)} 秒，奖励 ×${Number(encounterResult.multiplier.toFixed(3))}`
-    : "";
-  return `${perfectMsg}${encounterMsg}\n✨ 经验：+${expGain}${levelUpMsg}${staminaResetMsg}${dexMsg}${shinyDexMsg}`;
+  return `${perfectMsg}\n✨ 经验：+${expGain}${levelUpMsg}${staminaResetMsg}${dexMsg}${shinyDexMsg}`;
+}
+
+function formatEncounterSuccess(encounterResult, { coins = true } = {}) {
+  if (!encounterResult?.success) return "";
+  const multiplier = Number(encounterResult.multiplier.toFixed(3));
+  const rewards = coins
+    ? `樱花币×${multiplier}，经验×${multiplier}`
+    : `经验×${multiplier}（仅经验加成）`;
+  return `🌊 水路遭遇成功！用时 ${(encounterResult.elapsedMs / 1000).toFixed(1)} 秒，${rewards}\n`;
 }
 
 // 异色个体逃走时的专属惋惜提示
@@ -352,7 +358,7 @@ function getFishImagePath(fishId) {
 const FISHING_GUIDE_IMAGES = Object.freeze([
   Object.freeze({ title: "① 限定出没时间总览", filename: "01-fish-time.jpg" }),
   Object.freeze({ title: "② 限定出没地点与天气", filename: "02-fish-location-weather.jpg" }),
-  Object.freeze({ title: "③ 钓点解锁等级", filename: "03-location-unlocks.jpg" }),
+  Object.freeze({ title: "③ 钓点解锁条件", filename: "03-location-unlocks.jpg" }),
   Object.freeze({ title: "④ 图鉴与等级奖励", filename: "04-dex-level-rewards.jpg" }),
   Object.freeze({ title: "⑤ 水路遭遇玩法", filename: FISHING_ENCOUNTER_GUIDE_FILE }),
 ]);
@@ -1668,11 +1674,11 @@ export default class Fishing extends plugin {
     try {
       const { map, image } = await createFishingEncounterImage();
       if (fishingSessions.get(stateKey) !== state || state.settled) return false;
-      await e.reply("🌊 水路遭遇！鱼钻进了复杂的水道，请按接下来的地图把它引到终点。\n⏱️ 图片发出后有 60 秒，在行动上限内发送完整操作串，只有一次作答机会。\n📖 玩法见「#钓鱼攻略」。");
+      await e.reply("🌊 水路遭遇！鱼钻进了复杂的水道，请按接下来的地图把它引到终点。\n⏱️ 图片发出后有 60 秒，在行动上限内发送完整操作串，只有一次作答机会。");
       if (fishingSessions.get(stateKey) !== state || state.settled) return false;
       state.encounter = { map, attempt: null, inputReceived: false, pendingInput: null };
       state.phase = FISHING_PHASE.encounter;
-      // 图上只有地图和行动上限；提醒发出后再发图，取得图片发送回执后才开始 60 秒计时。
+      // 提醒发出后再发图，取得图片发送回执后才开始 60 秒计时。
       const receipt = await e.reply(segment.image(image));
       if (!receipt || receipt.status === "failed" || (receipt.retcode != null && Number(receipt.retcode) !== 0)) {
         throw new Error("遭遇图片发送未成功");
@@ -2017,6 +2023,9 @@ export default class Fishing extends plugin {
     // 噩梦和宝藏也触发遭遇，但只增加经验；首领不会触发。
     const encounterMultiplier = !bossVictory && state.encounterResult?.success ? state.encounterResult.multiplier : 1;
     expGain = applyEncounterReward(expGain, encounterMultiplier);
+    const encounterMsg = bossVictory ? "" : formatEncounterSuccess(state.encounterResult, {
+      coins: fish.rarity !== "噩梦" && fish.rarity !== "宝藏" && !fish.isTreasure,
+    });
     const weatherTag = Array.isArray(fish.weather) && fish.weather.length > 0
       ? `（${fish.weather.map((name) => `${WEATHER_CONFIG[name]?.emoji || ""}${name}`).join("/")}限定）`
       : "";
@@ -2079,6 +2088,7 @@ export default class Fishing extends plugin {
           fishImageSegment,
           `📝 ${fish.description}\n`,
           `📊 稀有度：${rarity.color}${fish.rarity}${weatherTag}\n`,
+          encounterMsg,
           lineResultMsg,
           // 高利贷结算段自带尾换行、formatCatchTail 自带首换行，若无结算段直接相接会多出空行。
           punishmentMsg +
@@ -2086,7 +2096,7 @@ export default class Fishing extends plugin {
               const ghostSettle = formatGhostDebtSettlement(settleResult).replace(/\n+$/, "");
               return ghostSettle ? "\n" + ghostSettle : "";
             })() +
-            formatCatchTail(expGain, isPerfect, settleResult, dexProgress, state.encounterResult),
+            formatCatchTail(expGain, isPerfect, settleResult, dexProgress),
         ]);
         return true;
       }
@@ -2109,7 +2119,8 @@ export default class Fishing extends plugin {
           `📝 ${fish.description}\n`,
           `📊 稀有度：${rarity.color}${fish.rarity}${weatherTag}\n`,
           `📈 熟练度：${newMastery}\n`,
-          `🗝️ 宝箱已放入背包，发送「#开宝箱」开启它！${formatCatchTail(expGain, isPerfect, addResult, dexProgress, state.encounterResult)}`,
+          encounterMsg,
+          `🗝️ 宝箱已放入背包，发送「#开宝箱」开启它！${formatCatchTail(expGain, isPerfect, addResult, dexProgress)}`,
         ]);
         return true;
       }
@@ -2211,10 +2222,11 @@ export default class Fishing extends plugin {
         buffMsg,
         merchantMsg,
         shinyMsg,
+        encounterMsg,
         bossRewardMsg,
         debtPenaltyMsg,
         debtMsg,
-        `${earningsMsg}${formatCatchTail(expGain, isPerfect, settleResult, dexProgress, state.encounterResult)}`,
+        `${earningsMsg}${formatCatchTail(expGain, isPerfect, settleResult, dexProgress)}`,
       ];
       await e.reply(resultMsg);
       return true;
@@ -2302,7 +2314,7 @@ export default class Fishing extends plugin {
           news: [
             { text: "⏰ 限定出没时间" },
             { text: "📍 限定出没地点与天气" },
-            { text: "🗺️ 钓点解锁等级" },
+            { text: "🗺️ 钓点解锁条件" },
             { text: "🎁 图鉴与等级奖励" },
             { text: "🌊 水路遭遇玩法" },
           ],
@@ -2344,22 +2356,25 @@ export default class Fishing extends plugin {
     if (!this.checkWhitelist(e)) return false;
     const fishingManager = new FishingManager(e.group_id);
     const currentId = fishingManager.getFishingLocation(e.user_id);
-    const fishingLevel = fishingManager.getUserFishingLevel(e.user_id);
+    const unlocks = new Map(fishingManager.getFishingLocationUnlocks(e.user_id)
+      .map((entry) => [entry.locationId, entry]));
 
     const lines = Object.entries(FISHING_LOCATIONS).map(([id, config]) => {
       const currentMark = id === currentId ? "（当前）" : "";
-      const lockMark = fishingLevel < config.unlockLevel
-        ? ` 🔒 Lv.${config.unlockLevel} 解锁`
-        : "";
+      const status = unlocks.get(id);
+      const lockMark = status.unlocked ? " ✅ 已解锁" : " 🔒 未解锁";
+      const requirement = status.requiredLocationId
+        ? `\n   收录【${FISHING_LOCATIONS[status.requiredLocationId].name}】专属图鉴 ${status.required} 种（当前 ${status.collected}/${status.required}）`
+        : "\n   初始开放";
       return `${config.emoji}【${config.name}】${currentMark}${lockMark}\n` +
-        `   ${config.description}`;
+        `   ${config.description}${requirement}`;
     });
 
     await e.reply(
       `🗺️ 钓点一览\n━━━━━━━━━━━━━━━━\n` +
       lines.join("\n") +
       `\n━━━━━━━━━━━━━━━━\n` +
-      `🎓 当前钓鱼等级：Lv.${fishingLevel}\n` +
+      `📖 专属图鉴含跨钓点鱼，不含全钓点通用鱼；只计成功收录的不同种类。\n` +
       `📝 发送「#前往钓点 钓点名」切换`
     );
     return true;
@@ -2385,12 +2400,14 @@ export default class Fishing extends plugin {
       return true;
     }
 
-    const fishingLevel = fishingManager.getUserFishingLevel(e.user_id);
-    if (fishingLevel < locationConfig.unlockLevel) {
+    const unlockStatus = fishingManager.getFishingLocationUnlockStatus(e.user_id, locationId);
+    if (!unlockStatus.unlocked) {
+      const requiredLocation = FISHING_LOCATIONS[unlockStatus.requiredLocationId];
       await e.reply(
         `🔒 ${locationConfig.emoji}【${locationConfig.name}】尚未解锁\n` +
-        `需要钓鱼等级 Lv.${locationConfig.unlockLevel}，当前 Lv.${fishingLevel}\n` +
-        `继续钓鱼提升等级吧~`,
+        `需要【${requiredLocation.name}】专属图鉴收录 ${unlockStatus.required} 种，当前 ${unlockStatus.collected}/${unlockStatus.required}\n` +
+        `还差 ${unlockStatus.required - unlockStatus.collected} 种；通用鱼不计入。\n` +
+        `发送「#钓鱼图鉴 ${requiredLocation.name}」查看缺失条目。`,
         10
       );
       return true;
@@ -2402,7 +2419,10 @@ export default class Fishing extends plugin {
       return true;
     }
 
-    fishingManager.setFishingLocation(e.user_id, locationId);
+    if (!fishingManager.setFishingLocation(e.user_id, locationId)) {
+      await e.reply("钓点尚未解锁，请发送「#钓点」查看专属图鉴进度。", 10);
+      return true;
+    }
     await e.reply(
       `🚶 收拾好装备，来到了${locationConfig.emoji}【${locationConfig.name}】\n` +
       `${locationConfig.description}\n` +

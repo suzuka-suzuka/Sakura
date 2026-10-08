@@ -130,6 +130,7 @@ test("毕业装备真实收竿入口必须先完成遭遇，旧计时器停止",
     const state = h.create(ordinary, { hasLucky, waitingTimer: timerIds[0], totalTimer: timerIds[1], confirmTimer: timerIds[2], fishStateTimer: timerIds[3], bossAttackTimer: timerIds[4] });
     await h.instance.handleFishing(h.e);
     assert.equal(state.phase, session.FISHING_PHASE.encounter);
+    assert.doesNotMatch(h.calls.replies[0][0], /玩法见|#钓鱼攻略/);
     assert.equal(h.calls.settlements.length, 0);
     assert.equal(h.calls.generated, 1);
     assert.ok(h.calls.contexts.some(args => args[2] === 65 && args[3] === true), "出图后必须刷新旧会话时限");
@@ -140,6 +141,10 @@ test("毕业装备真实收竿入口必须先完成遭遇，旧计时器停止",
     assert.equal(h.calls.settlements.length, 1);
     assert.equal(h.calls.settlements[0].earnings, 200);
     assert.equal(h.calls.settlements[0].expGain, 20);
+    const message = h.calls.replies.at(-1)[0].join("");
+    assert.match(message, /水路遭遇成功！用时 30\.0 秒，樱花币×2，经验×2/);
+    assert.ok(message.indexOf("水路遭遇成功") < message.indexOf("💰 价值"));
+    assert.equal(message.match(/水路遭遇成功/g).length, 1);
     assert.equal(h.calls.cooldown, 1);
     assert.equal(h.timers.size, 0);
     assert.equal(h.sessions.get(h.key), null);
@@ -154,6 +159,10 @@ test("45 秒与临近 60 秒按线性倍率结算整数金币和经验，其他�
     await h.answer(h.correct(), elapsed);
     assert.equal(h.calls.settlements[0].earnings, earnings);
     assert.equal(h.calls.settlements[0].expGain, expGain);
+    const message = h.calls.replies.at(-1)[0].join("");
+    const multiplier = elapsed === 45_000 ? "1.5" : "1";
+    assert.ok(message.includes(`樱花币×${multiplier}，经验×${multiplier}`));
+    assert.ok(message.indexOf("水路遭遇成功") < message.indexOf("💰 价值"));
   }
   const h = await harness();
   const state = h.create(ordinary, { biteTime: h.clock.now, hasMonsterBait: true, hasDoubleCoin: true, environment: { expMultiplier: 2, priceMultiplier: 2 } });
@@ -214,6 +223,11 @@ test("噩梦与宝藏只增加经验，答错时不执行噩梦效果和宝箱�
       assert.equal(result.method, fish.rarity === "宝藏" && success ? "inventory" : "attempt");
       assert.equal(h.calls.effects, fish.rarity === "噩梦" && success ? 1 : 0);
       assert.equal(h.calls.breaks, fish.rarity === "噩梦" && success ? 1 : 0);
+      if (success) {
+        const message = h.calls.replies.at(-1)[0].join("");
+        assert.match(message, /经验×2（仅经验加成）/);
+        assert.doesNotMatch(message, /樱花币×2/);
+      }
     }
   }
 });

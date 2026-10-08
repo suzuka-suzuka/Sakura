@@ -7,6 +7,7 @@ import {
   getBlindReelHitRate,
   FISHING_BENEFIT_DURATION_SECONDS,
   FISHING_LOCATIONS,
+  FISHING_LOCATION_UNLOCK_COUNT,
   FISHING_STAMINA_COST,
   FISHING_STAMINA_MAX,
   FISHING_STAMINA_RECOVERY_MS,
@@ -19,6 +20,7 @@ import {
   TORPEDO_ARM_DURATION_MS,
   TORPEDO_PRICE_BOOST_MULTIPLIER,
 } from "../fishing/rules.js";
+import { getLocationDexProgress } from "../fishing/fishData.js";
 
 export default class FishingManager {
   constructor(groupId) {
@@ -120,9 +122,55 @@ export default class FishingManager {
     return normalizeFishingLocation(userData.location);
   }
 
+  getLocationDexProgress(userId, locationIds = Object.keys(FISHING_LOCATIONS)) {
+    const collectedIds = new Set(
+      this.getUserCatchHistory(userId)
+        .filter((row) => row.successCount > 0)
+        .map((row) => row.fishId),
+    );
+    return locationIds.map((locationId) => ({
+      locationId,
+      locationName: FISHING_LOCATIONS[locationId]?.name || locationId,
+      emoji: FISHING_LOCATIONS[locationId]?.emoji || "🎣",
+      ...getLocationDexProgress(locationId, collectedIds),
+    }));
+  }
+
+  getFishingLocationUnlocks(userId) {
+    userId = String(userId);
+    const progress = new Map(this.getLocationDexProgress(userId)
+      .map((entry) => [entry.locationId, entry.collected]));
+    const unlockedLocations = new Set(db.prepare(
+      'SELECT location FROM fishing_location_unlocks WHERE group_id = ? AND user_id = ?',
+    ).all(this.groupId, userId).map((row) => row.location));
+    const recordUnlock = db.prepare(
+      'INSERT OR IGNORE INTO fishing_location_unlocks (group_id, user_id, location, unlocked_at) VALUES (?, ?, ?, ?)',
+    );
+    return Object.entries(FISHING_LOCATIONS).map(([locationId, config]) => {
+      const requiredLocationId = config.unlockLocation;
+      const required = requiredLocationId ? FISHING_LOCATION_UNLOCK_COUNT : 0;
+      const collected = progress.get(requiredLocationId) || 0;
+      const reached = collected >= required;
+      // 达标后永久保留资格，后续增删鱼种不会重新锁图。
+      if (requiredLocationId && reached && !unlockedLocations.has(locationId)) {
+        recordUnlock.run(this.groupId, userId, locationId, Date.now());
+      }
+      return {
+        locationId, requiredLocationId, required, collected,
+        unlocked: reached || unlockedLocations.has(locationId),
+      };
+    });
+  }
+
+  getFishingLocationUnlockStatus(userId, locationId) {
+    if (!FISHING_LOCATIONS[locationId]) return null;
+    return this.getFishingLocationUnlocks(userId)
+      .find((entry) => entry.locationId === locationId);
+  }
+
   setFishingLocation(userId, locationId) {
     userId = String(userId);
-    if (!FISHING_LOCATIONS[locationId]) return false;
+    if (!this.getFishingLocationUnlockStatus(userId, locationId)?.unlocked) return false;
     this._ensureUser(userId);
     db.prepare('UPDATE fishing_stats SET location = ? WHERE group_id = ? AND user_id = ?')
       .run(locationId, this.groupId, userId);

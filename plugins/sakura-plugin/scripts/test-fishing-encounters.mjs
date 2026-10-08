@@ -122,10 +122,16 @@ test("种子可重现，1250 张随机地图都有路线取舍，布局和小批
   }
 });
 
-test("资源图没有标题、时限、奖励、输入教学或解法", () => {
+test("资源图包含简短按键与双倍奖励提示，不展示解法", () => {
   const html = buildEncounterHtml(fixture);
   assert.ok(html.includes('行动 ≤ <span class="count">9</span>'));
-  for (const unwanted of ["倒计时", "奖励", "测试上限", "A＋方向", "一条消息", "浅湾脱困", "行动 =", " 步", "×", 'class="key"', answer]) assert.equal(html.includes(unwanted), false);
+  for (const [direction, key] of [["上", "s"], ["下", "x"], ["左", "z"], ["右", "y"]]) {
+    assert.ok(html.includes(`${direction} <kbd>${key}</kbd>`));
+  }
+  assert.ok(html.includes("<kbd>A</kbd>＋方向：水草（2行动）"));
+  assert.ok(html.includes("<kbd>B</kbd>＋方向：漂木（3行动）"));
+  assert.ok(html.includes("30秒内通过，双倍奖励"));
+  for (const unwanted of ["倒计时", "测试上限", "一条消息", "浅湾脱困", "行动 =", " 步", answer]) assert.equal(html.includes(unwanted), false);
 });
 
 test("逐场生成排除近期布局，并避免行动数连续相同", () => {
