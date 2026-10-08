@@ -89,12 +89,11 @@ class PluginConfigManager {
             return { success: false, errors: [{ message: `Schema not found: ${pluginName}/${moduleName}` }] };
         }
 
-        const migratedData = this._applyConfigInputMigration(schema, newData);
-        const result = schema.safeParse(migratedData);
+        const result = schema.safeParse(newData);
         if (!result.success) {
             return { success: false, errors: result.error.issues };
         }
-        const unusedPaths = this._findUnusedConfigPaths(migratedData, result.data);
+        const unusedPaths = this._findUnusedConfigPaths(newData, result.data);
         if (unusedPaths.length > 0) {
             logger.warn(`[插件配置] 保存 ${pluginName}/${moduleName} 时自动移除未定义或已废弃的配置项`);
             for (const pathParts of unusedPaths) {
@@ -207,10 +206,6 @@ class PluginConfigManager {
         return path.join(this._getScopeDir(pluginName, selfId), `${moduleName}.yaml`);
     }
 
-    _getLegacyConfigFilePath(pluginName, moduleName) {
-        return path.join(this._getPluginDir(pluginName), `${moduleName}.yaml`);
-    }
-
     _ensureScopeLoaded(pluginName, selfId) {
         const schemaMap = this.schemas[pluginName];
         if (!schemaMap) return null;
@@ -239,9 +234,9 @@ class PluginConfigManager {
 
         let nextConfig = null;
         if (selfId != null) {
-            const legacyFile = this._getLegacyConfigFilePath(pluginName, moduleName);
-            if (fs.existsSync(legacyFile)) {
-                nextConfig = this._readAndNormalizeModule(schema, legacyFile);
+            const defaultFile = this._getConfigFilePath(pluginName, moduleName, null);
+            if (fs.existsSync(defaultFile)) {
+                nextConfig = this._readAndNormalizeModule(schema, defaultFile);
             }
         }
 
@@ -282,25 +277,11 @@ class PluginConfigManager {
         this.configs[pluginName][scopeKey][moduleName] = nextConfig;
     }
 
-    _applyConfigInputMigration(schema, rawData) {
-        let migratedRawData = rawData;
-        if (typeof schema?.configInputMigration === 'function') {
-            try {
-                migratedRawData = schema.configInputMigration(rawData);
-            } catch (error) {
-                logger.warn(`[插件配置] 配置输入迁移失败，继续使用原始数据: ${error.message}`);
-            }
-        }
-        return migratedRawData;
-    }
-
     _normalizeModuleData(schema, rawData, context = {}) {
-        const migratedRawData = this._applyConfigInputMigration(schema, rawData);
-
-        const result = schema.safeParse(migratedRawData);
+        const result = schema.safeParse(rawData);
         if (result.success) {
             context.persistable = true;
-            const unusedPaths = this._findUnusedConfigPaths(migratedRawData, result.data);
+            const unusedPaths = this._findUnusedConfigPaths(rawData, result.data);
             if (unusedPaths.length > 0) {
                 const source = context.filePath ? ` ${context.filePath}` : '';
                 logger.warn(`[插件配置]${source} 包含未定义或已废弃的配置项，已自动移除`);
@@ -319,7 +300,7 @@ class PluginConfigManager {
         }
 
         const defaults = this._getDefaults(schema);
-        return this._mergeObjects(defaults, migratedRawData || {});
+        return this._mergeObjects(defaults, rawData || {});
     }
 
     _findUnusedConfigPaths(input, normalized, pathParts = []) {

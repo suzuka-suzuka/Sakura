@@ -82,7 +82,6 @@ async function harness() {
   const calls = { settlements: [], replies: [], breaks: 0, rodDamage: 0, cooldown: 0, rolls: 0, refunds: 0, immunityRolls: 0, curseResets: 0 };
   const player = { layers: 1, immune: false, roll: 0.95, durability: 190, coins: 1000 };
   class Manager {
-    static async migrateLegacyWishKeys() { return { koiWish: 0, starWish: 0 }; }
     getNightmareStatus() { return { blindnessLayers: player.layers }; }
     getRodMastery() { return 20; }
     getRodControl() { return player.durability; }

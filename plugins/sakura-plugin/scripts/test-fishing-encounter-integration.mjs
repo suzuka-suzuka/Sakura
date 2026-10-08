@@ -28,7 +28,6 @@ async function harness({ chance = 1, sendImage, renderImage, exists = false } = 
   const clearTimer = id => timers.delete(id);
   class SessionStore extends session.FishingSessionStore { constructor() { super({ clearTimer }); sessions = this; } }
   class Manager {
-    static async migrateLegacyWishKeys() { return { koiWish: 0, starWish: 0 }; }
     getNightmareStatus() { return { blindnessLayers: 0 }; }
     getRodMastery() { return 20; }
     getRodControl() { return 190; }

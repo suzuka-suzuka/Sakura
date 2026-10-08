@@ -8,7 +8,6 @@ import {
     MAX_TAVILY_SEARCH_RESULTS,
     TAVILY_SEARCH_DEPTH_OPTIONS,
     TAVILY_RAW_CONTENT_OPTIONS,
-    normalizeTavilyRawContent,
 } from './lib/AIUtils/tavilyConfig.js';
 
 const OPENAI_REASONING_EFFORT_OPTIONS = ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
@@ -119,56 +118,6 @@ const RunCommandWorkspaceSchema = z.object({
         .describe('工作区路径|#serverDirectory|命令进程的默认起点目录；不限制命令访问其他路径'),
 });
 
-export function migrateAIRoutesConfig(value) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-
-    const config = { ...value };
-    if (!Object.hasOwn(config, 'utilityRoute') && Object.hasOwn(config, 'appsRoute')) {
-        config.utilityRoute = config.appsRoute;
-    }
-    if (!Object.hasOwn(config, 'geminiRoute') && Object.hasOwn(config, 'toolsRoute')) {
-        config.geminiRoute = config.toolsRoute;
-    }
-
-    if (Array.isArray(config.profiles)) {
-        config.profiles = config.profiles.map((rawProfile) => {
-            if (!rawProfile || typeof rawProfile !== 'object' || Array.isArray(rawProfile)) {
-                return rawProfile;
-            }
-
-            const profile = { ...rawProfile };
-            if (!Object.hasOwn(profile, 'prefixes') && Object.hasOwn(profile, 'prefix')) {
-                profile.prefixes = Array.isArray(profile.prefix)
-                    ? profile.prefix
-                    : [profile.prefix];
-            }
-            if (!Object.hasOwn(profile, 'route') && Object.hasOwn(profile, 'Channel')) {
-                profile.route = profile.Channel;
-            }
-            if (!Object.hasOwn(profile, 'groupContext') && Object.hasOwn(profile, 'GroupContext')) {
-                profile.groupContext = profile.GroupContext;
-            }
-            if (!Object.hasOwn(profile, 'history') && Object.hasOwn(profile, 'History')) {
-                profile.history = profile.History;
-            }
-            if (!Object.hasOwn(profile, 'toolGroup') && Object.hasOwn(profile, 'Tool')) {
-                profile.toolGroup = typeof profile.Tool === 'string' ? profile.Tool : '';
-            }
-
-            delete profile.prefix;
-            delete profile.Channel;
-            delete profile.GroupContext;
-            delete profile.History;
-            delete profile.Tool;
-            return profile;
-        });
-    }
-
-    delete config.appsRoute;
-    delete config.toolsRoute;
-    return config;
-}
-
 const AIObjectSchema = z.object({
     profiles: z.array(ProfileSchema).default([]).describe('AI角色列表|#nameField:name|配置多个AI角色，每个角色可以有多个触发前缀'),
     toolGroups: z.array(ToolGroupSchema).default([]).describe('工具组|#nameField:name|自定义工具组合，每个角色可绑定一个工具组'),
@@ -216,20 +165,14 @@ const AIObjectSchema = z.object({
     });
 }).describe('AI 对话设定');
 
-export const AISchema = z.preprocess(migrateAIRoutesConfig, AIObjectSchema);
-Object.defineProperty(AISchema, 'configInputMigration', {
-    value: migrateAIRoutesConfig,
-});
+export const AISchema = AIObjectSchema;
 
 export const TavilyMCPSchema = z.object({
     apiKey: z.string().default('').describe('API Key|Tavily Remote MCP API Key'),
     baseURL: z.string().default(DEFAULT_TAVILY_MCP_URL).describe('Remote MCP URL|通常保持默认即可'),
     includeFavicon: z.boolean().default(true).describe('默认返回图标|作为 Tavily MCP 的默认参数'),
     includeImages: z.boolean().default(false).describe('默认返回图片|作为 Tavily MCP 的默认参数'),
-    includeRawContent: z.preprocess(
-        (val) => normalizeTavilyRawContent(val),
-        z.enum(TAVILY_RAW_CONTENT_OPTIONS).default('false')
-    ).describe('正文返回模式|false=不返回, markdown=返回Markdown正文, text=返回纯文本正文'),
+    includeRawContent: z.enum(TAVILY_RAW_CONTENT_OPTIONS).default('false').describe('正文返回模式|false=不返回, markdown=返回Markdown正文, text=返回纯文本正文'),
     searchDepth: z.enum(TAVILY_SEARCH_DEPTH_OPTIONS).default(DEFAULT_TAVILY_SEARCH_DEPTH).describe('默认搜索深度|basic/advanced/fast/ultra-fast'),
     maxResults: z.number().int().min(1).max(MAX_TAVILY_SEARCH_RESULTS).default(DEFAULT_TAVILY_MAX_RESULTS).describe('默认结果数量|当前 Tavily 搜索结果上限为 20'),
 }).describe('Tavily MCP');
@@ -290,85 +233,6 @@ export const ProvidersSchema = z.object({
     addUniqueFieldIssues(config.providers, 'id', ctx, ['providers']);
 }).describe('AI 供应商管理');
 
-function configuredTargetNumber(value) {
-    return typeof value === 'number' && Number.isFinite(value) && value >= 0
-        ? value
-        : null;
-}
-
-function migrateOpenAIReasoningLevel(value) {
-    if (value === 'off') return 'none';
-    if (['minimal', 'low', 'medium', 'high'].includes(value)) return value;
-    return 'default';
-}
-
-function migrateGeminiThinkingLevel(value) {
-    if (['off', 'minimal', 'low', 'medium', 'high'].includes(value)) return value;
-    return 'default';
-}
-
-export function migrateRoutesConfig(value) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-
-    const config = { ...value };
-    if (!Array.isArray(config.routes)) return config;
-
-    config.routes = config.routes.map((rawRoute) => {
-        if (!rawRoute || typeof rawRoute !== 'object' || Array.isArray(rawRoute)) {
-            return rawRoute;
-        }
-
-        const route = { ...rawRoute };
-        const routeTemperature = configuredTargetNumber(route.temperature);
-        const routeTopP = configuredTargetNumber(route.topP);
-        const hasLegacyReasoningLevel = Object.hasOwn(route, 'reasoningLevel');
-
-        if (Array.isArray(route.targets)) {
-            route.targets = route.targets.map((rawTarget) => {
-                if (!rawTarget || typeof rawTarget !== 'object' || Array.isArray(rawTarget)) {
-                    return rawTarget;
-                }
-
-                const target = { ...rawTarget };
-                if (!Object.hasOwn(target, 'temperature')) {
-                    target.temperature = configuredTargetNumber(target.temperatureOverride)
-                        ?? routeTemperature
-                        ?? -1;
-                }
-                if (!Object.hasOwn(target, 'topP')) {
-                    target.topP = configuredTargetNumber(target.topPOverride)
-                        ?? routeTopP
-                        ?? -1;
-                }
-
-                if (
-                    target.openaiReasoningEffort === 'inherit'
-                    || (!Object.hasOwn(target, 'openaiReasoningEffort') && hasLegacyReasoningLevel)
-                ) {
-                    target.openaiReasoningEffort = migrateOpenAIReasoningLevel(route.reasoningLevel);
-                }
-                if (
-                    target.geminiThinkingLevel === 'inherit'
-                    || (!Object.hasOwn(target, 'geminiThinkingLevel') && hasLegacyReasoningLevel)
-                ) {
-                    target.geminiThinkingLevel = migrateGeminiThinkingLevel(route.reasoningLevel);
-                }
-
-                delete target.temperatureOverride;
-                delete target.topPOverride;
-                return target;
-            });
-        }
-
-        delete route.temperature;
-        delete route.topP;
-        delete route.reasoningLevel;
-        return route;
-    });
-
-    return config;
-}
-
 const RouteTargetSchema = z.object({
     id: nonEmptyString('目标 ID').describe('目标 ID|路由内唯一'),
     provider: nonEmptyString('供应商').describe('供应商|#providerSelect'),
@@ -403,10 +267,7 @@ const RoutesObjectSchema = z.object({
     addUniqueFieldIssues(config.routes, 'id', ctx, ['routes']);
 }).describe('AI 路由管理');
 
-export const RoutesSchema = z.preprocess(migrateRoutesConfig, RoutesObjectSchema);
-Object.defineProperty(RoutesSchema, 'configInputMigration', {
-    value: migrateRoutesConfig,
-});
+export const RoutesSchema = RoutesObjectSchema;
 
 const MediaRouteTargetSchema = z.object({
     id: nonEmptyString('目标 ID').describe('目标 ID|路由内唯一'),
@@ -556,23 +417,6 @@ const defaultCommandCosts = [
     { command: "搜图", cost: 5 },
 ];
 
-function migrateEconomyConfig(value) {
-    if (!value || typeof value !== 'object' || !Array.isArray(value.commandCosts)) return value;
-    // 保留旧配置的消耗金额；新旧名称并存时优先使用新名称。
-    const aliases = new Map([
-        ['gv（Grok视频生成）', '视频生成'],
-        ['AI聊天', '角色扮演'],
-        ['拟态回复', 'bot对话'],
-    ]);
-    const configuredNames = new Set(value.commandCosts.map((item) => item?.command));
-    const commandCosts = value.commandCosts
-        .filter((item) => !(aliases.has(item?.command) && configuredNames.has(aliases.get(item.command))))
-        .map((item) => aliases.has(item?.command)
-            ? { ...item, command: aliases.get(item.command) }
-            : item);
-    return { ...value, commandCosts };
-}
-
 const EconomyObjectSchema = z.object({
     enable: z.boolean().default(true).describe('启用经济系统'),
     Groups: z.array(z.number()).default([]).describe('经济群号|#groupSelect|启用后指令将消耗樱花币'),
@@ -581,7 +425,7 @@ const EconomyObjectSchema = z.object({
     commandCosts: z.array(CommandCostSchema).default(defaultCommandCosts).describe('指令消耗配置|#commandCost|配置各指令消耗的樱花币数量'),
 }).describe('经济系统');
 
-export const EconomySchema = z.preprocess(migrateEconomyConfig, EconomyObjectSchema);
+export const EconomySchema = EconomyObjectSchema;
 
 const ForwardRuleSchema = z.object({
     sourceGroupIds: z.array(z.number()).default([]).describe('来源群号|#groupSelect|转发消息来源的群号列表'),

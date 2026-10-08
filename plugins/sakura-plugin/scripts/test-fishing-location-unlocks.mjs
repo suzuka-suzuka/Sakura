@@ -1,5 +1,5 @@
 // node --experimental-vm-modules --test plugins/sakura-plugin/scripts/test-fishing-location-unlocks.mjs
-// 临时数据库验证开图口径、真实指令与启动重置，不访问正式玩家数据。
+// 临时数据库验证开图口径、真实指令与重启数据保留，不访问正式玩家数据。
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -9,10 +9,9 @@ import path from "node:path";
 import vm from "node:vm";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import Database from "better-sqlite3";
 import * as rules from "../lib/fishing/rules.js";
 import * as session from "../lib/fishing/session.js";
-import { FISHING_LOCATION_RESET_ID, resetFishingLocationsOnce } from "./reset-fishing-locations.mjs";
+import { buildFishingLocationHtml } from "../lib/fishing/locationCard.js";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const pluginRoot = path.resolve(path.dirname(scriptPath), "..");
@@ -28,13 +27,16 @@ async function loadCommandApp(filename, FishingManager, fishData, { activeFishin
     OnEvent: (_pattern, callback) => callback,
     logger: { info() {}, warn() {}, error(message) { assert.fail(message); } },
     redis: { exists: async () => activeFishing },
-    segment: {},
+    segment: { image: file => ({ type: "image", data: { file } }) },
   });
   const imports = {
     "../lib/economy/FishingManager.js": { default: FishingManager },
     "../lib/fishing/rules.js": rules,
     "../lib/fishing/session.js": session,
     "../lib/fishing/fishData.js": fishData,
+    "../lib/fishing/locationCard.js": {
+      createFishingLocationImage: async data => Buffer.from(buildFishingLocationHtml(data)),
+    },
     "../lib/setting.js": { default: { getConfig: () => ({ gamegroups: ["group-a"] }) } },
     "../../../src/core/plugin.js": { eventStorage: new AsyncLocalStorage() },
   };
@@ -65,18 +67,23 @@ async function runFixture(mode) {
   globalThis.logger = { info() {}, warn() {}, error() {} };
   const { default: db } = await import("../lib/Database.js");
   if (mode === "startup") {
-    assert.ok(db.prepare("SELECT location FROM fishing_stats").all().every(row => row.location === "pond"));
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM fishing_location_resets").get().count, 1);
-    assert.equal(db.prepare("SELECT fishing_exp FROM fishing_stats WHERE user_id = 'legacy-a'").get().fishing_exp, 12345);
-    assert.equal(db.prepare("SELECT success_count FROM fishing_counts WHERE user_id = 'legacy-a'").get().success_count, 3);
-    db.prepare("UPDATE fishing_stats SET location = 'river' WHERE user_id = 'legacy-a'").run();
+    db.prepare(`INSERT INTO fishing_stats (group_id, user_id, location, fishing_exp, profession, profession_level)
+      VALUES ('group-a', 'collector-a', 'mystic', 12345, 'abyss_hunter', 2), ('group-b', 'collector-b', 'lake', 456, 'merchant', 1)`).run();
+    db.prepare(`INSERT INTO fishing_counts (group_id, user_id, fish_id, count, success_count)
+      VALUES ('group-a', 'collector-a', 'fish-a', 5, 3)`).run();
+    const before = db.prepare("SELECT * FROM fishing_stats ORDER BY group_id, user_id").all();
     db.init();
-    assert.equal(db.prepare("SELECT location FROM fishing_stats WHERE user_id = 'legacy-a'").get().location, "river");
+    assert.deepEqual(db.prepare("SELECT * FROM fishing_stats ORDER BY group_id, user_id").all(), before);
+    assert.equal(db.prepare("SELECT success_count FROM fishing_counts").get().success_count, 3);
+    assert.equal(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'fishing_location_resets'").get(), undefined);
     return;
   }
   if (mode === "startup-again") {
-    assert.equal(db.prepare("SELECT location FROM fishing_stats WHERE user_id = 'legacy-a'").get().location, "river");
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM fishing_location_resets").get().count, 1);
+    assert.equal(db.prepare("SELECT location FROM fishing_stats WHERE user_id = 'collector-a'").get().location, "mystic");
+    assert.equal(db.prepare("SELECT location FROM fishing_stats WHERE user_id = 'collector-b'").get().location, "lake");
+    assert.equal(db.prepare("SELECT fishing_exp FROM fishing_stats WHERE user_id = 'collector-a'").get().fishing_exp, 12345);
+    assert.equal(db.prepare("SELECT profession FROM fishing_stats WHERE user_id = 'collector-a'").get().profession, "abyss_hunter");
+    assert.equal(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'fishing_location_resets'").get(), undefined);
     return;
   }
 
@@ -155,9 +162,13 @@ async function runFixture(mode) {
   };
   const fishing = await loadCommandApp("fishing.js", FishingManager, fishData);
   await fishing.locationList(event);
-  assert.match(messages.at(-1), /樱花池塘.*15 种（当前 14\/15）/);
-  assert.match(messages.at(-1), /不含全钓点通用鱼/);
-  assert.doesNotMatch(messages.at(-1), /Lv\.|钓鱼等级/);
+  assert.equal(messages.at(-1).type, "image", "钓点列表应发送图片");
+  const card = messages.at(-1).data.file.toString();
+  assert.match(card, /樱花池塘图鉴 <b>14 \/ 15<\/b> 种/);
+  assert.match(card, /通用鱼不计/);
+  assert.match(card, /location current/);
+  assert.match(card, /#前往钓点 钓点名/);
+  assert.doesNotMatch(card, /Lv\.|钓鱼等级/);
   await fishing.gotoLocation(event);
   assert.match(messages.at(-1), /当前 14\/15/);
   assert.match(messages.at(-1), /还差 1 种/);
@@ -203,55 +214,8 @@ if (process.argv.includes("--fixture-run")) {
     process.exit(1);
   }
 } else {
-  test("地点重置覆盖所有群和空地点，仅执行一次且不改图鉴经验", () => {
-    const database = new Database(":memory:");
-    try {
-      database.exec(`
-        CREATE TABLE fishing_stats (group_id TEXT, user_id TEXT, location TEXT, fishing_exp INTEGER);
-        INSERT INTO fishing_stats VALUES ('a', '1', 'river', 123), ('b', '1', 'mystic', 456), ('b', '2', NULL, 789);
-        CREATE TABLE fishing_counts (fish_id TEXT, success_count INTEGER);
-        INSERT INTO fishing_counts VALUES ('fish', 3);
-      `);
-      assert.deepEqual(resetFishingLocationsOnce(database, { now: 1000 }), { skipped: false, affected: 3 });
-      assert.ok(database.prepare("SELECT location FROM fishing_stats").all().every(row => row.location === "pond"));
-      assert.deepEqual(database.prepare("SELECT fishing_exp FROM fishing_stats ORDER BY fishing_exp").all().map(row => row.fishing_exp), [123, 456, 789]);
-      assert.equal(database.prepare("SELECT success_count FROM fishing_counts").get().success_count, 3);
-      database.prepare("UPDATE fishing_stats SET location = 'river' WHERE user_id = '1'").run();
-      database.exec("INSERT INTO fishing_stats VALUES ('c', '3', 'lake', 0)");
-      assert.deepEqual(resetFishingLocationsOnce(database), { skipped: true, affected: 0 });
-      assert.equal(database.prepare("SELECT location FROM fishing_stats WHERE user_id = '3'").get().location, "lake");
-      assert.equal(database.prepare("SELECT executed_at FROM fishing_location_resets WHERE reset_id = ?").get(FISHING_LOCATION_RESET_ID).executed_at, 1000);
-    } finally { database.close(); }
-  });
-
-  test("重置失败时地点与标记整体回滚，修复后可以重试", () => {
-    const database = new Database(":memory:");
-    try {
-      database.exec(`
-        CREATE TABLE fishing_stats (location TEXT);
-        INSERT INTO fishing_stats VALUES ('mystic');
-        CREATE TRIGGER reject_reset BEFORE UPDATE ON fishing_stats BEGIN SELECT RAISE(ABORT, '拒绝重置'); END;
-      `);
-      assert.throws(() => resetFishingLocationsOnce(database), /拒绝重置/);
-      assert.equal(database.prepare("SELECT location FROM fishing_stats").get().location, "mystic");
-      assert.equal(database.prepare("SELECT 1 FROM sqlite_master WHERE name = 'fishing_location_resets'").get(), undefined);
-      database.exec("DROP TRIGGER reject_reset");
-      assert.equal(resetFishingLocationsOnce(database).affected, 1);
-    } finally { database.close(); }
-  });
-
-  test("真实数据库首次初始化重置地点，二次初始化与进程重启不会重复", () => {
+  test("现行数据库初始化和进程重启保留地点、职业、经验与图鉴", () => {
     const root = createFixture();
-    const dataDir = path.join(root, "plugins/sakura-plugin/data");
-    fs.mkdirSync(dataDir, { recursive: true });
-    const database = new Database(path.join(dataDir, "sakura.sqlite"));
-    database.exec(`
-      CREATE TABLE fishing_stats (group_id TEXT, user_id TEXT, location TEXT, fishing_exp INTEGER, PRIMARY KEY (group_id, user_id));
-      INSERT INTO fishing_stats VALUES ('group-a', 'legacy-a', 'mystic', 12345), ('group-b', 'legacy-b', 'lake', 456);
-      CREATE TABLE fishing_counts (group_id TEXT, user_id TEXT, fish_id TEXT, count INTEGER, success_count INTEGER, PRIMARY KEY (group_id, user_id, fish_id));
-      INSERT INTO fishing_counts VALUES ('group-a', 'legacy-a', 'fish-a', 5, 3);
-    `);
-    database.close();
     try { invokeFixture(root, "startup"); invokeFixture(root, "startup-again"); }
     finally { removeFixture(root); }
   });
@@ -262,7 +226,7 @@ if (process.argv.includes("--fixture-run")) {
     finally { removeFixture(root); }
   });
 
-  test("真实钓点列表与切换指令显示图鉴门槛，14种拒绝而15种成功", () => {
+  test("真实钓点列表发送进度图片，切换指令14种拒绝而15种成功", () => {
     const root = createFixture();
     try { invokeFixture(root, "commands"); }
     finally { removeFixture(root); }

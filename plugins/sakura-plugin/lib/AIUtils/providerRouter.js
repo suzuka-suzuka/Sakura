@@ -143,22 +143,14 @@ export function orderScheduledItems(items, strategy, cursorKey) {
     });
 }
 
-function configuredNumber(override, fallback) {
-  if (Number.isFinite(override) && override >= 0) return override;
-  if (Number.isFinite(fallback) && fallback >= 0) return fallback;
-  return undefined;
+function configuredNumber(value) {
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
-export function resolveGenerationSettings(route, target) {
-  const legacyCommonLevel = route.reasoningLevel || "default";
-
-  let openaiReasoningEffort = target.openaiReasoningEffort || "default";
-  if (openaiReasoningEffort === "inherit") {
-    openaiReasoningEffort = legacyCommonLevel === "off" ? "none" : legacyCommonLevel;
-  }
-  if (openaiReasoningEffort === "default") {
-    openaiReasoningEffort = undefined;
-  }
+export function resolveGenerationSettings(_route, target) {
+  const openaiReasoningEffort = target.openaiReasoningEffort && target.openaiReasoningEffort !== "default"
+    ? target.openaiReasoningEffort
+    : undefined;
 
   let geminiThinkingLevel;
   let geminiThinkingBudget;
@@ -167,23 +159,16 @@ export function resolveGenerationSettings(route, target) {
     geminiThinkingBudget = explicitBudget;
   } else {
     const targetLevel = target.geminiThinkingLevel || "default";
-    const resolvedLevel = targetLevel === "inherit" ? legacyCommonLevel : targetLevel;
-    if (resolvedLevel === "off") {
+    if (targetLevel === "off") {
       geminiThinkingBudget = 0;
-    } else if (resolvedLevel !== "default") {
-      geminiThinkingLevel = resolvedLevel;
+    } else if (targetLevel !== "default") {
+      geminiThinkingLevel = targetLevel;
     }
   }
 
   return {
-    temperature: configuredNumber(
-      target.temperature,
-      configuredNumber(target.temperatureOverride, route.temperature)
-    ),
-    topP: configuredNumber(
-      target.topP,
-      configuredNumber(target.topPOverride, route.topP)
-    ),
+    temperature: configuredNumber(target.temperature),
+    topP: configuredNumber(target.topP),
     openaiEnableThinking: target.openaiEnableThinking === true,
     openaiReasoningEffort,
     stream: target.stream === true,

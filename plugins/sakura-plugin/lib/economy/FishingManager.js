@@ -805,46 +805,6 @@ export default class FishingManager {
     return transaction.immediate();
   }
 
-  // 一次性迁移：旧版把两种许愿写在 Redis 里，改为落库后这些键不会再被读到，
-  // 逐个搬进 fishing_stats 再删除，键清空之后这段扫描就只是空转。
-  static async migrateLegacyWishKeys() {
-    if (!global.redis) return { koiWish: 0, starWish: 0 };
-    const legacyPatterns = [
-      { pattern: "sakura:fishing:koi-wish:*", type: "koiWish" },
-      { pattern: "sakura:fishing:wish:*", type: "starWish" },
-    ];
-    const migrated = { koiWish: 0, starWish: 0 };
-    for (const { pattern, type } of legacyPatterns) {
-      let cursor = "0";
-      do {
-        const [nextCursor, keys] = await redis.scan(
-          cursor,
-          "MATCH",
-          pattern,
-          "COUNT",
-          200,
-        );
-        cursor = String(nextCursor);
-        for (const key of keys) {
-          const segments = String(key).split(":");
-          const userId = segments.pop();
-          const groupId = segments.pop();
-          const value = await redis.get(key);
-          // 先落库再删键：中途挂掉最多重来一次，不会把玩家的许愿弄丢。
-          if (groupId && userId && value) {
-            const manager = new FishingManager(groupId);
-            const applied = type === "koiWish"
-              ? manager.setKoiWish(userId)
-              : manager.setStarWish(userId, value);
-            if (applied) migrated[type] += 1;
-          }
-          await redis.del(key);
-        }
-      } while (cursor !== "0");
-    }
-    return migrated;
-  }
-
   restoreStarWish(userId, rarity) {
     userId = String(userId);
     const safeRarity = String(rarity || "").trim();

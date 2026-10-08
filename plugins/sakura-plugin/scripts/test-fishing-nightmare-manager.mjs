@@ -5,8 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import Database from "better-sqlite3";
-import { RESET_ID, resetAbyssHunterProfessions } from "./reset-abyss-hunter-professions.mjs";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "../../..");
@@ -18,7 +16,6 @@ const databaseUrl = pathToFileURL(path.join(
   projectRoot,
   "plugins/sakura-plugin/lib/Database.js",
 )).href;
-const resetScriptUrl = pathToFileURL(path.join(testDir, "reset-abyss-hunter-professions.mjs")).href;
 
 test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", () => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sakura-nightmare-manager-"));
@@ -40,7 +37,6 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
     import assert from "node:assert/strict";
     const { default: FishingManager } = await import(${JSON.stringify(fishingManagerUrl)});
     const { default: db } = await import(${JSON.stringify(databaseUrl)});
-    const { resetAbyssHunterProfessions } = await import(${JSON.stringify(resetScriptUrl)});
     const manager = new FishingManager("group-a");
     const userId = "user-a";
     manager.getUserData(userId);
@@ -217,15 +213,6 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
     assert.equal(itemCount("chest_pond"), 0);
     assert.equal(manager.devourRandomInventoryItem(userId, ["rod_carbon"], () => 0), null);
     assert.equal(itemCount("rod_carbon"), 1);
-    const expBeforeReset = manager.getUserData(userId).fishing_exp;
-    assert.equal(resetAbyssHunterProfessions(db.db, { dryRun: false }).affected, 1);
-    assert.equal(manager.canChooseProfession(userId), true);
-    assert.equal(manager.getUserData(userId).profession_level, 0);
-    assert.equal(manager.getUserData(userId).fishing_exp, expBeforeReset);
-    assert.equal(itemCount("rod_carbon"), 1);
-    assert.equal(manager.chooseProfession(userId, "abyss_hunter").success, true);
-    assert.equal(resetAbyssHunterProfessions(db.db, { dryRun: false }).skipped, true);
-    assert.equal(manager.getUserData(userId).profession, "abyss_hunter");
     process.exit(0);
   `;
 
@@ -246,97 +233,6 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
       `隔离噩梦结算测试失败\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
     );
   } finally {
-    fs.rmSync(fixtureRoot, { recursive: true, force: true });
-  }
-});
-
-test("职业重置只处理已有深渊猎手，预览不写库，重复执行不影响新选择", () => {
-  const database = new Database(":memory:");
-  try {
-    database.exec(`
-      CREATE TABLE fishing_stats (
-        group_id TEXT, user_id TEXT, profession TEXT, profession_level INTEGER,
-        nightmare_immunity_charges INTEGER, nightmare_immunity_updated_at INTEGER,
-        fishing_exp INTEGER, blindness_layers INTEGER
-      );
-      INSERT INTO fishing_stats VALUES
-        ('group-a', 'hunter-1', 'abyss_hunter', 1, 1, 123, 5000, 2),
-        ('group-b', 'hunter-2', 'abyss_hunter', 2, 2, 456, 8000, 3),
-        ('group-a', 'merchant', 'merchant', 2, 0, 0, 6000, 1),
-        ('group-a', 'newbie', NULL, 0, 0, 0, 10, 0);
-    `);
-    const original = database.prepare("SELECT * FROM fishing_stats ORDER BY group_id, user_id").all();
-    assert.deepEqual(resetAbyssHunterProfessions(database), { dryRun: true, skipped: false, affected: 2 });
-    assert.deepEqual(database.prepare("SELECT * FROM fishing_stats ORDER BY group_id, user_id").all(), original);
-    assert.equal(database.prepare("SELECT 1 FROM sqlite_master WHERE name = 'fishing_profession_resets'").get(), undefined);
-    assert.deepEqual(resetAbyssHunterProfessions(database, { dryRun: false, now: 1000 }), { dryRun: false, skipped: false, affected: 2 });
-    const resetRows = database.prepare("SELECT * FROM fishing_stats ORDER BY group_id, user_id").all();
-    for (let index = 0; index < original.length; index++) {
-      assert.deepEqual(resetRows[index], original[index].profession === "abyss_hunter"
-        ? { ...original[index], profession: null, profession_level: 0, nightmare_immunity_charges: 0, nightmare_immunity_updated_at: 0 }
-        : original[index]);
-    }
-    const marker = database.prepare("SELECT * FROM fishing_profession_resets WHERE reset_id = ?").get(RESET_ID);
-    assert.equal(marker.affected_count, 2);
-    assert.equal(marker.executed_at, 1000);
-    assert.deepEqual(JSON.parse(marker.previous_professions).map(row => row.profession_level), [1, 2]);
-    database.prepare("UPDATE fishing_stats SET profession = 'abyss_hunter', profession_level = 1 WHERE user_id = 'hunter-1'").run();
-    assert.equal(resetAbyssHunterProfessions(database, { dryRun: false }).skipped, true);
-    assert.equal(database.prepare("SELECT profession FROM fishing_stats WHERE user_id = 'hunter-1'").get().profession, "abyss_hunter");
-  } finally {
-    database.close();
-  }
-});
-
-test("职业重置失败整体回滚，旧库未配置充能列也可重置", () => {
-  const database = new Database(":memory:");
-  try {
-    database.exec(`
-      CREATE TABLE fishing_stats (group_id TEXT, user_id TEXT, profession TEXT, profession_level INTEGER);
-      INSERT INTO fishing_stats VALUES ('group', 'hunter', 'abyss_hunter', 2);
-      CREATE TRIGGER reject_profession_reset BEFORE UPDATE ON fishing_stats
-      BEGIN SELECT RAISE(ABORT, '拒绝重置'); END;
-    `);
-    assert.throws(() => resetAbyssHunterProfessions(database, { dryRun: false }), /拒绝重置/);
-    assert.equal(database.prepare("SELECT profession FROM fishing_stats").get().profession, "abyss_hunter");
-    assert.equal(database.prepare("SELECT 1 FROM sqlite_master WHERE name = 'fishing_profession_resets'").get(), undefined);
-    database.exec("DROP TRIGGER reject_profession_reset");
-    assert.equal(resetAbyssHunterProfessions(database, { dryRun: false }).affected, 1);
-    assert.equal(database.prepare("SELECT profession FROM fishing_stats").get().profession, null);
-  } finally {
-    database.close();
-  }
-});
-
-test("重置命令默认预览指定数据库，正式执行后再次运行会跳过", () => {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sakura-profession-reset-"));
-  const dbPath = path.join(fixtureRoot, "fixture.sqlite");
-  const scriptPath = path.join(testDir, "reset-abyss-hunter-professions.mjs");
-  const database = new Database(dbPath);
-  try {
-    database.exec(`
-      CREATE TABLE fishing_stats (group_id TEXT, user_id TEXT, profession TEXT, profession_level INTEGER);
-      INSERT INTO fishing_stats VALUES ('group', 'hunter', 'abyss_hunter', 2);
-    `);
-    const run = args => spawnSync(process.execPath, [scriptPath, ...args], { encoding: "utf8", timeout: 10_000 });
-    const preview = run(["--db", dbPath]);
-    assert.equal(preview.status, 0, preview.stderr);
-    assert.match(preview.stdout, /预览：将取消 1 条/);
-    assert.equal(database.prepare("SELECT profession FROM fishing_stats").get().profession, "abyss_hunter");
-    const applied = run(["--apply", "--db", dbPath]);
-    assert.equal(applied.status, 0, applied.stderr);
-    assert.match(applied.stdout, /已取消 1 条/);
-    assert.equal(database.prepare("SELECT profession FROM fishing_stats").get().profession, null);
-    database.prepare("UPDATE fishing_stats SET profession = 'abyss_hunter', profession_level = 1").run();
-    const repeated = run(["--apply", "--db", dbPath]);
-    assert.equal(repeated.status, 0, repeated.stderr);
-    assert.match(repeated.stdout, /已跳过/);
-    assert.equal(database.prepare("SELECT profession FROM fishing_stats").get().profession, "abyss_hunter");
-    const missingDbPath = path.join(fixtureRoot, "missing.sqlite");
-    assert.equal(run(["--apply", "--db", missingDbPath]).status, 1);
-    assert.equal(fs.existsSync(missingDbPath), false);
-  } finally {
-    database.close();
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
   }
 });

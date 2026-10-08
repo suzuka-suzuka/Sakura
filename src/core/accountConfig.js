@@ -30,27 +30,6 @@ function normalizeSelfId(value) {
     return Number.isFinite(num) && num > 0 ? num : null;
 }
 
-function normalizeMasterList(master) {
-    if (Array.isArray(master)) {
-        return master.filter((item) => item != null && item !== '');
-    }
-    if (master == null || master === '') {
-        return [];
-    }
-    return [master];
-}
-
-function normalizeAccountConfigShape(rawData) {
-    if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) {
-        return rawData;
-    }
-
-    return {
-        ...rawData,
-        master: normalizeMasterList(rawData.master),
-    };
-}
-
 class AccountConfigManager {
     constructor() {
         this._configCache = new Map();
@@ -90,11 +69,10 @@ class AccountConfigManager {
 
         try {
             const raw = yaml.load(fs.readFileSync(filePath, 'utf8')) || {};
-            const normalizedRaw = normalizeAccountConfigShape(raw);
-            const result = AccountConfigSchema.safeParse(normalizedRaw);
+            const result = AccountConfigSchema.safeParse(raw);
             const nextConfig = result.success
                 ? result.data
-                : { ...getDefaultAccountConfig(), ...(normalizedRaw && typeof normalizedRaw === 'object' ? normalizedRaw : {}) };
+                : { ...getDefaultAccountConfig(), ...(raw && typeof raw === 'object' ? raw : {}) };
 
             this._configCache.set(cacheKey, nextConfig);
             return structuredClone(nextConfig);
@@ -114,8 +92,7 @@ class AccountConfigManager {
         const normalizedSelfId = normalizeSelfId(selfId);
         const cacheKey = normalizedSelfId ?? DEFAULT_CONFIG_CACHE_KEY;
 
-        const normalizedData = normalizeAccountConfigShape(data);
-        const result = AccountConfigSchema.safeParse(normalizedData);
+        const result = AccountConfigSchema.safeParse(data);
         if (!result.success) {
             return { success: false, errors: result.error.issues };
         }

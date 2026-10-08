@@ -23,6 +23,7 @@ import {
 } from "../lib/fishing/encounter.js";
 import { createFishingEncounterImage, closeFishingEncounterBrowser } from "../lib/fishing/encounterImages.js";
 import { FISHING_ENCOUNTER_GUIDE_FILE } from "../lib/fishing/encounterGuide.js";
+import { createFishingLocationImage } from "../lib/fishing/locationCard.js";
 import {
   FISHING_ACTION,
   FIGHT_ESCAPE_SETTLEMENT_OPTIONS,
@@ -104,19 +105,6 @@ import {
 import { getShanghaiHour, secondsUntilNextShanghaiDay } from "../lib/economy/time.js";
 
 const fishingSessions = new FishingSessionStore();
-
-// 锦鲤许愿与星愿改存 SQLite（不过期的键堆在 Redis 里只会越积越多），
-// 启动时把旧版残留的键搬进数据库并清掉。
-FishingManager.migrateLegacyWishKeys()
-  .then((migrated) => {
-    const total = migrated.koiWish + migrated.starWish;
-    if (total > 0) {
-      logger.info(
-        `[钓鱼] 已迁移旧版许愿数据：锦鲤 ${migrated.koiWish} 份、星愿 ${migrated.starWish} 份`,
-      );
-    }
-  })
-  .catch((err) => logger.warn(`[钓鱼] 迁移旧版许愿数据失败: ${err.message}`));
 
 const fishData = getFishData();
 
@@ -2356,27 +2344,14 @@ export default class Fishing extends plugin {
     if (!this.checkWhitelist(e)) return false;
     const fishingManager = new FishingManager(e.group_id);
     const currentId = fishingManager.getFishingLocation(e.user_id);
-    const unlocks = new Map(fishingManager.getFishingLocationUnlocks(e.user_id)
-      .map((entry) => [entry.locationId, entry]));
-
-    const lines = Object.entries(FISHING_LOCATIONS).map(([id, config]) => {
-      const currentMark = id === currentId ? "（当前）" : "";
-      const status = unlocks.get(id);
-      const lockMark = status.unlocked ? " ✅ 已解锁" : " 🔒 未解锁";
-      const requirement = status.requiredLocationId
-        ? `\n   收录【${FISHING_LOCATIONS[status.requiredLocationId].name}】专属图鉴 ${status.required} 种（当前 ${status.collected}/${status.required}）`
-        : "\n   初始开放";
-      return `${config.emoji}【${config.name}】${currentMark}${lockMark}\n` +
-        `   ${config.description}${requirement}`;
-    });
-
-    await e.reply(
-      `🗺️ 钓点一览\n━━━━━━━━━━━━━━━━\n` +
-      lines.join("\n") +
-      `\n━━━━━━━━━━━━━━━━\n` +
-      `📖 专属图鉴含跨钓点鱼，不含全钓点通用鱼；只计成功收录的不同种类。\n` +
-      `📝 发送「#前往钓点 钓点名」切换`
-    );
+    const unlocks = fishingManager.getFishingLocationUnlocks(e.user_id);
+    try {
+      const image = await createFishingLocationImage({ currentId, unlocks });
+      await e.reply(segment.image(image));
+    } catch (err) {
+      logger.error(`[钓点列表] 生成图片失败: ${err.stack || err}`);
+      await e.reply("钓点图片生成失败，请稍后再试。", 10);
+    }
     return true;
   });
 
