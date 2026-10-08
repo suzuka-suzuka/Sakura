@@ -2891,7 +2891,8 @@ export default class Fishing extends plugin {
         `🎯 这 ${Math.round(TORPEDO_ARM_DURATION_MS / 3600000)} 小时里它是个陷阱，` +
         `被同钓点的其他人钓中就会当场炸开。\n`,
         `⏰ ${formatDetonateCountdown(result.readyAt)}后可发送「#引爆鱼雷」自行引爆。\n`,
-        `📊 当前钓点共有 ${locationTorpedoes} 个鱼雷潜伏中，你自己埋了 ${ownTorpedoes} 枚~`,
+        `📊 当前钓点共有 ${locationTorpedoes} 枚鱼雷潜伏中\n`,
+        `🧭 你在所有钓点共埋了 ${ownTorpedoes} 枚鱼雷`,
       ]);
     } else {
       let message;
