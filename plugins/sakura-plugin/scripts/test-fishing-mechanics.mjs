@@ -78,6 +78,42 @@ test("玩家攻击随实时控制力变化，首领只伤鱼竿，锯鲨在40和
   assert.ok(rules.validateLegacyFishData(invalid).some(error => error.includes("首领张力竿损配置无效")));
 });
 
+test("探囊鬼手以100币为偷取上限，余额不超过100时掏空，下一击才重砸", () => {
+  const ape = bosses.find(boss => boss.id === "boss_river_ape_king");
+  assert.equal(rules.BOSS_COIN_STEAL_MAX, 100);
+  assert.equal(ape.boss_mechanic.max, rules.BOSS_COIN_STEAL_MAX);
+  for (const coinBalance of [1, 50, 99, 100]) {
+    const hit = rules.resolveBossAttack(ape, () => assert.fail("掏空余额不消耗随机数"), { coinBalance });
+    assert.equal(hit.coinSteal, coinBalance);
+    assert.equal(hit.rodDamage, 2);
+    assert.equal(hit.stealFallback, false);
+    const next = rules.resolveBossAttack(ape, () => assert.fail("重砸不消耗随机数"), {
+      coinBalance: coinBalance - hit.coinSteal,
+    });
+    assert.equal(next.coinSteal, 0);
+    assert.equal(next.rodDamage, 8);
+    assert.equal(next.stealFallback, true);
+  }
+  const fallback = { ...ape, boss_mechanic: { ...ape.boss_mechanic, max: undefined } };
+  for (const boss of [ape, fallback]) {
+    for (const [roll, expected] of [[0, 0], [0.5, 50], [0.999999999999, 100]]) {
+      const hit = rules.resolveBossAttack(boss, () => roll, { coinBalance: 101 });
+      assert.equal(hit.coinSteal, expected);
+      assert.equal(hit.rodDamage, 2);
+      assert.equal(hit.stealFallback, false);
+    }
+    let coinBalance = 1100;
+    for (let round = 1; round <= 11; round++) {
+      const hit = rules.resolveBossAttack(boss, () => 1, { coinBalance, attackRound: round });
+      assert.equal(hit.coinSteal, 100);
+      assert.equal(hit.rodDamage, 2);
+      assert.equal(hit.stealFallback, false);
+      coinBalance -= hit.coinSteal;
+    }
+    assert.equal(coinBalance, 0);
+  }
+});
+
 async function harness() {
   const calls = { settlements: [], replies: [], breaks: 0, rodDamage: 0, cooldown: 0, rolls: 0, refunds: 0, immunityRolls: 0, curseResets: 0 };
   const player = { layers: 1, immune: false, roll: 0.95, durability: 190, coins: 1000 };

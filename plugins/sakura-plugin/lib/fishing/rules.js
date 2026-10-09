@@ -69,8 +69,8 @@ export const BOSS_PRICE_WEIGHT_FLOOR = 0.75;
 export const BOSS_PRICE_WEIGHT_RANGE = 0.5;
 // 探囊鬼手：偷的是钱包余额而不是战利品——扣战利品的话失败一场等于零损耗。
 // 余额不足一次偷取上限时直接掏空；身无分文则改砸鱼竿，于是它成了唯一一个
-// 「兜里得有钱才打得过」的首领：11 次攻击最多偷走 550，垫够这个数就绝不会被砸竿。
-export const BOSS_COIN_STEAL_MAX = 50;
+// 「兜里得有钱才打得过」的首领：11 次攻击最多偷走 1100，垫够这个数就绝不会被砸竿。
+export const BOSS_COIN_STEAL_MAX = 100;
 export const BOSS_STEAL_BROKE_ROD_DAMAGE = 8;
 // 吞舟重撞按本场反击次数递增耐久伤害，上限约束长战斗的损耗。
 export const BOSS_ROD_CRUSH_INITIAL_DAMAGE = 1;
