@@ -1111,11 +1111,11 @@ const NIGHTMARE_TEXT = Object.freeze({
     counter: "工具箱修复耐久；完整噩梦免疫可挡下损伤与断线。",
   },
   steal_coins_flat: {
-    effect: "偷走 1～200 樱花币；身无分文时改为鱼竿 -20 耐久。",
+    effect: "偷走 1～400 樱花币；身无分文时改为鱼竿 -20 耐久。",
     counter: "控余额只能改变损失类型，不能免伤。",
   },
   steal_coins_percent: {
-    effect: "吞掉当前余额的 1%～10%；余额为 0 时改为鱼竿 -20 耐久。",
+    effect: "吞掉当前余额的 1%～20%；余额为 0 时改为鱼竿 -20 耐久。",
     counter: "完整免疫最稳；空余额也并不安全。",
   },
   curse: {
