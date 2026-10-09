@@ -1,6 +1,7 @@
 import db from "../Database.js";
 import {
   calculateGhostDebtPayment,
+  getGhostDebtTurnsRemaining,
   FISHING_STAMINA_MAX,
   getFishingLevelByExp,
   getFishingStaminaMax,
@@ -125,36 +126,43 @@ export default class FishingSettlementService {
     return { newlyRecorded, newlyShiny };
   }
 
-  // 亡者船票结算：抽成印记压低收益、收益全额抵债、未清部分利滚利，滚到上限则勾销并留下印记。
-  // 每条抛竿结算路径都要走这里，空军竿同样计息，否则玩家可以靠钓不上鱼躲利息。
+  // 抽成印记连乘后全额抵债，未清部分利滚利；四竿到期仍欠款则勾销并叠一层印记。
+  // 每条抛竿路径都走这里，空军和宝箱竿同样计息、消耗还款机会。
   // 算与写分开：重复结算会在 _claimSession 处被挡下，此时不能已经把利息写进去。
   _calcGhostDebt(earnings, { accrueInterest = true } = {}) {
     const row = db.prepare(`
-        SELECT ghost_debt, ghost_debt_mark FROM fishing_stats
+        SELECT ghost_debt, ghost_debt_turns_remaining, ghost_debt_mark FROM fishing_stats
         WHERE group_id = ? AND user_id = ?
     `).get(this.groupId, this.userId);
     const debtBefore = Math.max(0, Number(row?.ghost_debt) || 0);
-    const hasGhostMark = Boolean(row?.ghost_debt_mark);
+    const debtTurnsBefore = getGhostDebtTurnsRemaining(debtBefore, row?.ghost_debt_turns_remaining);
+    const markLayersBefore = Math.max(0, Math.floor(Number(row?.ghost_debt_mark) || 0));
     return {
       ...calculateGhostDebtPayment(earnings, debtBefore, {
-        hasGhostMark,
+        ghostMarkLayers: markLayersBefore,
+        debtTurnsRemaining: debtTurnsBefore,
         accrueInterest,
       }),
       debtBefore,
-      hasGhostMark,
+      debtTurnsBefore,
+      markLayersBefore,
     };
   }
 
   _persistGhostDebt(result) {
-    if (result.remainingDebt === result.debtBefore && !result.writtenOff) return;
+    if (result.remainingDebt === result.debtBefore &&
+        result.remainingTurns === result.debtTurnsBefore &&
+        result.ghostMarkLayers === result.markLayersBefore) return;
     db.prepare(`
         UPDATE fishing_stats
         SET ghost_debt = ?,
-            ghost_debt_mark = CASE WHEN ? = 1 THEN 1 ELSE ghost_debt_mark END
+            ghost_debt_turns_remaining = ?,
+            ghost_debt_mark = ?
         WHERE group_id = ? AND user_id = ?
     `).run(
       result.remainingDebt,
-      result.writtenOff ? 1 : 0,
+      result.remainingTurns,
+      result.ghostMarkLayers,
       this.groupId,
       this.userId,
     );

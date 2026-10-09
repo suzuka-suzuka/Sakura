@@ -125,6 +125,7 @@ class DB {
         bride_nightmare_multiplier REAL DEFAULT 1,
         lost_soul INTEGER DEFAULT 0,
         ghost_debt INTEGER DEFAULT 0,
+        ghost_debt_turns_remaining INTEGER DEFAULT 0,
         ghost_debt_mark INTEGER DEFAULT 0,
         deep_pressure_layers INTEGER DEFAULT 0,
         blindness_layers INTEGER DEFAULT 0,
@@ -217,6 +218,11 @@ class DB {
         created_at INTEGER
       );
     `);
+
+    // 为已有数据库补充期限字段，具体剩余竿数由放贷时初始化，不改写已有玩家状态。
+    if (!this.db.pragma('table_info(fishing_stats)').some(column => column.name === 'ghost_debt_turns_remaining')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN ghost_debt_turns_remaining INTEGER DEFAULT 0');
+    }
   }
 
   prepare(sql) {

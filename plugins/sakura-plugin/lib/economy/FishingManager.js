@@ -5,6 +5,9 @@ import {
   calculateFishingStamina,
   calculateRodDurabilityControl,
   getBlindReelHitRate,
+  getGhostDebtTurnsRemaining,
+  ghostMarkMultiplierFromLayers,
+  GHOST_DEBT_REPAYMENT_CASTS,
   FISHING_BENEFIT_DURATION_SECONDS,
   FISHING_LOCATIONS,
   FISHING_LOCATION_UNLOCK_COUNT,
@@ -510,7 +513,10 @@ export default class FishingManager {
         Number(userData.bride_nightmare_multiplier) || 1,
       ),
       ghostDebt: Math.max(0, Math.floor(Number(userData.ghost_debt) || 0)),
+      ghostDebtTurnsRemaining: getGhostDebtTurnsRemaining(userData.ghost_debt, userData.ghost_debt_turns_remaining),
       ghostMarked: Boolean(userData.ghost_debt_mark),
+      ghostMarkLayers: Math.max(0, Math.floor(Number(userData.ghost_debt_mark) || 0)),
+      ghostMarkMultiplier: ghostMarkMultiplierFromLayers(userData.ghost_debt_mark),
       deepPressureLayers: Math.max(0, Math.floor(Number(userData.deep_pressure_layers) || 0)),
       deepPressureMultiplier: deepPressureMultiplierFromLayers(userData.deep_pressure_layers),
       blindnessLayers: Math.max(0, Math.floor(Number(userData.blindness_layers) || 0)),
@@ -559,12 +565,13 @@ export default class FishingManager {
     if (safeAmount <= 0) return { added: 0, total: before };
     const row = db.prepare(`
         UPDATE fishing_stats
-        SET ghost_debt = COALESCE(ghost_debt, 0) + ?
+        SET ghost_debt = COALESCE(ghost_debt, 0) + ?,
+            ghost_debt_turns_remaining = ?
         WHERE group_id = ? AND user_id = ?
         RETURNING ghost_debt
-    `).get(safeAmount, this.groupId, userId);
+    `).get(safeAmount, GHOST_DEBT_REPAYMENT_CASTS, this.groupId, userId);
     const total = Math.max(0, Number(row?.ghost_debt) || 0);
-    return { added: Math.max(0, total - before), total };
+    return { added: Math.max(0, total - before), total, remainingTurns: GHOST_DEBT_REPAYMENT_CASTS };
   }
 
   getDeepPressureLayers(userId) {
@@ -627,6 +634,7 @@ export default class FishingManager {
       brideNightmareMultiplier: status.brideNightmareMultiplier,
       ghostDebt: status.ghostDebt,
       ghostMarked: status.ghostMarked,
+      ghostMarkLayers: status.ghostMarkLayers,
       deepPressureMarked,
       deepPressureLayers: status.deepPressureLayers,
       deepPressureMultiplier: status.deepPressureMultiplier,
@@ -717,6 +725,7 @@ export default class FishingManager {
               nightmare_curse_prank_revealed = 0,
               bride_nightmare_multiplier = 1,
               ghost_debt = 0,
+              ghost_debt_turns_remaining = 0,
               ghost_debt_mark = 0,
               deep_pressure_layers = 0,
               blindness_layers = 0

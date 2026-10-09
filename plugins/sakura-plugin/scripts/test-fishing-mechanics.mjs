@@ -90,11 +90,12 @@ async function harness() {
     rollNightmareImmunity() { calls.immunityRolls++; return { immune: player.immune, active: true, chance: 0.3 }; }
     resetNightmareCurse() { calls.curseResets++; }
     addBlindnessLayers(user, amount) { player.layers += amount; return { layers: player.layers, hitRate: rules.getBlindReelHitRate(player.layers) }; }
+    addGhostDebt(user, amount) { player.debt = (player.debt || 0) + amount; return { total: player.debt, remainingTurns: 4 }; }
     breakLine() { calls.breaks++; }
     damageRod(user, rod, amount) { calls.rodDamage += amount; player.durability = Math.max(0, player.durability - amount); return { applied: true, isBroken: player.durability <= 0, currentDurability: player.durability, maxDurability: 190 }; }
   }
   class Settlement {
-    settleAttempt(args) { calls.settlements.push(args); return { success: true }; }
+    settleAttempt(args) { calls.settlements.push(args); return player.settleResult || { success: true }; }
   }
   let sessions;
   class SessionStore extends session.FishingSessionStore { constructor() { super(); sessions = this; } }
@@ -113,6 +114,7 @@ async function harness() {
     "../lib/economy/FishingManager.js": { default: Manager },
     "../lib/economy/EconomyManager.js": { default: class {
       getCoins() { return player.coins; }
+      addCoins(e, amount) { player.coins += amount; }
       reduceCoins(e, amount) { player.coins -= amount; }
     } },
     "../lib/fishing/SettlementService.js": { default: Settlement },
@@ -201,6 +203,36 @@ test("完整免疫覆盖所有噩梦，河神在免疫未触发时仍只保线",
   assert.equal(h.calls.breaks, 0);
   assert.equal(h.calls.refunds, 1);
   assert.equal(h.player.layers, 2);
+});
+
+test("幽灵船真实结算放款四百，当竿不计息，完整免疫同时挡下放款与欠款", async () => {
+  for (const immune of [false, true]) {
+    const h = await harness();
+    h.player.immune = immune;
+    const state = h.create(fish.find(entry => entry.id === "nightmare_coast_ghost_ship"));
+    await h.instance.finishSuccess(h.e, state, new h.Manager());
+    assert.equal(h.player.coins, immune ? 1000 : 1400);
+    assert.equal(h.player.debt || 0, immune ? 0 : 400);
+    assert.equal(h.calls.settlements[0].accrueGhostInterest, immune);
+    const message = h.calls.replies.flat(2).join("\n");
+    assert.equal(message.includes("4 竿内必须还清"), !immune);
+    assert.equal(message.includes("再 ×0.9"), !immune);
+  }
+});
+
+test("失败竿到期也播报新增印记层数和连乘倍率，重复失败不再次结算", async () => {
+  const h = await harness();
+  h.player.settleResult = {
+    success: true, writtenOff: true, ghostMarkLayers: 2, ghostMarkMultiplier: 0.81,
+  };
+  const state = h.create(fish.find(entry => entry.rarity === "普通"));
+  assert.equal(await h.instance.finishFailedAttempt(h.e, state), true);
+  assert.equal(await h.instance.finishFailedAttempt(h.e, state), false);
+  assert.equal(h.calls.settlements.length, 1);
+  const message = h.calls.replies.flat(2).join("\n");
+  assert.ok(message.includes("4 竿期限已到"));
+  assert.ok(message.includes("当前 2 层"));
+  assert.ok(message.includes("×0.81"));
 });
 
 test("重复收竿消息只判定一次噩梦免疫", async () => {

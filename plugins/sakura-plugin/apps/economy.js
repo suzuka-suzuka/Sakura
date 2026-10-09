@@ -1251,7 +1251,7 @@ export default class Economy extends plugin {
             ? `${getBrideMarkLayers(result.brideNightmareMultiplier)} 层花嫁印记`
             : "",
           result.ghostDebt > 0 ? `${result.ghostDebt} 樱花币亡者高利贷` : "",
-          result.ghostMarked ? "亡者抽成印记" : "",
+          result.ghostMarked ? `亡者抽成印记 ${result.ghostMarkLayers} 层` : "",
           result.blindnessLayers > 0 ? `${result.blindnessLayers} 层致盲` : "",
           result.deepPressureMarked
             ? `${result.deepPressureLayers} 层深压回响（控制力 ×${Number(result.deepPressureMultiplier.toFixed(3))}）`
