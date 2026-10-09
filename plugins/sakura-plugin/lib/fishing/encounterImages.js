@@ -56,7 +56,7 @@ export async function renderFishingHtml(html, { selector = ".card", width = 900,
 export async function createFishingEncounterImage({ seed = randomUUID() } = {}) {
   const map = generateEncounterMaps({ count: 1, seed, excluded: recentMaps })[0];
   const choices = analyzeEncounterChoices(map);
-  if (!choices.hasMeaningfulChoice || choices.routes.some(route => validateEncounterInput(map, route.sequence).success !== (route.actions <= map.limits.actions))) throw new Error("遭遇地图校验失败");
+  if (!choices.hasMeaningfulChoice || choices.routes.some(route => validateEncounterInput(map, route.sequence).success !== (route.actions === map.limits.actions))) throw new Error("遭遇地图校验失败");
   // 先保存布局以避免同时触发的玩家获得同图；只缓存近期布局，不复用图片。
   recentMaps.push(map);
   if (recentMaps.length > 32) recentMaps.shift();

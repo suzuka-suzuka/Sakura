@@ -21,13 +21,13 @@ try {
     assert.equal(map.rows.length, 6);
     assert.ok(map.rows.every(row => row.length === 5));
     assert.ok(choices.routes.length >= 3 && choices.routes.length <= 4);
-    assert.ok(choices.underRoutes.length >= 1 && choices.overRoutes.length >= 1);
-    assert.ok(solutions.length > 0 && solutions.every(route => validateEncounterInput(map, route.sequence).success));
+    assert.ok(choices.overRoutes.length >= 1);
+    assert.ok(solutions.length > 0 && solutions.every(route => route.actions === map.limits.actions && validateEncounterInput(map, route.sequence).success));
     assert.equal(image.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
     assert.equal(image.readUInt32BE(16), 1800);
     assert.ok(images.every(previous => encounterFingerprint(previous.map) !== encounterFingerprint(map) && !previous.image.equals(image)));
     assert.notEqual(map.limits.actions, images.at(-1)?.map.limits.actions);
-    reports.push({ maxActions: map.limits.actions, routes: choices.routes.length, valid: solutions.length, bytes: image.length, elapsedMs: Math.round(performance.now() - started) });
+    reports.push({ requiredActions: map.limits.actions, routes: choices.routes.length, valid: solutions.length, bytes: image.length, elapsedMs: Math.round(performance.now() - started) });
     images.push({ map, image });
   }
   // 复现开发模式快照的“复制 lib、共用 resources”，确保不依赖源码目录层级。
@@ -50,7 +50,7 @@ try {
     assert.equal(image.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
     assert.equal(map.rows.length, 6);
     assert.ok(solveEncounter(map).every(route => validateEncounterInput(map, route.sequence).success));
-    snapshotReport = { maxActions: map.limits.actions, bytes: image.length };
+    snapshotReport = { requiredActions: map.limits.actions, bytes: image.length };
   } finally {
     await snapshotModule?.closeFishingEncounterBrowser();
     // 先解除资源 junction，再确认临时路径位于本次缓存目录内后删除。

@@ -56,7 +56,7 @@ ${embeddedFont}
 .directions,.abilities{display:flex;justify-content:center;align-items:center;gap:30px;white-space:nowrap}.directions{margin-bottom:8px}.directions span{display:flex;align-items:center;gap:9px}
 kbd{display:inline-block;min-width:34px;padding:0 8px;border:2px solid #a4c8b4;border-radius:7px;background:#fffdf3;font:700 25px/1.4 'Microsoft YaHei',sans-serif}.abilities{gap:32px;font-size:23px}.reward{margin-top:12px;color:#477c50;font-size:28px;font-weight:700}
 </style></head><body><main class="card"><svg class="map" viewBox="0 0 ${width * 120} ${height * 120 + 90}" role="img" aria-label="钓鱼水路">${cells}${shore(width, height, goal[0])}</svg>
-<div class="limits"><div class="limit">行动 ≤ <span class="count">${map.limits.actions}</span></div></div>
+<div class="limits"><div class="limit">行动 = <span class="count">${map.limits.actions}</span></div></div>
 <div class="controls"><div class="directions"><span>上 <kbd>s</kbd></span><span>下 <kbd>x</kbd></span><span>左 <kbd>z</kbd></span><span>右 <kbd>y</kbd></span></div>
 <div class="abilities"><span><kbd>A</kbd>＋方向：水草（2行动）</span><span><kbd>B</kbd>＋方向：漂木（3行动）</span></div>
 <div class="reward">${ENCOUNTER_FULL_REWARD_MS / 1000}秒内通过，双倍奖励</div></div></main></body></html>`;

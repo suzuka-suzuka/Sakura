@@ -1,7 +1,7 @@
 // 遭遇规则与关卡工具。重量判定通过后、困难度判定前抽取；护符与首领不触发。
 export const ENCOUNTER_TIME_LIMIT_MS = 60_000;
 export const ENCOUNTER_FULL_REWARD_MS = 30_000;
-export const ENCOUNTER_RULE_VERSION = 4;
+export const ENCOUNTER_RULE_VERSION = 5;
 export const ENCOUNTER_DEFAULT_CHANCE = 0.1;
 export const ENCOUNTER_ABILITY_COSTS = Object.freeze({ A: 1, B: 2 });
 
@@ -44,7 +44,7 @@ export function assertEncounterMap(map) {
     throw new TypeError("鱼必须位于地图上方，唯一收鱼点必须位于地图下方");
   }
   const { actions } = map.limits || {};
-  if (!Number.isInteger(actions) || actions < 1 || actions > 96) throw new TypeError("行动上限必须在 1 至 96 之间");
+  if (!Number.isInteger(actions) || actions < 1 || actions > 96) throw new TypeError("规定行动数必须在 1 至 96 之间");
   return { width, height: rows.length, start: starts[0], goal: goals[0] };
 }
 
@@ -85,12 +85,12 @@ export function validateEncounterInput(map, input) {
     usedA += ability === "A" ? 1 : 0;
     usedB += ability === "B" ? 1 : 0;
     actions += 1 + (ENCOUNTER_ABILITY_COSTS[ability] || 0);
-    if (actions > map.limits.actions) return { success: false, reason: "超过行动上限", step: index + 1, actions, moves: index + 1, usedA, usedB };
+    if (actions > map.limits.actions) return { success: false, reason: "超过规定行动数", step: index + 1, actions, moves: index + 1, usedA, usedB };
     if (tile === "G" && index !== tokens.length - 1) return { success: false, reason: "到达收鱼点后仍有操作", step: index + 1 };
   }
   const reachedGoal = map.rows[y][x] === "G";
-  const success = reachedGoal && actions <= map.limits.actions;
-  const reason = reachedGoal ? "正确" : "未到收鱼点";
+  const success = reachedGoal && actions === map.limits.actions;
+  const reason = success ? "正确" : reachedGoal ? "未用完规定行动数" : "未到收鱼点";
   return { success, reason, actions, moves: tokens.length, usedA, usedB };
 }
 
@@ -131,7 +131,7 @@ function routeDifference(left, right) {
 }
 
 function summarizeChoices(routes, limits, truncated = false) {
-  const validRoutes = routes.filter(route => route.actions <= limits.actions);
+  const validRoutes = routes.filter(route => route.actions === limits.actions);
   const underRoutes = routes.filter(route => route.actions < limits.actions);
   const atLimitRoutes = routes.filter(route => route.actions === limits.actions);
   const overRoutes = routes.filter(route => route.actions > limits.actions);
@@ -261,14 +261,14 @@ export function generateEncounterMaps({ count = 5, seed = "sakura", excluded = [
     map.rows = cells.map(row => row.join(""));
     const analysis = analyzeEncounterChoices(map);
     if (analysis.truncated || analysis.routes.length < 3 || !analysis.tradeoffPairs.length) continue;
-    // 上限允许省下行动；保留少量可成功路线和至少一条超限路线。
+    // 行动数必须恰好相等；保留少量可成功路线和至少一条行动超出的路线。
     const candidates = new Map();
     for (let actions = 9; actions <= 13; actions++) {
       if ((count <= 5 && limitsSeen.has(actions)) ||
           actions === (maps.at(-1) || excluded.at(-1))?.limits.actions) continue;
       const limits = { actions };
       const choices = summarizeChoices(analysis.routes, limits);
-      if (!choices.hasMeaningfulChoice || !choices.underRoutes.length || choices.validRoutes.length > 2 ||
+      if (!choices.hasMeaningfulChoice || choices.validRoutes.length > 2 ||
           choices.validRoutes.some(route => route.moves < 6 || route.moves > 9 || route.a + route.b < 2 || route.a + route.b > 3)) continue;
       candidates.set(actions, limits);
     }

@@ -130,6 +130,7 @@ test("毕业装备真实收竿入口必须先完成遭遇，旧计时器停止",
     await h.instance.handleFishing(h.e);
     assert.equal(state.phase, session.FISHING_PHASE.encounter);
     assert.doesNotMatch(h.calls.replies[0][0], /玩法见|#钓鱼攻略/);
+    assert.match(h.calls.replies[0][0], /必须恰好用完规定行动数/);
     assert.equal(h.calls.settlements.length, 0);
     assert.equal(h.calls.generated, 1);
     assert.ok(h.calls.contexts.some(args => args[2] === 65 && args[3] === true), "出图后必须刷新旧会话时限");
@@ -320,22 +321,24 @@ test("聊天、空消息和混入其他字符的消息不占用答案机会或�
   assert.equal(h.calls.settlements[0].earnings, 150);
 });
 
-test("真实遭遇接受未用完行动的路线，超出上限仍使鱼逃走", async () => {
-  for (const success of [true, false]) {
-    const h = await harness();
+test("真实遭遇只接受恰好用完行动的路线，少用或多用都使鱼逃走", async () => {
+  const map = { id: "exact-action-integration", rows: ["S####", "A..##", "A#.##", ".BB##", "#..##", "#G###"], limits: { actions: 13 } };
+  for (const kind of ["underRoutes", "atLimitRoutes", "overRoutes"]) {
+    const h = await harness({ renderImage: async () => ({ map, image: Buffer.from("隔离测试图片") }) });
     const state = h.create();
     await h.instance.handleFishing(h.e);
     const choices = encounter.analyzeEncounterChoices(state.encounter.map);
-    const route = (success ? choices.underRoutes : choices.overRoutes)[0];
+    const route = choices[kind][0];
     assert.ok(route);
     await h.answer(route.sequence, 30_000);
     assert.equal(h.calls.settlements.length, 1);
-    if (success) {
+    if (kind === "atLimitRoutes") {
       assert.equal(h.calls.settlements[0].earnings, 200);
-      assert.ok(state.encounterResult.actions < state.encounter.map.limits.actions);
+      assert.equal(state.encounterResult.actions, state.encounter.map.limits.actions);
     } else {
       assert.equal(h.calls.settlements[0].success, false);
       assert.equal(h.calls.settlements[0].earnings, 0);
+      assert.ok(h.calls.replies.some(args => String(args[0]).includes(kind === "underRoutes" ? "未用完规定行动数" : "超过规定行动数")));
     }
   }
 });
@@ -451,4 +454,6 @@ test("钓鱼攻略实际合并转发含第五张遭遇图和对应摘要", async
   const guide = buildEncounterGuideHtml();
   assert.match(guide, /首领不触发/);
   assert.match(guide, /噩梦与宝藏只增加经验/);
+  assert.match(guide, /总行动数必须恰好等于“行动 = N”，少用或多用都失败/);
+  assert.match(guide, /6＋1＋2＝9，恰好用完，成功/);
 });

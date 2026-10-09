@@ -1664,7 +1664,7 @@ export default class Fishing extends plugin {
     try {
       const { map, image } = await createFishingEncounterImage();
       if (fishingSessions.get(stateKey) !== state || state.settled) return false;
-      await e.reply("🌊 水路遭遇！鱼钻进了复杂的水道，请按接下来的地图把它引到终点。\n⏱️ 图片发出后有 60 秒，在行动上限内发送完整操作串，只有一次作答机会。");
+      await e.reply("🌊 水路遭遇！鱼钻进了复杂的水道，请按接下来的地图把它引到终点。\n⏱️ 图片发出后有 60 秒，必须恰好用完规定行动数，发送完整操作串，只有一次作答机会。");
       if (fishingSessions.get(stateKey) !== state || state.settled) return false;
       state.encounter = { map, attempt: null, inputReceived: false, pendingInput: null };
       state.phase = FISHING_PHASE.encounter;
