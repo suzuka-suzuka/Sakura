@@ -2345,8 +2345,9 @@ export default class Fishing extends plugin {
     const fishingManager = new FishingManager(e.group_id);
     const currentId = fishingManager.getFishingLocation(e.user_id);
     const unlocks = fishingManager.getFishingLocationUnlocks(e.user_id);
+    const dexProgress = fishingManager.getLocationDexProgress(e.user_id);
     try {
-      const image = await createFishingLocationImage({ currentId, unlocks });
+      const image = await createFishingLocationImage({ currentId, unlocks, dexProgress });
       await e.reply(segment.image(image));
     } catch (err) {
       logger.error(`[钓点列表] 生成图片失败: ${err.stack || err}`);

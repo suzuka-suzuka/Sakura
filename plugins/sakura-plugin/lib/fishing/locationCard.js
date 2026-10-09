@@ -7,22 +7,20 @@ function escapeHtml(value) {
   })[character]);
 }
 
-export function buildFishingLocationHtml({ currentId, unlocks, fontData = "" }) {
+export function buildFishingLocationHtml({ currentId, unlocks, dexProgress, fontData = "" }) {
   const statuses = new Map(unlocks.map(status => [status.locationId, status]));
+  const progressByLocation = new Map(dexProgress.map(progress => [progress.locationId, progress]));
   const rows = Object.entries(FISHING_LOCATIONS).map(([id, location]) => {
     const status = statuses.get(id);
     if (!status) throw new Error(`钓点解锁状态缺失：${id}`);
+    const progress = progressByLocation.get(id);
+    if (!progress) throw new Error(`钓点图鉴进度缺失：${id}`);
     const current = id === currentId;
     const state = current ? "current" : status.unlocked ? "available" : "locked";
     const label = current ? "当前" : status.unlocked ? "已解锁" : "未解锁";
-    const previous = FISHING_LOCATIONS[status.requiredLocationId];
-    const collected = Math.min(status.required, Math.max(0, Math.floor(status.collected)));
-    const requirement = previous
-      ? `${escapeHtml(previous.name)}图鉴 <b>${collected} / ${status.required}</b> 种`
-      : "初始开放";
     return `<section class="location ${state}">
       <div class="icon">${escapeHtml(location.emoji)}</div>
-      <div class="info"><h2>${escapeHtml(location.name)}</h2><p>${requirement}</p></div>
+      <div class="info"><h2>${escapeHtml(location.name)}</h2><p>图鉴 <b>${progress.collected} / ${progress.total}</b> 种</p></div>
       <span class="status">${label}</span>
     </section>`;
   }).join("");
@@ -36,7 +34,7 @@ ${fontData ? `@font-face{font-family:LocationCard;src:url(data:font/ttf;base64,$
 .status{flex-shrink:0;padding:7px 14px;border-radius:9px;font-size:20px;line-height:1.3;background:#f2f1f3;color:#8c8288}.available .status{background:#eef7ef;color:#4c815b}.current{border-color:#e6abc2;background:#fff0f6}.current .status{background:#e9c0d1;color:#884760}
 footer{margin-top:25px;padding-top:20px;border-top:1px solid #eadde3}footer p{margin:0;font-size:18px;line-height:1.5;color:#806575}.command{margin-top:10px;font-size:23px;color:#654756}.command strong{font-weight:700}
 </style></head><body><main class="card">
-<header><h1>钓点一览</h1><p>前一钓点收录 ${FISHING_LOCATION_UNLOCK_COUNT} 种专属鱼，解锁下一站</p></header>
+<header><h1>钓点一览</h1><p>每个钓点收录 ${FISHING_LOCATION_UNLOCK_COUNT} 种专属鱼，解锁下一站</p></header>
 <div class="locations">${rows}</div>
 <footer><p>仅计成功收录 · 含跨钓点鱼 · 通用鱼不计</p><div class="command">切换：<strong>#前往钓点 钓点名</strong></div></footer>
 </main></body></html>`;

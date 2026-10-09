@@ -161,10 +161,20 @@ async function runFixture(mode) {
     reply: async message => messages.push(message),
   };
   const fishing = await loadCommandApp("fishing.js", FishingManager, fishData);
+  const assertLocationProgress = card => {
+    const rows = card.match(/<section class="location [^"]+">[\s\S]*?<\/section>/g) || [];
+    const progress = manager.getLocationDexProgress(user);
+    assert.equal(rows.length, progress.length, "每个钓点都应显示图鉴进度");
+    progress.forEach((entry, index) => {
+      assert.ok(rows[index].includes(`<h2>${entry.locationName}</h2><p>图鉴 <b>${entry.collected} / ${entry.total}</b> 种</p>`),
+        `${entry.locationName}应显示自身已收录种数和完整总种数`);
+    });
+  };
   await fishing.locationList(event);
   assert.equal(messages.at(-1).type, "image", "钓点列表应发送图片");
   const card = messages.at(-1).data.file.toString();
-  assert.match(card, /樱花池塘图鉴 <b>14 \/ 15<\/b> 种/);
+  assertLocationProgress(card);
+  assert.match(card, /每个钓点收录 15 种专属鱼，解锁下一站/);
   assert.match(card, /通用鱼不计/);
   assert.match(card, /location current/);
   assert.match(card, /#前往钓点 钓点名/);
@@ -181,6 +191,12 @@ async function runFixture(mode) {
   await active.gotoLocation({ ...event, msg: "#前往钓点 樱花池塘" });
   assert.match(messages.at(-1), /钓鱼过程中不能切换钓点/);
   assert.equal(manager.getFishingLocation(user), "river");
+  for (const fish of fishes.slice(15)) capture(user, fish);
+  for (const fish of local("river").slice(0, 3)) capture(user, fish);
+  assert.ok(manager.getLocationDexProgress(user, ["pond"])[0].collected > 15);
+  await fishing.locationList(event);
+  assert.equal(messages.at(-1).type, "image");
+  assertLocationProgress(messages.at(-1).data.file.toString());
 }
 
 function createFixture() {
@@ -226,7 +242,7 @@ if (process.argv.includes("--fixture-run")) {
     finally { removeFixture(root); }
   });
 
-  test("真实钓点列表发送进度图片，切换指令14种拒绝而15种成功", () => {
+  test("钓点图片显示各地点完整图鉴进度，切换指令14种拒绝而15种成功", () => {
     const root = createFixture();
     try { invokeFixture(root, "commands"); }
     finally { removeFixture(root); }
