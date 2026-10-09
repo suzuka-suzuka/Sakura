@@ -327,7 +327,7 @@ export async function runDuePersonalMemories(selfId, { redis = null, now = Date.
 export function buildGroupMemoryInput(messages) {
   return JSON.stringify(messages.map((message) => ({
     id: message.messageId, time: message.time, userId: message.userId, name: message.senderName,
-    isBot: message.isBot, content: message.content,
+    content: message.content,
     reply: message.repliedMessage ? { userId: message.repliedMessage.userId, content: message.repliedMessage.content } : null,
   })));
 }
@@ -383,7 +383,7 @@ export async function collectGroupMemories(e, messages, { aiRequest = getAI, too
     "个人记忆以 userId 为本人，省略本人主语和QQ，保留完整事实；旧记录同样处理。可记本人关系、约定，不记他人独立信息。",
     "个人记忆提到其他群友、群公共记忆提到成员时，已知QQ写“昵称（QQ：号码）”，未知不编造；不记不明指代。",
     "写个人记忆前，先调用 ReadUserMemory，qq 填该成员的 QQ，避免重复。",
-    "勿混淆发言者；机器人内容不单独作事实依据；媒体占位符不猜内容。",
+    "勿混淆发言者；媒体占位符不猜内容。",
     "不记未变化的旧事实；无新事实可不调用工具。完成后简短结束，不向群发送消息。",
     `已有群记忆：\n${getExistingMemoryText(e, "group") || "无"}`,
   ].join("\n");

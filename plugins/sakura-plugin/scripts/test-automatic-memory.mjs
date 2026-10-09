@@ -270,9 +270,11 @@ test("一小时内文字、图片、表情与语音合计满100条，取最新10
   assert.ok(records.every((record) => record.time >= endTime - 3600));
 });
 
-test("群任务先查询个人记忆再写入，正确回传工具名和ID，仍限制个人写入目标", async () => {
+test("群任务输入不标记机器人，个人记忆目标仍排除机器人，先查询再按发送者QQ写入", async () => {
   const event = e(910001, 920004);
   const records = Array.from({ length: 100 }, (_, index) => ({ messageId: String(index), userId: "930004", senderName: "小夜", content: "聊天", time: index, isBot: false }));
+  records[99] = { messageId: "99", userId: "910001", senderName: "樱", content: "以后叫我樱", time: 99, isBot: true,
+    repliedMessage: { userId: "930004", content: "你希望怎么称呼？", isBot: false } };
   let round = 0;
   const original = structuredClone(records);
   const addedMemories = [];
@@ -282,9 +284,17 @@ test("群任务先查询个人记忆再写入，正确回传工具名和ID，仍
     assert.equal(args[7].disableNativeWebSearch, true);
     assert.match(args[3], /先调用 ReadUserMemory，qq 填该成员的 QQ/);
     assert.doesNotMatch(args[3], /query/);
-    if (round++ === 0) return { text: "", functionCalls: [
-      { id: "read-user", name: "ReadUserMemory", args: { qq: "930004" } },
-    ] };
+    assert.doesNotMatch(args[3], /机器人|isBot/);
+    if (round++ === 0) {
+      const input = JSON.parse(args[2][0].text);
+      assert.equal(input.length, 100);
+      assert.doesNotMatch(args[2][0].text, /isBot/);
+      assert.deepEqual(input[99], { id: "99", time: 99, userId: "910001", name: "樱", content: "以后叫我樱",
+        reply: { userId: "930004", content: "你希望怎么称呼？" } });
+      return { text: "", functionCalls: [
+        { id: "read-user", name: "ReadUserMemory", args: { qq: "930004" } },
+      ] };
+    }
     assert.equal(args[6].at(-1).role, "function");
     if (round === 2) {
       const { functionResponse } = args[6].at(-1).parts[0];
@@ -295,9 +305,11 @@ test("群任务先查询个人记忆再写入，正确回传工具名和ID，仍
       return { text: "", functionCalls: [
         { name: "Memory", args: { scope: "group", content: "本群每周六活动" } },
         { name: "Memory", args: { scope: "user", userId: "930004", content: "用户希望被称为小夜" } },
+        { name: "Memory", args: { scope: "user", userId: "910001", content: "希望被称为樱" } },
       ] };
     }
-    assert.deepEqual(args[6].at(-1).parts.map((part) => part.functionResponse.name), ["Memory", "Memory"]);
+    assert.deepEqual(args[6].at(-1).parts.map((part) => part.functionResponse.name), ["Memory", "Memory", "Memory"]);
+    assert.match(args[6].at(-1).parts[2].functionResponse.response.message, /发送者 QQ/);
     return { text: "已完成" };
   } });
   assert.equal(success, true);
