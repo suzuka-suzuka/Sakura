@@ -5,9 +5,7 @@ import {
   calculateFishingStamina,
   calculateRodDurabilityControl,
   getBlindReelHitRate,
-  getGhostDebtTurnsRemaining,
   ghostMarkMultiplierFromLayers,
-  GHOST_DEBT_REPAYMENT_CASTS,
   FISHING_BENEFIT_DURATION_SECONDS,
   FISHING_LOCATIONS,
   FISHING_LOCATION_UNLOCK_COUNT,
@@ -513,7 +511,6 @@ export default class FishingManager {
         Number(userData.bride_nightmare_multiplier) || 1,
       ),
       ghostDebt: Math.max(0, Math.floor(Number(userData.ghost_debt) || 0)),
-      ghostDebtTurnsRemaining: getGhostDebtTurnsRemaining(userData.ghost_debt, userData.ghost_debt_turns_remaining),
       ghostMarked: Boolean(userData.ghost_debt_mark),
       ghostMarkLayers: Math.max(0, Math.floor(Number(userData.ghost_debt_mark) || 0)),
       ghostMarkMultiplier: ghostMarkMultiplierFromLayers(userData.ghost_debt_mark),
@@ -565,13 +562,12 @@ export default class FishingManager {
     if (safeAmount <= 0) return { added: 0, total: before };
     const row = db.prepare(`
         UPDATE fishing_stats
-        SET ghost_debt = COALESCE(ghost_debt, 0) + ?,
-            ghost_debt_turns_remaining = ?
+        SET ghost_debt = COALESCE(ghost_debt, 0) + ?
         WHERE group_id = ? AND user_id = ?
         RETURNING ghost_debt
-    `).get(safeAmount, GHOST_DEBT_REPAYMENT_CASTS, this.groupId, userId);
+    `).get(safeAmount, this.groupId, userId);
     const total = Math.max(0, Number(row?.ghost_debt) || 0);
-    return { added: Math.max(0, total - before), total, remainingTurns: GHOST_DEBT_REPAYMENT_CASTS };
+    return { added: Math.max(0, total - before), total };
   }
 
   getDeepPressureLayers(userId) {

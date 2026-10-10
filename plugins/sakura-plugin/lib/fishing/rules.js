@@ -428,10 +428,10 @@ const QUALITY_WEIGHTS = Object.freeze({
 const FISHING_LEVEL_EXP_BASE = 24;
 export const PERFECT_CATCH_WINDOW_MS = 5000;
 export const PERFECT_EXP_MULTIPLIER = 2;
-// 亡者船票：放款额＝初始债务，后续四竿先抵债再计息，到期未清则勾销并叠一层抽成印记。
+// 亡者船票：放款额＝初始债务，后续每竿先抵债再计息，欠款达到阈值则勾销并叠一层抽成印记。
 export const GHOST_DEBT_PRINCIPAL = 400;
 export const GHOST_DEBT_INTEREST_RATE = 1.25;
-export const GHOST_DEBT_REPAYMENT_CASTS = 4;
+export const GHOST_DEBT_MARK_THRESHOLD = 800;
 export const GHOST_DEBT_MARK_MULTIPLIER = 0.9;
 export const FISHING_COOLDOWN_SECONDS = 5 * 60;
 export const FISHING_TIME_SAND_COOLDOWN_SECONDS = FISHING_COOLDOWN_SECONDS / 2;
@@ -501,19 +501,10 @@ export function ghostMarkMultiplierFromLayers(layers) {
   return GHOST_DEBT_MARK_MULTIPLIER ** Math.max(0, Math.floor(Number(layers) || 0));
 }
 
-export function getGhostDebtTurnsRemaining(debt, turns) {
-  if (!(Number(debt) > 0)) return 0;
-  return Math.max(0, Math.min(
-    GHOST_DEBT_REPAYMENT_CASTS,
-    Math.floor(Number(turns) || 0),
-  ));
-}
-
-// 放贷当竿不占期限；后续每竿先还款，再将未清部分滚一次利息并消耗一次还款机会。
-// 第四竿仍可还清；只有到期后仍欠钱才勾销债务并叠加印记。非抛竿收入只抵债，不计息或计次。
+// 放贷当竿不计息；后续每竿先还款，再将未清部分滚一次利息。
+// 欠款达到阈值才勾销并叠加印记，与竿数无关。非抛竿收入只抵债，不计息。
 export function calculateGhostDebtPayment(earnings, debt, {
   ghostMarkLayers = 0,
-  debtTurnsRemaining = GHOST_DEBT_REPAYMENT_CASTS,
   accrueInterest = false,
 } = {}) {
   const grossEarnings = Math.max(0, Math.floor(Number(earnings) || 0));
@@ -524,23 +515,13 @@ export function calculateGhostDebtPayment(earnings, debt, {
   const debtPaid = Math.min(earningsAfterMark, safeDebt);
   const debtAfterPayment = safeDebt - debtPaid;
   let remainingDebt = debtAfterPayment;
-  let remainingTurns = debtAfterPayment > 0
-    ? getGhostDebtTurnsRemaining(safeDebt, debtTurnsRemaining)
-    : 0;
   let interestAdded = 0;
-  let writtenOff = false;
   if (accrueInterest && debtAfterPayment > 0) {
-    const rolled = Math.ceil(debtAfterPayment * GHOST_DEBT_INTEREST_RATE);
-    remainingTurns -= 1;
-    if (remainingTurns <= 0) {
-      writtenOff = true;
-      remainingDebt = 0;
-      remainingTurns = 0;
-    } else {
-      remainingDebt = rolled;
-      interestAdded = rolled - debtAfterPayment;
-    }
+    remainingDebt = Math.ceil(debtAfterPayment * GHOST_DEBT_INTEREST_RATE);
+    interestAdded = remainingDebt - debtAfterPayment;
   }
+  const writtenOff = remainingDebt >= GHOST_DEBT_MARK_THRESHOLD;
+  if (writtenOff) remainingDebt = 0;
   return {
     grossEarnings,
     markDeducted: grossEarnings - earningsAfterMark,
@@ -550,7 +531,6 @@ export function calculateGhostDebtPayment(earnings, debt, {
     debtAfterPayment,
     interestAdded,
     remainingDebt,
-    remainingTurns,
     writtenOff,
     ghostMarkLayers: markLayersBefore + Number(writtenOff),
     ghostMarkMultiplier: ghostMarkMultiplierFromLayers(markLayersBefore + Number(writtenOff)),

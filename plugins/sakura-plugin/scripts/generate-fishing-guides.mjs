@@ -11,7 +11,7 @@ import {
   GHOST_DEBT_INTEREST_RATE,
   GHOST_DEBT_MARK_MULTIPLIER,
   GHOST_DEBT_PRINCIPAL,
-  GHOST_DEBT_REPAYMENT_CASTS,
+  GHOST_DEBT_MARK_THRESHOLD,
   SHINY_CHANCE,
   SHINY_EXP_MULTIPLIER,
   SHINY_PRICE_MULTIPLIER,
@@ -1136,7 +1136,7 @@ const NIGHTMARE_TEXT = Object.freeze({
     counter: "净化圣水清除全部致盲；好运护符不跳过空钩判定。",
   },
   ghost_debt: {
-    effect: `先给 ${GHOST_DEBT_PRINCIPAL} 币并欠等额本金；后续 ${GHOST_DEBT_REPAYMENT_CASTS} 竿先抵债、未清部分 ×${GHOST_DEBT_INTEREST_RATE}；到期未清则清债并加一层印记，每层收益再 ×${GHOST_DEBT_MARK_MULTIPLIER}。`,
+    effect: `先给 ${GHOST_DEBT_PRINCIPAL} 币并欠等额本金；后续每竿先抵债、未清部分 ×${GHOST_DEBT_INTEREST_RATE}；欠款达到 ${GHOST_DEBT_MARK_THRESHOLD} 则清债并加一层印记，每层收益再 ×${GHOST_DEBT_MARK_MULTIPLIER}。`,
     counter: "尽快用渔获还清，或用净化圣水清掉债务与印记。",
   },
   deep_pressure: {

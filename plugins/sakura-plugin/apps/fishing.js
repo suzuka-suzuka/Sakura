@@ -45,9 +45,8 @@ import {
   FOG_LAMP_WEIGHT_MULTIPLIERS,
   FOG_LAMP_ZERO_RARITIES,
   GHOST_DEBT_INTEREST_RATE,
-  GHOST_DEBT_MARK_MULTIPLIER,
   GHOST_DEBT_PRINCIPAL,
-  GHOST_DEBT_REPAYMENT_CASTS,
+  GHOST_DEBT_MARK_THRESHOLD,
   PERFECT_EXP_MULTIPLIER,
   RARITY_CONFIG,
   SHINY_DIFFICULTY_MULTIPLIER,
@@ -186,7 +185,7 @@ function formatNightmareImmunityDetail(status) {
   return `${Number((status.chance * 100).toFixed(2))}% 概率完整免疫 · 每次独立判定`;
 }
 
-// 高利贷结算播报：还款、利息、剩余竿数，以及到期新增的印记层数。
+// 高利贷结算播报：还款、利息，以及欠款达到阈值时新增的印记层数。
 function formatGhostDebtSettlement(settleResult) {
   if (!settleResult) return "";
   const { debtPaid = 0, interestAdded = 0, writtenOff = false } = settleResult;
@@ -196,13 +195,12 @@ function formatGhostDebtSettlement(settleResult) {
     : "";
   if (writtenOff) {
     return paidMsg +
-      `🚢 ${GHOST_DEBT_REPAYMENT_CASTS} 竿期限已到，未还清的借条被撕掉了！\n` +
+      `🚢 欠款已达 ${GHOST_DEBT_MARK_THRESHOLD}，未还清的借条被撕掉了！\n` +
       `🩸 亡者抽成印记 +1 层，当前 ${settleResult.ghostMarkLayers} 层，` +
       `此后垂钓所得 ×${Number(settleResult.ghostMarkMultiplier.toFixed(6))}，可用净化圣水清除\n`;
   }
   if (interestAdded > 0) {
-    return paidMsg + `📈 利滚利 +${interestAdded}，现在欠 ${settleResult.remainingDebt}，` +
-      `还剩 ${settleResult.remainingTurns} 竿还款机会\n`;
+    return paidMsg + `📈 利滚利 +${interestAdded}，现在欠 ${settleResult.remainingDebt} 樱花币\n`;
   }
   return paidMsg + "🎉 高利贷已经还清，亡者船票化作灰烬\n";
 }
@@ -990,11 +988,8 @@ export default class Fishing extends plugin {
         curseActive
           ? `\n☠️ 诅咒缠身，当前 ${curseAccrued} 层（噩梦权重 +${curseAccrued}，钓到任意噩梦才会消散）`
           : "",
-        // 高利贷相反：必须在动手前把利滚利摆出来，压迫感才成立。
-        // 利息以还款后的剩余债务为基准，抛竿时还不知道渔获，所以只报欠款和倍率。
         nightmareStatus.ghostDebt > 0
-          ? `\n🚢 亡者高利贷欠款 ${nightmareStatus.ghostDebt}，还剩 ${nightmareStatus.ghostDebtTurnsRemaining} 竿；这一竿没还上的部分会涨到 ` +
-            `${GHOST_DEBT_INTEREST_RATE} 倍`
+          ? `\n🚢 尚欠 ${nightmareStatus.ghostDebt} 樱花币`
           : "",
         nightmareStatus.ghostMarked
           ? `\n🩸 亡者抽成印记 ${nightmareStatus.ghostMarkLayers} 层，垂钓所得 ×${Number(nightmareStatus.ghostMarkMultiplier.toFixed(6))}`
@@ -1918,7 +1913,7 @@ export default class Fishing extends plugin {
       }
 
       case "ghost_debt": {
-        // 放贷当竿不计息或计次，之后四竿内未还清就清债并叠加抽成印记。
+        // 放贷当竿不计息，欠款达到阈值时由统一结算清债并叠加抽成印记。
         const principal = normalizePenalty(effect.amount || GHOST_DEBT_PRINCIPAL);
         economyManager.addCoins(e, principal, {
           type: "收入",
@@ -1928,9 +1923,9 @@ export default class Fishing extends plugin {
         ghostLoanIssued = true;
         message = `🚢 幽灵船塞给你一张亡者船票：到手 ${principal} 樱花币，` +
           `欠下 ${result.total} 樱花币。` +
-          `\n💰 还清前，垂钓所得会全额抵债——只有钓上来的鱼才还得了这笔账。` +
-          `\n📈 从下一竿起，${GHOST_DEBT_REPAYMENT_CASTS} 竿内必须还清；每竿未清部分涨到 ${GHOST_DEBT_INTEREST_RATE} 倍。` +
-          `\n🩸 到期仍未还清就勾销债务、增加 1 层亡者抽成印记，每层让垂钓所得再 ×${GHOST_DEBT_MARK_MULTIPLIER}。`;
+          `\n💰 还清前，垂钓所得会全额抵债。` +
+          `\n📈 从下一竿起，每竿未清部分涨到 ${GHOST_DEBT_INTEREST_RATE} 倍。` +
+          `\n🩸 滚到${GHOST_DEBT_MARK_THRESHOLD}仍未还清就勾销债务，代价是垂钓所得永远被抽走10%`;
         break;
       }
 
@@ -2618,8 +2613,7 @@ export default class Fishing extends plugin {
       effects.push({
         icon: "🚢",
         name: "亡者高利贷",
-        detail: `尚欠 ${nightmareStatus.ghostDebt} · 剩余 ${nightmareStatus.ghostDebtTurnsRemaining} 竿 · 垂钓所得全额抵债 · ` +
-          `每竿没还上的部分 ×${GHOST_DEBT_INTEREST_RATE}`,
+        detail: `尚欠 ${nightmareStatus.ghostDebt} 樱花币`,
         tone: "warning",
       });
     }

@@ -29,7 +29,7 @@ categories:
         type: consumable
         convertible: true
         instant_effect: clear_debuffs
-        description: 清除骷髅诅咒、花嫁印记、亡者高利贷（含还款期限和全部抽成印记）、深压回响和全部致盲。
+        description: 清除骷髅诅咒、花嫁印记、亡者高利贷（含全部抽成印记）、深压回响和全部致盲。
 
       - id: item_sand_time
         name: 时之沙

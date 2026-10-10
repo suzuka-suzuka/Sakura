@@ -126,7 +126,7 @@ async function harness() {
     rollNightmareImmunity() { calls.immunityRolls++; return { immune: player.immune, active: true, chance: 0.3 }; }
     resetNightmareCurse() { calls.curseResets++; }
     addBlindnessLayers(user, amount) { player.layers += amount; return { layers: player.layers, hitRate: rules.getBlindReelHitRate(player.layers) }; }
-    addGhostDebt(user, amount) { player.debt = (player.debt || 0) + amount; return { total: player.debt, remainingTurns: 4 }; }
+    addGhostDebt(user, amount) { player.debt = (player.debt || 0) + amount; return { total: player.debt }; }
     breakLine() { calls.breaks++; }
     damageRod(user, rod, amount) { calls.rodDamage += amount; player.durability = Math.max(0, player.durability - amount); return { applied: true, isBroken: player.durability <= 0, currentDurability: player.durability, maxDurability: 190 }; }
   }
@@ -251,12 +251,15 @@ test("幽灵船真实结算放款四百，当竿不计息，完整免疫同时�
     assert.equal(h.player.debt || 0, immune ? 0 : 400);
     assert.equal(h.calls.settlements[0].accrueGhostInterest, immune);
     const message = h.calls.replies.flat(2).join("\n");
-    assert.equal(message.includes("4 竿内必须还清"), !immune);
-    assert.equal(message.includes("再 ×0.9"), !immune);
+    assert.equal(message.includes("💰 还清前，垂钓所得会全额抵债。"), !immune);
+    assert.equal(message.includes("📈 从下一竿起，每竿未清部分涨到 1.25 倍。"), !immune);
+    assert.equal(message.includes("🩸 滚到800仍未还清就勾销债务，代价是垂钓所得永远被抽走10%"), !immune);
+    assert.equal(message.includes("4 竿内必须还清"), false);
+    assert.equal(message.includes("只有钓上来的鱼"), false);
   }
 });
 
-test("失败竿到期也播报新增印记层数和连乘倍率，重复失败不再次结算", async () => {
+test("失败竿欠款达到八百也播报新增印记层数和连乘倍率，重复失败不再次结算", async () => {
   const h = await harness();
   h.player.settleResult = {
     success: true, writtenOff: true, ghostMarkLayers: 2, ghostMarkMultiplier: 0.81,
@@ -266,7 +269,8 @@ test("失败竿到期也播报新增印记层数和连乘倍率，重复失败�
   assert.equal(await h.instance.finishFailedAttempt(h.e, state), false);
   assert.equal(h.calls.settlements.length, 1);
   const message = h.calls.replies.flat(2).join("\n");
-  assert.ok(message.includes("4 竿期限已到"));
+  assert.ok(message.includes("欠款已达 800"));
+  assert.equal(message.includes("竿期限"), false);
   assert.ok(message.includes("当前 2 层"));
   assert.ok(message.includes("×0.81"));
 });

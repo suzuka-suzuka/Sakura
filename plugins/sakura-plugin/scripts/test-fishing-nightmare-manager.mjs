@@ -119,7 +119,6 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
 
     for (let index = 0; index < 6; index += 1) manager.addGhostDebt(userId, 100);
     assert.equal(manager.getNightmareStatus(userId).ghostDebt, 600);
-    assert.equal(manager.getNightmareStatus(userId).ghostDebtTurnsRemaining, 4);
 
     // 深压回响：持久累加层数，每层让鱼竿实际控制力再 ×0.8，倍率由层数派生。
     assert.equal(manager.addDeepPressureLayers(userId, 1).total, 1);
@@ -176,7 +175,6 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
       },
       brideNightmareMultiplier: 1,
       ghostDebt: 0,
-      ghostDebtTurnsRemaining: 0,
       ghostMarked: false,
       ghostMarkLayers: 0,
       ghostMarkMultiplier: 1,
