@@ -764,13 +764,8 @@ export default class Economy extends plugin {
     const feePercent = _.random(0, 10);
     const totalFee = 10 + Math.round(amount * (feePercent / 100));
     
-    const actualTransfer = amount - totalFee;
-    const actualFee = totalFee;
-    
-    if (totalFee >= amount) {
-      await e.reply("转账金额必须高于本次手续费，请增加金额后重试~", 10);
-      return true;
-    }
+    const actualFee = Math.min(amount, totalFee);
+    const actualTransfer = amount - actualFee;
 
     const creditEntries = [];
     if (actualTransfer > 0) {
@@ -837,7 +832,7 @@ export default class Economy extends plugin {
       await e.reply(segment.image(image));
     } catch (err) {
       logger.error(`生成转账图片失败: ${err}`);
-      await e.reply(`💰 转账${actualTransfer > 0 ? '成功' : '失败'}！\n实际转账：${actualTransfer} 樱花币\n手续费：${actualFee} 樱花币`);
+      await e.reply(`💰 转账成功！\n实际转账：${actualTransfer} 樱花币\n手续费：${actualFee} 樱花币`);
     }
     return true;
   });
