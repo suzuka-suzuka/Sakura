@@ -268,7 +268,7 @@ test("骷髅在原有诅咒上加一层，免疫阻止新增，重复收竿不�
     assert.equal(h.calls.settlements.length, 1);
     assert.equal(h.sessions.get(h.key), null);
     const message = h.calls.replies.flat(2).join("\n");
-    assert.equal(message.includes(`☠️ 诅咒附身！噩梦诅咒缠上了你，当前 ${expectedLayers} 层。\n此后每抛一竿层数 +1、噩梦权重随之 +1`), !immune);
+    assert.equal(message.includes(`☠️ 诅咒附身！噩梦诅咒缠上了你，当前 ${expectedLayers} 层。\n此后每抛一竿层数 +1`), !immune);
   }
 });
 

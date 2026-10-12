@@ -984,9 +984,9 @@ export default class Fishing extends plugin {
         nightmareStatus.brideNightmareMultiplier > 1
           ? `\n💍 ${brideMarkLayers} 层花嫁印记生效中`
           : "",
-        // 诅咒逐竿累加：报当前层数与对噩梦权重的加成，压迫感来自越钓越深。
+        // 诅咒逐竿累加，提示当前层数。
         curseActive
-          ? `\n☠️ 诅咒缠身，当前 ${curseAccrued} 层（噩梦权重 +${curseAccrued}）`
+          ? `\n☠️ 诅咒缠身，当前 ${curseAccrued} 层`
           : "",
         nightmareStatus.ghostDebt > 0
           ? `\n🚢 尚欠 ${nightmareStatus.ghostDebt} 樱花币`
@@ -1877,7 +1877,7 @@ export default class Fishing extends plugin {
         // 再遇骷髅仍在原有诅咒上 +1 层，仅净化圣水可清除。
         const total = fishingManager.addNightmareCurseLayers(e.user_id, 1);
         message = `☠️ 诅咒附身！噩梦诅咒缠上了你，当前 ${total} 层。` +
-          "\n此后每抛一竿层数 +1、噩梦权重随之 +1";
+          "\n此后每抛一竿层数 +1";
         break;
       }
 
