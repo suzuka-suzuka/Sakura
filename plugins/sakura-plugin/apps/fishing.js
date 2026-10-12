@@ -2904,7 +2904,7 @@ export default class Fishing extends plugin {
         : `发送「#投放福袋 留言」，留言限${FORTUNE_BAG_MESSAGE_LIMIT}字。`);
       return true;
     }
-    await e.reply(`🧧 福袋 F${result.id}已投放到${getFishingLocationConfig(locationId).name}，初始10樱花币。`);
+    await e.reply(`🧧 福袋 F${result.id}已投放到${getFishingLocationConfig(locationId).name}。`);
     return true;
   });
 
