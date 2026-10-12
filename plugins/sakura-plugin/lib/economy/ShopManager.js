@@ -36,7 +36,7 @@ class ShopManager {
           items.push({
             ...item,
             categoryId,
-            handler: category.handler,
+            handler: item.handler || category.handler,
           });
         }
       }
@@ -65,7 +65,7 @@ class ShopManager {
           items.push({
             ...item,
             categoryId,
-            handler: category.handler,
+            handler: item.handler || category.handler,
           });
         }
       }

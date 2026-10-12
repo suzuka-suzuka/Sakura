@@ -147,25 +147,21 @@ categories:
         boss_bait: true
         description: 宝箱中偶尔出现的非卖品。在任意钓点使用，下一竿必定呼出当地首领。
 
-  fortune_bags:
-    name: "🧧 漂流福袋"
-    description: "投放后随捕获递增的福袋"
-    handler: fishing_fortune_bag
+  special_tools:
+    name: "✨ 特殊道具"
+    description: "可投放到钓点的趣味道具"
+    handler: fishing_special
     items:
       - id: fortune_bag
-        name: 福袋
+        name: 漂流福袋
         price: 400
         type: consumable
-        description: 10币起步，钓起领钱、回池加10；失败、放弃或超时沉没。#投放福袋 留言
-        inventory_description: 10币起步，钓起领钱后回池加10；失败、放弃或超时沉没。
+        handler: fishing_fortune_bag
+        description: 装着樱花币的漂流福袋，会随钓到的次数增加而增加樱花币，钓起失败后自动消失。
 
-  torpedoes:
-    name: "💣 鱼雷"
-    description: "可投放到鱼塘的恶作剧道具"
-    handler: fishing_torpedo
-    items:
       - id: torpedo
         name: 鱼雷
         price: 400
         type: consumable
+        handler: fishing_torpedo
         description: 每个钓点各限埋1枚。被钓中者损伤鱼竿，该钓点鱼价35分钟×1.5；满12小时自爆。

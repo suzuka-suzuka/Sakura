@@ -132,7 +132,7 @@ async function fixture(t) {
 
 test("六种宝箱通用奖池均分40%，福袋400币且图片有效", () => {
   const shop = readEconomy("shop"), chest = readEconomy("treasure_chest");
-  assert.equal(shop.categories.fortune_bags.items[0].price, 400);
+  assert.equal(shop.categories.special_tools.items.find(item => item.id === "fortune_bag").price, 400);
   for (const { loot } of Object.values(chest.chests)) {
     const total = loot.reduce((sum, item) => sum + item.weight, 0);
     assert.equal(total, 300);
@@ -218,15 +218,23 @@ test("结算故障原子回滚，过期占用按原额回池，不能释放另�
   assert.equal(manager.getAvailableCount("pond"), 0);
 });
 
-test("购买福袋使用稳定物品ID，开宝箱可发放福袋且满包仍能领取", async t => {
+test("合并商品页后漂流福袋与鱼雷按各自ID购买，宝箱福袋满包仍能领取", async t => {
   const f = await fixture(t), e = f.event();
   const Shop = (await f.load("lib/economy/ShopManager.js")).default;
   const shop = new Shop();
   f.db.prepare("INSERT INTO economy(group_id,user_id,coins,bag_level) VALUES ('g','u',5000,10)").run();
-  const bought = await shop.buyItem(e, "福袋", 3);
+  assert.equal(shop.findItemById("fortune_bag").handler, "fishing_fortune_bag");
+  assert.equal(shop.findItemById("torpedo").handler, "fishing_torpedo");
+  const bought = await shop.buyItem(e, "漂流福袋", 3);
   assert.equal(bought.success, true);
+  assert.equal(bought.item.handler, "fishing_fortune_bag");
   assert.equal(f.db.prepare("SELECT coins FROM economy WHERE user_id='u'").get().coins, 3800);
   assert.equal(f.db.prepare("SELECT count FROM inventory WHERE item_id='fortune_bag'").get().count, 3);
+  const torpedo = await shop.buyItem(e, "鱼雷", 2);
+  assert.equal(torpedo.success, true);
+  assert.equal(torpedo.item.handler, "fishing_torpedo");
+  assert.equal(f.db.prepare("SELECT coins FROM economy WHERE user_id='u'").get().coins, 3000);
+  assert.equal(f.db.prepare("SELECT count FROM inventory WHERE item_id='torpedo'").get().count, 2);
   f.stock(e, "chest_pond", 1); f.stock(e, "bait_worm", 10000);
   const Chest = (await f.load("lib/economy/ChestManager.js")).default;
   const chest = new Chest(e); chest.rollLoot = () => ({ type: "item", item_id: "fortune_bag", count: 1 });

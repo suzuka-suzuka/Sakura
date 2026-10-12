@@ -332,16 +332,18 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
 
       for (let index = 0; index < items.length; index++) {
         const item = items[index]
+        const itemHandler = item.handler || category.handler
+        const itemMeta = HANDLER_META[itemHandler] || meta
         const col = index % columns
         const row = Math.floor(index / columns)
         const x = 36 + col * (cardWidth + cardGap)
         const y = cardsTop + row * (cardHeight + cardGap)
         this.drawPanel(ctx, x, y, cardWidth, cardHeight, {
           fill: COLORS.panelSoft,
-          border: `${meta.color}40`,
+          border: `${itemMeta.color}40`,
           radius: 20,
         })
-        await this.drawItemImage(ctx, item.id, x + 18, y + 24, 112, item.icon || meta.icon)
+        await this.drawItemImage(ctx, item.id, x + 18, y + 24, 112, item.icon || itemMeta.icon)
 
         const textX = x + 148
         const textWidth = cardWidth - 166
@@ -354,9 +356,9 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
         ctx.font = `bold 21px ${this.fontFamily}`
         ctx.fillText(price > 0 ? `${this.formatNumber(price)} 樱花币` : "非卖品", textX, y + 80)
 
-        const detail = this.getShopItemDetail(item, category.handler)
+        const detail = this.getShopItemDetail(item, itemHandler)
         if (detail) {
-          ctx.fillStyle = meta.color
+          ctx.fillStyle = itemMeta.color
           ctx.font = `18px ${this.fontFamily}`
           ctx.fillText(detail, textX, y + 108)
         }
