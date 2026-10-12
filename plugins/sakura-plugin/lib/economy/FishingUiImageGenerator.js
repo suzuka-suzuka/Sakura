@@ -29,6 +29,7 @@ const HANDLER_META = Object.freeze({
   fishing_torpedo: { icon: "💣", label: "鱼雷", color: "#C45663" },
   fishing_special: { icon: "✨", label: "特殊物品", color: "#A86BC3" },
   fishing_chest: { icon: "🗝️", label: "钓点宝箱", color: "#C38B3D" },
+  fishing_fortune_bag: { icon: "🧧", label: "漂流福袋", color: "#C35656" },
 })
 
 function toFiniteNumber(value, fallback = 0) {
@@ -398,6 +399,7 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
       return [item.bossBait ? "首领挑战专用" : "钓鱼消耗品"]
     }
     if (item.handler === "fishing_chest") return ["发送 #开宝箱 开启"]
+    if (item.handler === "fishing_fortune_bag") return ["发送 #投放福袋 留言"]
     if (item.type === "buff") return ["发送 #使用 激活效果", conversionHint].filter(Boolean)
     if (item.handler === "fishing_special" && item.type === "consumable") {
       return ["发送 #使用 消耗", conversionHint].filter(Boolean)

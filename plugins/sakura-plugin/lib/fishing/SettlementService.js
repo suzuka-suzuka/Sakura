@@ -6,6 +6,8 @@ import {
   getFishingStaminaMax,
 } from "./rules.js";
 
+import { FORTUNE_BAG_OWNER_EXP } from "../economy/fortuneBagRules.js";
+
 function normalizeNonNegativeInteger(value) {
   const number = Number(value);
   return Number.isSafeInteger(number) && number >= 0 ? number : null;
@@ -231,6 +233,39 @@ export default class FishingSettlementService {
       });
       const levelUp = this._grantExp(safeExpGain);
       return { success: true, ...debtResult, levelUp, newlyRecorded, newlyShiny };
+    })();
+  }
+
+  // 福袋按面额发钱；本竿债务照常计息，但不从福袋奖励抵债或抽成。
+  settleFortuneBagCatch({ sessionId, bagId, amount, ownerId, rodId, expGain = 0 }) {
+    const coins = normalizeNonNegativeInteger(amount);
+    const experience = normalizeNonNegativeInteger(expGain);
+    if (!sessionId || !Number.isSafeInteger(bagId) || coins == null || coins <= 0 || experience == null) {
+      return { success: false, reason: "invalid" };
+    }
+    return db.transaction(() => {
+      this._ensureRows();
+      if (!this._claimSession({ sessionId, success: true, earnings: coins })) {
+        return { success: false, reason: "duplicate" };
+      }
+      const debtResult = this._calcGhostDebt(0);
+      this._persistGhostDebt(debtResult);
+      db.prepare("UPDATE economy SET coins = coins + ? WHERE group_id = ? AND user_id = ?")
+        .run(coins, this.groupId, this.userId);
+      const balance = db.prepare("SELECT coins FROM economy WHERE group_id = ? AND user_id = ?")
+        .get(this.groupId, this.userId).coins;
+      db.prepare(`INSERT INTO economy_transactions
+        (group_id, user_id, type, amount, balance_after, note, related_id, created_at)
+        VALUES (?, ?, '福袋收入', ?, ?, ?, ?, ?)`)
+        .run(this.groupId, this.userId, coins, balance, `福袋 F${bagId}`, `fortune_bag:${bagId}`, Date.now());
+      db.prepare(`UPDATE fishing_stats SET total_catch = total_catch + 1, total_earnings = total_earnings + ?
+        WHERE group_id = ? AND user_id = ?`).run(coins, this.groupId, this.userId);
+      this._recordCatch({ rodId, masteryGain: 1, recordCatch: false });
+      const levelUp = this._grantExp(experience);
+      const owner = new FishingSettlementService({ group_id: this.groupId, user_id: ownerId });
+      owner._ensureRows();
+      owner._grantExp(FORTUNE_BAG_OWNER_EXP);
+      return { success: true, ...debtResult, earnings: coins, levelUp };
     })();
   }
 

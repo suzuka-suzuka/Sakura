@@ -147,6 +147,18 @@ categories:
         boss_bait: true
         description: 宝箱中偶尔出现的非卖品。在任意钓点使用，下一竿必定呼出当地首领。
 
+  fortune_bags:
+    name: "🧧 漂流福袋"
+    description: "投放后随捕获递增的福袋"
+    handler: fishing_fortune_bag
+    items:
+      - id: fortune_bag
+        name: 福袋
+        price: 400
+        type: consumable
+        description: 10币起步，钓起领钱、回池加10；失败、放弃或超时沉没。#投放福袋 留言
+        inventory_description: 10币起步，钓起领钱后回池加10；失败、放弃或超时沉没。
+
   torpedoes:
     name: "💣 鱼雷"
     description: "可投放到鱼塘的恶作剧道具"

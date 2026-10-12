@@ -1,76 +1,81 @@
 # 钓点宝箱统一掉落表
-# 每张表合计100：五种通用奖励各8%，地点专属道具15%，
-# 优先补齐未持有鱼饵×3为20%，鱼雷×2为10%，地点藏品为15%。
+# 每张表合计300：六种通用奖励均分40%，专属道具15%、鱼饵20%、鱼雷10%、藏品15%。
 
 chests:
   chest_pond:
     loot:
-      - { weight: 8, type: item, item_id: item_charm_lucky, count: 1 }
-      - { weight: 8, type: item, item_id: item_toolkit_repair, count: 1 }
-      - { weight: 8, type: item, item_id: item_holy_water, count: 1 }
-      - { weight: 8, type: item, item_id: item_sand_time, count: 1 }
-      - { weight: 8, type: item, item_id: bait_boss, count: 1 }
-      - { weight: 15, type: item, item_id: item_sign_koi, count: 1 }
-      - { weight: 20, type: random_bait, count: 3 }
-      - { weight: 10, type: item, item_id: torpedo, count: 1 }
-      - { weight: 15, type: item, item_id: treasure_pond_sakura_amber, count: 1 }
+      - { weight: 20, type: item, item_id: item_charm_lucky, count: 1 }
+      - { weight: 20, type: item, item_id: item_toolkit_repair, count: 1 }
+      - { weight: 20, type: item, item_id: item_holy_water, count: 1 }
+      - { weight: 20, type: item, item_id: item_sand_time, count: 1 }
+      - { weight: 20, type: item, item_id: bait_boss, count: 1 }
+      - { weight: 20, type: item, item_id: fortune_bag, count: 1 }
+      - { weight: 45, type: item, item_id: item_sign_koi, count: 1 }
+      - { weight: 60, type: random_bait, count: 3 }
+      - { weight: 30, type: item, item_id: torpedo, count: 1 }
+      - { weight: 45, type: item, item_id: treasure_pond_sakura_amber, count: 1 }
 
   chest_river:
     loot:
-      - { weight: 8, type: item, item_id: item_charm_lucky, count: 1 }
-      - { weight: 8, type: item, item_id: item_toolkit_repair, count: 1 }
-      - { weight: 8, type: item, item_id: item_holy_water, count: 1 }
-      - { weight: 8, type: item, item_id: item_sand_time, count: 1 }
-      - { weight: 8, type: item, item_id: bait_boss, count: 1 }
-      - { weight: 15, type: item, item_id: item_charm_river, count: 1 }
-      - { weight: 20, type: random_bait, count: 3 }
-      - { weight: 10, type: item, item_id: torpedo, count: 1 }
-      - { weight: 15, type: item, item_id: treasure_river_golden_scale, count: 1 }
+      - { weight: 20, type: item, item_id: item_charm_lucky, count: 1 }
+      - { weight: 20, type: item, item_id: item_toolkit_repair, count: 1 }
+      - { weight: 20, type: item, item_id: item_holy_water, count: 1 }
+      - { weight: 20, type: item, item_id: item_sand_time, count: 1 }
+      - { weight: 20, type: item, item_id: bait_boss, count: 1 }
+      - { weight: 20, type: item, item_id: fortune_bag, count: 1 }
+      - { weight: 45, type: item, item_id: item_charm_river, count: 1 }
+      - { weight: 60, type: random_bait, count: 3 }
+      - { weight: 30, type: item, item_id: torpedo, count: 1 }
+      - { weight: 45, type: item, item_id: treasure_river_golden_scale, count: 1 }
 
   chest_lake:
     loot:
-      - { weight: 8, type: item, item_id: item_charm_lucky, count: 1 }
-      - { weight: 8, type: item, item_id: item_toolkit_repair, count: 1 }
-      - { weight: 8, type: item, item_id: item_holy_water, count: 1 }
-      - { weight: 8, type: item, item_id: item_sand_time, count: 1 }
-      - { weight: 8, type: item, item_id: bait_boss, count: 1 }
-      - { weight: 15, type: item, item_id: item_lamp_fog, count: 1 }
-      - { weight: 20, type: random_bait, count: 3 }
-      - { weight: 10, type: item, item_id: torpedo, count: 1 }
-      - { weight: 15, type: item, item_id: treasure_lake_bronze_mirror, count: 1 }
+      - { weight: 20, type: item, item_id: item_charm_lucky, count: 1 }
+      - { weight: 20, type: item, item_id: item_toolkit_repair, count: 1 }
+      - { weight: 20, type: item, item_id: item_holy_water, count: 1 }
+      - { weight: 20, type: item, item_id: item_sand_time, count: 1 }
+      - { weight: 20, type: item, item_id: bait_boss, count: 1 }
+      - { weight: 20, type: item, item_id: fortune_bag, count: 1 }
+      - { weight: 45, type: item, item_id: item_lamp_fog, count: 1 }
+      - { weight: 60, type: random_bait, count: 3 }
+      - { weight: 30, type: item, item_id: torpedo, count: 1 }
+      - { weight: 45, type: item, item_id: treasure_lake_bronze_mirror, count: 1 }
 
   chest_coast:
     loot:
-      - { weight: 8, type: item, item_id: item_charm_lucky, count: 1 }
-      - { weight: 8, type: item, item_id: item_toolkit_repair, count: 1 }
-      - { weight: 8, type: item, item_id: item_holy_water, count: 1 }
-      - { weight: 8, type: item, item_id: item_sand_time, count: 1 }
-      - { weight: 8, type: item, item_id: bait_boss, count: 1 }
-      - { weight: 15, type: item, item_id: item_card_double_coin, count: 1 }
-      - { weight: 20, type: random_bait, count: 3 }
-      - { weight: 10, type: item, item_id: torpedo, count: 1 }
-      - { weight: 15, type: item, item_id: treasure_coast_black_pearl, count: 1 }
+      - { weight: 20, type: item, item_id: item_charm_lucky, count: 1 }
+      - { weight: 20, type: item, item_id: item_toolkit_repair, count: 1 }
+      - { weight: 20, type: item, item_id: item_holy_water, count: 1 }
+      - { weight: 20, type: item, item_id: item_sand_time, count: 1 }
+      - { weight: 20, type: item, item_id: bait_boss, count: 1 }
+      - { weight: 20, type: item, item_id: fortune_bag, count: 1 }
+      - { weight: 45, type: item, item_id: item_card_double_coin, count: 1 }
+      - { weight: 60, type: random_bait, count: 3 }
+      - { weight: 30, type: item, item_id: torpedo, count: 1 }
+      - { weight: 45, type: item, item_id: treasure_coast_black_pearl, count: 1 }
 
   chest_abyss:
     loot:
-      - { weight: 8, type: item, item_id: item_charm_lucky, count: 1 }
-      - { weight: 8, type: item, item_id: item_toolkit_repair, count: 1 }
-      - { weight: 8, type: item, item_id: item_holy_water, count: 1 }
-      - { weight: 8, type: item, item_id: item_sand_time, count: 1 }
-      - { weight: 8, type: item, item_id: bait_boss, count: 1 }
-      - { weight: 15, type: item, item_id: item_bait_monster, count: 1 }
-      - { weight: 20, type: random_bait, count: 3 }
-      - { weight: 10, type: item, item_id: torpedo, count: 1 }
-      - { weight: 15, type: item, item_id: treasure_abyss_dragon_ambergris, count: 1 }
+      - { weight: 20, type: item, item_id: item_charm_lucky, count: 1 }
+      - { weight: 20, type: item, item_id: item_toolkit_repair, count: 1 }
+      - { weight: 20, type: item, item_id: item_holy_water, count: 1 }
+      - { weight: 20, type: item, item_id: item_sand_time, count: 1 }
+      - { weight: 20, type: item, item_id: bait_boss, count: 1 }
+      - { weight: 20, type: item, item_id: fortune_bag, count: 1 }
+      - { weight: 45, type: item, item_id: item_bait_monster, count: 1 }
+      - { weight: 60, type: random_bait, count: 3 }
+      - { weight: 30, type: item, item_id: torpedo, count: 1 }
+      - { weight: 45, type: item, item_id: treasure_abyss_dragon_ambergris, count: 1 }
 
   chest_mystic:
     loot:
-      - { weight: 8, type: item, item_id: item_charm_lucky, count: 1 }
-      - { weight: 8, type: item, item_id: item_toolkit_repair, count: 1 }
-      - { weight: 8, type: item, item_id: item_holy_water, count: 1 }
-      - { weight: 8, type: item, item_id: item_sand_time, count: 1 }
-      - { weight: 8, type: item, item_id: bait_boss, count: 1 }
-      - { weight: 15, type: item, item_id: item_bottle_wish, count: 1 }
-      - { weight: 20, type: random_bait, count: 3 }
-      - { weight: 10, type: item, item_id: torpedo, count: 1 }
-      - { weight: 15, type: item, item_id: treasure_mystic_star_fragment, count: 1 }
+      - { weight: 20, type: item, item_id: item_charm_lucky, count: 1 }
+      - { weight: 20, type: item, item_id: item_toolkit_repair, count: 1 }
+      - { weight: 20, type: item, item_id: item_holy_water, count: 1 }
+      - { weight: 20, type: item, item_id: item_sand_time, count: 1 }
+      - { weight: 20, type: item, item_id: bait_boss, count: 1 }
+      - { weight: 20, type: item, item_id: fortune_bag, count: 1 }
+      - { weight: 45, type: item, item_id: item_bottle_wish, count: 1 }
+      - { weight: 60, type: random_bait, count: 3 }
+      - { weight: 30, type: item, item_id: torpedo, count: 1 }
+      - { weight: 45, type: item, item_id: treasure_mystic_star_fragment, count: 1 }

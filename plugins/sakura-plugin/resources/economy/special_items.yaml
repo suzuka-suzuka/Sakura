@@ -12,8 +12,8 @@ categories:
         type: buff
         convertible: true
         duration: 2100
-        description: 使用后35分钟内，非首领渔获通过收竿命中判定后可直接钓起；致盲仍可能导致空钩。
-        activation_message: "🍀 好运护符已激活！\n🎣 接下来35分钟内，非首领渔获通过收竿命中判定后可直接钓起！\n🌫️ 致盲仍可能导致空钩。"
+        description: 35分钟内，非首领、非福袋渔获收竿命中后直接钓起；致盲仍可能空钩。
+        activation_message: "🍀 好运护符已激活！\n🎣 接下来35分钟内，非首领、非福袋渔获收竿命中后直接钓起！"
 
       - id: item_toolkit_repair
         name: 修理工具箱

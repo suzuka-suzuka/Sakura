@@ -189,6 +189,24 @@ class DB {
       CREATE INDEX IF NOT EXISTS idx_pond_torpedoes_group_location
       ON pond_torpedoes (group_id, location);
 
+      CREATE TABLE IF NOT EXISTS pond_fortune_bags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        location TEXT NOT NULL,
+        message TEXT NOT NULL,
+        amount INTEGER NOT NULL DEFAULT 10,
+        status TEXT NOT NULL DEFAULT 'active',
+        session_id TEXT UNIQUE,
+        hook_until INTEGER,
+        success_count INTEGER NOT NULL DEFAULT 0,
+        total_paid INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_fortune_bags_group_location
+      ON pond_fortune_bags (group_id, location, status);
+
       CREATE TABLE IF NOT EXISTS favorability (
         group_id TEXT NOT NULL,
         from_user_id TEXT NOT NULL,

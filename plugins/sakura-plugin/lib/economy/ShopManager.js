@@ -94,7 +94,7 @@ class ShopManager {
   }
 
   getItemId(item) {
-    if (item.type === 'equipment' || item.handler === 'fishing_bait' || item.handler === 'fishing_torpedo') {
+    if (item.type === 'equipment' || item.handler === 'fishing_bait' || item.handler === 'fishing_torpedo' || item.handler === 'fishing_fortune_bag') {
       return item.id || item.name;
     }
     return item.name;

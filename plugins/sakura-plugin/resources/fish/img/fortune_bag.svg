@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="204" height="204" viewBox="0 0 204 204">
+  <defs><linearGradient id="bag" x2="0" y2="1"><stop stop-color="#f46e78"/><stop offset="1" stop-color="#c93149"/></linearGradient><linearGradient id="gold" x2="0" y2="1"><stop stop-color="#fff0a5"/><stop offset="1" stop-color="#e6a52f"/></linearGradient></defs>
+  <ellipse cx="102" cy="180" rx="67" ry="9" fill="#000" opacity=".12"/>
+  <path d="M71 29 88 38 103 25 117 38 134 29 124 65C161 89 177 138 153 166 132 188 70 188 49 166 25 138 43 89 80 65Z" fill="url(#bag)" stroke="#912c40" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M77 63Q102 71 127 63M89 69Q76 87 56 90M116 69Q130 87 149 90" fill="none" stroke="#f5ca68" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="102" cy="125" r="33" fill="url(#gold)" stroke="#f5d87d" stroke-width="3"/>
+  <path d="m86 108 16 17 16-17M102 125v25M86 126h32M86 136h32" fill="none" stroke="#b77325" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m160 37 4 10 10 4-10 4-4 10-4-10-10-4 10-4Z" fill="#f4c963"/>
+</svg>

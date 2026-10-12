@@ -315,6 +315,7 @@ export default class Economy extends plugin {
       "fishing_torpedo",
       "fishing_special",
       "fishing_chest",
+      "fishing_fortune_bag",
     ];
 
     const items = Object.entries(inventory).map(([itemId, count]) => {
@@ -324,13 +325,14 @@ export default class Economy extends plugin {
       else if (!handler && itemId.startsWith("line_")) handler = "fishing_line";
       else if (!handler && itemId.startsWith("bait_")) handler = "fishing_bait";
       else if (!handler && itemId.startsWith("chest_")) handler = "fishing_chest";
+      else if (!handler && itemId === "fortune_bag") handler = "fishing_fortune_bag";
       else if (!handler && itemId === "torpedo") handler = "fishing_torpedo";
       else if (!handler) handler = "fishing_special";
 
       const entry = {
         id: item?.id || itemId,
         name: item?.name || itemId,
-        description: item?.description || "尚未收录说明的物品",
+        description: item?.inventory_description || item?.description || "尚未收录说明的物品",
         icon: item?.icon,
         type: item?.type,
         sellPrice: Number(item?.sell_price) || 0,

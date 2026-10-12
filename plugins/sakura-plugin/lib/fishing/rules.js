@@ -457,7 +457,7 @@ export const NORMAL_TUG_SUCCESS_MULTIPLIER = 2;
 export const NORMAL_TUG_PRESSURE_RANGE = (
   FORCE_PULL_DIFFICULTY_RANGE / NORMAL_TUG_SUCCESS_MULTIPLIER
 );
-export const TORPEDO_HOOK_WEIGHT_PER_ITEM = 3;
+export const TORPEDO_HOOK_WEIGHT_PER_ITEM = 5;
 export const TORPEDO_ROD_DAMAGE = 20;
 // 被别人钓中的加成高于自己引爆：踩雷是运气，引爆者却能自己挑时机，
 // 能挑时机的那一档就该弱一些。

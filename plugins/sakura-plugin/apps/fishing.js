@@ -4,6 +4,8 @@ import FishingImageGenerator from "../lib/economy/FishingImageGenerator.js";
 import FishingUiImageGenerator from "../lib/economy/FishingUiImageGenerator.js";
 import InventoryManager from "../lib/economy/InventoryManager.js";
 import ShopManager from "../lib/economy/ShopManager.js";
+import FortuneBagManager from "../lib/economy/FortuneBagManager.js";
+import { fortuneBagAsCatch, rollPondItemType, FORTUNE_BAG_MESSAGE_LIMIT } from "../lib/economy/fortuneBagRules.js";
 import _ from "lodash";
 import fs from "node:fs";
 import path from "node:path";
@@ -55,7 +57,6 @@ import {
   TORPEDO_ARM_DURATION_MS,
   TORPEDO_BLAST_CATCH_COUNT,
   TORPEDO_DETONATE_PRICE_MULTIPLIER,
-  TORPEDO_HOOK_WEIGHT_PER_ITEM,
   TORPEDO_PRICE_BOOST_MULTIPLIER,
   TORPEDO_ROD_DAMAGE,
   WEATHER_CONFIG,
@@ -261,30 +262,32 @@ async function selectRandomFish(
     nightmareWeightMultiplier = 1,
     finalWeightMultipliers = null,
     zeroWeightRarities = [],
+    fortuneBagManager = null,
+    sessionId = null,
   } = {},
 ) {
-  // 星愿强制稀有度时跳过鱼雷拦截，保证“必中传说”兑现
+  // 星愿强制稀有度时跳过钓点投放物，保证指定品质兑现。
   if (!forceRarity && fishingManager && userId) {
     const torpedoCount = fishingManager.getAvailableTorpedoCount(userId, location);
-    if (torpedoCount > 0) {
-      const torpedoWeight = torpedoCount * TORPEDO_HOOK_WEIGHT_PER_ITEM;
-      const totalWeight = 100 + torpedoWeight;
-      const random = Math.random() * totalWeight;
-
-      if (random < torpedoWeight) {
-        return {
-          id: "torpedo",
-          name: "鱼雷",
-          rarity: "危险",
-          isTorpedo: true,
-          actualWeight: 0,
-          effectiveWeight: 0,
-          weight: [0, 0],
-          base_price: 0,
-          torpedoLocation: location,
-          description: "💥 轰！！！"
-        };
-      }
+    const bagCount = fortuneBagManager?.getAvailableCount(location) || 0;
+    const itemType = rollPondItemType(torpedoCount, bagCount);
+    if (itemType === "torpedo") {
+      return {
+        id: "torpedo",
+        name: "鱼雷",
+        rarity: "危险",
+        isTorpedo: true,
+        actualWeight: 0,
+        effectiveWeight: 0,
+        weight: [0, 0],
+        base_price: 0,
+        torpedoLocation: location,
+        description: "💥 轰！！！"
+      };
+    }
+    if (itemType === "fortune_bag") {
+      const bag = fortuneBagManager.reserve(location, sessionId);
+      if (bag) return fortuneBagAsCatch(bag);
     }
   }
 
@@ -394,6 +397,10 @@ export default class Fishing extends plugin {
 
   cleanupFishingSession(stateKey, sessionId) {
     const state = fishingSessions.finish(stateKey, sessionId);
+    if (state?.fortuneBagManager) {
+      try { state.fortuneBagManager.release(state.id); }
+      catch (err) { logger.warn(`[福袋] 释放占用失败: ${err.message}`); }
+    }
     if (state?.lockKey && state?.id) {
       releaseRedisLock(redis, state.lockKey, state.id).catch((err) => {
         logger.warn(`[钓鱼] 释放会话锁失败: ${err.message}`);
@@ -724,7 +731,7 @@ export default class Fishing extends plugin {
     const shinyEscapeMsg = formatShinyEscape(state.fish);
     try {
       const settled = await this.finishFailedAttempt(e, state);
-      if (settled && message) await e.reply(`${message}${shinyEscapeMsg}`, false, true);
+      if (settled && message && !state.fish?.isFortuneBag) await e.reply(`${message}${shinyEscapeMsg}`, false, true);
       return settled;
     } catch (err) {
       logger.error(`[钓鱼] 超时处理失败: ${err.stack || err}`);
@@ -872,6 +879,7 @@ export default class Fishing extends plugin {
       return true;
     }
     state.cleanup = () => this.cleanupFishingSession(stateKey, state.id);
+    state.fortuneBagManager = new FortuneBagManager(e);
 
     try {
       const staminaResult = fishingManager.consumeFishingStamina(userId);
@@ -934,17 +942,21 @@ export default class Fishing extends plugin {
             // 噩梦是减半不是免疫——钓上来的噩梦照常触发减益，圣水仍是唯一的解。
             finalWeightMultipliers: buffFlags.hasFogLamp ? FOG_LAMP_WEIGHT_MULTIPLIERS : null,
             zeroWeightRarities: buffFlags.hasFogLamp ? FOG_LAMP_ZERO_RARITIES : [],
+            fortuneBagManager: state.fortuneBagManager,
+            sessionId: state.id,
           },
         );
+      state.fish = selectedFish;
+      // 福袋重量为面额一半，困难度同当地宝箱，不吃天气数值倍率。
       // 真实鱼重用于展示、出售和记录；天气只把它换算为本竿承受的有效拉力。
       // 首领保持固定的传说级基准，天气不改变其有效拉力与困难度。
       selectedFish.effectiveWeight = calculateEffectiveFishWeight(
         selectedFish.actualWeight,
-        !selectedFish.isTorpedo && !isBossFish(selectedFish)
+        !selectedFish.isTorpedo && !selectedFish.isFortuneBag && !isBossFish(selectedFish)
           ? environment.weightMultiplier
           : 1,
       );
-      if (!selectedFish.isTorpedo && !isBossFish(selectedFish)) {
+      if (!selectedFish.isTorpedo && !selectedFish.isFortuneBag && !isBossFish(selectedFish)) {
         selectedFish.difficulty = Math.max(
           0,
           Math.round(selectedFish.difficulty * environment.difficultyMultiplier),
@@ -995,7 +1007,7 @@ export default class Fishing extends plugin {
           ? `\n🩸 亡者抽成印记 ${nightmareStatus.ghostMarkLayers} 层，垂钓所得 ×${Number(nightmareStatus.ghostMarkMultiplier.toFixed(6))}`
           : "",
         nightmareStatus.blindnessLayers > 0
-          ? `\n👁️ 致盲 ${nightmareStatus.blindnessLayers} 层 · 收竿命中率 ${Number((nightmareStatus.reelHitRate * 100).toFixed(2))}%`
+          ? `\n👁️ 致盲 ${nightmareStatus.blindnessLayers} 层`
           : "",
         nightmareStatus.deepPressureLayers > 0
           ? `\n🔔 ${nightmareStatus.deepPressureLayers} 层深压回响生效中`
@@ -1010,7 +1022,7 @@ export default class Fishing extends plugin {
         lineConfig,
         baitConfig,
         phase: FISHING_PHASE.waiting,
-        hasLucky: buffFlags.hasLucky,
+        hasLucky: buffFlags.hasLucky && !selectedFish.isFortuneBag,
         hasFogLamp: buffFlags.hasFogLamp,
         hasMonsterBait: buffFlags.hasMonsterBait,
         hasRiverBless: buffFlags.hasRiverBless,
@@ -1201,7 +1213,7 @@ export default class Fishing extends plugin {
           ? `\n🌈 你亲手放走了一抹罕见的虹光…忍痛割爱。`
           : "";
         await this.finishFailedAttempt(e, state);
-        await e.reply(`🎣 放生了这条鱼，期待下次相遇~${shinyReleaseMsg}`);
+        if (!fish.isFortuneBag) await e.reply(`🎣 放生了这条鱼，期待下次相遇~${shinyReleaseMsg}`);
         return;
       }
 
@@ -1214,7 +1226,7 @@ export default class Fishing extends plugin {
       const reelAccuracy = resolveBlindReel(state, fishingManager.getNightmareStatus(userId).blindnessLayers);
       if (!reelAccuracy.hit) {
         await this.finishFailedAttempt(e, state, { recordCatch: false });
-        await e.reply(`🌫️ 致盲让你错过了收竿时机，只收回一枚空钩。\n👁️ 致盲 ${reelAccuracy.layers} 层 · 收竿命中率 ${Number((reelAccuracy.hitRate * 100).toFixed(2))}%\n本次鱼饵已消耗，鱼竿和鱼线没有额外损伤。`);
+        await e.reply("🌫️ 眼前一片模糊，你慌忙收紧鱼线，却只拉回一枚空钩。");
         return;
       }
 
@@ -1303,7 +1315,7 @@ export default class Fishing extends plugin {
 
           await e.reply([
             `🌊 巨大的力量传来！\n`,
-            `😱 这到底是个什么庞然大物！？(${fishWeight})\n`,
+            fish.isFortuneBag ? "" : `😱 这到底是个什么庞然大物！？(${fishWeight})\n`,
             lineBreak.saved
               ? `💥 鱼线发出濒死的悲鸣，却奇迹般撑住了！\n🌊 河神的祝福护住了【${lineConfig.name}】，但鱼还是跑了...${damageResult.msg}${refundMsg}`
               : `💥 啪！鱼线瞬间崩断了！\n🧵 【${lineConfig.name}】牺牲了...${damageResult.msg}`,
@@ -1326,7 +1338,7 @@ export default class Fishing extends plugin {
           await e.reply([
             `💥 崩！\n`,
             `😫 还是没能坚持住，鱼脱钩了...\n`,
-            `👋 鱼大摇大摆地游走了(${fishWeight})\n`,
+            fish.isFortuneBag ? "" : `👋 鱼大摇大摆地游走了(${fishWeight})\n`,
             lineBreak.saved
               ? `🌊 河神的祝福护住了【${lineConfig.name}】！${damageResult.msg}${refundMsg}`
               : `🧵 失去了【${lineConfig.name}】${damageResult.msg}`,
@@ -1730,7 +1742,12 @@ export default class Fishing extends plugin {
 
     try {
       const settlement = new FishingSettlementService(e);
-      const result = settlement.settleAttempt({
+      const result = state.fish?.isFortuneBag
+        ? state.fortuneBagManager.settle({
+          bagId: state.fish.fortuneBagId, sessionId: state.id, success: false,
+          rodId: state.rodConfig?.id, masteryGain,
+        })
+        : settlement.settleAttempt({
         sessionId: state.id,
         fishId: state.fish?.id,
         success: false,
@@ -1742,6 +1759,7 @@ export default class Fishing extends plugin {
       if (!result.success && result.reason !== "duplicate") {
         logger.warn(`[钓鱼] 失败结算未完成: ${result.reason}`);
       }
+      if (result.ended) await e.reply([segment.at(result.ownerId), ` 🧧 有只装着 ${result.amount} 樱花币的福袋沉没了。`]);
       const debtMsg = formatGhostDebtSettlement(result);
       if (debtMsg) await e.reply(debtMsg.trimEnd(), false, true);
     } catch (err) {
@@ -2016,6 +2034,15 @@ export default class Fishing extends plugin {
       : "";
 
     try {
+      if (fish.isFortuneBag) {
+        const result = state.fortuneBagManager.settle({
+          bagId: fish.fortuneBagId, sessionId: state.id, success: true,
+          rodId: rodConfig.id, expGain, locationId: state.locationId,
+        });
+        if (!result.success) throw new Error(`福袋结算失败：${result.reason}`);
+        await e.reply(`🌊 鱼线拖出一只鼓鼓的福袋，袋口一松，樱花币叮当落下。\n🧧 ${fish.name}：${fish.description}\n💰 获得 ${result.amount} 樱花币，福袋已回池。${formatGhostDebtSettlement(result)}`);
+        return true;
+      }
       if (fish.rarity === "噩梦") {
         // 深渊猎手每次独立判定完整免疫；未触发时照常结算断线与噩梦效果。
         const immunity = fishingManager.rollNightmareImmunity(userId);
@@ -2864,6 +2891,20 @@ export default class Fishing extends plugin {
       logger.error(`生成钓鱼图鉴图片失败: ${err.stack || err}`);
     }
 
+    return true;
+  });
+
+  deployFortuneBag = Command(/^#?(?:投放|放置)福袋(?:\s+([\s\S]*))?$/, async (e) => {
+    if (!this.checkWhitelist(e)) return false;
+    const locationId = new FishingManager(e.group_id).getFishingLocation(e.user_id);
+    const result = new FortuneBagManager(e).deploy(locationId, e.match?.[1]);
+    if (!result.success) {
+      await e.reply(result.reason === "no_item"
+        ? "没有福袋，可购买或开宝箱获得。"
+        : `发送「#投放福袋 留言」，留言限${FORTUNE_BAG_MESSAGE_LIMIT}字。`);
+      return true;
+    }
+    await e.reply(`🧧 福袋 F${result.id}已投放到${getFishingLocationConfig(locationId).name}，初始10樱花币。`);
     return true;
   });
 

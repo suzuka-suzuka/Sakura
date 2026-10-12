@@ -6,7 +6,7 @@ export const ENCOUNTER_DEFAULT_CHANCE = 0.1;
 export const ENCOUNTER_ABILITY_COSTS = Object.freeze({ A: 1, B: 2 });
 
 export function rollFishingEncounter(state, chance = ENCOUNTER_DEFAULT_CHANCE, random = Math.random) {
-  if (!state || state.encounterChecked || state.hasLucky || state.fish?.isTorpedo || state.fish?.is_boss === true) return false;
+  if (!state || state.encounterChecked || state.hasLucky || state.fish?.isTorpedo || state.fish?.isFortuneBag || state.fish?.is_boss === true) return false;
   state.encounterChecked = true;
   const probability = Number.isFinite(chance) ? Math.max(0, Math.min(1, chance)) : ENCOUNTER_DEFAULT_CHANCE;
   return probability > 0 && (probability === 1 || random() < probability);
