@@ -34,7 +34,6 @@ async function harness({ chance = 1, sendImage, renderImage, exists = false } = 
     getLineBonusFromMastery() { return 0; }
     getMerchantCoinMultiplier() { return 1; }
     async getFishPriceMultiplier() { return 1; }
-    resetNightmareCurse() {}
     rollNightmareImmunity() { return { immune: false }; }
     breakLine() { calls.breaks++; }
   }

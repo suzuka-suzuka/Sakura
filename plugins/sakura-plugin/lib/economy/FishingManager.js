@@ -689,20 +689,6 @@ export default class FishingManager {
     return Math.max(0, Number(row?.nightmare_curse_layers) || 0);
   }
 
-  // 钓到任意噩梦即清空诅咒；若该噩梦本身是诅咒骷髅，其效果会随后重新 +1。
-  resetNightmareCurse(userId) {
-    userId = String(userId);
-    this._ensureUser(userId);
-    const before = this.getNightmareCurseLayers(userId);
-    if (before <= 0) return { cleared: 0 };
-    db.prepare(`
-        UPDATE fishing_stats
-        SET nightmare_curse_layers = 0
-        WHERE group_id = ? AND user_id = ?
-    `).run(this.groupId, userId);
-    return { cleared: before };
-  }
-
   getNightmareCurseStatus(userId) {
     const userData = this.getUserData(userId);
     return getNightmareCurseDisplay(userData.nightmare_curse_layers);

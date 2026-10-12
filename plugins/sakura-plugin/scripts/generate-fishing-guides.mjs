@@ -1121,7 +1121,7 @@ const NIGHTMARE_TEXT = Object.freeze({
   },
   curse: {
     effect: "附加 1 层诅咒；之后每抛一竿再 +1 层，每层让噩梦权重 +1。",
-    counter: "钓到任意噩梦会清旧诅咒；净化圣水可直接清除。",
+    counter: "净化圣水可直接清除。",
   },
   nightmare_weight_multiplier: {
     effect: "花嫁印记累计生效：每层让噩梦抽取权重再 ×2。",

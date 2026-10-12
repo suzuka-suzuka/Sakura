@@ -136,15 +136,15 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
     assert.equal(manager.clearDeepPressure(userId).cleared, false);
     manager.addDeepPressureLayers(userId, 2);
 
-    // 诅咒：命中 +1，生效期每抛一竿累加，钓到任意噩梦即清空。
+    // 诅咒：命中与后续抛竿均累加，原有层数持续保留，仅圣水清除。
+    assert.equal(manager.accrueNightmareCurseLayer(userId), 0);
     assert.equal(manager.addNightmareCurseLayers(userId, 1), 1);
     assert.equal(manager.accrueNightmareCurseLayer(userId), 2);
     assert.equal(manager.accrueNightmareCurseLayer(userId), 3);
-    assert.equal(manager.resetNightmareCurse(userId).cleared, 3);
-    assert.equal(manager.getNightmareCurseLayers(userId), 0);
-    // 清空后 accrue 不会凭空造层（仅在生效期累加）。
-    assert.equal(manager.accrueNightmareCurseLayer(userId), 0);
-    manager.addNightmareCurseLayers(userId, 5);
+    assert.equal(manager.addNightmareCurseLayers(userId, 1), 4);
+    assert.equal(manager.accrueNightmareCurseLayer(userId), 5);
+    assert.equal(new FishingManager("group-a").getNightmareCurseLayers(userId), 5);
+    assert.equal(new FishingManager("group-b").getNightmareCurseLayers(userId), 0);
 
     assert.equal(manager.addBlindnessLayers(userId).layers, 1);
     assert.equal(manager.addBlindnessLayers(userId).layers, 2);
@@ -153,6 +153,7 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
     assert.equal(new FishingManager("group-b").getNightmareStatus(userId).blindnessLayers, 0);
     manager.repairRod(userId, "rod_carbon");
     assert.equal(manager.getNightmareStatus(userId).blindnessLayers, 2);
+    assert.equal(manager.getNightmareCurseLayers(userId), 5);
     manager.damageRod(userId, "rod_carbon", 5);
     const cleansable = manager.getCleansableNightmareAfflictions(userId);
     assert.equal(cleansable.curseLayers, 5);
@@ -167,6 +168,9 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
 
     const purified = manager.clearNightmareDebuffs(userId);
     assert.equal(purified.cleared, 5);
+    assert.equal(purified.curseLayers, 5);
+    // 净化后继续抛竿不会凭空增加诅咒。
+    assert.equal(manager.accrueNightmareCurseLayer(userId), 0);
     assert.deepEqual(manager.getNightmareStatus(userId), {
       curse: {
         actualLayers: 0,

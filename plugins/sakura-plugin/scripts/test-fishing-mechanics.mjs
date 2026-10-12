@@ -115,8 +115,8 @@ test("探囊鬼手以100币为偷取上限，余额不超过100时掏空，下�
 });
 
 async function harness() {
-  const calls = { settlements: [], replies: [], breaks: 0, rodDamage: 0, cooldown: 0, rolls: 0, refunds: 0, immunityRolls: 0, curseResets: 0 };
-  const player = { layers: 1, immune: false, roll: 0.95, durability: 190, coins: 1000 };
+  const calls = { settlements: [], replies: [], breaks: 0, rodDamage: 0, cooldown: 0, rolls: 0, refunds: 0, immunityRolls: 0 };
+  const player = { layers: 1, curseLayers: 5, immune: false, roll: 0.95, durability: 190, coins: 1000 };
   class Manager {
     getNightmareStatus() { return { blindnessLayers: player.layers }; }
     getRodMastery() { return 20; }
@@ -124,7 +124,7 @@ async function harness() {
     getRodDurabilityInfo() { return { currentDurability: player.durability, maxDurability: 190 }; }
     getLineBonusFromMastery() { return 0; }
     rollNightmareImmunity() { calls.immunityRolls++; return { immune: player.immune, active: true, chance: 0.3 }; }
-    resetNightmareCurse() { calls.curseResets++; }
+    addNightmareCurseLayers(user, amount) { player.curseLayers += amount; return player.curseLayers; }
     addBlindnessLayers(user, amount) { player.layers += amount; return { layers: player.layers, hitRate: rules.getBlindReelHitRate(player.layers) }; }
     addGhostDebt(user, amount) { player.debt = (player.debt || 0) + amount; return { total: player.debt }; }
     breakLine() { calls.breaks++; }
@@ -225,7 +225,7 @@ test("完整免疫覆盖所有噩梦，河神在免疫未触发时仍只保线",
     h.instance.applyNightmareEffect = async () => assert.fail("免疫触发后不应执行任何噩梦惩罚");
     await h.instance.finishSuccess(h.e, state, new h.Manager());
     assert.equal(h.calls.immunityRolls, 1);
-    assert.equal(h.calls.curseResets, 1);
+    assert.equal(h.player.curseLayers, 5);
     assert.equal(h.calls.breaks, 0);
     assert.equal(h.calls.rodDamage, 0);
     assert.equal(h.calls.refunds, 0);
@@ -239,6 +239,37 @@ test("完整免疫覆盖所有噩梦，河神在免疫未触发时仍只保线",
   assert.equal(h.calls.breaks, 0);
   assert.equal(h.calls.refunds, 1);
   assert.equal(h.player.layers, 2);
+});
+
+test("钓到其他噩梦保留骷髅诅咒，完整免疫也不清除旧层数", async () => {
+  for (const id of ["nightmare_bone_shark", "nightmare_lake_corpse_fisher", "nightmare_coast_ghost_ship"]) {
+    for (const immune of [false, true]) {
+      const h = await harness();
+      h.player.immune = immune;
+      const state = h.create(fish.find(entry => entry.id === id));
+      await h.instance.finishSuccess(h.e, state, new h.Manager());
+      assert.equal(h.player.curseLayers, 5, `${id} 免疫=${immune} 应保留旧诅咒`);
+      assert.equal(h.calls.settlements.length, 1);
+    }
+  }
+});
+
+test("骷髅在原有诅咒上加一层，免疫阻止新增，重复收竿不重复叠层", async () => {
+  for (const initialLayers of [0, 5]) for (const immune of [false, true]) {
+    const h = await harness();
+    h.player.layers = 0;
+    h.player.curseLayers = initialLayers;
+    h.player.immune = immune;
+    h.create(fish.find(entry => entry.id === "nightmare_cursed_skull"), { hasLucky: true });
+    await Promise.all([h.instance.handleFishing(h.e), h.instance.handleFishing(h.e)]);
+    const expectedLayers = initialLayers + Number(!immune);
+    assert.equal(h.player.curseLayers, expectedLayers);
+    assert.equal(h.calls.immunityRolls, 1);
+    assert.equal(h.calls.settlements.length, 1);
+    assert.equal(h.sessions.get(h.key), null);
+    const message = h.calls.replies.flat(2).join("\n");
+    assert.equal(message.includes(`☠️ 诅咒附身！噩梦诅咒缠上了你，当前 ${expectedLayers} 层。\n此后每抛一竿层数 +1、噩梦权重随之 +1`), !immune);
+  }
 });
 
 test("幽灵船真实结算放款四百，当竿不计息，完整免疫同时挡下放款与欠款", async () => {
@@ -318,7 +349,7 @@ test("真实噩梦结算：捞尸人叠层并断线，完整免疫挡下两者�
     assert.equal(h.calls.rodDamage, 0);
     assert.equal(h.calls.settlements.length, 1);
     assert.equal(h.calls.immunityRolls, 1);
-    assert.equal(h.calls.curseResets, 1);
+    assert.equal(h.player.curseLayers, 5);
     const message = h.calls.replies.flat(2).join("\n");
     assert.equal(message.includes("概率完整免疫"), false);
     assert.equal(message.includes("本次已触发"), false);

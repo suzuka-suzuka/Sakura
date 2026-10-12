@@ -794,7 +794,7 @@ export function getFishingLevelByExp(exp) {
   return Math.floor(Math.sqrt(safeExp / FISHING_LEVEL_EXP_BASE)) + 1;
 }
 
-// 诅咒改为逐竿累加、钓到任意噩梦即清空，不再逐层递减，因此如实展示当前层数。
+// 骷髅诅咒逐竿累加，仅净化圣水可清除，展示实际层数。
 export function getNightmareCurseDisplay(actualLayers) {
   const safeActualLayers = Math.max(0, Math.floor(Number(actualLayers) || 0));
   return {

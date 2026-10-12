@@ -896,7 +896,7 @@ export default class Fishing extends plugin {
       const nightmareStatus = fishingManager.getNightmareStatus(userId);
 
       // 骷髅诅咒：生效期每抛一竿累加一层，每层给噩梦权重 +1，且在花嫁倍率之前结算（先加后乘）。
-      // 首领鱼饵不参与诅咒累加。诅咒会在本竿钓到任意噩梦时清空（见结算处）。
+      // 首领鱼饵不参与诅咒累加；诅咒仅由净化圣水清除。
       const curseAccrued = !isBossBait && nightmareStatus.curse.actualLayers > 0
         ? fishingManager.accrueNightmareCurseLayer(userId)
         : 0;
@@ -986,7 +986,7 @@ export default class Fishing extends plugin {
           : "",
         // 诅咒逐竿累加：报当前层数与对噩梦权重的加成，压迫感来自越钓越深。
         curseActive
-          ? `\n☠️ 诅咒缠身，当前 ${curseAccrued} 层（噩梦权重 +${curseAccrued}，钓到任意噩梦才会消散）`
+          ? `\n☠️ 诅咒缠身，当前 ${curseAccrued} 层（噩梦权重 +${curseAccrued}）`
           : "",
         nightmareStatus.ghostDebt > 0
           ? `\n🚢 尚欠 ${nightmareStatus.ghostDebt} 樱花币`
@@ -1874,11 +1874,10 @@ export default class Fishing extends plugin {
       }
 
       case "curse": {
-        // 命中诅咒骷髅固定 +1 层。此前的 resetNightmareCurse 已把旧层清零，
-        // 因此再遇诅咒等于「重新计算」，从 1 层起累加。
+        // 再遇骷髅仍在原有诅咒上 +1 层，仅净化圣水可清除。
         const total = fishingManager.addNightmareCurseLayers(e.user_id, 1);
         message = `☠️ 诅咒附身！噩梦诅咒缠上了你，当前 ${total} 层。` +
-          "\n此后每抛一竿层数 +1、噩梦权重随之 +1，直到你钓到任意噩梦";
+          "\n此后每抛一竿层数 +1、噩梦权重随之 +1";
         break;
       }
 
@@ -2018,9 +2017,6 @@ export default class Fishing extends plugin {
 
     try {
       if (fish.rarity === "噩梦") {
-        // 钓到任意噩梦即清空诅咒（无论是否被免疫挡下）；若这条噩梦本身是诅咒骷髅，
-        // 其效果会在下面重新从 1 层起累加，实现「重新计算」。
-        fishingManager.resetNightmareCurse(userId);
         // 深渊猎手每次独立判定完整免疫；未触发时照常结算断线与噩梦效果。
         const immunity = fishingManager.rollNightmareImmunity(userId);
         const immunityTriggered = Boolean(immunity.immune);
@@ -2596,7 +2592,7 @@ export default class Fishing extends plugin {
       effects.push({
         icon: "☠️",
         name: "诅咒",
-        detail: `${curseStatus.actualLayers} 层 · 噩梦权重 +${curseStatus.actualLayers}` ,
+        detail: `${curseStatus.actualLayers} 层 · 噩梦权重 +${curseStatus.actualLayers}`,
         tone: "danger",
       });
     }
