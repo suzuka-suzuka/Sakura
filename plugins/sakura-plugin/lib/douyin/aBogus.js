@@ -114,12 +114,15 @@ function generateRandomPrefix(random) {
   return String.fromCharCode(...bytes);
 }
 
-function buildFingerprintPayload(searchParams, userAgent, windowEnv, now) {
+function buildFingerprintPayload(searchParams, userAgent, windowEnv, now, signatureType) {
   const suffix = "cus";
   const startTime = now();
   const queryHash = sm3(sm3(searchParams + suffix));
   const suffixHash = sm3(sm3(suffix));
-  const uaKey = String.fromCharCode(0.00390625, 1, 14);
+  // 回复接口使用独立的签名参数，同时影响 UA 哈希和签名载荷。
+  // 参数约定参考 https://github.com/NanmiCoder/MediaCrawler/blob/main/libs/douyin.js
+  const args = [0, 1, signatureType === "reply" ? 8 : 14];
+  const uaKey = String.fromCharCode(0.00390625, 1, args[2]);
   const uaHash = sm3(encodeResult(rc4Encrypt(userAgent, uaKey), "s3"));
   const endTime = now();
 
@@ -130,7 +133,6 @@ function buildFingerprintPayload(searchParams, userAgent, windowEnv, now) {
     18: 44,
     19: [1, 0, 1, 5],
   };
-  const args = [0, 1, 14];
   const pageId = 6241;
   const aid = 6383;
 
@@ -208,6 +210,7 @@ export function generateABogus(
     windowEnv = DEFAULT_DOUYIN_WINDOW_ENV,
     now = Date.now,
     random = Math.random,
+    signatureType = "detail",
   } = {}
 ) {
   const prefix = generateRandomPrefix(random);
@@ -215,7 +218,15 @@ export function generateABogus(
     String(searchParams || ""),
     String(userAgent || ""),
     String(windowEnv || DEFAULT_DOUYIN_WINDOW_ENV),
-    now
+    now,
+    signatureType
   );
   return `${encodeResult(prefix + payload, "s4")}=`;
+}
+
+export function generateReplyABogus(searchParams, userAgent, options = {}) {
+  return generateABogus(searchParams, userAgent, {
+    ...options,
+    signatureType: "reply",
+  });
 }

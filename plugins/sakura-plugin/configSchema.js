@@ -344,7 +344,7 @@ export const BilicookieSchema = z.object({
 export const DouyinSchema = z.object({
     enable: z.boolean().default(true).describe('启用抖音解析|关闭后不再响应抖音链接和解析指令'),
     autoResolve: z.boolean().default(true).describe('自动解析|是否自动解析消息中的抖音链接；关闭后仍可使用“#抖音解析”'),
-    browserFallback: z.boolean().default(true).describe('浏览器自动回退|普通请求被抖音拦截时，使用本机无头 Chrome 获取匿名 Cookie 后重试'),
+    browserFallback: z.boolean().default(true).describe('浏览器自动回退|优先直接请求作品与评论接口；受限时使用本机无头 Chrome 读取作品详情或刷新评论访问 Cookie'),
     cookie: z.string().default('').describe('抖音Cookie|#textarea|可留空匿名尝试；遇到访问验证时填写浏览器登录 www.douyin.com 后的完整 Cookie'),
     cooldownSeconds: z.number().int().min(0).max(300).default(15).describe('解析冷却(秒)|同一群或私聊两次解析之间的最短间隔；主人不受限制'),
     maxVideoSizeMB: z.number().int().min(1).max(500).default(80).describe('视频大小上限(MB)|超过后只发送作品信息和原链接'),

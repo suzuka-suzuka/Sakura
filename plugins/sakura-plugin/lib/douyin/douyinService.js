@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { generateABogus } from "./aBogus.js";
+import { generateABogus, generateReplyABogus } from "./aBogus.js";
 import { plugindata } from "../path.js";
 
 export const DOUYIN_WEB_USER_AGENT =
@@ -201,12 +201,16 @@ function buildDetailQuery(awemeId) {
   });
 }
 
-export function buildAwemeDetailUrl(awemeId, signer = generateABogus) {
+export function buildAwemeDetailUrl(awemeId, signer = generateABogus, { cookie = "" } = {}) {
   if (!/^\d{15,22}$/.test(String(awemeId || ""))) {
     throw createDouyinError("无效的抖音作品 ID", "DOUYIN_INVALID_ID");
   }
 
   const query = buildDetailQuery(awemeId);
+  addCookieTokens(query, cookie);
+  const cookies = parseCookieHeader(cookie);
+  const uifid = cookies.get("UIFID") || cookies.get("UIFID_TEMP");
+  if (uifid) query.set("uifid", uifid);
   const signature = signer(query.toString(), DOUYIN_API_USER_AGENT);
   query.set("a_bogus", signature);
   return `https://www.douyin.com/aweme/v1/web/aweme/detail/?${query.toString()}`;
@@ -284,7 +288,7 @@ export function buildCommentReplyUrl(
   awemeId,
   commentId,
   { cursor = 0, count = 3, cookie = "" } = {},
-  signer = generateABogus
+  signer = generateReplyABogus
 ) {
   if (!/^\d{15,22}$/.test(String(awemeId || ""))) {
     throw createDouyinError("无效的抖音作品 ID", "DOUYIN_INVALID_ID");
@@ -770,7 +774,7 @@ function findAwemeCandidate(root, awemeId = "") {
       const looksLikeAweme = Boolean(
         current.video || current.image_post_info || current.images || current.statistics
       );
-      if (id && id === awemeId) return current;
+      if (id && id === awemeId && looksLikeAweme) return current;
       if (!fallback && looksLikeAweme && (id || current.desc)) fallback = current;
     }
 
@@ -778,7 +782,7 @@ function findAwemeCandidate(root, awemeId = "") {
       if (value && typeof value === "object") queue.push(value);
     }
   }
-  return fallback;
+  return awemeId ? null : fallback;
 }
 
 function extractMetaContent(html, key) {
@@ -800,7 +804,7 @@ function extractMetaContent(html, key) {
   return "";
 }
 
-function extractAwemeFromHtml(html, awemeId, sourceUrl) {
+function extractAwemeFromHtml(html, awemeId, sourceUrl, { allowMetadata = true } = {}) {
   const scriptPatterns = [
     /<script[^>]+id=["']RENDER_DATA["'][^>]*>([\s\S]*?)<\/script>/gi,
     /<script[^>]+id=["']__UNIVERSAL_DATA_FOR_REHYDRATION__["'][^>]*>([\s\S]*?)<\/script>/gi,
@@ -814,6 +818,8 @@ function extractAwemeFromHtml(html, awemeId, sourceUrl) {
       if (candidate) return candidate;
     }
   }
+
+  if (!allowMetadata) return null;
 
   const desc =
     extractMetaContent(html, "og:description") ||
@@ -937,6 +943,20 @@ export class DouyinService {
     return headers;
   }
 
+  buildApiHeaders(cookie = "", extra = {}) {
+    // 抖音网关在 A-Bogus 校验之前检查这两个头；仅用于抖音官方 API。
+    // 协议行为参考 https://github.com/NanmiCoder/MediaCrawler/blob/main/media_platform/douyin/client.py
+    const cookies = parseCookieHeader(cookie);
+    const headers = this.buildHeaders(cookie, {
+      "user-agent": DOUYIN_API_USER_AGENT,
+      "x-tt-argus": "1",
+      ...extra,
+    });
+    const uifid = cookies.get("UIFID") || cookies.get("UIFID_TEMP");
+    if (uifid) headers.uifid = uifid;
+    return headers;
+  }
+
   getCachedBrowserCookie(sourceCookie = "") {
     const source = normalizeText(sourceCookie);
     const cache = this.browserCookieCache;
@@ -970,8 +990,8 @@ export class DouyinService {
 
     try {
       const page = await browser.newPage();
-      await page.setUserAgent(DOUYIN_API_USER_AGENT);
-      await page.setViewport({ width: 412, height: 915, isMobile: true });
+      await page.setUserAgent(DOUYIN_WEB_USER_AGENT);
+      await page.setViewport({ width: 1365, height: 768 });
       await page.setRequestInterception(true);
       page.on("request", (request) => {
         const resourceType = request.resourceType();
@@ -1043,6 +1063,98 @@ export class DouyinService {
         });
     }
     return this.browserCookiePromise;
+  }
+
+  async fetchBrowserDetail(awemeId, sourceCookie = "") {
+    const puppeteerModule = await import("puppeteer");
+    const puppeteer = puppeteerModule.default || puppeteerModule;
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"],
+    });
+    const sourceUrl = `https://www.douyin.com/video/${awemeId}`;
+
+    try {
+      const page = await browser.newPage();
+      await page.setUserAgent(DOUYIN_WEB_USER_AGENT);
+      await page.setViewport({ width: 1365, height: 768 });
+      await page.setRequestInterception(true);
+      page.on("request", (request) => {
+        const action = ["media", "image", "font"].includes(request.resourceType())
+          ? request.abort()
+          : request.continue();
+        void action.catch(() => {});
+      });
+
+      const configuredCookies = parseCookieHeader(sourceCookie);
+      if (configuredCookies.size > 0) {
+        await page.setCookie(
+          ...[...configuredCookies.entries()].map(([name, value]) => ({
+            name,
+            value,
+            url: DOUYIN_REFERER,
+          }))
+        );
+      }
+
+      const usableDetail = (candidate) => {
+        if (!candidate) return null;
+        const aweme = normalizeDouyinAweme(candidate);
+        return aweme.id === awemeId &&
+          (aweme.streams.length > 0 || aweme.images.length > 0)
+          ? candidate
+          : null;
+      };
+
+      // 让网页自身完成请求签名与访问初始化，只接收当前作品的详情。
+      let responseDetail = null;
+      const detailResponse = page.waitForResponse(
+        async (response) => {
+          const url = new URL(response.url());
+          if (
+            url.hostname !== "www.douyin.com" ||
+            url.pathname !== "/aweme/v1/web/aweme/detail/" ||
+            url.searchParams.get("aweme_id") !== awemeId ||
+            !response.ok()
+          ) return false;
+          try {
+            const data = parseJsonCandidate(await response.text());
+            const detail = usableDetail(data?.aweme_detail ?? data?.awemeDetail);
+            if (!detail) return false;
+            responseDetail = detail;
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 25_000 }
+      ).catch(() => null);
+
+      await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await detailResponse;
+      const candidate = responseDetail || usableDetail(
+        extractAwemeFromHtml(await page.content(), awemeId, sourceUrl, { allowMetadata: false })
+      );
+      if (!candidate) {
+        throw createDouyinError(
+          "桌面浏览器未取得当前作品的可下载详情",
+          "DOUYIN_BROWSER_DETAIL_FAILED"
+        );
+      }
+
+      const collected = new Map(configuredCookies);
+      for (const cookie of await page.cookies(DOUYIN_REFERER)) {
+        if (cookie?.name && cookie?.value) collected.set(cookie.name, cookie.value);
+      }
+      this.browserCookieCache = {
+        sourceCookie: normalizeText(sourceCookie),
+        cookieHeader: serializeCookies(collected),
+        expiresAt: Date.now() + 30 * 60 * 1000,
+      };
+      return candidate;
+    } finally {
+      await browser.close().catch(() => {});
+    }
   }
 
   async requestText(url, options = {}, timeoutMs = 30_000) {
@@ -1124,13 +1236,11 @@ export class DouyinService {
   }
 
   async fetchDetailApi(awemeId, cookie) {
-    const url = buildAwemeDetailUrl(awemeId);
+    const url = buildAwemeDetailUrl(awemeId, generateABogus, { cookie });
     const { response, text } = await this.requestText(
       url,
       {
-        headers: this.buildHeaders(cookie, {
-          "user-agent": DOUYIN_API_USER_AGENT,
-        }),
+        headers: this.buildApiHeaders(cookie),
         redirect: "error",
       },
       30_000
@@ -1233,14 +1343,14 @@ export class DouyinService {
       ].includes(error?.code);
       if (browserFallback && shouldUseBrowser) {
         try {
-          this.log("info", "[Douyin] 普通请求受限，启动浏览器刷新匿名访问 Cookie");
-          effectiveCookie = await this.refreshBrowserCookies(cookie, { force: true });
-          candidate = await this.fetchDetailApi(awemeId, effectiveCookie);
+          this.log("info", "[Douyin] 详情接口受限，使用桌面作品页面回退");
+          candidate = await this.fetchBrowserDetail(awemeId, cookie);
+          effectiveCookie = this.getCachedBrowserCookie(cookie);
         } catch (browserError) {
           failures.push(browserError);
           this.log(
             "warn",
-            `[Douyin] 浏览器 Cookie 回退失败，继续尝试旧接口：${browserError.message}`
+            `[Douyin] 桌面浏览器详情回退失败，继续尝试旧接口：${browserError.message}`
           );
         }
       } else {
@@ -1292,9 +1402,8 @@ export class DouyinService {
     const { response, text } = await this.requestText(
       url,
       {
-        headers: this.buildHeaders(cookie, {
+        headers: this.buildApiHeaders(cookie, {
           referer: referer || DOUYIN_REFERER,
-          "user-agent": DOUYIN_API_USER_AGENT,
         }),
         redirect: "error",
       },
@@ -1417,7 +1526,7 @@ export class DouyinService {
         "DOUYIN_COMMENT_BAD_JSON",
       ].includes(error?.code);
       if (!browserFallback || !shouldUseBrowser) throw error;
-      this.log("info", "[Douyin] 评论请求受限，启动浏览器刷新匿名访问 Cookie");
+      this.log("info", "[Douyin] 评论请求受限，启动桌面浏览器刷新访问 Cookie");
       effectiveCookie = await this.refreshBrowserCookies(cookie, { force: true });
       loaded = await loadTopLevel(effectiveCookie);
     }
