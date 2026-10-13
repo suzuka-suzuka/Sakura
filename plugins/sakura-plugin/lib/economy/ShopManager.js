@@ -75,7 +75,8 @@ class ShopManager {
 
   findShopItemByName(name) {
     const items = this.getShopItems();
-    return items.find((item) => item.name === name) || null;
+    return items.find((item) => item.name === name ||
+      (Array.isArray(item.aliases) && item.aliases.includes(name))) || null;
   }
 
   findShopItemById(id) {
@@ -85,7 +86,8 @@ class ShopManager {
 
   findItemByName(name) {
     const items = this.getAllItems();
-    return items.find((item) => item.name === name) || null;
+    return items.find((item) => item.name === name ||
+      (Array.isArray(item.aliases) && item.aliases.includes(name))) || null;
   }
 
   findItemById(id) {

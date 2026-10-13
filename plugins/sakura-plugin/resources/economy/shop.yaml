@@ -154,6 +154,7 @@ categories:
     items:
       - id: fortune_bag
         name: 漂流福袋
+        aliases: [福袋]
         price: 400
         type: consumable
         handler: fishing_fortune_bag

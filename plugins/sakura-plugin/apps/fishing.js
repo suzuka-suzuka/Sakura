@@ -2894,7 +2894,7 @@ export default class Fishing extends plugin {
     return true;
   });
 
-  deployFortuneBag = Command(/^#?(?:投放|放置)福袋(?:\s+([\s\S]*))?$/, async (e) => {
+  deployFortuneBag = Command(/^#?(?:投放|放置)(?:漂流)?福袋\s*([\s\S]*)$/, async (e) => {
     if (!this.checkWhitelist(e)) return false;
     const locationId = new FishingManager(e.group_id).getFishingLocation(e.user_id);
     const result = new FortuneBagManager(e).deploy(locationId, e.match?.[1]);

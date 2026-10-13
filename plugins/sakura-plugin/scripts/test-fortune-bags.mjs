@@ -32,7 +32,7 @@ async function fixture(t) {
     clearTimeout: id => timers.delete(id),
     plugin: class { constructor(options) { Object.assign(this, options); } finish() {} setContext() {}
       getScopeKey(...parts) { return JSON.stringify(parts); } },
-    Command: (pattern, handler) => handler, Cron: (pattern, handler) => handler,
+    Command: (pattern, handler) => Object.assign(handler, { pattern }), Cron: (pattern, handler) => handler,
     logger: { warn() {}, info() {}, error: message => errors.push(message) },
     segment: { image: value => value, at: value => `[CQ:at,qq=${value}]` },
     Math: Object.assign(Object.create(Math), { random: () => 0 }),
@@ -225,9 +225,13 @@ test("合并商品页后漂流福袋与鱼雷按各自ID购买，宝箱福袋满
   f.db.prepare("INSERT INTO economy(group_id,user_id,coins,bag_level) VALUES ('g','u',5000,10)").run();
   assert.equal(shop.findItemById("fortune_bag").handler, "fishing_fortune_bag");
   assert.equal(shop.findItemById("torpedo").handler, "fishing_torpedo");
-  const bought = await shop.buyItem(e, "漂流福袋", 3);
-  assert.equal(bought.success, true);
-  assert.equal(bought.item.handler, "fishing_fortune_bag");
+  assert.equal(shop.findItemByName("福袋").id, "fortune_bag");
+  for (const [name, count] of [["漂流福袋", 2], ["福袋", 1]]) {
+    const bought = await shop.buyItem(e, name, count);
+    assert.equal(bought.success, true);
+    assert.equal(bought.item.id, "fortune_bag");
+    assert.equal(bought.item.handler, "fishing_fortune_bag");
+  }
   assert.equal(f.db.prepare("SELECT coins FROM economy WHERE user_id='u'").get().coins, 3800);
   assert.equal(f.db.prepare("SELECT count FROM inventory WHERE item_id='fortune_bag'").get().count, 3);
   const torpedo = await shop.buyItem(e, "鱼雷", 2);
@@ -240,6 +244,36 @@ test("合并商品页后漂流福袋与鱼雷按各自ID购买，宝箱福袋满
   const chest = new Chest(e); chest.rollLoot = () => ({ type: "item", item_id: "fortune_bag", count: 1 });
   assert.equal(chest.openChest(shop.findItemById("chest_pond")).success, true);
   assert.equal(f.db.prepare("SELECT count FROM inventory WHERE item_id='fortune_bag'").get().count, 4);
+});
+
+test("福袋与漂流福袋投放命令共用库存，留言前空格可省略且空留言不扣物品", async t => {
+  const f = await fixture(t), e = f.event();
+  const App = (await f.load("apps/fishing.js")).default;
+  const app = new App();
+  f.stock(e, "fortune_bag", 9);
+  for (const action of ["投放", "放置"]) {
+    for (const name of ["福袋", "漂流福袋"]) {
+      for (const separator of ["", " "]) {
+        e.msg = `#${action}${name}${separator}好运留给  下一位`;
+        e.match = app.deployFortuneBag.pattern.exec(e.msg);
+        assert.ok(e.match, e.msg);
+        assert.equal(await app.deployFortuneBag(e), true);
+      }
+    }
+  }
+  const rows = f.db.prepare("SELECT message,location FROM pond_fortune_bags ORDER BY id").all();
+  assert.equal(rows.length, 8);
+  assert.ok(rows.every(row => row.message === "好运留给 下一位" && row.location === "pond"));
+  assert.equal(e.replies.length, 8);
+  assert.ok(e.replies.every(reply => /^🧧 福袋 F\d+已投放到樱花池塘。$/u.test(reply)));
+  for (const command of ["#投放福袋", "#投放漂流福袋   "]) {
+    e.match = app.deployFortuneBag.pattern.exec(command);
+    assert.ok(e.match);
+    await app.deployFortuneBag(e);
+    assert.match(e.replies.at(-1), /留言限120字/u);
+  }
+  assert.equal(f.db.prepare("SELECT count FROM inventory WHERE item_id='fortune_bag'").get().count, 1);
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS count FROM pond_fortune_bags").get().count, 8);
 });
 
 test("数据库重开保留福袋与编号序列，已沉没编号不会重复使用", async t => {
