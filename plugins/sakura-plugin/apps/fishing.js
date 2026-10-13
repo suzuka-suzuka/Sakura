@@ -160,7 +160,7 @@ function formatEncounterSuccess(encounterResult, { coins = true } = {}) {
   const multiplier = Number(encounterResult.multiplier.toFixed(3));
   const rewards = coins
     ? `樱花币×${multiplier}，经验×${multiplier}`
-    : `经验×${multiplier}（仅经验加成）`;
+    : `经验×${multiplier}`;
   return `🌊 水路遭遇成功！用时 ${(encounterResult.elapsedMs / 1000).toFixed(1)} 秒，${rewards}\n`;
 }
 
@@ -1894,8 +1894,7 @@ export default class Fishing extends plugin {
       case "curse": {
         // 再遇骷髅仍在原有诅咒上 +1 层，仅净化圣水可清除。
         const total = fishingManager.addNightmareCurseLayers(e.user_id, 1);
-        message = `☠️ 诅咒附身！噩梦诅咒缠上了你，当前 ${total} 层。` +
-          "\n此后每抛一竿层数 +1";
+        message = `☠️ 诅咒附身！噩梦诅咒缠上了你，当前 ${total} 层。此后每抛一竿层数 +1`;
         break;
       }
 

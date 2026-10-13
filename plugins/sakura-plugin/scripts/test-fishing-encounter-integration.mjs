@@ -224,7 +224,7 @@ test("噩梦与宝藏只增加经验，答错时不执行噩梦效果和宝箱�
       assert.equal(h.calls.breaks, fish.rarity === "噩梦" && success ? 1 : 0);
       if (success) {
         const message = h.calls.replies.at(-1)[0].join("");
-        assert.match(message, /经验×2（仅经验加成）/);
+        assert.match(message, /经验×2\n/);
         assert.doesNotMatch(message, /樱花币×2/);
       }
     }
