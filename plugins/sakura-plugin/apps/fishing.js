@@ -2896,12 +2896,19 @@ export default class Fishing extends plugin {
 
   deployFortuneBag = Command(/^#?(?:投放|放置)(?:漂流)?福袋\s*([\s\S]*)$/, async (e) => {
     if (!this.checkWhitelist(e)) return false;
-    const locationId = new FishingManager(e.group_id).getFishingLocation(e.user_id);
-    const result = new FortuneBagManager(e).deploy(locationId, e.match?.[1]);
+    let locationId = new FishingManager(e.group_id).getFishingLocation(e.user_id);
+    let message = (e.match?.[1] || "").trim();
+    // 留言前的完整钓点名指定投放地点，省略时使用玩家当前钓点。
+    const target = Object.entries(FISHING_LOCATIONS).find(([, config]) => message.startsWith(config.name));
+    if (target) {
+      locationId = target[0];
+      message = message.slice(target[1].name.length).trim();
+    }
+    const result = new FortuneBagManager(e).deploy(locationId, message);
     if (!result.success) {
       await e.reply(result.reason === "no_item"
         ? "没有福袋，可购买或开宝箱获得。"
-        : `发送「#投放福袋 留言」，留言限${FORTUNE_BAG_MESSAGE_LIMIT}字。`);
+        : `发送「#投放福袋 [钓点名] 留言」，留言限${FORTUNE_BAG_MESSAGE_LIMIT}字。`, 10);
       return true;
     }
     await e.reply(`🧧 福袋 F${result.id}已投放到${getFishingLocationConfig(locationId).name}。`);

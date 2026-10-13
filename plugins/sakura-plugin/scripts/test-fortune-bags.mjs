@@ -99,9 +99,13 @@ async function fixture(t) {
   });
   const Manager = (await load("lib/economy/FortuneBagManager.js")).default;
   function event(user = "u", group = "g") {
-    const replies = [];
-    return { group_id: group, user_id: user, msg: "", replies,
-      reply: async value => { replies.push(Array.isArray(value) ? value.join("") : String(value)); return { message_id: replies.length }; } };
+    const replies = [], recallTimes = [];
+    return { group_id: group, user_id: user, msg: "", replies, recallTimes,
+      reply: async (value, recall = 0) => {
+        replies.push(Array.isArray(value) ? value.join("") : String(value));
+        recallTimes.push(recall);
+        return { message_id: replies.length };
+      } };
   }
   function stock(e, item, count) {
     db.prepare("INSERT OR REPLACE INTO inventory (group_id,user_id,item_id,count) VALUES (?,?,?,?)")
@@ -250,6 +254,9 @@ test("福袋与漂流福袋投放命令共用库存，留言前空格可省略�
   const f = await fixture(t), e = f.event();
   const App = (await f.load("apps/fishing.js")).default;
   const app = new App();
+  const FishingManager = (await f.load("lib/economy/FishingManager.js")).default;
+  new FishingManager(e.group_id).getUserData(e.user_id);
+  f.db.prepare("UPDATE fishing_stats SET location='river' WHERE group_id=? AND user_id=?").run(e.group_id, e.user_id);
   f.stock(e, "fortune_bag", 9);
   for (const action of ["投放", "放置"]) {
     for (const name of ["福袋", "漂流福袋"]) {
@@ -263,17 +270,63 @@ test("福袋与漂流福袋投放命令共用库存，留言前空格可省略�
   }
   const rows = f.db.prepare("SELECT message,location FROM pond_fortune_bags ORDER BY id").all();
   assert.equal(rows.length, 8);
-  assert.ok(rows.every(row => row.message === "好运留给 下一位" && row.location === "pond"));
+  assert.ok(rows.every(row => row.message === "好运留给 下一位" && row.location === "river"));
   assert.equal(e.replies.length, 8);
-  assert.ok(e.replies.every(reply => /^🧧 福袋 F\d+已投放到樱花池塘。$/u.test(reply)));
-  for (const command of ["#投放福袋", "#投放漂流福袋   "]) {
+  assert.ok(e.recallTimes.every(seconds => seconds === 0));
+  assert.ok(e.replies.every(reply => /^🧧 福袋 F\d+已投放到青柳河湾。$/u.test(reply)));
+  for (const command of ["#投放福袋", "#投放漂流福袋   ", `#投放福袋${"字".repeat(121)}`]) {
     e.match = app.deployFortuneBag.pattern.exec(command);
     assert.ok(e.match);
     await app.deployFortuneBag(e);
     assert.match(e.replies.at(-1), /留言限120字/u);
+    assert.equal(e.recallTimes.at(-1), 10);
   }
   assert.equal(f.db.prepare("SELECT count FROM inventory WHERE item_id='fortune_bag'").get().count, 1);
   assert.equal(f.db.prepare("SELECT COUNT(*) AS count FROM pond_fortune_bags").get().count, 8);
+  const noItem = f.event("without-item");
+  noItem.match = app.deployFortuneBag.pattern.exec("#投放漂流福袋好运");
+  await app.deployFortuneBag(noItem);
+  assert.match(noItem.replies.at(-1), /没有福袋/u);
+  assert.equal(noItem.recallTimes.at(-1), 10);
+  await app.deployTorpedo(noItem);
+  assert.match(noItem.replies.at(-1), /没有鱼雷/u);
+  assert.equal(noItem.recallTimes.at(-1), 10);
+});
+
+test("投放福袋可指定六个钓点且空格可省略，地点不混入留言也不改变玩家位置", async t => {
+  const f = await fixture(t), e = f.event();
+  const App = (await f.load("apps/fishing.js")).default;
+  const app = new App();
+  const FishingManager = (await f.load("lib/economy/FishingManager.js")).default;
+  const fm = new FishingManager(e.group_id);
+  fm.getUserData(e.user_id);
+  f.db.prepare("UPDATE fishing_stats SET location='coast' WHERE group_id=? AND user_id=?").run(e.group_id, e.user_id);
+  f.stock(e, "fortune_bag", 13);
+  let id = 0;
+  for (const [locationId, location] of Object.entries(fishingRules.FISHING_LOCATIONS)) {
+    for (const command of [`#投放福袋 ${location.name} 好运留给  下一位`, `#放置漂流福袋${location.name}好运留给  下一位`]) {
+      e.match = app.deployFortuneBag.pattern.exec(command);
+      assert.ok(e.match, command);
+      await app.deployFortuneBag(e);
+      const row = f.db.prepare("SELECT location,message FROM pond_fortune_bags WHERE id=?").get(++id);
+      assert.equal(row.location, locationId);
+      assert.equal(row.message, "好运留给 下一位");
+      assert.equal(e.replies.at(-1), `🧧 福袋 F${id}已投放到${location.name}。`);
+      assert.equal(fm.getFishingLocation(e.user_id), "coast");
+    }
+  }
+  const manager = new f.Manager(e);
+  assert.equal(manager.getAvailableCount("pond"), 2);
+  assert.equal(manager.getAvailableCount("river"), 2);
+  assert.equal(new f.Manager(f.event("other", "other-group")).getAvailableCount("river"), 0);
+  assert.equal(manager.reserve("river", "remote-bag").location, "river");
+  manager.release("remote-bag");
+  e.match = app.deployFortuneBag.pattern.exec("#投放福袋 雾隐湖");
+  await app.deployFortuneBag(e);
+  assert.match(e.replies.at(-1), /留言限120字/u);
+  assert.equal(e.recallTimes.at(-1), 10);
+  assert.equal(f.db.prepare("SELECT count FROM inventory WHERE item_id='fortune_bag'").get().count, 1);
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS count FROM pond_fortune_bags").get().count, 12);
 });
 
 test("数据库重开保留福袋与编号序列，已沉没编号不会重复使用", async t => {
