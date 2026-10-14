@@ -685,17 +685,14 @@ export function applyFishFightStateModifiers({
   throw new TypeError(`未知的溜鱼操作：${action}`);
 }
 
-// 熟练度折算控制力：每 2 竿 +1，保持线性、不设上限。
-// 控制力 1:1 抵扣困难度，所以熟练度迟早会盖过全图困难度——这是长期投入该给的回报，
-// 只是把斜率减半推远节奏：跳过全图判定从 35 竿变成 70 竿。
-// 不封顶还有一个实际理由：首领与异色的校准出自每秒精准操作的模拟，真人达不到那个
-// 操作密度，熟练度是他们补这段差距的唯一手段；一旦设上限，上限又落在机制阈值附近
-// （异色 281 的拉距归零线是控制力 231），就会凭空出现「打不了」的断层。
+// 熟练度每 2 点提供 1 点控制力，按熟练度 100 封顶，最多 +50。
+// 这里只限制鱼竿控制力折算；熟练度继续累积，职业鱼线加成仍读取完整熟练度。
 export const MASTERY_CONTROL_DIVISOR = 2;
+export const MASTERY_CONTROL_CAP = 100;
 
 export function getMasteryControlBonus(mastery) {
   const safeMastery = Math.max(0, Math.floor(Number(mastery) || 0));
-  return Math.floor(safeMastery / MASTERY_CONTROL_DIVISOR);
+  return Math.floor(Math.min(safeMastery, MASTERY_CONTROL_CAP) / MASTERY_CONTROL_DIVISOR);
 }
 
 export function calculateForcePullSuccessRate(fishDifficulty, effectiveControl) {

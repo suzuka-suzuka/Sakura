@@ -30,6 +30,20 @@ test("致盲按乘法叠层，单次收竿重试不会再次抽签", () => {
   assert.equal(session.resolveBlindReel({}, 1, () => 0.9).hit, false);
 });
 
+test("熟练度100封顶提供50控制力，奇数熟练度向下取整", () => {
+  for (const [mastery, expected] of [
+    [-1, 0], [0, 0], [1, 0], [2, 1], [20, 10], [99, 49],
+    [99.9, 49], [100, 50], [101, 50], [200, 50], [10000, 50],
+    ["200", 50], [undefined, 0], [NaN, 0],
+  ]) {
+    assert.equal(rules.getMasteryControlBonus(mastery), expected, `熟练度 ${mastery}`);
+  }
+  // 高熟练度也先与耐久折算后的竿身控制力相加，再受深压影响。
+  const control = rules.calculateRodDurabilityControl(190, 152, 190) + rules.getMasteryControlBonus(200);
+  assert.equal(control, 202);
+  assert.ok(Math.abs(control * rules.deepPressureMultiplierFromLayers(1) - 161.6) < 1e-9);
+});
+
 test("骸骨鲨按最大耐久扣20%，耐久折算覆盖零值与熟练度相加顺序", () => {
   assert.deepEqual([10, 100, 190, 950, 101].map(max => rules.calculateRodPercentDamage(max, 0.2)), [2, 20, 38, 190, 21]);
   assert.equal(rules.calculateRodDurabilityControl(190, 152, 190) + rules.getMasteryControlBonus(20), 162);

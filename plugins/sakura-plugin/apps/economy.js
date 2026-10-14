@@ -1277,8 +1277,7 @@ export default class Economy extends plugin {
         }
         await e.reply(
           `🎏 你将【${item.name}】系在了樱枝上……\n` +
-          `🌸 许愿会一直留到下一次咬钩，届时` +
-          `只要不是宝藏、噩梦、鱼雷或首领，则必定为异色！`,
+          `🌸 许愿保留至下一次咬钩并消耗，常规渔获必定异色！`,
         );
         return true;
       }

@@ -226,7 +226,7 @@ function computeRiverBlessRefundValue(state, fishingManager) {
 
 function getEffectiveRodControl(fishingManager, userId, state, rodMastery = 0) {
   // 竿身控制力先按当前耐久百分比折算，再加熟练度；深压回响最后作用于实际控制力。
-  // 熟练度保持每 2 点增加 1 点控制力。
+  // 熟练度每 2 点增加 1 点控制力，熟练度 100 时达到 +50 上限。
   const deepPressureMultiplier = Number(state.deepPressureMultiplier) || 1;
   const effectiveControl = fishingManager.getRodControl(userId, state.rodConfig.id) +
     getMasteryControlBonus(rodMastery);
@@ -2599,7 +2599,7 @@ export default class Fishing extends plugin {
       effects.push({
         icon: "🎏",
         name: "锦鲤许愿",
-        detail: "下一次咬钩消耗，非宝藏/噩梦/鱼雷/首领必定异色",
+        detail: "下次咬钩消耗，常规渔获必定异色",
         tone: "positive",
       });
     }

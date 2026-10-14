@@ -49,7 +49,7 @@ categories:
         type: consumable
         convertible: true
         instant_effect: koi_wish
-        description: 樱花池塘专属道具。使用后一直保留，下一次咬钩必定异色。
+        description: 樱花池塘专属道具。许愿保留至下一次咬钩并消耗，常规渔获必定异色。
 
       - id: item_charm_river
         name: 河神垂青
