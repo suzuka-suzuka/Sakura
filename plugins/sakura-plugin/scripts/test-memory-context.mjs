@@ -48,6 +48,9 @@ mock.module(url("../lib/AIUtils/memoryVectorStore.js"), { namedExports: {
 const memory = await import("../lib/AIUtils/memoryStore.js");
 const { runAgentLoop } = await import("../lib/AIUtils/AgentRunner.js");
 const { activeAiTasks } = await import("../lib/AIUtils/stopFlag.js");
+const { withMemoryScope } = await import("../lib/AIUtils/memoryScope.js");
+const { MemoryTool } = await import("../lib/AIUtils/tools/MemoryTool.js");
+const { ReadUserMemoryTool } = await import("../lib/AIUtils/tools/ReadUserMemoryTool.js");
 const event = (userId, groupId = 962001) => ({ self_id: 960001, user_id: userId, group_id: groupId });
 
 function seed(e, contents, summary = "已有成员摘要", scope = "user") {
@@ -217,7 +220,7 @@ test("大量群公共记忆仍自动召回，向量目标仅包含群公共记�
     assert.match(args[3], /本群咖啡活动/);
     assert.doesNotMatch(args[3], /个人细节/);
     assert.equal(vectorCalls.length, count + 1);
-    assert.deepEqual(vectorCalls.at(-1).scopes, ["group:962005"]);
+    assert.deepEqual(vectorCalls.at(-1).scopes, ["mimic:group:962005"]);
     return { text: "已完成" };
   }]);
 });
@@ -255,4 +258,55 @@ test("只有个人摘要且无详细记录时仍注入摘要，查询返回空�
       return { text: "已完成" };
     },
   ]);
+});
+
+test("前缀角色仅注入和查询自己的个人记忆，开关群上下文都不读取Mimic记忆", async () => {
+  const e = event(961010, 962010);
+  seed(e, ["拟态用户事实"], "拟态用户摘要");
+  seed(e, Array.from({ length: 12 }, (_, i) => `拟态群事实${i}`), "拟态群摘要", "group");
+  for (const source of ["chat:甲", "chat:乙"]) {
+    withMemoryScope(source, () => seed(e, [`${source}个人事实`], `${source}个人摘要`));
+  }
+  const count = vectorCalls.length;
+  for (const source of ["chat:甲", "chat:乙"]) {
+    for (const groupContext of [false, true]) {
+      await runScenario(e, "群活动", [
+        async (...args) => {
+          assert.ok(args[3].includes(`${source}个人摘要`));
+          assert.doesNotMatch(args[3], /拟态|群事实|群摘要/);
+          assert.ok(!args[3].includes(`${source === "chat:甲" ? "chat:乙" : "chat:甲"}个人摘要`));
+          assert.equal(args[4], groupContext);
+          return { functionCalls: [call(e.user_id)] };
+        },
+        async (...args) => {
+          assert.deepEqual(response(args[6]), [`${source}个人事实`]);
+          return { text: "已完成" };
+        },
+      ], { memorySource: source, groupContext });
+    }
+  }
+  assert.equal(vectorCalls.length, count);
+});
+
+test("并发工具调用按角色隔离，模型不能指定来源，前缀群记忆写入被后端拒绝", async () => {
+  const e = event(961011, 962011);
+  const tool = new MemoryTool();
+  const reader = new ReadUserMemoryTool();
+  await Promise.all(["chat:甲", "chat:乙", "Mimic"].map((source) => withMemoryScope(source, async () => {
+    await new Promise((resolve) => setImmediate(resolve));
+    const schema = tool.function(e);
+    assert.deepEqual(schema.parameters.properties.scope.enum, source === "Mimic" ? ["user", "group"] : ["user"]);
+    assert.equal(schema.parameters.properties.source, undefined);
+    const text = `${source}独立约定`;
+    assert.match(await tool.func({ scope: "user", content: text, source: "Mimic", userId: "999999" }, e), /已写入/);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(await reader.func({ qq: String(e.user_id), source: "Mimic" }, e), [text]);
+    if (source !== "Mimic") {
+      assert.match(await tool.func({ scope: "group", content: "禁止的群约定", source: "Mimic" }, e), /不能保存群记忆/);
+      assert.throws(() => memory.getMemoryLocation({ groupId: e.group_id, userId: e.user_id, scope: "group" }), /不能读写群记忆/);
+    }
+  })));
+  const group = memory.getMemoryLocation({ groupId: e.group_id, scope: "group" });
+  assert.equal(fs.existsSync(group.memoryFile), false);
+  assert.deepEqual(tool.function(e).parameters.properties.scope.enum, ["user", "group"]);
 });

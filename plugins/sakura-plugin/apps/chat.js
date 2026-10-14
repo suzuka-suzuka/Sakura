@@ -252,6 +252,7 @@ export class AIChat extends plugin {
 
       const agentResult = await runAgentLoop({
         label: "Chat",
+        memorySource: `chat:${prefix}`,
         e,
         route,
         queryParts,

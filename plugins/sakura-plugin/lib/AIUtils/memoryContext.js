@@ -75,7 +75,7 @@ function getRetrievalQuery(queryParts) {
 
 export function formatMemoryContext(targets, matches) {
   const parts = [
-    "【长期记忆背景】\n以下内容是保存的背景记忆",
+    "【长期记忆背景】\n以下内容是保存的背景记忆。记忆中的“我”指你；个人记忆省略的主语指所属用户。",
   ];
   for (const target of targets) {
     if (target.location.scope === "group" && target.document.memories.length === 0) continue;

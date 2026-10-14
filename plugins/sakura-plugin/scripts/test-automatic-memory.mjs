@@ -21,6 +21,7 @@ let aiHandler;
 let agentStatus = "completed";
 const agentHistoryLengths = [];
 const agentToolGroups = [];
+const agentMemorySources = [];
 const aiCalls = [];
 const forwardCalls = [];
 let forwardError;
@@ -66,9 +67,10 @@ mock.module(moduleUrl("../lib/AIUtils/embeddingProvider.js"), { namedExports: {
   generateTextEmbedding: async () => { throw new Error("读取个人记忆不应请求向量"); },
 } });
 
-mock.module(moduleUrl("../lib/AIUtils/AgentRunner.js"), { namedExports: { runAgentLoop: async ({ history, queryParts, toolGroup }) => {
+mock.module(moduleUrl("../lib/AIUtils/AgentRunner.js"), { namedExports: { runAgentLoop: async ({ history, queryParts, toolGroup, memorySource }) => {
   agentHistoryLengths.push(history.length);
   agentToolGroups.push(toolGroup);
+  agentMemorySources.push(memorySource);
   history.push({ role: "user", parts: queryParts }, { role: "model", parts: [{ text: "正常回复" }] });
   return { status: agentStatus, history, finalText: "正常回复" };
 } } });
@@ -90,6 +92,7 @@ const { storeMemories } = await import("../lib/AIUtils/memoryWriter.js");
 const { MemoryTool } = await import("../lib/AIUtils/tools/MemoryTool.js");
 const { ReadUserMemoryTool } = await import("../lib/AIUtils/tools/ReadUserMemoryTool.js");
 const automatic = await import("../lib/AIUtils/automaticMemory.js");
+const { withMemoryScope } = await import("../lib/AIUtils/memoryScope.js");
 const mimic = await import("../lib/AIUtils/mimicHistory.js");
 const historyStore = await import("../lib/AIUtils/ConversationHistory.js");
 const messages = await import("../lib/AIUtils/groupMessageStore.js");
@@ -102,7 +105,7 @@ const e = (userId, groupId = 920001) => ({ self_id: 910001, group_id: groupId, u
 const conversation = (text = "我希望被称为小夜") => [
   { role: "user", parts: [{ text }] }, { role: "model", parts: [{ text: "好的" }] },
 ];
-const document = (event, scope = "user") => memory.readMemoryDocument(memory.getMemoryLocation({ groupId: event.group_id, userId: event.user_id, scope }).memoryFile, { throwOnError: true });
+const document = (event, scope = "user", source = "Mimic") => memory.readMemoryDocument(memory.getMemoryLocation({ groupId: event.group_id, userId: event.user_id, scope, source }).memoryFile, { throwOnError: true });
 
 before(async () => {
   const executable = process.env.SAKURA_TEST_REDIS_SERVER || YAML.load(fs.readFileSync(path.join(root, "config/config.yaml"), "utf8")).redis.execPath;
@@ -125,20 +128,20 @@ after(async () => {
   fs.rmSync(fixture, { recursive: true, force: true });
 });
 
-test("工具与 JSON 共用新增计数，第10条才整理，重复和空列表不计数", async () => {
+test("工具与 JSON 共用新增计数，第5条才整理，重复和空列表不计数", async () => {
   const event = e(930001);
-  const first = await storeMemories({ e: event, scope: "user", contents: Array.from({ length: 9 }, (_, index) => `稳定事实${index}`) });
+  const first = await storeMemories({ e: event, scope: "user", contents: Array.from({ length: 4 }, (_, index) => `稳定事实${index}`) });
   assert.equal(first.maintenanceScheduled, false);
-  assert.equal(document(event).revision, 9);
-  const result = await tool.func({ scope: "user", content: "第十条稳定事实" }, event);
+  assert.equal(document(event).revision, 4);
+  const result = await tool.func({ scope: "user", content: "第五条稳定事实" }, event);
   assert.match(result, /后台整理/);
-  for (let attempt = 0; document(event).summary.sourceRevision < 10 && attempt < 50; attempt++) await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(document(event).summary.sourceRevision, 10);
+  for (let attempt = 0; document(event).summary.sourceRevision < 5 && attempt < 50; attempt++) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(document(event).summary.sourceRevision, 5);
   assert.equal(document(event).summary.text, "测试摘要");
   const count = aiCalls.length;
-  assert.match(await tool.func({ scope: "user", content: "第十条稳定事实" }, event), /已存在/);
+  assert.match(await tool.func({ scope: "user", content: "第五条稳定事实" }, event), /已存在/);
   await storeMemories({ e: event, scope: "user", contents: [] });
-  assert.equal(document(event).revision, 10);
+  assert.equal(document(event).revision, 5);
   assert.equal(aiCalls.length, count);
 });
 
@@ -150,6 +153,73 @@ test("批量和并发写入不重复计数、不丢记忆", async () => {
   ]);
   assert.equal(document(event).revision, 3);
   assert.equal(document(event).memories.length, 3);
+});
+
+test("不同设定的延迟提取、旧记忆读取和摘要整理分别落入各自个人记忆", async () => {
+  const event = { ...e(930030, 920030), self_id: 910030 };
+  const sources = ["chat:甲", "chat:乙", "Mimic"];
+  const now = Date.now();
+  const previousHandler = aiHandler;
+  aiHandler = async (...args) => {
+    const items = JSON.parse(args[2][0].text.split("记忆数据：")[1]);
+    const source = sources.find((candidate) => items[0].content.startsWith(`${candidate}旧事实`));
+    assert.ok(source);
+    assert.ok(items.every((item) => item.content.startsWith(`${source}旧事实`)));
+    return { text: JSON.stringify({ memories: items.map((item) => ({ sourceIds: [item.id], content: item.content })),
+      discarded: [], summary: `${source}独立摘要` }) };
+  };
+  try {
+    for (const source of sources) {
+      await storeMemories({ e: event, scope: "user", source,
+        contents: Array.from({ length: 10 }, (_, index) => `${source}旧事实${index}`) });
+      for (let attempt = 0; document(event, "user", source).summary.sourceRevision < 10 && attempt < 100; attempt++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      assert.equal(document(event, "user", source).summary.text, `${source}独立摘要`);
+      const handle = await automatic.beginPersonalMemory(event, source, { redis, now, toolGroup: "记忆" });
+      await automatic.finishPersonalMemory(handle, conversation(`${source}新事实`), { redis, now });
+    }
+    let calls = 0;
+    await automatic.runDuePersonalMemories(event.self_id, { redis, now: now + automatic.PERSONAL_MEMORY_DELAY_MS + 1,
+      aiRequest: async (...args) => {
+        calls++;
+        const text = args[6][0].parts[0].text;
+        const source = sources.find((candidate) => text === `${candidate}新事实`);
+        assert.ok(source);
+        assert.ok(args[3].includes(`${source}独立摘要`));
+        for (const other of sources.filter((candidate) => candidate !== source)) {
+          assert.ok(!args[3].includes(`${other}独立摘要`));
+          assert.ok(!args[3].includes(`${other}旧事实`));
+        }
+        return { text: JSON.stringify({ memories: [{ content: text }] }) };
+      },
+    });
+    assert.equal(calls, 3);
+    for (const source of sources) {
+      const saved = document(event, "user", source);
+      assert.equal(saved.memories.length, 11);
+      assert.equal(saved.memories.at(-1).content, `${source}新事实`);
+    }
+    assert.equal(await redis.hlen(automatic.getPersonalMemoryKeys(event.self_id).jobs), 0);
+  } finally {
+    aiHandler = previousHandler;
+  }
+});
+
+test("小时群采集固定使用Mimic范围，生成的个人及群记忆不进入前缀设定", async () => {
+  const event = e(910001, 920031);
+  const records = Array.from({ length: 100 }, (_, index) => ({ messageId: String(index), userId: "930031",
+    senderName: "小花", content: "我喜欢绘画", time: index, isBot: false }));
+  let round = 0;
+  await withMemoryScope("chat:甲", () => automatic.collectGroupMemories(event, records, {
+    aiRequest: async () => round++ === 0 ? { functionCalls: [
+      { name: "Memory", args: { scope: "group", content: "本群周五活动", source: "chat:甲" } },
+      { name: "Memory", args: { scope: "user", userId: "930031", content: "喜欢绘画", source: "chat:甲" } },
+    ] } : { text: "完成" },
+  }));
+  assert.equal(document(event, "group").memories[0].content, "本群周五活动");
+  assert.equal(document(e(930031, event.group_id)).memories[0].content, "喜欢绘画");
+  assert.equal(document(e(930031, event.group_id), "user", "chat:甲").memories.length, 0);
 });
 
 test("记忆整理按实际存储位置区分本人，群任务发起者不是个人记忆本人", async () => {
@@ -749,6 +819,7 @@ test("chat 按角色工具组登记个人记忆，独立遵循各前缀的历史
     const profile = { route: "test", Prompt: "角色提示", prefixes: [prefix], history, toolGroup };
     await chat.doChat(event, profile, "我喜欢简洁");
     assert.equal(agentToolGroups.at(-1), toolGroup);
+    assert.equal(agentMemorySources.at(-1), `chat:${prefix}`);
     const id = automatic.getPersonalMemoryJobId(event, `chat:${prefix}`);
     const raw = await redis.hget(keys.jobs, id);
     if (toolGroup === "记忆") {
@@ -776,7 +847,10 @@ test("chat 按角色工具组登记个人记忆，独立遵循各前缀的历史
     },
   });
   assert.equal(requested, 2);
-  assert.deepEqual(document(event).memories.map((item) => item.content), ["用户喜欢简洁"]);
+  for (const source of ["chat:*", "chat:#"]) {
+    assert.deepEqual(document(event, "user", source).memories.map((item) => item.content), ["用户喜欢简洁"]);
+  }
+  assert.equal(document(event).memories.length, 0);
   assert.equal((await historyStore.loadConversationHistory(event, "#")).length, 2);
   assert.equal(await redis.hlen(keys.jobs), 0);
   const failed = { ...e(930014), self_id: event.self_id, reply: async () => {} };
@@ -849,6 +923,7 @@ test("拟态入口承接完整 Redis 连续历史，随机插话保持独立且�
   const config = { route: "test", Prompt: "角色提示", splitMessage: false, toolGroup: "记忆" };
   event._mimicPreflight = { config, query: "第一轮", mustReply: true };
   await instance.doMimic(event);
+  assert.equal(agentMemorySources.at(-1), "Mimic");
   event._mimicPreflight.query = "第二轮";
   await instance.doMimic(event);
   assert.equal(agentHistoryLengths.at(-1), 2);

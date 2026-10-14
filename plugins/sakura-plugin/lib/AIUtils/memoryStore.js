@@ -2,9 +2,10 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { plugindata } from "../path.js";
+import { getMemorySource, normalizeMemorySource, MIMIC_MEMORY_SOURCE } from "./memoryScope.js";
 
 export const MEMORY_SCHEMA_VERSION = 2;
-export const MEMORY_MAINTENANCE_INTERVAL = 10;
+export const MEMORY_MAINTENANCE_INTERVAL = 5;
 export const memoryRoot = path.join(plugindata, "memory");
 
 const documentLocks = new Map();
@@ -23,14 +24,19 @@ function normalizeMemoryId(value) {
   return normalized;
 }
 
-export function getMemoryLocation({ groupId = null, userId, scope = "user" }) {
+export function getMemoryLocation({ groupId = null, userId, scope = "user", source = getMemorySource() }) {
+  source = normalizeMemorySource(source);
+  const isMimic = source === MIMIC_MEMORY_SOURCE;
+  const namespace = isMimic ? "mimic" : `profile:${crypto.createHash("sha256").update(source).digest("hex")}`;
+  const root = isMimic ? path.join(memoryRoot, "mimic") : path.join(memoryRoot, "profiles", namespace.slice(8));
   if (scope === "group") {
+    if (!isMimic) throw new Error("前缀角色不能读写群记忆");
     const normalizedGroupId = normalizeId(groupId, "群号");
     return {
-      scope,
-      scopeKey: `group:${normalizedGroupId}`,
+      scope, source,
+      scopeKey: `${namespace}:group:${normalizedGroupId}`,
       title: "当前群公共记忆",
-      memoryFile: path.join(memoryRoot, "groups", `${normalizedGroupId}.json`),
+      memoryFile: path.join(root, "groups", `${normalizedGroupId}.json`),
     };
   }
 
@@ -41,27 +47,28 @@ export function getMemoryLocation({ groupId = null, userId, scope = "user" }) {
   const normalizedUserId = normalizeId(userId, "QQ号");
   if (groupId === undefined || groupId === null || groupId === "") {
     return {
-      scope,
-      scopeKey: `private:${normalizedUserId}`,
+      scope, source,
+      scopeKey: `${namespace}:private:${normalizedUserId}`,
       title: "当前用户记忆",
-      memoryFile: path.join(memoryRoot, "private", `${normalizedUserId}.json`),
+      memoryFile: path.join(root, "private", `${normalizedUserId}.json`),
     };
   }
 
   const normalizedGroupId = normalizeId(groupId, "群号");
   return {
-    scope,
-    scopeKey: `group-user:${normalizedGroupId}:${normalizedUserId}`,
+    scope, source,
+    scopeKey: `${namespace}:group-user:${normalizedGroupId}:${normalizedUserId}`,
     title: "当前用户记忆",
     memoryFile: path.join(
-      memoryRoot,
+      root,
       "group-users",
       `${normalizedGroupId}-${normalizedUserId}.json`
     ),
   };
 }
 
-export function getMemoryLocations({ groupId = null, userId, scope = "all" }) {
+export function getMemoryLocations({ groupId = null, userId, scope = "all", source = getMemorySource() }) {
+  source = normalizeMemorySource(source);
   if (!["user", "group", "all"].includes(scope)) {
     throw new Error("不支持的记忆作用域");
   }
@@ -70,15 +77,15 @@ export function getMemoryLocations({ groupId = null, userId, scope = "all" }) {
   }
 
   if (scope === "user") {
-    return [getMemoryLocation({ groupId, userId, scope: "user" })];
+    return [getMemoryLocation({ groupId, userId, scope: "user", source })];
   }
   if (scope === "group") {
-    return [getMemoryLocation({ groupId, userId, scope: "group" })];
+    return [getMemoryLocation({ groupId, userId, scope: "group", source })];
   }
 
-  const locations = [getMemoryLocation({ groupId, userId, scope: "user" })];
-  if (groupId) {
-    locations.push(getMemoryLocation({ groupId, userId, scope: "group" }));
+  const locations = [getMemoryLocation({ groupId, userId, scope: "user", source })];
+  if (groupId && source === MIMIC_MEMORY_SOURCE) {
+    locations.push(getMemoryLocation({ groupId, userId, scope: "group", source }));
   }
   return locations;
 }

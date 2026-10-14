@@ -290,6 +290,7 @@ export class Mimic extends plugin {
       const queryParts = buildMultimodalQueryParts(query, imgBase64List);
       const agentResult = await runAgentLoop({
         label: "Mimic",
+        memorySource: "Mimic",
         e,
         route,
         queryParts,

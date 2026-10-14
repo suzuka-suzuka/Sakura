@@ -6,13 +6,15 @@ import {
   writeMemoryDocument,
 } from "./memoryStore.js";
 import { scheduleMemoryMaintenance } from "./memoryMaintenance.js";
+import { getMemorySource } from "./memoryScope.js";
 
 // 工具写入和后台 JSON 写入共用计数、去重与整理入口。
-export async function storeMemories({ e, scope, userId = e?.user_id, contents, location = null }, options = {}) {
+export async function storeMemories({ e, scope, userId = e?.user_id, contents, source = getMemorySource(), location = null }, options = {}) {
   if (!Array.isArray(contents) || contents.some((content) => typeof content !== "string" || !content.trim())) {
     throw new Error("记忆必须是非空文字列表");
   }
-  const target = location || getMemoryLocation({ groupId: e?.group_id, userId, scope });
+  const target = getMemoryLocation({ groupId: e?.group_id, userId, scope, source });
+  if (location && location.memoryFile !== target.memoryFile) throw new Error("记忆位置与当前来源不一致");
   const result = await withMemoryDocumentLock(target.memoryFile, async () => {
     if (options.shouldWrite && !await options.shouldWrite()) return { added: [], duplicates: [], skipped: true };
     let document = readMemoryDocument(target.memoryFile, { throwOnError: true });

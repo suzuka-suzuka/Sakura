@@ -1,5 +1,6 @@
 import { AbstractTool } from "./AbstractTool.js";
 import { storeMemories } from "../memoryWriter.js";
+import { getMemorySource, MIMIC_MEMORY_SOURCE } from "../memoryScope.js";
 
 function formatStoreResult(scope, result, maintenanceScheduled) {
   const scopeName = scope === "group" ? "群公共记忆" : "用户记忆";
@@ -20,14 +21,31 @@ export class MemoryTool extends AbstractTool {
       },
       content: {
         type: "string",
-        description: "一条完整事实。user：本人以 userId（未指定时为当前用户）为准，省略本人主语和QQ；可记本人关系、约定，不记他人独立信息。涉及他人或写group时，已知QQ用“昵称（QQ：号码）”，未知不编造。",
+        description: "一条完整事实。涉及你自己时写“我”，不带自身QQ；“我”不指个人记忆所属用户。user：本人以 userId（未指定时为当前用户）为准，省略本人主语和QQ；可记本人关系、约定，不记他人独立信息。涉及其他群友时，已知QQ用“昵称（QQ：号码）”，未知不编造。",
       },
     },
     required: ["scope", "content"],
   };
 
   function(e, context = {}) {
-    const definition = super.function();
+    const original = super.function();
+    const isMimic = getMemorySource() === MIMIC_MEMORY_SOURCE;
+    const definition = {
+      ...original,
+      description: isMimic ? original.description : "主动保存当前设定下可长期复用的个人事实、偏好、关系和约定。每条一件事，无需用户要求。",
+      parameters: {
+        ...original.parameters,
+        additionalProperties: false,
+        properties: {
+          ...original.parameters.properties,
+          scope: {
+            ...original.parameters.properties.scope,
+            enum: isMimic ? ["user", "group"] : ["user"],
+            description: isMimic ? original.parameters.properties.scope.description : "user=当前设定的个人记忆；不能读写群记忆。",
+          },
+        },
+      },
+    };
     if (!Array.isArray(context.memoryTargets)) return definition;
     return {
       ...definition,
@@ -49,6 +67,7 @@ export class MemoryTool extends AbstractTool {
     const { scope, content } = opts || {};
     if (!e?.user_id) return "无法获取用户信息。";
     if (!["user", "group"].includes(scope)) return "不支持的记忆作用域。";
+    if (scope === "group" && getMemorySource() !== MIMIC_MEMORY_SOURCE) return "前缀角色不能保存群记忆。";
     if (scope === "group" && !e.group_id) return "私聊中不能访问群公共记忆。";
     if (!String(content || "").trim()) {
       return "记忆内容不能为空。";

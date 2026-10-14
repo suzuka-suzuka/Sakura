@@ -64,8 +64,9 @@ async function generateMemoryOrganization(snapshot, e, location) {
       "discarded 只用于被更新事实取代的旧记忆，supersededBy 必须填写被保留的较新输入 ID。",
       "summary 应基于整理后的有效记忆，保留稳定身份、偏好、禁忌、关系、长期目标、持续事项和重要约定。",
       ownerId
-        ? `QQ：${ownerId} 的个人记忆：content、summary 省略本人主语和QQ，旧记录同样处理；保留完整事实及其他群友已知QQ，格式“昵称（QQ：号码）”。`
-        : "本次整理的是群公共记忆，保留成员已知QQ，格式“昵称（QQ：号码）”。",
+        ? `QQ：${ownerId} 的个人记忆：content、summary 省略本人主语和QQ；保留完整事实及其他群友已知QQ，格式“昵称（QQ：号码）”。`
+        : "本次整理的是群公共记忆，保留其他群友已知QQ，格式“昵称（QQ：号码）”。",
+      "记忆中的“我”指角色自身，不指所属用户；content、summary 保持这一指代和第一人称，不补其QQ。",
       "不凭昵称合并不同QQ，不编造号码。",
       "只输出合法 JSON，不要 Markdown、解释或额外文本。格式：",
       '{"memories":[{"sourceIds":["输入ID"],"content":"整理后的原子记忆"}],"discarded":[{"id":"旧输入ID","supersededBy":"较新输入ID"}],"summary":"记忆摘要"}',

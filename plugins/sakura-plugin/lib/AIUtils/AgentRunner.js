@@ -3,6 +3,7 @@ import { getAI } from "./getAI.js";
 import { ensureToolCallIds } from "./toolCallProtocol.js";
 import { executeToolCalls, toolGroupHasTool } from "./tools/tools.js";
 import { buildMemoryContext } from "./memoryContext.js";
+import { withMemoryScope, MIMIC_MEMORY_SOURCE } from "./memoryScope.js";
 import { finalizeStoppedConversationTurn } from "./ConversationHistory.js";
 import {
   filterNewInlineDataParts,
@@ -45,7 +46,11 @@ function buildModelResponseParts(response) {
   return parts;
 }
 
-export async function runAgentLoop({
+export async function runAgentLoop({ memorySource = MIMIC_MEMORY_SOURCE, ...options }) {
+  return withMemoryScope(memorySource, () => runScopedAgentLoop(options));
+}
+
+async function runScopedAgentLoop({
   label = "Agent",
   e,
   route,
