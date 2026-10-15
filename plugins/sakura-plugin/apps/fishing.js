@@ -1931,7 +1931,7 @@ export default class Fishing extends plugin {
       case "blindness": {
         const result = fishingManager.addBlindnessLayers(e.user_id, 1);
         message = `🌫️ 捞尸人的迷雾遮住了双眼，致盲增加 1 层，当前 ${result.layers} 层！` +
-          `\n👁️ 此后收竿命中率 ${Number((result.hitRate * 100).toFixed(2))}%，可用净化圣水清除。`;
+          `\n👁️ 此后收竿命中率 ${Number((result.hitRate * 100).toFixed(2))}%。`;
         break;
       }
 
