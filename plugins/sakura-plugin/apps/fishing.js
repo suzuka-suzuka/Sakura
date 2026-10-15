@@ -103,6 +103,7 @@ import {
   releaseRedisLock,
 } from "../lib/economy/redisAtomic.js";
 import { getShanghaiHour, secondsUntilNextShanghaiDay } from "../lib/economy/time.js";
+import { dataCleanupGuards } from "../lib/GroupDataCleaner.js";
 
 const fishingSessions = new FishingSessionStore();
 
@@ -366,6 +367,10 @@ export default class Fishing extends plugin {
       event: "message.group",
       priority: 1135,
     });
+    this.dataCleanupGuard = (groupId, userId) => !fishingSessions.entries().some(([, state]) =>
+      String(state.fortuneBagManager?.groupId) === groupId &&
+      (userId == null || String(state.fortuneBagManager?.userId) === userId));
+    dataCleanupGuards.add(this.dataCleanupGuard);
   }
 
   get appconfig() {
@@ -903,14 +908,15 @@ export default class Fishing extends plugin {
 
       const nightmareStatus = fishingManager.getNightmareStatus(userId);
 
-      // 骷髅诅咒：生效期每抛一竿累加一层，每层给噩梦权重 +1，且在花嫁倍率之前结算（先加后乘）。
-      // 首领鱼饵不参与诅咒累加；诅咒仅由净化圣水清除。
+      // 骷髅诅咒：未停止时每抛一竿累加一层，每层给噩梦权重 +1，且在花嫁倍率之前结算（先加后乘）。
+      // 首领鱼饵不参与累加；钓到非骷髅噩梦后停止累加，原有层数仍生效。
       const curseAccrued = !isBossBait && nightmareStatus.curse.actualLayers > 0
         ? fishingManager.accrueNightmareCurseLayer(userId)
         : 0;
-      const curseActive = curseAccrued > 0;
+      const curseLayers = curseAccrued || (!isBossBait ? nightmareStatus.curse.actualLayers : 0);
+      const curseActive = curseLayers > 0;
       // 记录本竿是否累加过诅咒，便于启动失败时回滚这一层。
-      state.curseAccrued = curseActive;
+      state.curseAccrued = curseAccrued > 0;
 
       // 星愿一次性生效：抛竿即消耗所选品质；启动失败会在 catch 中原样退还。
       // 首领鱼饵不吃星愿，这一竿不去动它，留给下一次普通咬钩。
@@ -936,7 +942,7 @@ export default class Fishing extends plugin {
           {
             forceRarity: wishRarity,
             nightmareBonus: buffFlags.hasMonsterBait ? 50 : 0,
-            curseLayers: curseAccrued,
+            curseLayers,
             nightmareWeightMultiplier: nightmareStatus.brideNightmareMultiplier,
             // 雾灯最后结算：花嫁、诅咒与怪物诱饵抬完噩梦之后，再宝藏×2、噩梦×0.5、垃圾清零。
             // 噩梦是减半不是免疫——钓上来的噩梦照常触发减益，圣水仍是唯一的解。
@@ -996,9 +1002,9 @@ export default class Fishing extends plugin {
         nightmareStatus.brideNightmareMultiplier > 1
           ? `\n💍 ${brideMarkLayers} 层花嫁印记生效中`
           : "",
-        // 诅咒逐竿累加，提示当前层数。
+        // 诅咒提示当前层数，停止累加后仍显示。
         curseActive
-          ? `\n☠️ 诅咒缠身，当前 ${curseAccrued} 层`
+          ? `\n☠️ 诅咒缠身，当前 ${curseLayers} 层`
           : "",
         nightmareStatus.ghostDebt > 0
           ? `\n🚢 尚欠 ${nightmareStatus.ghostDebt} 樱花币`
@@ -1799,6 +1805,7 @@ export default class Fishing extends plugin {
   }
 
   destroy() {
+    dataCleanupGuards.delete(this.dataCleanupGuard);
     for (const [stateKey, state] of fishingSessions.entries()) {
       this.cleanupFishingSession(stateKey, state.id);
     }
@@ -1892,9 +1899,9 @@ export default class Fishing extends plugin {
       }
 
       case "curse": {
-        // 再遇骷髅仍在原有诅咒上 +1 层，仅净化圣水可清除。
+        // 再遇骷髅在原有诅咒上 +1 层，并恢复逐竿累加。
         const total = fishingManager.addNightmareCurseLayers(e.user_id, 1);
-        message = `☠️ 诅咒附身！噩梦诅咒缠上了你，当前 ${total} 层。此后每抛一竿层数 +1`;
+        message = `☠️ 诅咒附身！噩梦诅咒缠上了你，当前 ${total} 层。此后每抛一竿层数 +1，钓到其他噩梦后停止叠加`;
         break;
       }
 
@@ -2043,6 +2050,9 @@ export default class Fishing extends plugin {
         return true;
       }
       if (fish.rarity === "噩梦") {
+        if (fish.nightmare_effect?.type !== "curse") {
+          fishingManager.stopNightmareCurseAccrual(userId);
+        }
         // 深渊猎手每次独立判定完整免疫；未触发时照常结算断线与噩梦效果。
         const immunity = fishingManager.rollNightmareImmunity(userId);
         const immunityTriggered = Boolean(immunity.immune);

@@ -35,6 +35,7 @@ async function harness({ chance = 1, sendImage, renderImage, exists = false } = 
     getMerchantCoinMultiplier() { return 1; }
     async getFishPriceMultiplier() { return 1; }
     rollNightmareImmunity() { return { immune: false }; }
+    stopNightmareCurseAccrual() {}
     breakLine() { calls.breaks++; }
   }
   class Settlement {
@@ -54,6 +55,7 @@ async function harness({ chance = 1, sendImage, renderImage, exists = false } = 
     segment: { image: file => ({ type: "image", data: { file } }), at: qq => ({ type: "at", data: { qq } }) },
   });
   const imports = {
+    "../lib/GroupDataCleaner.js": { dataCleanupGuards: new Set() },
     "../lib/fishing/rules.js": { ...rules, rollFishExp: () => 10, calculateForcePullSuccessRate: () => 1 },
     "../lib/fishing/session.js": { ...session, FishingSessionStore: SessionStore },
     "../lib/fishing/encounter.js": encounter,

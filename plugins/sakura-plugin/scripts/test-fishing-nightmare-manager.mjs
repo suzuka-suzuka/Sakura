@@ -136,7 +136,18 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
     assert.equal(manager.clearDeepPressure(userId).cleared, false);
     manager.addDeepPressureLayers(userId, 2);
 
-    // 诅咒：命中与后续抛竿均累加，原有层数持续保留，仅圣水清除。
+    // 模拟旧表：补列保留原有诅咒，重复初始化也不重置停止状态。
+    db.prepare("UPDATE fishing_stats SET nightmare_curse_layers = 2 WHERE group_id = ? AND user_id = ?")
+      .run("group-a", userId);
+    db.db.exec("ALTER TABLE fishing_stats DROP COLUMN nightmare_curse_stopped");
+    db.init();
+    db.init();
+    assert.equal(manager.getNightmareCurseLayers(userId), 2);
+    assert.equal(manager.accrueNightmareCurseLayer(userId), 3);
+    db.prepare("UPDATE fishing_stats SET nightmare_curse_layers = 0 WHERE group_id = ? AND user_id = ?")
+      .run("group-a", userId);
+
+    // 诅咒：命中与后续抛竿均累加，非骷髅噩梦停止累加但不清除已有层数。
     assert.equal(manager.accrueNightmareCurseLayer(userId), 0);
     assert.equal(manager.addNightmareCurseLayers(userId, 1), 1);
     assert.equal(manager.accrueNightmareCurseLayer(userId), 2);
@@ -145,6 +156,24 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
     assert.equal(manager.accrueNightmareCurseLayer(userId), 5);
     assert.equal(new FishingManager("group-a").getNightmareCurseLayers(userId), 5);
     assert.equal(new FishingManager("group-b").getNightmareCurseLayers(userId), 0);
+    manager.stopNightmareCurseAccrual(userId);
+    manager.stopNightmareCurseAccrual(userId);
+    db.init();
+    const resumedManager = new FishingManager("group-a");
+    for (let index = 0; index < 3; index++) {
+      assert.equal(resumedManager.accrueNightmareCurseLayer(userId), 0);
+      assert.equal(resumedManager.getNightmareStatus(userId).curse.actualLayers, 5);
+    }
+    // 其他群不受影响；再次中骷髅诅咒恢复累加，启动失败只回滚本竿新增层。
+    const otherGroup = new FishingManager("group-b");
+    assert.equal(otherGroup.addNightmareCurseLayers(userId, 1), 1);
+    assert.equal(otherGroup.accrueNightmareCurseLayer(userId), 2);
+    assert.equal(manager.addNightmareCurseLayers(userId, 1), 6);
+    assert.equal(manager.accrueNightmareCurseLayer(userId), 7);
+    assert.equal(manager.rollbackNightmareCurseLayer(userId), 6);
+    db.prepare("UPDATE fishing_stats SET nightmare_curse_layers = 5 WHERE group_id = ? AND user_id = ?")
+      .run("group-a", userId);
+    manager.stopNightmareCurseAccrual(userId);
 
     assert.equal(manager.addBlindnessLayers(userId).layers, 1);
     assert.equal(manager.addBlindnessLayers(userId).layers, 2);
@@ -171,6 +200,7 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
     assert.equal(purified.curseLayers, 5);
     // 净化后继续抛竿不会凭空增加诅咒。
     assert.equal(manager.accrueNightmareCurseLayer(userId), 0);
+    assert.equal(manager.getUserData(userId).nightmare_curse_stopped, 0);
     assert.deepEqual(manager.getNightmareStatus(userId), {
       curse: {
         actualLayers: 0,

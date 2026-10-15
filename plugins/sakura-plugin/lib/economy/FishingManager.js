@@ -656,14 +656,25 @@ export default class FishingManager {
 
     const row = db.prepare(`
         UPDATE fishing_stats
-        SET nightmare_curse_layers = COALESCE(nightmare_curse_layers, 0) + ?
+        SET nightmare_curse_layers = COALESCE(nightmare_curse_layers, 0) + ?,
+            nightmare_curse_stopped = 0
         WHERE group_id = ? AND user_id = ?
         RETURNING nightmare_curse_layers
     `).get(safeLayers, this.groupId, userId);
     return Math.max(0, Number(row?.nightmare_curse_layers) || 0);
   }
 
-  // 每抛一竿在诅咒生效期累加一层；返回累加后的层数用于本竿噩梦权重加成。
+  // 非骷髅噩梦停止逐竿累加，保留已有层数；再次中骷髅诅咒时恢复累加。
+  stopNightmareCurseAccrual(userId) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    db.prepare(`
+        UPDATE fishing_stats SET nightmare_curse_stopped = 1
+        WHERE group_id = ? AND user_id = ? AND COALESCE(nightmare_curse_layers, 0) > 0
+    `).run(this.groupId, userId);
+  }
+
+  // 返回本竿累加后的层数；未累加时返回 0，调用方仍保留原有层数的权重。
   accrueNightmareCurseLayer(userId) {
     userId = String(userId);
     this._ensureUser(userId);
@@ -671,6 +682,7 @@ export default class FishingManager {
         UPDATE fishing_stats
         SET nightmare_curse_layers = COALESCE(nightmare_curse_layers, 0) + 1
         WHERE group_id = ? AND user_id = ? AND COALESCE(nightmare_curse_layers, 0) > 0
+          AND COALESCE(nightmare_curse_stopped, 0) = 0
         RETURNING nightmare_curse_layers
     `).get(this.groupId, userId);
     return Math.max(0, Number(row?.nightmare_curse_layers) || 0);
@@ -704,6 +716,7 @@ export default class FishingManager {
       db.prepare(`
           UPDATE fishing_stats
           SET nightmare_curse_layers = 0,
+              nightmare_curse_stopped = 0,
               nightmare_curse_prank_revealed = 0,
               bride_nightmare_multiplier = 1,
               ghost_debt = 0,

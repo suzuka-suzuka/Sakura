@@ -30,6 +30,7 @@ async function loadCommandApp(filename, FishingManager, fishData, { activeFishin
     segment: { image: file => ({ type: "image", data: { file } }) },
   });
   const imports = {
+    "../lib/GroupDataCleaner.js": { dataCleanupGuards: new Set() },
     "../lib/economy/FishingManager.js": { default: FishingManager },
     "../lib/fishing/rules.js": rules,
     "../lib/fishing/session.js": session,

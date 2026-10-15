@@ -1120,7 +1120,7 @@ const NIGHTMARE_TEXT = Object.freeze({
     counter: "完整免疫最稳；空余额也并不安全。",
   },
   curse: {
-    effect: "附加 1 层诅咒；之后每抛一竿再 +1 层，每层让噩梦权重 +1。",
+    effect: "附加 1 层诅咒，之后每竿 +1 层；钓到非骷髅噩梦后停止累加，保留已有层数，每层让噩梦权重 +1。再次中骷髅诅咒会恢复累加。",
     counter: "净化圣水可直接清除。",
   },
   nightmare_weight_multiplier: {

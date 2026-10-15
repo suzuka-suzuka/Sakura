@@ -20,7 +20,7 @@ const readEconomy = name => YAML.load(fs.readFileSync(path.join(root, "resources
 
 async function fixture(t) {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "sakura-fortune-bags-"));
-  const modules = new Map(), timers = new Map(), buffs = new Set(), errors = [];
+  const modules = new Map(), timers = new Map(), buffs = new Set(), errors = [], selections = [];
   let timerId = 0, sessions;
   class SessionStore extends session.FishingSessionStore {
     constructor() { super({ clearTimer: id => timers.delete(id) }); sessions = this; }
@@ -42,12 +42,16 @@ async function fixture(t) {
     "lib/economy/InventoryManager.js", "lib/economy/EconomyManager.js", "lib/economy/ShopManager.js",
     "lib/economy/FishingManager.js", "lib/economy/ChestManager.js", "lib/fishing/fishData.js", "apps/fishing.js"]);
   const special = new Map([
+    [path.join(root, "lib/GroupDataCleaner.js"), { dataCleanupGuards: new Set() }],
     ["better-sqlite3", { default: Database }], ["node:fs", { default: fs }], ["fs", { default: fs }],
     ["node:path", { default: path }], ["path", { default: path }],
     ["node:crypto", crypto], ["node:url", url], ["lodash", { default: { random: (min, max) => max ?? min } }],
     [path.join(root, "lib/path.js"), { plugindata: temporary, pluginresources: path.join(root, "resources"), _path: temporary }],
     [path.join(root, "lib/setting.js"), { default: { getEconomy: name => configuration[name], getConfig: () => ({ gamegroups: ["g"], enable: true }) } }],
-    [path.join(root, "lib/fishing/rules.js"), fishingRules], [path.join(root, "lib/economy/rules.js"), economyRules],
+    [path.join(root, "lib/fishing/rules.js"), { ...fishingRules, selectFishFromData: (data, options) => {
+      selections.push(options);
+      return fishingRules.selectFishFromData(data, options);
+    } }], [path.join(root, "lib/economy/rules.js"), economyRules],
     [path.join(root, "lib/economy/inventoryRules.js"), await import("../lib/economy/inventoryRules.js")],
     [path.join(root, "lib/economy/time.js"), await import("../lib/economy/time.js")],
     [path.join(root, "lib/economy/fortuneBagRules.js"), { ...bagRules, rollPondItemType: (a, b) => bagRules.rollPondItemType(a, b, () => 0) }],
@@ -131,7 +135,32 @@ async function fixture(t) {
     await timers.get(state.waitingTimer)();
     return { app, state, manager, fm, bagId: deployed.id };
   }
-  return { db, Manager, event, stock, load, fishing, buffs, timers, errors, configuration };
+  return { db, Manager, event, stock, load, fishing, buffs, timers, errors, configuration, selections };
+}
+
+for (const stopped of [false, true]) {
+  test(`真实抛竿：诅咒${stopped ? "停止累加后仍保留原权重" : "继续累加并使用新权重"}，启动失败只回滚新增层`, async t => {
+    const f = await fixture(t), e = f.event();
+    f.db.prepare(`INSERT INTO fishing_stats(group_id,user_id,nightmare_curse_layers,nightmare_curse_stopped,star_wish)
+      VALUES ('g','u',3,?,'普通')`).run(Number(stopped));
+    const { app, state, fm } = await f.fishing(e, { expectBag: false });
+    const expected = stopped ? 3 : 4;
+    assert.equal(fm.getNightmareCurseLayers(e.user_id), expected);
+    assert.equal(f.selections.at(-1).curseLayers, expected);
+    assert.equal(state.curseAccrued, !stopped);
+    assert.ok(e.replies.some(reply => reply.includes(`诅咒缠身，当前 ${expected} 层`)));
+    state.cleanup();
+    // 在叠层完成后制造启动故障，验证停止状态不会误扣一层。
+    const original = fm.constructor.prototype.consumeStarWish;
+    fm.constructor.prototype.consumeStarWish = () => { throw new Error("测试启动故障"); };
+    try {
+      await app.startFishing(e);
+    } finally {
+      fm.constructor.prototype.consumeStarWish = original;
+    }
+    assert.equal(fm.getNightmareCurseLayers(e.user_id), expected);
+    assert.equal(fm.getUserData(e.user_id).nightmare_curse_stopped, Number(stopped));
+  });
 }
 
 test("六种宝箱通用奖池均分40%，福袋400币且图片有效", () => {
@@ -148,6 +177,21 @@ test("六种宝箱通用奖池均分40%，福袋400币且图片有效", () => {
   }
   const png = fs.readFileSync(path.join(root, "resources/fish/img/fortune_bag.png"));
   assert.equal(png.readUInt32BE(16), 204); assert.equal(png.readUInt32BE(20), 204);
+});
+
+test("真实钓鱼会话阻止删除该成员和整群，结束后允许后续清理", async t => {
+  const f = await fixture(t), e = f.event();
+  const { app, state } = await f.fishing(e);
+  const { dataCleanupGuards } = await f.load("lib/GroupDataCleaner.js");
+  assert.equal(dataCleanupGuards.size, 1);
+  const allowed = (group, user = null) => [...dataCleanupGuards].every(guard => guard(group, user));
+  assert.equal(allowed(e.group_id), false);
+  assert.equal(allowed(e.group_id, e.user_id), false);
+  assert.equal(allowed(e.group_id, "other"), true);
+  assert.equal(allowed("other", e.user_id), true);
+  state.cleanup();
+  assert.equal(allowed(e.group_id), true);
+  assert.equal(allowed(e.group_id, e.user_id), true);
 });
 
 test("福袋和鱼雷每个5权重，共用100基础池；留言和动态数值", () => {

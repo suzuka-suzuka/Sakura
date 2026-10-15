@@ -130,7 +130,7 @@ test("探囊鬼手以100币为偷取上限，余额不超过100时掏空，下�
 
 async function harness() {
   const calls = { settlements: [], replies: [], breaks: 0, rodDamage: 0, cooldown: 0, rolls: 0, refunds: 0, immunityRolls: 0 };
-  const player = { layers: 1, curseLayers: 5, immune: false, roll: 0.95, durability: 190, coins: 1000 };
+  const player = { layers: 1, curseLayers: 5, curseStopped: false, immune: false, roll: 0.95, durability: 190, coins: 1000 };
   class Manager {
     getNightmareStatus() { return { blindnessLayers: player.layers }; }
     getRodMastery() { return 20; }
@@ -138,7 +138,8 @@ async function harness() {
     getRodDurabilityInfo() { return { currentDurability: player.durability, maxDurability: 190 }; }
     getLineBonusFromMastery() { return 0; }
     rollNightmareImmunity() { calls.immunityRolls++; return { immune: player.immune, active: true, chance: 0.3 }; }
-    addNightmareCurseLayers(user, amount) { player.curseLayers += amount; return player.curseLayers; }
+    addNightmareCurseLayers(user, amount) { player.curseStopped = false; player.curseLayers += amount; return player.curseLayers; }
+    stopNightmareCurseAccrual() { player.curseStopped = player.curseLayers > 0; }
     addBlindnessLayers(user, amount) { player.layers += amount; return { layers: player.layers, hitRate: rules.getBlindReelHitRate(player.layers) }; }
     addGhostDebt(user, amount) { player.debt = (player.debt || 0) + amount; return { total: player.debt }; }
     breakLine() { calls.breaks++; }
@@ -157,6 +158,7 @@ async function harness() {
     segment: { at: x => x, image: x => x },
   });
   const imports = {
+    "../lib/GroupDataCleaner.js": { dataCleanupGuards: new Set() },
     "../lib/fishing/rules.js": rules,
     "../lib/fishing/encounter.js": encounter,
     "../lib/setting.js": { default: { getConfig: () => ({ fishingEncounterChance: 0 }) } },
@@ -226,6 +228,7 @@ test("真实收竿入口：致盲空钩先于护符、超重、噩梦和首领�
     assert.equal(h.calls.rodDamage, 0);
     assert.equal(h.calls.cooldown, 1);
     assert.equal(h.player.layers, 1);
+    assert.equal(h.player.curseStopped, false);
     assert.equal(state.reelAccuracy.hit, false);
     assert.equal(h.sessions.get(h.key), null);
   }
@@ -255,34 +258,38 @@ test("完整免疫覆盖所有噩梦，河神在免疫未触发时仍只保线",
   assert.equal(h.player.layers, 2);
 });
 
-test("钓到其他噩梦保留骷髅诅咒，完整免疫也不清除旧层数", async () => {
-  for (const id of ["nightmare_bone_shark", "nightmare_lake_corpse_fisher", "nightmare_coast_ghost_ship"]) {
+test("钓到非骷髅噩梦停止诅咒叠加并保留层数，完整免疫也能停止叠加", async () => {
+  for (const { id } of fish.filter(entry => entry.rarity === "噩梦" && entry.nightmare_effect?.type !== "curse")) {
     for (const immune of [false, true]) {
       const h = await harness();
       h.player.immune = immune;
+      h.instance.applyNightmareEffect = async ({ expGain }) => ({ message: "", expGain, rodBroken: false, ghostLoanIssued: false });
       const state = h.create(fish.find(entry => entry.id === id));
       await h.instance.finishSuccess(h.e, state, new h.Manager());
       assert.equal(h.player.curseLayers, 5, `${id} 免疫=${immune} 应保留旧诅咒`);
+      assert.equal(h.player.curseStopped, true, `${id} 免疫=${immune} 应停止逐竿叠加`);
       assert.equal(h.calls.settlements.length, 1);
     }
   }
 });
 
-test("骷髅在原有诅咒上加一层，免疫阻止新增，重复收竿不重复叠层", async () => {
-  for (const initialLayers of [0, 5]) for (const immune of [false, true]) {
+test("骷髅在原有诅咒上加一层并恢复叠加，免疫阻止新增，重复收竿不重复叠层", async () => {
+  for (const initialLayers of [0, 5]) for (const stopped of [false, true]) for (const immune of [false, true]) {
     const h = await harness();
     h.player.layers = 0;
     h.player.curseLayers = initialLayers;
+    h.player.curseStopped = stopped;
     h.player.immune = immune;
     h.create(fish.find(entry => entry.id === "nightmare_cursed_skull"), { hasLucky: true });
     await Promise.all([h.instance.handleFishing(h.e), h.instance.handleFishing(h.e)]);
     const expectedLayers = initialLayers + Number(!immune);
     assert.equal(h.player.curseLayers, expectedLayers);
+    assert.equal(h.player.curseStopped, immune ? stopped : false);
     assert.equal(h.calls.immunityRolls, 1);
     assert.equal(h.calls.settlements.length, 1);
     assert.equal(h.sessions.get(h.key), null);
     const message = h.calls.replies.flat(2).join("\n");
-    assert.equal(message.includes(`☠️ 诅咒附身！噩梦诅咒缠上了你，当前 ${expectedLayers} 层。此后每抛一竿层数 +1`), !immune);
+    assert.equal(message.includes(`☠️ 诅咒附身！噩梦诅咒缠上了你，当前 ${expectedLayers} 层。此后每抛一竿层数 +1，钓到其他噩梦后停止叠加`), !immune);
   }
 });
 

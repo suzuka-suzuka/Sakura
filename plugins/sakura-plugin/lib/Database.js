@@ -120,6 +120,7 @@ class DB {
         fishing_stamina INTEGER DEFAULT 10,
         fishing_stamina_updated_at INTEGER DEFAULT 0,
         nightmare_curse_layers INTEGER DEFAULT 0,
+        nightmare_curse_stopped INTEGER DEFAULT 0,
         nightmare_curse_prank_revealed INTEGER DEFAULT 0,
         bride_thread_layers INTEGER DEFAULT 0,
         bride_nightmare_multiplier REAL DEFAULT 1,
@@ -240,6 +241,10 @@ class DB {
     // 为已有数据库补充期限字段，具体剩余竿数由放贷时初始化，不改写已有玩家状态。
     if (!this.db.pragma('table_info(fishing_stats)').some(column => column.name === 'ghost_debt_turns_remaining')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN ghost_debt_turns_remaining INTEGER DEFAULT 0');
+    }
+    // 旧诅咒继续累加，直到更新后成功钓到一次非骷髅噩梦。
+    if (!this.db.pragma('table_info(fishing_stats)').some(column => column.name === 'nightmare_curse_stopped')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN nightmare_curse_stopped INTEGER DEFAULT 0');
     }
   }
 
