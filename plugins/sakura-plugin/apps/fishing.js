@@ -199,7 +199,7 @@ function formatGhostDebtSettlement(settleResult) {
     return paidMsg +
       `🚢 欠款已达 ${GHOST_DEBT_MARK_THRESHOLD}，未还清的借条被撕掉了！\n` +
       `🩸 亡者抽成印记 +1 层，当前 ${settleResult.ghostMarkLayers} 层，` +
-      `此后垂钓所得 ×${Number(settleResult.ghostMarkMultiplier.toFixed(6))}，可用净化圣水清除\n`;
+      `此后垂钓所得 ×${Number(settleResult.ghostMarkMultiplier.toFixed(6))}\n`;
   }
   if (interestAdded > 0) {
     return paidMsg + `📈 利滚利 +${interestAdded}，现在欠 ${settleResult.remainingDebt} 樱花币\n`;
