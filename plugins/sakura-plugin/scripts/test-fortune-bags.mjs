@@ -214,12 +214,13 @@ test("投放支持纯图片、留言配图、引用图片，校验失败不扣�
   assert.equal(new f.Manager(e).deploy("pond", "", Buffer.alloc(0)).reason, "invalid_image");
 });
 
-test("我的福袋仅转发本群本人记录，展示三种状态及图片并分批发送", async t => {
+test("我的福袋仅转发本群本人未沉没记录，一只福袋一个节点且文字图片同节点", async t => {
   const f = await fixture(t), e = f.event(), png = await testImage();
   const manager = new f.Manager(e);
-  f.stock(e, "fortune_bag", 4);
-  for (let i = 0; i < 4; i++) manager.deploy("river", `本人留言${i}`, i === 0 ? png : null);
-  manager.reserve("river", "ongoing");
+  f.stock(e, "fortune_bag", 5);
+  for (let i = 0; i < 5; i++) manager.deploy("river", `本人留言${i}`, i === 0 ? png : null);
+  f.db.prepare("UPDATE pond_fortune_bags SET status='hooked',session_id='ongoing',hook_until=? WHERE id=2")
+    .run(Date.now() + bagRules.FORTUNE_BAG_LEASE_MS);
   f.db.prepare("UPDATE pond_fortune_bags SET status='ended',session_id=NULL WHERE id=4").run();
   for (const other of [f.event("other"), f.event("u", "other-group")]) {
     f.stock(other, "fortune_bag", 1);
@@ -230,16 +231,24 @@ test("我的福袋仅转发本群本人记录，展示三种状态及图片并�
     assert.ok(app.myFortuneBags.pattern.test(command));
   }
   await app.myFortuneBags(e);
-  assert.equal(e.forwards.length, 2);
+  assert.equal(e.forwards.length, 1);
   const nodes = e.forwards.flatMap(item => item.nodes);
   assert.equal(nodes.length, 4);
   const text = nodes.map(node => node.content[0]).join("\n");
-  assert.match(text, /漂流中/u); assert.match(text, /正在被钓/u); assert.match(text, /已沉没/u);
+  assert.match(text, /漂流中/u); assert.match(text, /正在被钓/u);
+  assert.ok(!text.includes("已沉没")); assert.ok(!text.includes("本人留言3"));
+  assert.equal(new Set(nodes.map(node => node.content[0].match(/^🧧 福袋 F\d+/u)?.[0])).size, 4);
   assert.match(text, /青柳河湾/u); assert.ok(!text.includes("不应出现"));
   assert.ok(nodes.some(node => Buffer.isBuffer(node.content[1]) && node.content[1].equals(png)));
   const empty = f.event("empty");
   await app.myFortuneBags(empty);
-  assert.equal(empty.forwards.length, 0); assert.match(empty.replies[0], /还没有/u);
+  assert.equal(empty.forwards.length, 0); assert.match(empty.replies[0], /没有尚未沉没/u);
+  const sunkOnly = f.event("sunk-only");
+  f.stock(sunkOnly, "fortune_bag", 1);
+  const sunkBag = new f.Manager(sunkOnly).deploy("pond", "已沉没留言");
+  f.db.prepare("UPDATE pond_fortune_bags SET status='ended' WHERE id=?").run(sunkBag.id);
+  await app.myFortuneBags(sunkOnly);
+  assert.equal(sunkOnly.forwards.length, 0); assert.match(sunkOnly.replies[0], /没有尚未沉没/u);
   e.sendForwardMsg = async () => { throw new Error("转发失败"); };
   await app.myFortuneBags(e);
   assert.match(e.replies.at(-1), /发送失败/u);

@@ -2939,25 +2939,22 @@ export default class Fishing extends plugin {
     if (!this.checkWhitelist(e)) return false;
     const bags = new FortuneBagManager(e).listOwn();
     if (!bags.length) {
-      await e.reply("你还没有在本群投放过福袋。", 10);
+      await e.reply("你在本群没有尚未沉没的福袋。", 10);
       return true;
     }
-    const statuses = { active: "漂流中", hooked: "正在被钓", ended: "已沉没" };
+    const statuses = { active: "漂流中", hooked: "正在被钓" };
     try {
-      // 每份最多三张图片，避免多只图片福袋令单次合并转发过大。
-      for (let offset = 0; offset < bags.length; offset += 3) {
-        const nodes = bags.slice(offset, offset + 3).map(bag => {
-          const content = [
-            `🧧 福袋 F${bag.id}\n📍 ${getFishingLocationConfig(bag.location).name} · ${statuses[bag.status] || bag.status}\n💰 面额：${bag.amount} 樱花币\n🎣 已钓起 ${bag.success_count} 次，累计发出 ${bag.total_paid} 樱花币\n📝 留言：${bag.message || "无"}`,
-          ];
-          if (bag.image) content.push(segment.image(bag.image));
-          return { content };
-        });
-        await e.sendForwardMsg(nodes, {
-          source: "我的福袋", prompt: "🧧 我的福袋", summary: `共 ${bags.length} 只福袋`,
-          news: [{ text: `本群投放记录 ${offset + 1}–${Math.min(offset + 3, bags.length)}/${bags.length}` }],
-        });
-      }
+      const nodes = bags.map(bag => {
+        const content = [
+          `🧧 福袋 F${bag.id}\n📍 ${getFishingLocationConfig(bag.location).name} · ${statuses[bag.status] || bag.status}\n💰 面额：${bag.amount} 樱花币\n🎣 已钓起 ${bag.success_count} 次，累计发出 ${bag.total_paid} 樱花币\n📝 留言：${bag.message || "无"}`,
+        ];
+        if (bag.image) content.push(segment.image(bag.image));
+        return { content };
+      });
+      await e.sendForwardMsg(nodes, {
+        source: "我的福袋", prompt: "🧧 我的福袋", summary: `共 ${bags.length} 只福袋`,
+        news: [{ text: `本群尚未沉没的福袋：${bags.length} 只` }],
+      });
     } catch (error) {
       logger.warn(`[福袋] 查询转发失败: ${error.message}`);
       await e.reply("福袋查询发送失败，请稍后重试。", 10);

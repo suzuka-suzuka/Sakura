@@ -48,7 +48,7 @@ export default class FortuneBagManager {
     this.recoverReservations();
     return db.prepare(`
       SELECT * FROM pond_fortune_bags
-      WHERE group_id = ? AND owner_id = ? ORDER BY id DESC
+      WHERE group_id = ? AND owner_id = ? AND status IN ('active', 'hooked') ORDER BY id DESC
     `).all(this.groupId, this.userId);
   }
 
