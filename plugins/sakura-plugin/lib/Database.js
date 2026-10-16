@@ -196,6 +196,7 @@ class DB {
         owner_id TEXT NOT NULL,
         location TEXT NOT NULL,
         message TEXT NOT NULL,
+        image BLOB,
         amount INTEGER NOT NULL DEFAULT 10,
         status TEXT NOT NULL DEFAULT 'active',
         session_id TEXT UNIQUE,
@@ -237,6 +238,11 @@ class DB {
         created_at INTEGER
       );
     `);
+
+    // 图片随福袋持久保存，避免 QQ 临时链接失效；旧福袋仍保留纯文字内容。
+    if (!this.db.pragma('table_info(pond_fortune_bags)').some(column => column.name === 'image')) {
+      this.db.exec('ALTER TABLE pond_fortune_bags ADD COLUMN image BLOB');
+    }
 
     // 为已有数据库补充期限字段，具体剩余竿数由放贷时初始化，不改写已有玩家状态。
     if (!this.db.pragma('table_info(fishing_stats)').some(column => column.name === 'ghost_debt_turns_remaining')) {

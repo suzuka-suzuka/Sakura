@@ -5,6 +5,7 @@ import FishingUiImageGenerator from "../lib/economy/FishingUiImageGenerator.js";
 import InventoryManager from "../lib/economy/InventoryManager.js";
 import ShopManager from "../lib/economy/ShopManager.js";
 import FortuneBagManager from "../lib/economy/FortuneBagManager.js";
+import { readFortuneBagImage } from "../lib/economy/fortuneBagImage.js";
 import { fortuneBagAsCatch, rollPondItemType, FORTUNE_BAG_MESSAGE_LIMIT } from "../lib/economy/fortuneBagRules.js";
 import _ from "lodash";
 import fs from "node:fs";
@@ -2046,7 +2047,8 @@ export default class Fishing extends plugin {
           rodId: rodConfig.id, expGain, locationId: state.locationId,
         });
         if (!result.success) throw new Error(`福袋结算失败：${result.reason}`);
-        await e.reply(`🌊 鱼线拖出一只鼓鼓的福袋，袋口一松，樱花币叮当落下。\n🧧 ${fish.name}：${fish.description}\n💰 获得 ${result.amount} 樱花币，福袋已回池。${formatGhostDebtSettlement(result)}`);
+        const message = `🌊 鱼线拖出一只鼓鼓的福袋，袋口一松，樱花币叮当落下。\n🧧 ${fish.name}${fish.description ? `：${fish.description}` : ""}\n💰 获得 ${result.amount} 樱花币，福袋已回池。${formatGhostDebtSettlement(result)}`;
+        await e.reply(fish.image ? [message, segment.image(fish.image)] : message);
         return true;
       }
       if (fish.rarity === "噩梦") {
@@ -2913,14 +2915,53 @@ export default class Fishing extends plugin {
       locationId = target[0];
       message = message.slice(target[1].name.length).trim();
     }
-    const result = new FortuneBagManager(e).deploy(locationId, message);
+    let image;
+    try {
+      image = await readFortuneBagImage(e);
+    } catch (error) {
+      const hint = /^(?:福袋图片不能|每个福袋最多|请使用有效的|图片读取失败)/u.test(error.message)
+        ? error.message : "图片读取失败，请重新发送图片后再试。";
+      await e.reply(hint, 10);
+      return true;
+    }
+    const result = new FortuneBagManager(e).deploy(locationId, message, image);
     if (!result.success) {
       await e.reply(result.reason === "no_item"
         ? "没有福袋，可购买或开宝箱获得。"
-        : `发送「#投放福袋 [钓点名] 留言」，留言限${FORTUNE_BAG_MESSAGE_LIMIT}字。`, 10);
+        : `发送「#投放福袋 [钓点名] 留言」并可附一张2MB以内的图片；留言限${FORTUNE_BAG_MESSAGE_LIMIT}字，也可只放图片。`, 10);
       return true;
     }
     await e.reply(`🧧 福袋 F${result.id}已投放到${getFishingLocationConfig(locationId).name}。`);
+    return true;
+  });
+
+  myFortuneBags = Command(/^#?(?:我的(?:漂流)?福袋|查询(?:我的)?(?:漂流)?福袋)$/, async (e) => {
+    if (!this.checkWhitelist(e)) return false;
+    const bags = new FortuneBagManager(e).listOwn();
+    if (!bags.length) {
+      await e.reply("你还没有在本群投放过福袋。", 10);
+      return true;
+    }
+    const statuses = { active: "漂流中", hooked: "正在被钓", ended: "已沉没" };
+    try {
+      // 每份最多三张图片，避免多只图片福袋令单次合并转发过大。
+      for (let offset = 0; offset < bags.length; offset += 3) {
+        const nodes = bags.slice(offset, offset + 3).map(bag => {
+          const content = [
+            `🧧 福袋 F${bag.id}\n📍 ${getFishingLocationConfig(bag.location).name} · ${statuses[bag.status] || bag.status}\n💰 面额：${bag.amount} 樱花币\n🎣 已钓起 ${bag.success_count} 次，累计发出 ${bag.total_paid} 樱花币\n📝 留言：${bag.message || "无"}`,
+          ];
+          if (bag.image) content.push(segment.image(bag.image));
+          return { content };
+        });
+        await e.sendForwardMsg(nodes, {
+          source: "我的福袋", prompt: "🧧 我的福袋", summary: `共 ${bags.length} 只福袋`,
+          news: [{ text: `本群投放记录 ${offset + 1}–${Math.min(offset + 3, bags.length)}/${bags.length}` }],
+        });
+      }
+    } catch (error) {
+      logger.warn(`[福袋] 查询转发失败: ${error.message}`);
+      await e.reply("福袋查询发送失败，请稍后重试。", 10);
+    }
     return true;
   });
 

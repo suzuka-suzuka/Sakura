@@ -401,7 +401,7 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
       return [item.bossBait ? "首领挑战专用" : "钓鱼消耗品"]
     }
     if (item.handler === "fishing_chest") return ["发送 #开宝箱 开启"]
-    if (item.handler === "fishing_fortune_bag") return ["发送 #投放福袋 留言"]
+    if (item.handler === "fishing_fortune_bag") return ["发送 #投放福袋 留言/图片（≤2MB）", "发送 #我的福袋 查询"]
     if (item.type === "buff") return ["发送 #使用 激活效果", conversionHint].filter(Boolean)
     if (item.handler === "fishing_special" && item.type === "consumable") {
       return ["发送 #使用 消耗", conversionHint].filter(Boolean)

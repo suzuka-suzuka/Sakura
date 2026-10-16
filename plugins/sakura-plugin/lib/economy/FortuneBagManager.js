@@ -6,6 +6,7 @@ import {
   FORTUNE_BAG_INITIAL_AMOUNT,
   FORTUNE_BAG_INCREMENT,
   FORTUNE_BAG_LEASE_MS,
+  FORTUNE_BAG_IMAGE_LIMIT,
   normalizeFortuneBagMessage,
 } from "./fortuneBagRules.js";
 
@@ -20,9 +21,12 @@ export default class FortuneBagManager {
     this.e = e;
   }
 
-  deploy(locationId, message) {
-    const text = normalizeFortuneBagMessage(message);
-    if (!text) return { success: false, reason: "invalid_message" };
+  deploy(locationId, message, image = null) {
+    if (image !== null && (!Buffer.isBuffer(image) || !image.length || image.length > FORTUNE_BAG_IMAGE_LIMIT)) {
+      return { success: false, reason: "invalid_image" };
+    }
+    const text = image && !String(message || "").trim() ? "" : normalizeFortuneBagMessage(message);
+    if (text === null) return { success: false, reason: "invalid_message" };
     if (!FISHING_LOCATIONS[locationId]) return { success: false, reason: "invalid_location" };
     return db.transaction(() => {
       const consumed = db.prepare(`
@@ -33,11 +37,19 @@ export default class FortuneBagManager {
       db.prepare("DELETE FROM inventory WHERE group_id = ? AND user_id = ? AND item_id = ? AND count <= 0")
         .run(this.groupId, this.userId, FORTUNE_BAG_ITEM_ID);
       const inserted = db.prepare(`
-        INSERT INTO pond_fortune_bags (group_id, owner_id, location, message, amount, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(this.groupId, this.userId, locationId, text, FORTUNE_BAG_INITIAL_AMOUNT, Date.now());
+        INSERT INTO pond_fortune_bags (group_id, owner_id, location, message, image, amount, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(this.groupId, this.userId, locationId, text, image, FORTUNE_BAG_INITIAL_AMOUNT, Date.now());
       return { success: true, id: Number(inserted.lastInsertRowid), amount: FORTUNE_BAG_INITIAL_AMOUNT };
     }).immediate();
+  }
+
+  listOwn() {
+    this.recoverReservations();
+    return db.prepare(`
+      SELECT * FROM pond_fortune_bags
+      WHERE group_id = ? AND owner_id = ? ORDER BY id DESC
+    `).all(this.groupId, this.userId);
   }
 
   recoverReservations(now = Date.now()) {

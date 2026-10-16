@@ -8,6 +8,7 @@ export const FORTUNE_BAG_HOOK_WEIGHT_PER_ITEM = 5;
 export const FORTUNE_BAG_OWNER_EXP = 1;
 export const FORTUNE_BAG_LEASE_MS = 15 * 60 * 1000;
 export const FORTUNE_BAG_MESSAGE_LIMIT = 120;
+export const FORTUNE_BAG_IMAGE_LIMIT = 2 * 1024 * 1024;
 
 // 鱼雷与福袋每个5权重；普通渔获保留100基础权重。
 export function rollPondItemType(torpedoCount, fortuneBagCount, random = Math.random) {
@@ -37,6 +38,7 @@ export function fortuneBagAsCatch(bag) {
     fortuneBagId: bag.id,
     amount: bag.amount,
     description: bag.message,
+    image: bag.image || null,
     difficulty,
     actualWeight: weight,
     effectiveWeight: weight,

@@ -9,6 +9,8 @@ import * as crypto from "node:crypto";
 import * as url from "node:url";
 import Database from "better-sqlite3";
 import YAML from "js-yaml";
+import sharp from "sharp";
+import { downloadFortuneBagImage } from "../lib/economy/fortuneBagImage.js";
 import * as fishingRules from "../lib/fishing/rules.js";
 import * as economyRules from "../lib/economy/rules.js";
 import * as bagRules from "../lib/economy/fortuneBagRules.js";
@@ -22,12 +24,14 @@ async function fixture(t) {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "sakura-fortune-bags-"));
   const modules = new Map(), timers = new Map(), buffs = new Set(), errors = [], selections = [];
   let timerId = 0, sessions;
+  let imageFetch = async () => { throw new Error("未配置图片下载"); };
   class SessionStore extends session.FishingSessionStore {
     constructor() { super({ clearTimer: id => timers.delete(id) }); sessions = this; }
   }
   const redis = { get: async key => [...buffs].some(id => key.includes(`:${id}:`)) ? "1" : null,
     ttl: async () => -2, exists: async () => 0 };
-  const context = vm.createContext({ console, Buffer, redis,
+  const context = vm.createContext({ console, Buffer, redis, AbortSignal,
+    fetch: (...args) => imageFetch(...args),
     setTimeout: callback => { timers.set(++timerId, callback); return timerId; },
     clearTimeout: id => timers.delete(id),
     plugin: class { constructor(options) { Object.assign(this, options); } finish() {} setContext() {}
@@ -40,10 +44,10 @@ async function fixture(t) {
   const configuration = Object.fromEntries(["shop", "special_items", "treasure_chest", "profession", "bag"].map(name => [name, readEconomy(name)]));
   const sources = new Set(["lib/Database.js", "lib/economy/FortuneBagManager.js", "lib/fishing/SettlementService.js",
     "lib/economy/InventoryManager.js", "lib/economy/EconomyManager.js", "lib/economy/ShopManager.js",
-    "lib/economy/FishingManager.js", "lib/economy/ChestManager.js", "lib/fishing/fishData.js", "apps/fishing.js"]);
+    "lib/economy/FishingManager.js", "lib/economy/ChestManager.js", "lib/economy/fortuneBagImage.js", "lib/fishing/fishData.js", "apps/fishing.js"]);
   const special = new Map([
     [path.join(root, "lib/GroupDataCleaner.js"), { dataCleanupGuards: new Set() }],
-    ["better-sqlite3", { default: Database }], ["node:fs", { default: fs }], ["fs", { default: fs }],
+    ["better-sqlite3", { default: Database }], ["sharp", { default: sharp }], ["node:fs", { default: fs }], ["fs", { default: fs }],
     ["node:path", { default: path }], ["path", { default: path }],
     ["node:crypto", crypto], ["node:url", url], ["lodash", { default: { random: (min, max) => max ?? min } }],
     [path.join(root, "lib/path.js"), { plugindata: temporary, pluginresources: path.join(root, "resources"), _path: temporary }],
@@ -103,9 +107,11 @@ async function fixture(t) {
   });
   const Manager = (await load("lib/economy/FortuneBagManager.js")).default;
   function event(user = "u", group = "g") {
-    const replies = [], recallTimes = [];
-    return { group_id: group, user_id: user, msg: "", replies, recallTimes,
+    const replies = [], recallTimes = [], forwards = [], payloads = [];
+    return { group_id: group, user_id: user, msg: "", replies, recallTimes, forwards, payloads,
+      sendForwardMsg: async (nodes, info) => { forwards.push({ nodes, info }); return { message_id: forwards.length }; },
       reply: async (value, recall = 0) => {
+        payloads.push(value);
         replies.push(Array.isArray(value) ? value.join("") : String(value));
         recallTimes.push(recall);
         return { message_id: replies.length };
@@ -115,7 +121,7 @@ async function fixture(t) {
     db.prepare("INSERT OR REPLACE INTO inventory (group_id,user_id,item_id,count) VALUES (?,?,?,?)")
       .run(e.group_id, e.user_id, item, count);
   }
-  async function fishing(e, { line = "line_steel", rod = "rod_titanium", amount = 10, expectBag = true, location = "pond", ownerId = e.user_id } = {}) {
+  async function fishing(e, { line = "line_steel", rod = "rod_titanium", amount = 10, expectBag = true, location = "pond", ownerId = e.user_id, image = null } = {}) {
     const FishingManager = (await load("lib/economy/FishingManager.js")).default;
     const fm = new FishingManager(e.group_id);
     fm.getUserData(e.user_id);
@@ -125,7 +131,7 @@ async function fixture(t) {
     const ownerEvent = { ...e, user_id: ownerId };
     stock(ownerEvent, "fortune_bag", 1);
     const manager = new Manager(e);
-    const deployed = new Manager(ownerEvent).deploy(location, "留给下一位的好运");
+    const deployed = new Manager(ownerEvent).deploy(location, "留给下一位的好运", image);
     db.prepare("UPDATE pond_fortune_bags SET amount=? WHERE id=?").run(amount, deployed.id);
     const App = (await load("apps/fishing.js")).default;
     const app = new App();
@@ -135,8 +141,137 @@ async function fixture(t) {
     await timers.get(state.waitingTimer)();
     return { app, state, manager, fm, bagId: deployed.id };
   }
-  return { db, Manager, event, stock, load, fishing, buffs, timers, errors, configuration, selections };
+  return { db, Manager, event, stock, load, fishing, buffs, timers, errors, configuration, selections,
+    setImageFetch: value => { imageFetch = value; } };
 }
+
+const testImage = () => sharp({ create: { width: 2, height: 2, channels: 4, background: "red" } }).png().toBuffer();
+const imageMessage = count => Array.from({ length: count }, () => ({ type: "image", data: { url: "https://example.test/bag.png" } }));
+
+test("福袋图片校验真实格式及2MB边界，流式超限立即停止且不信任响应头", async () => {
+  const png = await testImage();
+  const limit = bagRules.FORTUNE_BAG_IMAGE_LIMIT;
+  const boundary = Buffer.concat([png, Buffer.alloc(limit - png.length)]);
+  assert.deepEqual(await downloadFortuneBagImage("https://example.test/image", async () => new Response(boundary)), boundary);
+  await assert.rejects(downloadFortuneBagImage("https://example.test/image", async () => new Response("not an image")), /有效的/u);
+  await assert.rejects(downloadFortuneBagImage("file:///secret", async () => { throw new Error("不应访问"); }), /图片读取失败/u);
+  await assert.rejects(downloadFortuneBagImage("https://example.test/image", async () => new Response(null, { status: 404 })), /图片读取失败/u);
+  let cancelled = false, reads = 0;
+  const response = headers => ({ ok: true, headers: new Headers(headers), body: { getReader: () => ({
+    read: async () => { reads++; return { done: false, value: Buffer.alloc(limit + 1) }; },
+    cancel: async () => { cancelled = true; },
+  }) } });
+  await assert.rejects(downloadFortuneBagImage("https://example.test/image", async () => response({ "content-length": String(limit + 1) })), /不能超过2MB/u);
+  assert.equal(reads, 0); assert.equal(cancelled, true);
+  cancelled = false;
+  await assert.rejects(downloadFortuneBagImage("https://example.test/image", async () => response({ "content-length": "1" })), /不能超过2MB/u);
+  assert.equal(reads, 1); assert.equal(cancelled, true);
+});
+
+test("投放支持纯图片、留言配图、引用图片，校验失败不扣物品且10秒撤回", async t => {
+  const f = await fixture(t), e = f.event(), png = await testImage();
+  const App = (await f.load("apps/fishing.js")).default, app = new App();
+  f.stock(e, "fortune_bag", 10);
+  f.setImageFetch(async () => new Response(png));
+  for (const command of ["#投放福袋", "#投放福袋 青柳河湾", "#投放福袋 青柳河湾 好运"]) {
+    e.message = imageMessage(1);
+    e.match = app.deployFortuneBag.pattern.exec(command);
+    await app.deployFortuneBag(e);
+    assert.match(e.replies.at(-1), /已投放到/u);
+  }
+  e.message = [];
+  e.reply_id = "quoted";
+  e.getReplyMsg = async () => ({ message: imageMessage(1) });
+  e.match = app.deployFortuneBag.pattern.exec("#投放福袋 引用图片");
+  await app.deployFortuneBag(e);
+  // 当前消息有图时，不读取引用消息。
+  e.message = imageMessage(1);
+  e.getReplyMsg = async () => { throw new Error("不应读取引用"); };
+  await app.deployFortuneBag(e);
+  const rows = f.db.prepare("SELECT * FROM pond_fortune_bags ORDER BY id").all();
+  assert.equal(rows.length, 5);
+  assert.deepEqual(rows.map(row => row.message), ["", "", "好运", "引用图片", "引用图片"]);
+  assert.ok(rows.every(row => row.image.equals(png)));
+  e.message = imageMessage(2);
+  await app.deployFortuneBag(e);
+  assert.match(e.replies.at(-1), /最多放一张/u);
+  e.message = imageMessage(1);
+  f.setImageFetch(async () => new Response(Buffer.alloc(bagRules.FORTUNE_BAG_IMAGE_LIMIT + 1)));
+  await app.deployFortuneBag(e);
+  assert.match(e.replies.at(-1), /不能超过2MB/u);
+  f.setImageFetch(async () => new Response("not an image"));
+  await app.deployFortuneBag(e);
+  assert.match(e.replies.at(-1), /有效的/u);
+  f.setImageFetch(async () => { throw new Error("下载超时及内部链接"); });
+  await app.deployFortuneBag(e);
+  assert.equal(e.replies.at(-1), "图片读取失败，请重新发送图片后再试。");
+  f.setImageFetch(async () => new Response(png));
+  e.match = app.deployFortuneBag.pattern.exec(`#投放福袋${"字".repeat(121)}`);
+  await app.deployFortuneBag(e);
+  assert.match(e.replies.at(-1), /留言限120字/u);
+  assert.ok(e.recallTimes.slice(-5).every(value => value === 10));
+  assert.equal(f.db.prepare("SELECT count FROM inventory WHERE item_id='fortune_bag'").get().count, 5);
+  assert.equal(new f.Manager(e).deploy("pond", "", Buffer.alloc(0)).reason, "invalid_image");
+});
+
+test("我的福袋仅转发本群本人记录，展示三种状态及图片并分批发送", async t => {
+  const f = await fixture(t), e = f.event(), png = await testImage();
+  const manager = new f.Manager(e);
+  f.stock(e, "fortune_bag", 4);
+  for (let i = 0; i < 4; i++) manager.deploy("river", `本人留言${i}`, i === 0 ? png : null);
+  manager.reserve("river", "ongoing");
+  f.db.prepare("UPDATE pond_fortune_bags SET status='ended',session_id=NULL WHERE id=4").run();
+  for (const other of [f.event("other"), f.event("u", "other-group")]) {
+    f.stock(other, "fortune_bag", 1);
+    new f.Manager(other).deploy("pond", "不应出现");
+  }
+  const App = (await f.load("apps/fishing.js")).default, app = new App();
+  for (const command of ["#我的福袋", "我的漂流福袋", "#查询福袋", "#查询我的福袋"]) {
+    assert.ok(app.myFortuneBags.pattern.test(command));
+  }
+  await app.myFortuneBags(e);
+  assert.equal(e.forwards.length, 2);
+  const nodes = e.forwards.flatMap(item => item.nodes);
+  assert.equal(nodes.length, 4);
+  const text = nodes.map(node => node.content[0]).join("\n");
+  assert.match(text, /漂流中/u); assert.match(text, /正在被钓/u); assert.match(text, /已沉没/u);
+  assert.match(text, /青柳河湾/u); assert.ok(!text.includes("不应出现"));
+  assert.ok(nodes.some(node => Buffer.isBuffer(node.content[1]) && node.content[1].equals(png)));
+  const empty = f.event("empty");
+  await app.myFortuneBags(empty);
+  assert.equal(empty.forwards.length, 0); assert.match(empty.replies[0], /还没有/u);
+  e.sendForwardMsg = async () => { throw new Error("转发失败"); };
+  await app.myFortuneBags(e);
+  assert.match(e.replies.at(-1), /发送失败/u);
+});
+
+test("旧福袋表补充图片列可重复执行，图片随数据库重开保留", async t => {
+  const f = await fixture(t), e = f.event(), manager = new f.Manager(e), png = await testImage();
+  f.stock(e, "fortune_bag", 2);
+  manager.deploy("pond", "旧留言");
+  f.db.db.exec("ALTER TABLE pond_fortune_bags DROP COLUMN image");
+  f.db.init(); f.db.init();
+  assert.equal(manager.listOwn()[0].message, "旧留言");
+  assert.equal(manager.listOwn()[0].image, null);
+  manager.deploy("pond", "", png);
+  f.db.db.close(); f.db.db = new Database(f.db.dbPath); f.db.init();
+  assert.ok(manager.listOwn()[0].image.equals(png));
+});
+
+test("真实钓起匿名发图并保留原图回池，后续咬钩及结算仍保留图片", async t => {
+  const f = await fixture(t), e = f.event(), png = await testImage();
+  const { app, state, manager, bagId } = await f.fishing(e, { image: png, ownerId: "image-owner" });
+  assert.ok(state.fish.image.equals(png));
+  e.msg = "收竿"; await app.handleFishing(e);
+  const payload = e.payloads.find(value => Array.isArray(value) && value.some(item => Buffer.isBuffer(item)));
+  assert.ok(payload.some(item => Buffer.isBuffer(item) && item.equals(png)));
+  assert.ok(!payload[0].includes("image-owner"));
+  const row = manager.reserve("pond", "second-catch");
+  assert.equal(row.id, bagId); assert.ok(row.image.equals(png));
+  assert.ok(bagRules.fortuneBagAsCatch(row).image.equals(png));
+  assert.equal(manager.settle({ bagId, sessionId: "second-catch", success: true }).success, true);
+  assert.equal(f.db.prepare("SELECT success_count FROM pond_fortune_bags WHERE id=?").get(bagId).success_count, 2);
+});
 
 for (const stopped of [false, true]) {
   test(`真实抛竿：诅咒${stopped ? "停止累加后仍保留原权重" : "继续累加并使用新权重"}，启动失败只回滚新增层`, async t => {
