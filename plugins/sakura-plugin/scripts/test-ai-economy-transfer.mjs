@@ -85,8 +85,38 @@ function setup(t, { botCoins = 1000, userCoins = 100, level = 3, master = false,
     draws: () => draws, lockCalls: () => lockCalls,
     execute: (amount, targetQQ = "10002") => tool.func({ action: "transfer", targetQQ, amount }, e),
     executeFine: (amount, targetQQ = "10001") => tool.func({ action: "fine", targetQQ, amount }, e),
+    executeBalance: targetQQ => tool.func({ action: "balance", targetQQ }, e),
   };
 }
+
+test("余额查询默认查 AI，显式填写 AI 的 QQ 也能查询", async t => {
+  const h = setup(t);
+  assert.equal(await h.executeBalance(), "你当前有 1000 樱花币。");
+  assert.equal(await h.executeBalance("10000"), "你当前有 1000 樱花币。");
+});
+
+test("普通用户可以查询指定 QQ，余额以当前群为准且不产生扣款或冷却", async t => {
+  const h = setup(t);
+  h.db.prepare("INSERT INTO economy (group_id, user_id, coins) VALUES ('20001', '10001', 999)").run();
+  assert.equal(await h.executeBalance("10001"), "用户 10001 在当前群有 100 樱花币。");
+  assert.equal(h.coins("10001"), 100);
+  assert.equal(h.coins("10000"), 1000);
+  assert.equal(h.db.prepare("SELECT COUNT(*) AS count FROM economy_transactions").get().count, 0);
+  assert.equal(h.draws(), 0);
+  assert.equal(h.lockCalls(), 0);
+});
+
+test("查询未建立账户的用户返回零余额", async t => {
+  const h = setup(t);
+  assert.equal(await h.executeBalance("10009"), "用户 10009 在当前群有 0 樱花币。");
+});
+
+test("余额查询填写非法 QQ 时明确报错，不回退为 AI 的余额", async t => {
+  const h = setup(t);
+  for (const targetQQ of ["", "abc", "1234", "123456789012", null, 10001]) {
+    assert.match(await h.executeBalance(targetQQ), /参数错误：请提供正确的QQ号/);
+  }
+});
 
 for (const [requested, actual] of [[10, 10], [75, 75], [200, 100]]) {
   test(`独立罚款由 AI 指定 ${requested} 币，实际扣除 ${actual} 币`, async t => {

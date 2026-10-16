@@ -18,11 +18,11 @@ export class EconomyTool extends AbstractTool {
       action: {
         type: "string",
         enum: ["transfer", "balance", "fine"],
-        description: "操作类型：transfer(转账给别人)、balance(查询自己的余额)、fine(罚款，罚款所得转入你自己的账户)",
+        description: "操作类型：transfer(转账给别人)、balance(查询余额，默认查自己)、fine(罚款，罚款所得转入你自己的账户)",
       },
       targetQQ: {
         type: "string",
-        description: "目标用户的QQ号，transfer和fine操作时必填",
+        description: "目标用户的QQ号，transfer 和 fine 时必填，balance 时可选，不填则查询你自己的余额",
       },
       amount: {
         type: "number",
@@ -32,7 +32,7 @@ export class EconomyTool extends AbstractTool {
     required: ["action"],
   };
   description =
-    "经济系统工具。樱花币是群内虚拟货币，没有实际价值。可以查询自己的余额、给别人转账、或对违规用户罚款。";
+    "经济系统工具。樱花币是群内虚拟货币，没有实际价值。可以查询自己或指定用户的余额、给别人转账、或对违规用户罚款。";
 
   func = async function (opts, e) {
     const { action, targetQQ, amount } = opts;
@@ -45,8 +45,15 @@ export class EconomyTool extends AbstractTool {
       };
 
       if (action === "balance") {
-        const botCoins = economyManager.getCoins(botE);
-        return `你当前有 ${botCoins} 樱花币。`;
+        if (targetQQ !== undefined && (typeof targetQQ !== "string" || !/^\d{5,11}$/.test(targetQQ))) {
+          return `参数错误：请提供正确的QQ号。`;
+        }
+        if (targetQQ === undefined || targetQQ === String(e.self_id)) {
+          const botCoins = economyManager.getCoins(botE);
+          return `你当前有 ${botCoins} 樱花币。`;
+        }
+        const targetCoins = economyManager.getCoins({ user_id: targetQQ, group_id: e.group_id });
+        return `用户 ${targetQQ} 在当前群有 ${targetCoins} 樱花币。`;
       }
 
       if (action === "fine") {
