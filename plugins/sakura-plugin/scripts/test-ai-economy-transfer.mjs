@@ -84,8 +84,61 @@ function setup(t, { botCoins = 1000, userCoins = 100, level = 3, master = false,
     coins: id => manager.getCoins({ user_id: id }),
     draws: () => draws, lockCalls: () => lockCalls,
     execute: (amount, targetQQ = "10002") => tool.func({ action: "transfer", targetQQ, amount }, e),
+    executeFine: (amount, targetQQ = "10001") => tool.func({ action: "fine", targetQQ, amount }, e),
   };
 }
+
+for (const [requested, actual] of [[10, 10], [75, 75], [200, 100]]) {
+  test(`独立罚款由 AI 指定 ${requested} 币，实际扣除 ${actual} 币`, async t => {
+    const h = setup(t);
+    assert.match(await h.executeFine(requested), new RegExp(`罚款成功！已扣除 .* ${actual} 樱花币`));
+    assert.equal(h.coins("10001"), 100 - actual);
+    assert.equal(h.coins("10000"), 1000 + actual);
+    assert.equal(h.db.prepare("SELECT SUM(coins) AS total FROM economy").get().total, 1100);
+    assert.equal(h.db.prepare("SELECT COUNT(*) AS count FROM economy_transactions").get().count, 2);
+    assert.equal(h.draws(), 0);
+    assert.equal(h.lockCalls(), 0);
+  });
+}
+
+test("独立罚款拒绝缺失或非法金额，不默认扣 50 币", async t => {
+  const h = setup(t);
+  for (const amount of [undefined, null, 0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.match(await h.executeFine(amount), /参数错误：罚款金额/);
+  }
+  assert.equal(h.coins("10001"), 100);
+  assert.equal(h.coins("10000"), 1000);
+});
+
+test("独立罚款保留普通用户不能罚其他人和不能罚 AI 的权限限制", async t => {
+  const h = setup(t);
+  assert.match(await h.executeFine(10, "10002"), /权限不足/);
+  assert.match(await h.executeFine(10, "10000"), /不能罚款自己/);
+  assert.equal(h.coins("10000"), 1000);
+  assert.equal(h.coins("10001"), 100);
+});
+
+test("主人可以让 AI 按指定金额罚其他人", async t => {
+  const h = setup(t, { master: true });
+  h.db.prepare("UPDATE economy SET coins = 200 WHERE user_id = '10002'").run();
+  assert.match(await h.executeFine(80, "10002"), /罚款成功！已扣除 .* 80 樱花币/);
+  assert.equal(h.coins("10002"), 120);
+  assert.equal(h.coins("10000"), 1080);
+});
+
+test("独立罚款目标没钱时拒绝扣款", async t => {
+  const h = setup(t, { userCoins: 0 });
+  assert.match(await h.executeFine(80), /没钱可扣/);
+  assert.equal(h.coins("10000"), 1000);
+});
+
+test("独立罚款扣款失败时不报告成功", async t => {
+  const h = setup(t);
+  h.manager.constructor.prototype.transferCoins = () => false;
+  assert.match(await h.executeFine(80), /罚款失败：对方余额发生变化/);
+  assert.equal(h.coins("10001"), 100);
+  assert.equal(h.coins("10000"), 1000);
+});
 
 test("金额比例对应概率曲线，封顶 90%，超过余额与无余额为零", () => {
   for (const [amount, expected] of [[1, 0.9], [50, 0.9], [100, 0.8], [200, 0.5], [300, 1 / 3.25], [400, 0.2], [500, 1 / 7.25], [1000, 1 / 26], [1001, 0]]) {

@@ -18,7 +18,7 @@ export class EconomyTool extends AbstractTool {
       action: {
         type: "string",
         enum: ["transfer", "balance", "fine"],
-        description: "操作类型：transfer(转账给别人)、balance(查询自己的余额)、fine(罚款，扣除目标用户50樱花币)",
+        description: "操作类型：transfer(转账给别人)、balance(查询自己的余额)、fine(罚款)",
       },
       targetQQ: {
         type: "string",
@@ -26,7 +26,7 @@ export class EconomyTool extends AbstractTool {
       },
       amount: {
         type: "number",
-        description: "转账的樱花币数量，仅 transfer 操作时需要，填写正整数",
+        description: "樱花币数量，transfer 和 fine 操作时需要，填写正整数",
       },
     },
     required: ["action"],
@@ -62,9 +62,14 @@ export class EconomyTool extends AbstractTool {
           return `权限不足：(${e.user_id})没有权限让你罚款其他人。`;
         }
 
+        const requestedFineAmount = Number(amount);
+        if (!Number.isSafeInteger(requestedFineAmount) || requestedFineAmount <= 0) {
+          return `参数错误：罚款金额必须是大于0的正整数。`;
+        }
+
         const targetE = { user_id: targetQQ, group_id: e.group_id };
         const targetCoins = economyManager.getCoins(targetE);
-        const fineAmount = Math.min(50, targetCoins);
+        const fineAmount = Math.min(requestedFineAmount, targetCoins);
 
         if (fineAmount <= 0) {
           return `罚款失败：对方已经一穷二白了，没钱可扣。`;
