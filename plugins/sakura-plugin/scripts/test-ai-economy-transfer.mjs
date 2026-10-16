@@ -91,7 +91,7 @@ function setup(t, { botCoins = 1000, userCoins = 100, level = 3, master = false,
 for (const [requested, actual] of [[10, 10], [75, 75], [200, 100]]) {
   test(`独立罚款由 AI 指定 ${requested} 币，实际扣除 ${actual} 币`, async t => {
     const h = setup(t);
-    assert.match(await h.executeFine(requested), new RegExp(`罚款成功！已扣除 .* ${actual} 樱花币`));
+    assert.match(await h.executeFine(requested), new RegExp(`罚款成功！已扣除 .* ${actual} 樱花币，并转入你自己的账户。`));
     assert.equal(h.coins("10001"), 100 - actual);
     assert.equal(h.coins("10000"), 1000 + actual);
     assert.equal(h.db.prepare("SELECT SUM(coins) AS total FROM economy").get().total, 1100);

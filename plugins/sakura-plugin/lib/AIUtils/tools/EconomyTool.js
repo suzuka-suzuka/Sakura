@@ -18,7 +18,7 @@ export class EconomyTool extends AbstractTool {
       action: {
         type: "string",
         enum: ["transfer", "balance", "fine"],
-        description: "操作类型：transfer(转账给别人)、balance(查询自己的余额)、fine(罚款)",
+        description: "操作类型：transfer(转账给别人)、balance(查询自己的余额)、fine(罚款，罚款所得转入你自己的账户)",
       },
       targetQQ: {
         type: "string",
@@ -88,7 +88,7 @@ export class EconomyTool extends AbstractTool {
           }
         } catch (err) {}
 
-        return `罚款成功！已扣除 ${targetNickname}(${targetQQ}) ${fineAmount} 樱花币。`;
+        return `罚款成功！已扣除 ${targetNickname}(${targetQQ}) ${fineAmount} 樱花币，并转入你自己的账户。`;
       }
 
       if (action === "transfer") {
