@@ -26,7 +26,7 @@ export class EconomyTool extends AbstractTool {
       },
       amount: {
         type: "number",
-        description: "转账的樱花币数量，仅transfer操作时需要；非主人索要AI当前余额的20%时成功率为50%，少要概率更高、多要更低，最高90%；超过余额必定失败，失败罚发起人50樱花币，不足则扣剩余余额",
+        description: "转账的樱花币数量，仅 transfer 操作时需要，填写正整数",
       },
     },
     required: ["action"],
