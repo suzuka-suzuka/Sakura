@@ -1,8 +1,9 @@
 export const REVIVE_COIN_BASE_AMOUNT = 100;
 export const REVIVE_COIN_PER_LEVEL = 2;
 export const TRANSFER_UNLOCK_LEVEL = 3;
-export const AI_TRANSFER_MAX_BALANCE_PERCENT = 20;
-export const AI_TRANSFER_GROUP_COOLDOWN_SECONDS = 2 * 60;
+export const AI_TRANSFER_BASE_BALANCE_PERCENT = 20;
+export const AI_TRANSFER_MAX_SUCCESS_RATE = 0.9;
+export const AI_TRANSFER_PERSONAL_COOLDOWN_SECONDS = 60;
 export const EQUIPMENT_SELL_PRICE_RATIO = 0.8;
 
 export function calculateEquipmentSellPrice(originalPrice, durabilityRatio = 1) {
@@ -242,8 +243,13 @@ export function validateRedPacket(amount, count) {
   return { valid: true, amount: safeAmount, count: safeCount };
 }
 
-export function getNonMasterAiTransferLimit(balance) {
+export function getNonMasterAiTransferSuccessRate(balance, amount) {
   const numericBalance = Number(balance);
+  const numericAmount = Number(amount);
   if (!Number.isFinite(numericBalance) || numericBalance <= 0) return 0;
-  return Math.floor(numericBalance * AI_TRANSFER_MAX_BALANCE_PERCENT / 100);
+  if (!Number.isSafeInteger(numericAmount) || numericAmount <= 0) return 0;
+  if (numericAmount > numericBalance) return 0;
+  // 索要当前余额的 20% 时成功率为 50%，金额越高成功率越低。
+  const ratio = numericAmount / numericBalance / (AI_TRANSFER_BASE_BALANCE_PERCENT / 100);
+  return Math.max(0, Math.min(AI_TRANSFER_MAX_SUCCESS_RATE, 1 / (1 + ratio ** 2)));
 }

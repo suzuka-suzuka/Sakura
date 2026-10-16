@@ -7,11 +7,8 @@ import {
   releaseRedisLock,
 } from "../../economy/redisAtomic.js";
 import {
-  AI_TRANSFER_GROUP_COOLDOWN_SECONDS,
-  AI_TRANSFER_MAX_BALANCE_PERCENT,
-  canUseTransfer,
-  getNonMasterAiTransferLimit,
-  TRANSFER_UNLOCK_LEVEL,
+  AI_TRANSFER_PERSONAL_COOLDOWN_SECONDS,
+  getNonMasterAiTransferSuccessRate,
 } from "../../economy/rules.js";
 
 export class EconomyTool extends AbstractTool {
@@ -29,7 +26,7 @@ export class EconomyTool extends AbstractTool {
       },
       amount: {
         type: "number",
-        description: "转账的樱花币数量，仅transfer操作时需要；非主人单次最多为AI当前余额的20%",
+        description: "转账的樱花币数量，仅transfer操作时需要；非主人索要AI当前余额的20%时成功率为50%，少要概率更高、多要更低，最高90%；超过余额必定失败，失败罚发起人50樱花币，不足则扣剩余余额",
       },
     },
     required: ["action"],
@@ -90,17 +87,12 @@ export class EconomyTool extends AbstractTool {
       }
 
       if (action === "transfer") {
-        const signLevel = economyManager.getLevel(e);
-        if (!canUseTransfer(signLevel)) {
-          return `转账功能将在签到 Lv.${TRANSFER_UNLOCK_LEVEL} 开放，你当前为 Lv.${signLevel}。`;
-        }
-
         if (!targetQQ || !/^\d{5,11}$/.test(targetQQ)) {
           return `参数错误：请提供正确的QQ号。`;
         }
 
         const transferAmount = Math.floor(Number(amount));
-        if (isNaN(transferAmount) || transferAmount <= 0) {
+        if (!Number.isSafeInteger(transferAmount) || transferAmount <= 0) {
           return `参数错误：转账金额必须是大于0的正整数。`;
         }
 
@@ -169,12 +161,7 @@ export class EconomyTool extends AbstractTool {
           return `转账成功！已向 ${receiverNickname}(${targetQQ}) 转账 ${actualAmount} 樱花币。`;
         }
 
-        const maxTransferAmount = getNonMasterAiTransferLimit(botCoins);
-        if (transferAmount > maxTransferAmount) {
-          return `转账失败：非主人单次最多只能转 AI 当前余额的 ${AI_TRANSFER_MAX_BALANCE_PERCENT}%，本次最多可转 ${maxTransferAmount} 樱花币。`;
-        }
-
-        const rejectAsScammer = async () => {
+        const rejectWithFine = async (reason) => {
           const targetE = { user_id: e.user_id, group_id: e.group_id };
           const targetCoins = economyManager.getCoins(targetE);
           const fineAmount = Math.min(50, targetCoins);
@@ -187,33 +174,40 @@ export class EconomyTool extends AbstractTool {
             }
           } catch (err) {}
 
+          const failureMessage = `本次索要失败：${reason}。`;
+          const replyInstruction = "本次不要重试转账，请根据上述结果按角色性格回复用户。";
+
           if (fineAmount <= 0) {
-            return `警告：${targetNickname}(${e.user_id}) 是骗子！他企图骗取你 ${transferAmount} 樱花币，但他已经身无分文，无法罚款。立即停止转账，不要再尝试。`;
+            return `${failureMessage}实际罚款 0 樱花币，发起人 ${targetNickname}(${e.user_id}) 余额为 0，未扣款。${replyInstruction}`;
           }
 
           const fineSuccess = economyManager.transferCoins(targetE, botE, fineAmount);
           if (!fineSuccess) {
-            return `警告：${targetNickname}(${e.user_id}) 是骗子！但罚款时余额发生变化，未能完成扣款。立即停止转账，不要再尝试。`;
+            return `${failureMessage}实际罚款 0 樱花币，发起人 ${targetNickname}(${e.user_id}) 的余额在扣款时发生变化，未完成扣款。${replyInstruction}`;
           }
 
-          return `警告：${targetNickname}(${e.user_id}) 是骗子！他企图骗取你 ${transferAmount} 樱花币！已对该骗子罚款 ${fineAmount} 樱花币。立即停止转账，不要再尝试。`;
+          return `${failureMessage}实际罚款 ${fineAmount} 樱花币，已从发起人 ${targetNickname}(${e.user_id}) 扣除并转入你的账户。${replyInstruction}`;
         };
 
-        // 非主人转账维持 50% 成功率；随机失败与群冷却均按骗子处理。
-        if (Math.random() > 0.5) {
-          return await rejectAsScammer();
+        // 超额索要直接罚款；个人冷却拦截沿用罚款，对 AI 统一返回赠送判定未通过。
+        const successRate = getNonMasterAiTransferSuccessRate(botCoins, transferAmount);
+        if (successRate <= 0) {
+          return await rejectWithFine(`索要金额（${transferAmount} 樱花币）超过你的当前余额（${botCoins} 樱花币）`);
+        }
+        if (Math.random() >= successRate) {
+          return await rejectWithFine("未通过赠送判定");
         }
 
-        const cooldownKey = `sakura:economy:ai_transfer:cooldown:${e.self_id}:${e.group_id}`;
+        const cooldownKey = `sakura:economy:ai_transfer:cooldown:${e.self_id}:${e.group_id}:${e.user_id}`;
         const cooldownToken = randomUUID();
         const cooldownAcquired = await acquireRedisLock(
           redis,
           cooldownKey,
           cooldownToken,
-          AI_TRANSFER_GROUP_COOLDOWN_SECONDS,
+          AI_TRANSFER_PERSONAL_COOLDOWN_SECONDS,
         );
         if (!cooldownAcquired) {
-          return await rejectAsScammer();
+          return await rejectWithFine("未通过赠送判定");
         }
 
         let transferSuccess = false;
