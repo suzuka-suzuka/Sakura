@@ -420,6 +420,7 @@ export class PixivTask extends plugin {
     }, {
       imageUrls,
       proxy: config.proxy,
+      fallbackLinkProxy: config.fallbackLinkProxy,
       pid: illust.id,
       initialRecallTime: isR18 ? (config.recallTime ?? 10) : 0,
       fallbackRecallTime: config.recallTime ?? 10,

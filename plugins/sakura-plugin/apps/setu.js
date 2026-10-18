@@ -59,6 +59,7 @@ export class setuPlugin extends plugin {
     const finalSuccess = await sendPixivImages(e, {
       imageUrls: [imageUrl],
       proxy: config.proxy,
+      fallbackLinkProxy: config.fallbackLinkProxy,
       pid,
       initialRecallTime,
       fallbackRecallTime: config.recallTime ?? 10,

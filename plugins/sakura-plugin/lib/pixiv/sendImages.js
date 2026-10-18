@@ -61,7 +61,7 @@ export async function verifyImageMessage(e, result, expectedCount, {
 }
 
 export async function sendPixivImages(e, {
-  imageUrls, proxy = "", pid, initialRecallTime = 0, fallbackRecallTime = 10,
+  imageUrls, proxy = "", fallbackLinkProxy = "", pid, initialRecallTime = 0, fallbackRecallTime = 10,
 }, { download = downloadImage, flipImage = FlipImageBuffer, verify = verifyImageMessage } = {}) {
   const prefix = `[P站发图][PID:${pid}][目标:${e.group_id || e.user_id}]`
   const downloadUrls = imageUrls.map(url => resolvePixivImageUrl(url, proxy))
@@ -90,7 +90,7 @@ export async function sendPixivImages(e, {
     }
   }
 
-  // 缺图时直接提供完整链接，避免把部分图片发送成功当成全部发送成功。
+  // 缺图时直接进入链接兜底，避免把部分图片发送成功当成全部发送成功。
   if (buffers.length && buffers.length === imageUrls.length) {
     if (await send(buffers, initialRecallTime, "原图")) return true
     await e.reply("图片发送失败，正在尝试翻转后重发...", 10, true)
@@ -106,9 +106,10 @@ export async function sendPixivImages(e, {
     if (flipped.length === buffers.length && await send(flipped, fallbackRecallTime, "翻转图片")) return true
   }
 
-  const links = [...new Set([
-    ...(pid ? [`https://www.pixiv.net/artworks/${pid}`] : []), ...downloadUrls, ...imageUrls,
-  ])]
+  // 公开给用户的链接单独配置，不复用机器人下载图片的反代。
+  const links = fallbackLinkProxy.trim()
+    ? [...new Set(imageUrls.map(url => resolvePixivImageUrl(url, fallbackLinkProxy)))]
+    : (pid ? [`https://www.pixiv.net/artworks/${pid}`] : [])
   const result = await e.reply("图片最终发送失败，请点击链接查看：\n" + links.join("\n"), 60, false)
   logger[result?.message_id ? "info" : "warn"](`${prefix} 链接兜底 message_id=${result?.message_id ?? "无"}`)
   return !!result?.message_id && String(result.message_id) !== "0"

@@ -86,6 +86,7 @@ export class IllustrationTool extends AbstractTool {
       const sent = await sendPixivImages(e, {
         imageUrls: [imageUrl],
         proxy: this.pixivConfig.proxy,
+        fallbackLinkProxy: this.pixivConfig.fallbackLinkProxy,
         pid: imageInfo.pid,
         initialRecallTime: isR18 ? 10 : 0,
         fallbackRecallTime: isR18 ? 10 : 0,
