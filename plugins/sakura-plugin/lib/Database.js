@@ -130,6 +130,7 @@ class DB {
         ghost_debt_mark INTEGER DEFAULT 0,
         deep_pressure_layers INTEGER DEFAULT 0,
         blindness_layers INTEGER DEFAULT 0,
+        nightmare_vulnerable INTEGER DEFAULT 0,
         nightmare_immunity_charges INTEGER DEFAULT 0,
         nightmare_immunity_updated_at INTEGER DEFAULT 0,
         koi_wish INTEGER DEFAULT 0,
@@ -251,6 +252,10 @@ class DB {
     // 旧诅咒继续累加，直到更新后成功钓到一次非骷髅噩梦。
     if (!this.db.pragma('table_info(fishing_stats)').some(column => column.name === 'nightmare_curse_stopped')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN nightmare_curse_stopped INTEGER DEFAULT 0');
+    }
+    // 新增易伤状态，旧玩家默认未受影响，重复初始化不重置状态。
+    if (!this.db.pragma('table_info(fishing_stats)').some(column => column.name === 'nightmare_vulnerable')) {
+      this.db.exec('ALTER TABLE fishing_stats ADD COLUMN nightmare_vulnerable INTEGER DEFAULT 0');
     }
   }
 

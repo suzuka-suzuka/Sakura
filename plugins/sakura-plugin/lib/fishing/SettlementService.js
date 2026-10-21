@@ -130,7 +130,7 @@ export default class FishingSettlementService {
   // 抽成印记连乘后全额抵债，未清部分利滚利；欠款达到阈值则勾销并叠一层印记。
   // 每条抛竿路径都走这里，空军和宝箱竿同样计息。
   // 算与写分开：重复结算会在 _claimSession 处被挡下，此时不能已经把利息写进去。
-  _calcGhostDebt(earnings, { accrueInterest = true } = {}) {
+  _calcGhostDebt(earnings, { accrueInterest = true, deferWriteOff = false } = {}) {
     const row = db.prepare(`
         SELECT ghost_debt, ghost_debt_mark FROM fishing_stats
         WHERE group_id = ? AND user_id = ?
@@ -141,6 +141,7 @@ export default class FishingSettlementService {
       ...calculateGhostDebtPayment(earnings, debtBefore, {
         ghostMarkLayers: markLayersBefore,
         accrueInterest,
+        deferWriteOff,
       }),
       debtBefore,
       markLayersBefore,
@@ -203,6 +204,7 @@ export default class FishingSettlementService {
     weight = 0,
     shiny = false,
     accrueGhostInterest = true,
+    ghostLoanIssued = false,
   }) {
     const safeEarnings = normalizeNonNegativeInteger(earnings);
     const safeMastery = normalizeNonNegativeInteger(masteryGain);
@@ -218,7 +220,9 @@ export default class FishingSettlementService {
       }
       // 这条路径不发放金币，只让债务照常计息。
       const debtResult = this._calcGhostDebt(0, {
-        accrueInterest: accrueGhostInterest,
+        // 放贷当竿保留全部债务，下一竿先抵债、再计息，最后检查印记阈值。
+        accrueInterest: !ghostLoanIssued && accrueGhostInterest,
+        deferWriteOff: ghostLoanIssued,
       });
       this._persistGhostDebt(debtResult);
       const { newlyRecorded, newlyShiny } = this._recordCatch({

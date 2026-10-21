@@ -1016,6 +1016,7 @@ export default class Fishing extends plugin {
         nightmareStatus.blindnessLayers > 0
           ? `\n👁️ 致盲 ${nightmareStatus.blindnessLayers} 层`
           : "",
+        nightmareStatus.vulnerable ? "\n🪞 易伤：其他噩梦效果 ×2" : "",
         nightmareStatus.deepPressureLayers > 0
           ? `\n🔔 ${nightmareStatus.deepPressureLayers} 层深压回响生效中`
           : "",
@@ -1823,6 +1824,9 @@ export default class Fishing extends plugin {
   }) {
     const { fish, rodConfig } = state;
     const effect = fish.nightmare_effect || {};
+    // 只放大本次新施加的惩罚；易伤自身不叠加，也不重算已有减益。
+    const vulnerable = fishingManager.getNightmareStatus(e.user_id).vulnerable;
+    const multiplier = effect.type !== "vulnerability" && vulnerable ? 2 : 1;
     const normalizePenalty = (value) => Math.max(
       1,
       Math.round(Number(value)),
@@ -1831,7 +1835,7 @@ export default class Fishing extends plugin {
     // 放贷这一竿不能立刻计息，否则玩家还没机会还就已经欠更多。
     let ghostLoanIssued = false;
     const fallbackRodDamage = (amount, prefix) => {
-      const damage = normalizePenalty(amount);
+      const damage = normalizePenalty(amount) * multiplier;
       const result = applyRodDamage(fishingManager, e.user_id, rodConfig, damage);
       rodBroken ||= result.isBroken;
       return `${prefix}${result.msg}`;
@@ -1839,6 +1843,14 @@ export default class Fishing extends plugin {
     let message = "💥 这是一个噩梦般的生物！";
 
     switch (effect.type) {
+      case "vulnerability": {
+        const result = fishingManager.applyNightmareVulnerability(e.user_id);
+        message = result.applied
+          ? "🪞 裂魂怨灵在你身上留下魂裂！此后遭遇其他噩梦时，其惩罚效果翻倍。"
+          : "🪞 魂裂仍未愈合，易伤持续生效！";
+        break;
+      }
+
       case "rod_damage": {
         message = fallbackRodDamage(
           effect.amount || 20,
@@ -1849,9 +1861,12 @@ export default class Fishing extends plugin {
 
       case "rod_damage_percent": {
         const { maxDurability } = fishingManager.getRodDurabilityInfo(e.user_id, rodConfig.id);
+        const damage = calculateRodPercentDamage(maxDurability, effect.ratio);
         message = fallbackRodDamage(
-          calculateRodPercentDamage(maxDurability, effect.ratio),
-          `🦈 骸骨鲨啃蚀鱼竿，损失最大耐久的 ${Math.round(effect.ratio * 100)}%！`,
+          damage,
+          multiplier > 1
+            ? `🦈 骸骨鲨啃蚀鱼竿，损失 ${damage * multiplier} 点耐久！`
+            : `🦈 骸骨鲨啃蚀鱼竿，损失最大耐久的 ${Math.round(effect.ratio * 100)}%！`,
         );
         break;
       }
@@ -1868,7 +1883,7 @@ export default class Fishing extends plugin {
         const min = Math.max(1, Math.floor(Number(effect.min) || 1));
         const max = Math.max(min, Math.floor(Number(effect.max) || min));
         const baseAmount = Math.min(_.random(min, max), currentCoins);
-        const stolenAmount = Math.min(normalizePenalty(baseAmount), currentCoins);
+        const stolenAmount = Math.min(normalizePenalty(baseAmount) * multiplier, currentCoins);
         economyManager.reduceCoins(e, stolenAmount, {
           type: "支出",
           note: `钓鱼事件：${fish.name}`,
@@ -1890,18 +1905,18 @@ export default class Fishing extends plugin {
         const maxPercent = Math.max(minPercent, Math.floor(Number(effect.max_percent) || minPercent));
         const percent = _.random(minPercent, maxPercent);
         const baseAmount = Math.max(1, Math.min(currentCoins, Math.round(currentCoins * percent / 100)));
-        const stolenAmount = Math.min(normalizePenalty(baseAmount), currentCoins);
+        const stolenAmount = Math.min(normalizePenalty(baseAmount) * multiplier, currentCoins);
         economyManager.reduceCoins(e, stolenAmount, {
           type: "支出",
           note: `钓鱼事件：${fish.name}`,
         });
-        message = `🌑 它按 ${percent}% 吞噬你的财富……你丢失了 ${stolenAmount} 樱花币！`;
+        message = `🌑 它按 ${percent}% ${multiplier > 1 ? "的双倍金额" : ""}吞噬你的财富……你丢失了 ${stolenAmount} 樱花币！`;
         break;
       }
 
       case "curse": {
-        // 再遇骷髅在原有诅咒上 +1 层，并恢复逐竿累加。
-        const total = fishingManager.addNightmareCurseLayers(e.user_id, 1);
+        // 再遇骷髅追加本次诅咒层数，并恢复每竿 +1；易伤不放大逐竿累加。
+        const total = fishingManager.addNightmareCurseLayers(e.user_id, (effect.layers || 1) * multiplier);
         message = `☠️ 诅咒附身！噩梦诅咒缠上了你，当前 ${total} 层。此后每抛一竿层数 +1，钓到其他噩梦后停止叠加`;
         break;
       }
@@ -1909,7 +1924,7 @@ export default class Fishing extends plugin {
       case "nightmare_weight_multiplier": {
         const result = fishingManager.applyBrideNightmareMultiplier(
           e.user_id,
-          effect.multiplier || 2,
+          (effect.multiplier || 2) ** multiplier,
         );
         message = `💍 溺水花嫁留下了印记，当前 ${getBrideMarkLayers(result.total)} 层，` +
           `噩梦抽取权重变为 ${result.total} 倍。`;
@@ -1917,9 +1932,14 @@ export default class Fishing extends plugin {
       }
 
       case "steal_bait": {
-        const result = fishingManager.stealHighestValueBait(e.user_id);
-        if (result.stolen) {
-          message = `🐒 水猴偷走了背包里价值最高的鱼饵【${result.bait.name}】×1，剩余 ${result.remaining} 个！`;
+        const stolen = [];
+        for (let index = 0; index < multiplier; index++) {
+          const result = fishingManager.stealHighestValueBait(e.user_id);
+          if (!result.stolen) break;
+          stolen.push(`【${result.bait.name}】×1，剩余 ${result.remaining} 个`);
+        }
+        if (stolen.length > 0) {
+          message = `🐒 水猴按价值从高到低偷走了鱼饵：${stolen.join("；")}！`;
         } else {
           message = fallbackRodDamage(
             effect.fallback_rod_damage || 20,
@@ -1930,8 +1950,8 @@ export default class Fishing extends plugin {
       }
 
       case "blindness": {
-        const result = fishingManager.addBlindnessLayers(e.user_id, 1);
-        message = `🌫️ 捞尸人的迷雾遮住了双眼，致盲增加 1 层，当前 ${result.layers} 层！` +
+        const result = fishingManager.addBlindnessLayers(e.user_id, multiplier);
+        message = `🌫️ 捞尸人的迷雾遮住了双眼，致盲增加 ${multiplier} 层，当前 ${result.layers} 层！` +
           `\n👁️ 此后收竿命中率 ${Number((result.hitRate * 100).toFixed(2))}%。`;
         break;
       }
@@ -1943,33 +1963,36 @@ export default class Fishing extends plugin {
           type: "收入",
           note: `钓鱼事件：${fish.name}`,
         });
-        const result = fishingManager.addGhostDebt(e.user_id, principal);
+        const debtAdded = principal * multiplier;
+        const result = fishingManager.addGhostDebt(e.user_id, debtAdded);
         ghostLoanIssued = true;
         message = `🚢 幽灵船塞给你一张亡者船票：到手 ${principal} 樱花币，` +
-          `欠下 ${result.total} 樱花币。` +
+          `新增欠款 ${debtAdded} 樱花币，当前共欠 ${result.total} 樱花币。` +
           `\n💰 还清前，垂钓所得会全额抵债。` +
           `\n📈 从下一竿起，每竿未清部分涨到 ${GHOST_DEBT_INTEREST_RATE} 倍。` +
+          `\n⏳ 放贷当竿不清算，下一竿先还款、再计息，最后判断是否转成印记。` +
           `\n🩸 滚到${GHOST_DEBT_MARK_THRESHOLD}仍未还清就勾销债务，代价是垂钓所得永远被抽走10%`;
         break;
       }
 
       case "deep_pressure": {
-        const layers = normalizePenalty(effect.layers || 1);
+        const layers = normalizePenalty(effect.layers || 1) * multiplier;
         const result = fishingManager.addDeepPressureLayers(e.user_id, layers);
         message = `🔔 潜水钟敲响，施加 ${result.added} 层深压，当前 ${result.total} 层！`;
         break;
       }
 
       case "devour_inventory": {
-        const result = fishingManager.devourRandomInventoryItem(
-          e.user_id,
-          [rodConfig.id],
-        );
-        if (result) {
-          const shopManager = new ShopManager();
-          const item = shopManager.findItemById(result.itemId) ||
-            shopManager.findItemByName(result.itemId);
-          message = `🌑 食星之影吞掉了【${item?.name || result.itemId}】×1！`;
+        const devoured = [];
+        const shopManager = new ShopManager();
+        for (let index = 0; index < multiplier; index++) {
+          const result = fishingManager.devourRandomInventoryItem(e.user_id, [rodConfig.id]);
+          if (!result) break;
+          const item = shopManager.findItemById(result.itemId) || shopManager.findItemByName(result.itemId);
+          devoured.push(`【${item?.name || result.itemId}】×1`);
+        }
+        if (devoured.length > 0) {
+          message = `🌑 食星之影吞掉了${devoured.join("、")}！`;
         } else {
           message = fallbackRodDamage(
             effect.fallback_rod_damage || 20,
@@ -1983,6 +2006,7 @@ export default class Fishing extends plugin {
         break;
     }
 
+    if (multiplier > 1) message = `🪞 易伤生效，本次惩罚翻倍！\n${message}`;
     return { message, expGain, rodBroken, ghostLoanIssued };
   }
 
@@ -2101,6 +2125,7 @@ export default class Fishing extends plugin {
           expGain,
           weight: fish.actualWeight,
           accrueGhostInterest: !effectResult.ghostLoanIssued,
+          ghostLoanIssued: effectResult.ghostLoanIssued,
         });
         const dexProgress = getDexProgress(fishingManager, userId, settleResult);
 
@@ -2673,6 +2698,14 @@ export default class Fishing extends plugin {
         icon: "👁️",
         name: "致盲",
         detail: `${nightmareStatus.blindnessLayers} 层 · 收竿命中率 ${Number((nightmareStatus.reelHitRate * 100).toFixed(2))}%`,
+        tone: "danger",
+      });
+    }
+    if (nightmareStatus.vulnerable) {
+      effects.push({
+        icon: "🪞",
+        name: "易伤",
+        detail: "其他噩梦效果 ×2",
         tone: "danger",
       });
     }

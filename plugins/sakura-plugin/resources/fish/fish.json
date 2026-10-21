@@ -2410,6 +2410,27 @@
     ]
   },
   {
+    "id": "nightmare_soul_wraith",
+    "name": "裂魂怨灵",
+    "rarity": "噩梦",
+    "description": "水中浮起一道裂开的魂影，冰冷的指尖在你身上留下伤痕。",
+    "base_price": 0,
+    "difficulty": 84,
+    "nightmare_effect": {
+      "type": "vulnerability"
+    },
+    "weight": [
+      31.36,
+      38.96
+    ],
+    "active_hours": [
+      [
+        0,
+        24
+      ]
+    ]
+  },
+  {
     "id": "nightmare_pond_drowned_bride",
     "name": "溺水花嫁",
     "rarity": "噩梦",

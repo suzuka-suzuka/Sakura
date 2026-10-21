@@ -26,6 +26,21 @@ test("放贷四百，当竿不计息，抽成阈值为八百", () => {
   assert.equal(result.writtenOff, false);
 });
 
+test("放贷达到八百或更高也保留债务，下一竿先还款、再计息、最后检查阈值", () => {
+  for (const debt of [800, 900, 1200]) {
+    const loan = calculateGhostDebtPayment(0, debt, { deferWriteOff: true, ghostMarkLayers: 2 });
+    assert.equal(loan.remainingDebt, debt);
+    assert.equal(loan.writtenOff, false);
+    assert.equal(loan.interestAdded, 0);
+    assert.equal(loan.ghostMarkLayers, 2);
+  }
+  for (const [earnings, remainingDebt, marks] of [[200, 750, 0], [100, 0, 1], [800, 0, 0]]) {
+    const next = calculateGhostDebtPayment(earnings, 800, { accrueInterest: true });
+    assert.equal(next.remainingDebt, remainingDebt);
+    assert.equal(next.ghostMarkLayers, marks);
+  }
+});
+
 test("未还款时欠款滚到八百以上才勾销，向上取整保持原利息规则", () => {
   let debt = 400, marks = 0;
   for (const remainingDebt of [500, 625, 782, 0]) {
@@ -137,7 +152,7 @@ test("真实数据库结算覆盖超过四竿、旧期限、重复结算、重�
     const settlement = new Settlement({group_id: "ghost-test", user_id: user});
     const status = () => manager.getNightmareStatus(user);
     manager.addGhostDebt(user, 400);
-    settlement.settleAttempt({sessionId: "loan", success: true, accrueGhostInterest: false});
+    settlement.settleAttempt({sessionId: "loan", success: true, ghostLoanIssued: true});
     assert.equal(status().ghostDebt, 400);
     db.prepare("UPDATE fishing_stats SET ghost_debt_turns_remaining=0 WHERE group_id=? AND user_id=?").run("ghost-test",user);
     const firstArgs = {sessionId: "paid-first", fishId: "fish", earnings: 100};
@@ -179,9 +194,19 @@ test("真实数据库结算覆盖超过四竿、旧期限、重复结算、重�
     manager.addGhostDebt(user, 400);
     assert.equal(status().ghostDebt, 900);
     assert.equal(status().ghostMarkLayers, 2);
-    const repeatLoan = settlement.settleAttempt({sessionId: "repeat-loan", success: true, accrueGhostInterest: false});
+    const repeatLoan = settlement.settleAttempt({sessionId: "repeat-loan", success: true, ghostLoanIssued: true});
     assert.equal(repeatLoan.interestAdded, 0);
-    assert.equal(repeatLoan.writtenOff, true);
+    assert.equal(repeatLoan.writtenOff, false);
+    assert.equal(status().ghostDebt, 900);
+    assert.equal(status().ghostMarkLayers, 2);
+    assert.deepEqual(settlement.settleAttempt({sessionId: "repeat-loan", ghostLoanIssued: true}), {success: false, reason: "duplicate"});
+    assert.equal(status().ghostDebt, 900);
+    // 已有两层抽成，500收益先变405，再抵债，余款495计息为619，仍有还款机会。
+    const afterLoan = settlement.settleCoinCatch({sessionId: "repay-repeat-loan", fishId: "fish", earnings: 500});
+    assert.equal(afterLoan.remainingDebt, 619);
+    assert.equal(status().ghostMarkLayers, 2);
+    settlement.settleAttempt({sessionId: "after-repeat-loan-1"});
+    settlement.settleAttempt({sessionId: "after-repeat-loan-2"});
     assert.equal(status().ghostDebt, 0);
     assert.equal(status().ghostMarkLayers, 3);
     manager.addGhostDebt(user, 400);
@@ -192,6 +217,33 @@ test("真实数据库结算覆盖超过四竿、旧期限、重复结算、重�
     assert.equal(status().ghostMarkLayers, 0);
     assert.equal(status().ghostMarkMultiplier, 1);
     assert.equal(db.prepare("SELECT coins FROM economy WHERE group_id=? AND user_id=?").get("ghost-test",user).coins, coinsBefore);
+    db.db.close();
+    process.exit(0);
+  `);
+}));
+
+test("真实借款八百后下一竿还二百可保留债务，还一百才触发印记，足额还清无印记", () => withFixture(fixtureRoot => {
+  runIsolated(fixtureRoot, `
+    import assert from "node:assert/strict";
+    const {default: Manager} = await import(${JSON.stringify(moduleUrl("lib/economy/FishingManager.js"))});
+    const {default: Settlement} = await import(${JSON.stringify(moduleUrl("lib/fishing/SettlementService.js"))});
+    const {default: db} = await import(${JSON.stringify(moduleUrl("lib/Database.js"))});
+    for (const [payment, debt, marks] of [[200,750,0],[100,0,1],[800,0,0]]) {
+      const user = "repay-" + payment;
+      const manager = new Manager("loan-test");
+      const settlement = new Settlement({group_id: "loan-test", user_id: user});
+      manager.addGhostDebt(user, 800);
+      const loan = settlement.settleAttempt({sessionId: "loan-" + user, success: true, ghostLoanIssued: true});
+      assert.equal(loan.remainingDebt, 800);
+      assert.equal(loan.ghostMarkLayers, 0);
+      assert.equal(loan.interestAdded, 0);
+      const next = settlement.settleCoinCatch({sessionId: "next-" + user, fishId: "fish", earnings: payment});
+      assert.equal(next.remainingDebt, debt);
+      assert.equal(next.ghostMarkLayers, marks);
+      assert.deepEqual(settlement.settleCoinCatch({sessionId: "next-" + user, fishId: "fish", earnings: payment}), {success: false, reason: "duplicate"});
+      assert.equal(manager.getNightmareStatus(user).ghostDebt, debt);
+      assert.equal(manager.getNightmareStatus(user).ghostMarkLayers, marks);
+    }
     db.db.close();
     process.exit(0);
   `);

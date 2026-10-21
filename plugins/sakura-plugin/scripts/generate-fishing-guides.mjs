@@ -1103,6 +1103,10 @@ async function generateBossGuide() {
 }
 
 const NIGHTMARE_TEXT = Object.freeze({
+  vulnerability: {
+    effect: "施加易伤：其他噩梦本次施加的惩罚翻倍，持续生效、重复不叠加。数值损失翻倍，层数与偷取件数翻倍；花嫁一次施加两层印记，幽灵船仍给400币但新增800债务。",
+    counter: "净化圣水清除易伤；完整免疫可挡下本次施加。",
+  },
   rod_damage: {
     effect: "鱼竿耐久直接损耗 20 点。",
     counter: "事后用修理工具箱恢复；预防只能靠完整免疫。",
@@ -1136,7 +1140,7 @@ const NIGHTMARE_TEXT = Object.freeze({
     counter: "净化圣水清除全部致盲；好运护符不跳过空钩判定。",
   },
   ghost_debt: {
-    effect: `先给 ${GHOST_DEBT_PRINCIPAL} 币并欠等额本金；后续每竿先抵债、未清部分 ×${GHOST_DEBT_INTEREST_RATE}；欠款达到 ${GHOST_DEBT_MARK_THRESHOLD} 则清债并加一层印记，每层收益再 ×${GHOST_DEBT_MARK_MULTIPLIER}。`,
+    effect: `先给 ${GHOST_DEBT_PRINCIPAL} 币并欠等额本金；放贷当竿不计息、不清算。下次结算先抵债、未清部分 ×${GHOST_DEBT_INTEREST_RATE}，最后判断欠款是否达到 ${GHOST_DEBT_MARK_THRESHOLD}；达到则清债并加一层印记，每层收益再 ×${GHOST_DEBT_MARK_MULTIPLIER}。`,
     counter: "尽快用渔获还清，或用净化圣水清掉债务与印记。",
   },
   deep_pressure: {
@@ -1266,7 +1270,7 @@ async function generateNightmareGuide() {
     ["1 · 雾灯", "35 分钟内个人天气固定为雾，宝藏权重×2、噩梦×0.5、垃圾归零；只降低遭遇率，钓上来照样生效。"],
     ["2 · 深渊猎手", "每次成功钓到噩梦时独立判定，1级30%、2级50%；触发后伤害、偷取、状态与断线全部免疫，不限次数。"],
     ["3 · 河神垂青", "只保住鱼线并给予折现奖励，噩梦本体效果照常生效。"],
-    ["4 · 净化圣水", "清诅咒、花嫁印记、亡者债务/抽成印记与致盲。"],
+    ["4 · 净化圣水", "清诅咒、花嫁印记、亡者债务/抽成印记、致盲与易伤。"],
     ["5 · 修理工具箱", "修满鱼竿耐久，并清除全部深压；不清花嫁、诅咒或债务。"],
   ];
   for (const [index, [label, text]] of counters.entries()) {

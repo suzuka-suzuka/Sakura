@@ -517,8 +517,20 @@ export default class FishingManager {
       deepPressureLayers: Math.max(0, Math.floor(Number(userData.deep_pressure_layers) || 0)),
       deepPressureMultiplier: deepPressureMultiplierFromLayers(userData.deep_pressure_layers),
       blindnessLayers: Math.max(0, Math.floor(Number(userData.blindness_layers) || 0)),
+      vulnerable: Boolean(userData.nightmare_vulnerable),
       reelHitRate: getBlindReelHitRate(userData.blindness_layers),
     };
+  }
+
+  applyNightmareVulnerability(userId) {
+    userId = String(userId);
+    this._ensureUser(userId);
+    const before = this.getNightmareStatus(userId).vulnerable;
+    db.prepare(`
+        UPDATE fishing_stats SET nightmare_vulnerable = 1
+        WHERE group_id = ? AND user_id = ?
+    `).run(this.groupId, userId);
+    return { applied: !before };
   }
 
   addBlindnessLayers(userId, layers = 1) {
@@ -631,11 +643,13 @@ export default class FishingManager {
       ghostMarked: status.ghostMarked,
       ghostMarkLayers: status.ghostMarkLayers,
       blindnessLayers: status.blindnessLayers,
+      vulnerable: status.vulnerable,
       total: Number(status.curse.actualLayers > 0) +
         Number(brideMarked) +
         Number(status.ghostDebt > 0) +
         Number(status.ghostMarked) +
-        Number(status.blindnessLayers > 0),
+        Number(status.blindnessLayers > 0) +
+        Number(status.vulnerable),
     };
   }
 
@@ -718,7 +732,8 @@ export default class FishingManager {
               ghost_debt = 0,
               ghost_debt_turns_remaining = 0,
               ghost_debt_mark = 0,
-              blindness_layers = 0
+              blindness_layers = 0,
+              nightmare_vulnerable = 0
           WHERE group_id = ? AND user_id = ?
       `).run(this.groupId, userId);
       return { cleared: status.total, ...status };

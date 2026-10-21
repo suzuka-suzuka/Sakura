@@ -136,6 +136,18 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
     assert.equal(manager.clearDeepPressure(userId).cleared, false);
     manager.addDeepPressureLayers(userId, 2);
 
+    // 旧库补列、持久保存、跨群隔离与重复施加；工具箱不解除易伤。
+    db.db.exec("ALTER TABLE fishing_stats DROP COLUMN nightmare_vulnerable");
+    db.init();
+    assert.equal(manager.getNightmareStatus(userId).vulnerable, false);
+    assert.equal(manager.applyNightmareVulnerability(userId).applied, true);
+    assert.equal(manager.applyNightmareVulnerability(userId).applied, false);
+    db.init();
+    assert.equal(new FishingManager("group-a").getNightmareStatus(userId).vulnerable, true);
+    assert.equal(new FishingManager("group-b").getNightmareStatus(userId).vulnerable, false);
+    manager.repairRod(userId, "rod_carbon");
+    assert.equal(manager.getNightmareStatus(userId).vulnerable, true);
+
     // 模拟旧表：补列保留原有诅咒，重复初始化也不重置停止状态。
     db.prepare("UPDATE fishing_stats SET nightmare_curse_layers = 2 WHERE group_id = ? AND user_id = ?")
       .run("group-a", userId);
@@ -189,11 +201,13 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
     assert.equal(cleansable.brideMarked, true);
     assert.equal(cleansable.brideNightmareMultiplier, 4);
     assert.equal(cleansable.ghostDebt, 600);
-    assert.equal(cleansable.total, 4);
+    assert.equal(cleansable.total, 5);
+    assert.equal(cleansable.vulnerable, true);
     assert.equal(cleansable.blindnessLayers, 2);
 
     const purified = manager.clearNightmareDebuffs(userId);
-    assert.equal(purified.cleared, 4);
+    assert.equal(purified.cleared, 5);
+    assert.equal(purified.vulnerable, true);
     assert.equal(purified.curseLayers, 5);
     // 净化后继续抛竿不会凭空增加诅咒。
     assert.equal(manager.accrueNightmareCurseLayer(userId), 0);
@@ -212,12 +226,17 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
       deepPressureLayers: 2,
       deepPressureMultiplier: 0.8 ** 2,
       blindnessLayers: 0,
+      vulnerable: false,
       reelHitRate: 1,
     });
     assert.equal(manager.getRodStats(userId, "rod_carbon").damage, 5);
     assert.equal(manager.getRodControl(userId, "rod_carbon"), 104.5);
     assert.equal(manager.getCleansableNightmareAfflictions(userId).total, 0);
     assert.equal(manager.clearNightmareDebuffs(userId).cleared, 0);
+    manager.applyNightmareVulnerability(userId);
+    assert.equal(manager.getCleansableNightmareAfflictions(userId).total, 1);
+    assert.equal(manager.clearNightmareDebuffs(userId).cleared, 1);
+    assert.equal(manager.getNightmareStatus(userId).vulnerable, false);
     assert.equal(manager.getDeepPressureLayers(userId), 2);
     assert.equal(manager.clearDeepPressure(userId).cleared, true);
     assert.deepEqual(manager.repairRod(userId, "rod_carbon"), {

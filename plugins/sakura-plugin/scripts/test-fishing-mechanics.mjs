@@ -17,6 +17,16 @@ const { bosses, rods } = readBossBalanceInputs();
 // Node 22 的 VM 模块在多次异步测试间保留宿主引用，避免上下文过早回收。
 const harnessModules = [];
 
+test("裂魂怨灵作为全钓点全天通用噩梦加载，效果类型通过数据校验", () => {
+  const wraith = fish.find(entry => entry.id === "nightmare_soul_wraith");
+  assert.ok(wraith);
+  assert.equal(wraith.rarity, "噩梦");
+  assert.equal(wraith.nightmare_effect.type, "vulnerability");
+  assert.equal(wraith.locations, undefined);
+  assert.deepEqual(wraith.active_hours, [[0, 24]]);
+  assert.deepEqual(rules.validateLegacyFishData(fish), []);
+});
+
 test("致盲按乘法叠层，单次收竿重试不会再次抽签", () => {
   for (const layers of [0, 1, 2, 3, 5, 10]) assert.equal(rules.getBlindReelHitRate(layers), 0.9 ** layers);
   const state = {};
@@ -128,14 +138,19 @@ test("探囊鬼手以100币为偷取上限，余额不超过100时掏空，下�
   }
 });
 
-async function harness() {
+async function harness({ withImages = false } = {}) {
   const calls = { settlements: [], replies: [], breaks: 0, rodDamage: 0, cooldown: 0, rolls: 0, refunds: 0, immunityRolls: 0 };
   const player = { layers: 1, curseLayers: 5, curseStopped: false, immune: false, roll: 0.95, durability: 190, coins: 1000 };
   class Manager {
-    getNightmareStatus() { return { blindnessLayers: player.layers }; }
+    getNightmareStatus() { return { blindnessLayers: player.layers, vulnerable: Boolean(player.vulnerable) }; }
+    applyNightmareVulnerability() { const applied = !player.vulnerable; player.vulnerable = true; return { applied }; }
+    applyBrideNightmareMultiplier(user, factor) { player.bride = (player.bride || 1) * factor; return { total: player.bride }; }
+    addDeepPressureLayers(user, amount) { player.deep = (player.deep || 0) + amount; return { added: amount, total: player.deep }; }
+    stealHighestValueBait() { return player.baits?.shift() || { stolen: false }; }
+    devourRandomInventoryItem(user, excluded) { assert.deepEqual(Array.from(excluded), ["rod_legendary"]); return player.items?.shift() || null; }
     getRodMastery() { return 20; }
     getRodControl() { return player.durability; }
-    getRodDurabilityInfo() { return { currentDurability: player.durability, maxDurability: 190 }; }
+    getRodDurabilityInfo() { return { currentDurability: player.durability, maxDurability: player.maxDurability || 190 }; }
     getLineBonusFromMastery() { return 0; }
     rollNightmareImmunity() { calls.immunityRolls++; return { immune: player.immune, active: true, chance: 0.3 }; }
     addNightmareCurseLayers(user, amount) { player.curseStopped = false; player.curseLayers += amount; return player.curseLayers; }
@@ -158,6 +173,8 @@ async function harness() {
     segment: { at: x => x, image: x => x },
   });
   const imports = {
+    "lodash": { default: { random: (min, max) => player.randomMax ? max : min } },
+    "../lib/economy/ShopManager.js": { default: class { findItemById(id) { return { name: id }; } findItemByName() { return null; } } },
     "../lib/GroupDataCleaner.js": { dataCleanupGuards: new Set() },
     "../lib/fishing/rules.js": rules,
     "../lib/fishing/encounter.js": encounter,
@@ -171,8 +188,8 @@ async function harness() {
     } },
     "../lib/fishing/SettlementService.js": { default: Settlement },
     "../lib/fishing/fishData.js": { getFishData: () => fish, getFishIdSet: () => new Set(fish.map(f => f.id)), getLocationExclusiveFish: () => [] },
-    "../lib/path.js": { pluginresources: "/isolated/resources" },
-    "node:fs": { default: { existsSync: () => false } },
+    "../lib/path.js": { pluginresources: withImages ? path.join(pluginRoot, "resources") : "/isolated/resources" },
+    "node:fs": { default: { existsSync: imagePath => withImages && fs.existsSync(imagePath) } },
     "node:path": { default: path },
   };
   const source = fs.readFileSync(path.join(pluginRoot, "apps/fishing.js"), "utf8");
@@ -302,12 +319,110 @@ test("幽灵船真实结算放款四百，当竿不计息，完整免疫同时�
     assert.equal(h.player.coins, immune ? 1000 : 1400);
     assert.equal(h.player.debt || 0, immune ? 0 : 400);
     assert.equal(h.calls.settlements[0].accrueGhostInterest, immune);
+    assert.equal(Boolean(h.calls.settlements[0].ghostLoanIssued), !immune);
     const message = h.calls.replies.flat(2).join("\n");
     assert.equal(message.includes("💰 还清前，垂钓所得会全额抵债。"), !immune);
     assert.equal(message.includes("📈 从下一竿起，每竿未清部分涨到 1.25 倍。"), !immune);
     assert.equal(message.includes("🩸 滚到800仍未还清就勾销债务，代价是垂钓所得永远被抽走10%"), !immune);
     assert.equal(message.includes("4 竿内必须还清"), false);
     assert.equal(message.includes("只有钓上来的鱼"), false);
+  }
+});
+
+test("裂魂怨灵施加易伤不自我放大，重复与免疫遵守持久状态规则", async () => {
+  for (const vulnerable of [false, true]) for (const immune of [false, true]) {
+    const h = await harness();
+    h.player.vulnerable = vulnerable;
+    h.player.immune = immune;
+    const state = h.create(fish.find(f => f.id === "nightmare_soul_wraith"));
+    await h.instance.finishSuccess(h.e, state, new h.Manager());
+    assert.equal(Boolean(h.player.vulnerable), vulnerable || !immune);
+    assert.equal(h.calls.rodDamage, 0);
+    assert.equal(h.calls.breaks, Number(!immune));
+    const message = h.calls.replies.flat(2).join("\n");
+    assert.equal(message.includes("本次惩罚翻倍"), false);
+    assert.equal(message.includes("易伤持续生效"), vulnerable && !immune);
+    assert.equal(message.includes("留下魂裂"), !vulnerable && !immune);
+    assert.equal(message.includes("直到被净化"), false);
+    assert.equal(h.player.curseStopped, true);
+  }
+});
+
+test("裂魂怨灵真实结算从鱼种同名PNG读取并发送图片", async () => {
+  const imagePath = path.join(pluginRoot, "resources/fish/img/nightmare_soul_wraith.png");
+  const png = fs.readFileSync(imagePath);
+  assert.equal(png.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+  assert.equal(png.readUInt32BE(16), 204);
+  assert.equal(png.readUInt32BE(20), 204);
+  const h = await harness({ withImages: true });
+  const state = h.create(fish.find(entry => entry.id === "nightmare_soul_wraith"));
+  await h.instance.finishSuccess(h.e, state, new h.Manager());
+  const message = h.calls.replies.flat(2);
+  assert.ok(message.includes(`file:///${imagePath}`));
+  assert.equal(h.player.vulnerable, true);
+});
+
+test("易伤覆盖伤竿、偷钱、各类叠层和借款，完整免疫与重复收竿不多扣", async () => {
+  for (const immune of [false, true]) {
+    for (const [id, verify] of [
+      ["monster_mimic", h => assert.equal(h.calls.rodDamage, 40)],
+      ["nightmare_bone_shark", h => assert.equal(h.calls.rodDamage, 78)],
+      ["nightmare_thief_murloc", h => assert.equal(h.player.coins, 200)],
+      ["nightmare_void_devourer", h => assert.equal(h.player.coins, 600)],
+      ["nightmare_cursed_skull", h => assert.equal(h.player.curseLayers, 7)],
+      ["nightmare_pond_drowned_bride", h => assert.equal(h.player.bride, 8)],
+      ["nightmare_lake_corpse_fisher", h => assert.equal(h.player.layers, 3)],
+      ["nightmare_abyss_diving_bell", h => assert.equal(h.player.deep, 3)],
+      ["nightmare_coast_ghost_ship", h => { assert.equal(h.player.coins, 1400); assert.equal(h.player.debt, 1100); }],
+    ]) {
+      const h = await harness();
+      Object.assign(h.player, { vulnerable: true, immune, randomMax: true, bride: 2, deep: 1, debt: 300, maxDurability: 191 });
+      const state = h.create(fish.find(f => f.id === id), { hasRiverBless: true });
+      assert.equal(await h.instance.finishSuccess(h.e, state, new h.Manager()), true);
+      assert.equal(await h.instance.finishSuccess(h.e, state, new h.Manager()), false);
+      assert.equal(h.calls.settlements.length, 1);
+      assert.equal(h.calls.breaks, 0);
+      assert.equal(h.player.vulnerable, true);
+      const message = h.calls.replies.flat(2).join("\n");
+      assert.equal(message.includes("易伤生效，本次惩罚翻倍"), !immune);
+      if (!immune) verify(h);
+      else {
+        assert.equal(h.player.coins, 1000);
+        assert.equal(h.calls.rodDamage, 0);
+        assert.equal(h.player.layers, 1);
+        assert.equal(h.player.curseLayers, 5);
+        assert.equal(h.player.bride, 2);
+        assert.equal(h.player.deep, 1);
+        assert.equal(h.player.debt, 300);
+      }
+    }
+  }
+});
+
+test("易伤偷取两件时库存不足不追加伤竿，空库存和零余额才触发双倍兜底", async () => {
+  for (const id of ["nightmare_river_water_monkey", "nightmare_mystic_star_eater"]) {
+    for (const count of [0, 1, 2]) {
+      const h = await harness();
+      h.player.vulnerable = true;
+      h.player.baits = Array.from({ length: count }, (_, i) => ({ stolen: true, bait: { name: `bait-${i}` }, remaining: 0 }));
+      h.player.items = Array.from({ length: count }, (_, i) => ({ itemId: `item-${i}` }));
+      const state = h.create(fish.find(f => f.id === id));
+      await h.instance.finishSuccess(h.e, state, new h.Manager());
+      assert.equal(h.calls.rodDamage, count === 0 ? 40 : 0);
+      assert.equal(id.includes("monkey") ? h.player.baits.length : h.player.items.length, 0);
+      assert.equal(h.calls.breaks, 1);
+      const message = h.calls.replies.flat(2).join("\n");
+      if (count) assert.ok(message.includes(id.includes("monkey") ? "bait-0" : "item-0"));
+      if (count === 2) assert.ok(message.includes(id.includes("monkey") ? "bait-1" : "item-1"));
+    }
+  }
+  for (const id of ["nightmare_thief_murloc", "nightmare_void_devourer"]) for (const coins of [0, 1, 100]) {
+    const h = await harness();
+    Object.assign(h.player, { vulnerable: true, coins, randomMax: true });
+    await h.instance.finishSuccess(h.e, h.create(fish.find(f => f.id === id)), new h.Manager());
+    assert.equal(h.calls.rodDamage, coins === 0 ? 40 : 0);
+    assert.ok(h.player.coins >= 0);
+    if (id.includes("murloc")) assert.equal(h.player.coins, 0);
   }
 });
 

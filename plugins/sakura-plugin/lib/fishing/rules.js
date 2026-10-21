@@ -108,6 +108,7 @@ export function calculateRodPercentDamage(maxDurability, ratio) {
   return Math.ceil(Math.max(0, Number(maxDurability) || 0) * Math.max(0, Number(ratio) || 0));
 }
 export const NIGHTMARE_EFFECT_TYPES = Object.freeze([
+  "vulnerability",
   "rod_damage",
   "rod_damage_percent",
   "steal_coins_flat",
@@ -501,11 +502,12 @@ export function ghostMarkMultiplierFromLayers(layers) {
   return GHOST_DEBT_MARK_MULTIPLIER ** Math.max(0, Math.floor(Number(layers) || 0));
 }
 
-// 放贷当竿不计息；后续每竿先还款，再将未清部分滚一次利息。
+// 放贷当竿不计息、不清算；后续每竿先还款，再将未清部分滚一次利息。
 // 欠款达到阈值才勾销并叠加印记，与竿数无关。非抛竿收入只抵债，不计息。
 export function calculateGhostDebtPayment(earnings, debt, {
   ghostMarkLayers = 0,
   accrueInterest = false,
+  deferWriteOff = false,
 } = {}) {
   const grossEarnings = Math.max(0, Math.floor(Number(earnings) || 0));
   const safeDebt = Math.max(0, Math.floor(Number(debt) || 0));
@@ -520,7 +522,7 @@ export function calculateGhostDebtPayment(earnings, debt, {
     remainingDebt = Math.ceil(debtAfterPayment * GHOST_DEBT_INTEREST_RATE);
     interestAdded = remainingDebt - debtAfterPayment;
   }
-  const writtenOff = remainingDebt >= GHOST_DEBT_MARK_THRESHOLD;
+  const writtenOff = !deferWriteOff && remainingDebt >= GHOST_DEBT_MARK_THRESHOLD;
   if (writtenOff) remainingDebt = 0;
   return {
     grossEarnings,
