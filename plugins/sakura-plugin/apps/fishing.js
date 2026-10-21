@@ -2047,8 +2047,9 @@ export default class Fishing extends plugin {
           rodId: rodConfig.id, expGain, locationId: state.locationId,
         });
         if (!result.success) throw new Error(`福袋结算失败：${result.reason}`);
-        const message = `🌊 鱼线拖出一只鼓鼓的福袋，袋口一松，樱花币叮当落下。\n🧧 ${fish.name}${fish.description ? `：${fish.description}` : ""}\n💰 获得 ${result.amount} 樱花币，福袋已回池。${formatGhostDebtSettlement(result)}`;
-        await e.reply(fish.image ? [message, segment.image(fish.image)] : message);
+        const message = `🌊 鱼线拖出一只鼓鼓的福袋，袋口一松，樱花币叮当落下。\n🧧 ${fish.name}${fish.description ? `：${fish.description}` : ""}`;
+        const rewardMessage = `\n💰 获得 ${result.amount} 樱花币，福袋已回池。${formatGhostDebtSettlement(result)}`;
+        await e.reply(fish.image ? [message + "\n", segment.image(fish.image), rewardMessage] : message + rewardMessage);
         return true;
       }
       if (fish.rarity === "噩梦") {
