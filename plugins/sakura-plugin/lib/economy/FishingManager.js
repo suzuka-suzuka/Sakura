@@ -578,7 +578,7 @@ export default class FishingManager {
     return this.getNightmareStatus(userId).deepPressureMultiplier;
   }
 
-  // 深压回响：每次命中累加若干层（默认 1 层），持久生效、只减不增，直到净化或修理工具箱清除。
+  // 深压回响：每次命中累加若干层（默认 1 层），持久生效、只减不增，直到修理工具箱清除。
   // 每层把鱼竿实际控制力再乘一次 0.8，倍率由层数派生。
   addDeepPressureLayers(userId, layers = 1) {
     userId = String(userId);
@@ -623,7 +623,6 @@ export default class FishingManager {
   getCleansableNightmareAfflictions(userId) {
     const status = this.getNightmareStatus(userId);
     const brideMarked = status.brideNightmareMultiplier > 1;
-    const deepPressureMarked = status.deepPressureLayers > 0;
     return {
       curseLayers: status.curse.actualLayers,
       brideMarked,
@@ -631,15 +630,12 @@ export default class FishingManager {
       ghostDebt: status.ghostDebt,
       ghostMarked: status.ghostMarked,
       ghostMarkLayers: status.ghostMarkLayers,
-      deepPressureMarked,
-      deepPressureLayers: status.deepPressureLayers,
-      deepPressureMultiplier: status.deepPressureMultiplier,
       blindnessLayers: status.blindnessLayers,
       total: Number(status.curse.actualLayers > 0) +
         Number(brideMarked) +
         Number(status.ghostDebt > 0) +
         Number(status.ghostMarked) +
-        Number(deepPressureMarked) + Number(status.blindnessLayers > 0),
+        Number(status.blindnessLayers > 0),
     };
   }
 
@@ -722,7 +718,6 @@ export default class FishingManager {
               ghost_debt = 0,
               ghost_debt_turns_remaining = 0,
               ghost_debt_mark = 0,
-              deep_pressure_layers = 0,
               blindness_layers = 0
           WHERE group_id = ? AND user_id = ?
       `).run(this.groupId, userId);

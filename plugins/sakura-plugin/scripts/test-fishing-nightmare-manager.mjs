@@ -189,14 +189,11 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
     assert.equal(cleansable.brideMarked, true);
     assert.equal(cleansable.brideNightmareMultiplier, 4);
     assert.equal(cleansable.ghostDebt, 600);
-    assert.equal(cleansable.deepPressureMarked, true);
-    assert.equal(cleansable.deepPressureLayers, 2);
-    assert.ok(Math.abs(cleansable.deepPressureMultiplier - 0.64) < 1e-9);
-    assert.equal(cleansable.total, 5);
+    assert.equal(cleansable.total, 4);
     assert.equal(cleansable.blindnessLayers, 2);
 
     const purified = manager.clearNightmareDebuffs(userId);
-    assert.equal(purified.cleared, 5);
+    assert.equal(purified.cleared, 4);
     assert.equal(purified.curseLayers, 5);
     // 净化后继续抛竿不会凭空增加诅咒。
     assert.equal(manager.accrueNightmareCurseLayer(userId), 0);
@@ -212,13 +209,17 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
       ghostMarked: false,
       ghostMarkLayers: 0,
       ghostMarkMultiplier: 1,
-      deepPressureLayers: 0,
-      deepPressureMultiplier: 1,
+      deepPressureLayers: 2,
+      deepPressureMultiplier: 0.8 ** 2,
       blindnessLayers: 0,
       reelHitRate: 1,
     });
     assert.equal(manager.getRodStats(userId, "rod_carbon").damage, 5);
     assert.equal(manager.getRodControl(userId, "rod_carbon"), 104.5);
+    assert.equal(manager.getCleansableNightmareAfflictions(userId).total, 0);
+    assert.equal(manager.clearNightmareDebuffs(userId).cleared, 0);
+    assert.equal(manager.getDeepPressureLayers(userId), 2);
+    assert.equal(manager.clearDeepPressure(userId).cleared, true);
     assert.deepEqual(manager.repairRod(userId, "rod_carbon"), {
       durabilityRepaired: 5,
     });

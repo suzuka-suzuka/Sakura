@@ -1141,7 +1141,7 @@ const NIGHTMARE_TEXT = Object.freeze({
   },
   deep_pressure: {
     effect: "永久累加 1 层深压；每层让鱼竿实际控制力再 ×0.8。",
-    counter: "修理工具箱或净化圣水都能清除全部深压。",
+    counter: "修理工具箱清除全部深压。",
   },
   devour_inventory: {
     effect: "按背包物品件数随机吞掉 1 件（当前装备鱼竿除外）；没有可吞噽物品时鱼竿 -20 耐久。",
@@ -1266,7 +1266,7 @@ async function generateNightmareGuide() {
     ["1 · 雾灯", "35 分钟内个人天气固定为雾，宝藏权重×2、噩梦×0.5、垃圾归零；只降低遭遇率，钓上来照样生效。"],
     ["2 · 深渊猎手", "每次成功钓到噩梦时独立判定，1级30%、2级50%；触发后伤害、偷取、状态与断线全部免疫，不限次数。"],
     ["3 · 河神垂青", "只保住鱼线并给予折现奖励，噩梦本体效果照常生效。"],
-    ["4 · 净化圣水", "清诅咒、花嫁印记、亡者债务/抽成印记、深压与致盲。"],
+    ["4 · 净化圣水", "清诅咒、花嫁印记、亡者债务/抽成印记与致盲。"],
     ["5 · 修理工具箱", "修满鱼竿耐久，并清除全部深压；不清花嫁、诅咒或债务。"],
   ];
   for (const [index, [label, text]] of counters.entries()) {
@@ -1294,7 +1294,7 @@ async function generateNightmareGuide() {
 const ITEM_GUIDE_TEXT = Object.freeze({
   item_charm_lucky: "35分钟内，非首领渔获命中后跳过重量与难度判定；致盲仍可能空钩，完美收竿仍需5秒内操作。",
   item_toolkit_repair: "立即修满当前鱼竿耐久，并清除全部深压回响。",
-  item_holy_water: "立即清除骷髅诅咒、花嫁印记、亡者债务/抽成印记、深压回响与致盲。",
+  item_holy_water: "立即清除骷髅诅咒、花嫁印记、亡者债务/抽成印记与致盲。",
   item_sand_time: "35分钟内把每竿钓鱼冷却从5分钟缩短到2分30秒。",
   bait_boss: "宝箱非卖品。装备后下一竿必定呼出当前钓点首领；每次消耗1个。",
   torpedo: `每个钓点各限埋1枚。被别人钓中：鱼竿-${TORPEDO_ROD_DAMAGE}、断线，钓点鱼价35分钟×${TORPEDO_PRICE_BOOST_MULTIPLIER}；满${Math.round(TORPEDO_ARM_DURATION_MS / 3600000)}小时可自爆，获得当地随机${TORPEDO_BLAST_CATCH_COUNT}条鱼并使鱼价×${TORPEDO_DETONATE_PRICE_MULTIPLIER}。`,
