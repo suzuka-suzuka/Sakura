@@ -1511,9 +1511,8 @@ export default class FishingManager {
     return transaction.immediate();
   }
 
-  // 引爆：删掉鱼雷这一步就是幂等锁——删不到就说明它已经被引爆或被别人钓走了，
-  // 结算回调只在删除成功后、同一个事务里执行，不会出现「雷没了钱也没到账」。
-  detonateTorpedo(userId, { location: locationId, now = Date.now(), settle = null } = {}) {
+  // 删除成功才算引爆，已引爆或被钓走的鱼雷不能重复触发。
+  detonateTorpedo(userId, { location: locationId, now = Date.now() } = {}) {
     userId = String(userId);
     const location = normalizeFishingLocation(locationId);
     const transaction = db.transaction(() => {
@@ -1535,8 +1534,7 @@ export default class FishingManager {
       `).run(this.groupId, userId, location);
       if (removed.changes !== 1) return { success: false, reason: "gone", location };
 
-      const settlement = typeof settle === "function" ? settle({ location }) : null;
-      return { success: true, location, armedAt, settlement };
+      return { success: true, location, armedAt };
     });
 
     return transaction.immediate();

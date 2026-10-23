@@ -164,4 +164,4 @@ categories:
         price: 400
         type: consumable
         handler: fishing_torpedo
-        description: 每个钓点各限埋1枚。被钓中者损伤鱼竿，该钓点鱼价35分钟×1.5；满12小时自爆。
+        description: 每个钓点各限埋1枚。被钓中者损伤鱼竿，该钓点鱼价35分钟×1.5；满12小时可引爆，鱼价35分钟×1.25。

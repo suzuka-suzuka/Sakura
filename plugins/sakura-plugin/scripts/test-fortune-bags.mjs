@@ -23,13 +23,15 @@ const readEconomy = name => YAML.load(fs.readFileSync(path.join(root, "resources
 async function fixture(t) {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "sakura-fortune-bags-"));
   const modules = new Map(), timers = new Map(), buffs = new Set(), errors = [], selections = [];
+  const redisValues = new Map(), redisWrites = [];
   let timerId = 0, sessions;
   let randomValue = 0.5;
   let imageFetch = async () => { throw new Error("未配置图片下载"); };
   class SessionStore extends session.FishingSessionStore {
     constructor() { super({ clearTimer: id => timers.delete(id) }); sessions = this; }
   }
-  const redis = { get: async key => [...buffs].some(id => key.includes(`:${id}:`)) ? "1" : null,
+  const redis = { get: async key => redisValues.get(key) ?? ([...buffs].some(id => key.includes(`:${id}:`)) ? "1" : null),
+    set: async (...args) => { redisWrites.push(args); redisValues.set(args[0], args[1]); return "OK"; },
     ttl: async () => -2, exists: async () => 0 };
   const context = vm.createContext({ console, Buffer, redis, AbortSignal,
     fetch: (...args) => imageFetch(...args),
@@ -144,11 +146,52 @@ async function fixture(t) {
     return { app, state, manager, fm, bagId: deployed.id };
   }
   return { db, Manager, event, stock, load, fishing, buffs, timers, errors, configuration, selections,
+    redisWrites,
     setRandom: value => { randomValue = value; },
     setImageFetch: value => { imageFetch = value; } };
 }
 
 const testImage = () => sharp({ create: { width: 2, height: 2, channels: 4, background: "red" } }).png().toBuffer();
+
+test("实际引爆只增加所在钓点35分钟1.25倍鱼价，无收入抵债和渔获，重复引爆不刷新", async t => {
+  const f = await fixture(t), e = f.event();
+  const FM = (await f.load("lib/economy/FishingManager.js")).default;
+  const App = (await f.load("apps/fishing.js")).default;
+  const fm = new FM(e.group_id), app = new App();
+  fm.getUserData(e.user_id);
+  f.db.prepare("INSERT INTO economy(group_id,user_id,coins) VALUES ('g','u',1000)").run();
+  f.db.prepare("UPDATE fishing_stats SET ghost_debt=400,ghost_debt_mark=2 WHERE user_id='u'").run();
+  f.stock(e, "torpedo", 2);
+  fm.deployTorpedo(e.user_id, "pond");
+  fm.deployTorpedo(e.user_id, "river");
+  e.msg = "#引爆鱼雷 青柳河湾";
+  await app.detonateTorpedo(e);
+  assert.equal(f.redisWrites.length, 0);
+  assert.equal(fm.getTotalTorpedoCount(), 2);
+  f.db.prepare("UPDATE pond_torpedoes SET timestamp=1 WHERE location='river'").run();
+  const before = f.db.prepare("SELECT * FROM fishing_stats WHERE user_id='u'").get();
+  await app.detonateTorpedo(e);
+  assert.equal(fm.getTotalTorpedoCount("river"), 0);
+  assert.equal(fm.getTotalTorpedoCount("pond"), 1);
+  assert.equal(await fm.getFishPriceMultiplier("river"), 1.25);
+  assert.equal(await fm.getFishPriceMultiplier("pond"), 1);
+  assert.deepEqual(Array.from(f.redisWrites[0]), [fm.getFishPriceBoostKey("river"), "1.25", "EX", 2100]);
+  assert.equal(f.db.prepare("SELECT coins FROM economy WHERE user_id='u'").get().coins, 1000);
+  assert.deepEqual(f.db.prepare("SELECT * FROM fishing_stats WHERE user_id='u'").get(), before);
+  for (const table of ["economy_transactions", "fishing_attempts", "fishing_counts"]) {
+    assert.equal(f.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0);
+  }
+  assert.match(e.replies.at(-1), /35 分钟内鱼价 ×1\.25/u);
+  assert.doesNotMatch(e.replies.at(-1), /水面浮起|爆破收获|樱花币|偿还|不再|取消/u);
+  await app.detonateTorpedo(e);
+  assert.equal(f.redisWrites.length, 1);
+  e.msg = "#引爆鱼雷";
+  f.db.prepare("UPDATE pond_torpedoes SET timestamp=1 WHERE location='pond'").run();
+  await app.detonateTorpedo(e);
+  assert.equal(fm.getTotalTorpedoCount(), 0);
+  assert.equal(await fm.getFishPriceMultiplier("pond"), 1.25);
+  assert.equal(f.db.prepare("SELECT coins FROM economy WHERE user_id='u'").get().coins, 1000);
+});
 const imageMessage = count => Array.from({ length: count }, () => ({ type: "image", data: { url: "https://example.test/bag.png" } }));
 
 test("福袋图片校验真实格式及2MB边界，流式超限立即停止且不信任响应头", async () => {

@@ -56,7 +56,6 @@ import {
   SHINY_EXP_MULTIPLIER,
   SHINY_PRICE_MULTIPLIER,
   TORPEDO_ARM_DURATION_MS,
-  TORPEDO_BLAST_CATCH_COUNT,
   TORPEDO_DETONATE_PRICE_MULTIPLIER,
   TORPEDO_PRICE_BOOST_MULTIPLIER,
   TORPEDO_ROD_DAMAGE,
@@ -85,7 +84,6 @@ import {
   resolveKoiWishShiny,
   rollFishExp,
   rollFishingBiteWaitMs,
-  rollTorpedoBlastCatch,
   rollBossPlayerDamage,
   rollNormalTugPressure,
   selectNextFishFightState,
@@ -3106,26 +3104,8 @@ export default class Fishing extends plugin {
       return true;
     }
 
-    // 收获先摇好再进事务：摇取是纯随机，删雷失败时直接丢弃即可。
-    let blast;
-    try {
-      blast = rollTorpedoBlastCatch(fishData, {
-        location: armed.location,
-        count: TORPEDO_BLAST_CATCH_COUNT,
-      });
-    } catch (err) {
-      logger.error(`[钓鱼] 计算爆破收获失败: ${err.stack || err}`);
-      await e.reply("💣 引信卡住了，鱼雷没能引爆，请稍后再试~", 10);
-      return true;
-    }
-
-    const settlementService = new FishingSettlementService(e);
     const result = fishingManager.detonateTorpedo(userId, {
       location: armed.location,
-      settle: () => settlementService.settleTorpedoBlast({
-        earnings: blast.earnings,
-        note: `鱼雷爆破收获（${armedLocation?.name || armed.location}）`,
-      }),
     });
 
     if (!result.success) {
@@ -3149,26 +3129,9 @@ export default class Fishing extends plugin {
       logger.warn(`[钓鱼] 引爆鱼价加成写入失败: ${err.message}`);
     }
 
-    const settlement = result.settlement || {};
-    const catchList = blast.catches
-      .map((item) => {
-        const rarity = RARITY_CONFIG[item.rarity] || { color: "⚪" };
-        return `${item.name} ${rarity.color}${item.rarity}` +
-          `（${item.weight}）${item.price}樱花币`;
-      })
-      .join("\n");
-    const markMsg = settlement.markDeducted > 0
-      ? `\n🩸 亡者抽成印记扣走 ${settlement.markDeducted}`
-      : "";
-    const debtMsg = settlement.debtPaid > 0
-      ? `\n👻 偿还 ${settlement.debtPaid} 樱花币高利贷，未还 ${settlement.debtAfterPayment}`
-      : "";
-
     await e.reply(
       `💥💥💥 轰！！！\n` +
       `😈 你亲手引爆了埋在${armedLocation?.emoji || ""}【${armedLocation?.name || "某个钓点"}】的鱼雷！\n` +
-      `🐟 水面浮起 ${blast.catches.length} 条鱼：\n${catchList}\n` +
-      `💰 爆破收获 ${settlement.earnings ?? 0} 樱花币${markMsg}${debtMsg}\n` +
       (priceBoostApplied
         ? `📈 ${armedLocation?.name || "该钓点"}接下来 ${Math.round(FISHING_BENEFIT_DURATION_SECONDS / 60)} 分钟内鱼价 ×${TORPEDO_DETONATE_PRICE_MULTIPLIER}！`
         : "📈 但鱼价加成暂时没有生效。"),

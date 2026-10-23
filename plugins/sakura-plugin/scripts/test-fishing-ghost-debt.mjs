@@ -114,10 +114,10 @@ test("先偿还再滚百分之二十五利息，非抛竿收入只抵债不计�
   const cast = calculateGhostDebtPayment(100, 400, { accrueInterest: true });
   assert.equal(cast.debtPaid, 100);
   assert.equal(cast.remainingDebt, 375);
-  const blast = calculateGhostDebtPayment(100, 375);
-  assert.equal(blast.remainingDebt, 275);
-  assert.equal(blast.interestAdded, 0);
-  assert.equal(blast.writtenOff, false);
+  const payment = calculateGhostDebtPayment(100, 375);
+  assert.equal(payment.remainingDebt, 275);
+  assert.equal(payment.interestAdded, 0);
+  assert.equal(payment.writtenOff, false);
 });
 
 function withFixture(run) {
@@ -141,7 +141,7 @@ function runIsolated(fixtureRoot, script) {
   assert.equal(result.status, 0, `隔离债务测试失败\n${result.stdout}\n${result.stderr}`);
 }
 
-test("真实数据库结算覆盖超过四竿、旧期限、重复结算、重复放贷、爆破与净化", () => withFixture(fixtureRoot => {
+test("真实数据库结算覆盖超过四竿、旧期限、重复结算、重复放贷、抵债与净化", () => withFixture(fixtureRoot => {
   runIsolated(fixtureRoot, `
     import assert from "node:assert/strict";
     const {default: Manager} = await import(${JSON.stringify(moduleUrl("lib/economy/FishingManager.js"))});
@@ -179,10 +179,10 @@ test("真实数据库结算覆盖超过四竿、旧期限、重复结算、重�
     assert.equal(settlement.settleCoinCatch({sessionId: "marked-income", fishId: "fish", earnings: 1000}).earnings, 900);
     manager.addGhostDebt(user, 400);
     assert.equal(status().ghostMarkLayers, 1);
-    const blast = settlement.settleTorpedoBlast({earnings: 100});
-    assert.equal(blast.debtPaid, 90);
-    assert.equal(blast.remainingDebt, 310);
-    for(let i=0;i<4;i++) settlement.settleAttempt({sessionId: "second-debt-"+i});
+    const payment = settlement.settleCoinCatch({sessionId: "repay", fishId: "fish", earnings: 100});
+    assert.equal(payment.debtPaid, 90);
+    assert.equal(payment.remainingDebt, 388);
+    for(let i=0;i<3;i++) settlement.settleAttempt({sessionId: "second-debt-"+i});
     assert.equal(status().ghostDebt, 759);
     assert.equal(status().ghostMarkLayers, 1);
     settlement.settleAttempt({sessionId: "second-debt-threshold"});

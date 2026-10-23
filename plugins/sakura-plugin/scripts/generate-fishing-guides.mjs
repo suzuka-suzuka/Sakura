@@ -16,7 +16,6 @@ import {
   SHINY_EXP_MULTIPLIER,
   SHINY_PRICE_MULTIPLIER,
   TORPEDO_ARM_DURATION_MS,
-  TORPEDO_BLAST_CATCH_COUNT,
   TORPEDO_DETONATE_PRICE_MULTIPLIER,
   TORPEDO_PRICE_BOOST_MULTIPLIER,
   TORPEDO_ROD_DAMAGE,
@@ -923,7 +922,7 @@ async function generateWeatherGuide() {
   );
   drawTextBlock(
     ctx,
-    "• 晴天更轻、更容易，但收益也低；雷暴收益最高，同时最难。\n• 雾灯只把个人天气固定为雾，并让宝藏权重×2、噩梦×0.5、垃圾归零，不改变群内天气播报。\n• 首领与鱼雷爆破收获不吃天气重量、难度或收益倍率。",
+    "• 晴天更轻、更容易，但收益也低；雷暴收益最高，同时最难。\n• 雾灯只把个人天气固定为雾，并让宝藏权重×2、噩梦×0.5、垃圾归零，不改变群内天气播报。\n• 首领不吃天气重量、难度或收益倍率。",
     390,
     height - 273,
     WIDTH - 550,
@@ -1301,7 +1300,7 @@ const ITEM_GUIDE_TEXT = Object.freeze({
   item_holy_water: "立即清除骷髅诅咒、花嫁印记、亡者债务/抽成印记与致盲。",
   item_sand_time: "35分钟内把每竿钓鱼冷却从5分钟缩短到2分30秒。",
   bait_boss: "宝箱非卖品。装备后下一竿必定呼出当前钓点首领；每次消耗1个。",
-  torpedo: `每个钓点各限埋1枚。被别人钓中：鱼竿-${TORPEDO_ROD_DAMAGE}、断线，钓点鱼价35分钟×${TORPEDO_PRICE_BOOST_MULTIPLIER}；满${Math.round(TORPEDO_ARM_DURATION_MS / 3600000)}小时可自爆，获得当地随机${TORPEDO_BLAST_CATCH_COUNT}条鱼并使鱼价×${TORPEDO_DETONATE_PRICE_MULTIPLIER}。`,
+  torpedo: `每个钓点各限埋1枚。被别人钓中：鱼竿-${TORPEDO_ROD_DAMAGE}、断线，钓点鱼价35分钟×${TORPEDO_PRICE_BOOST_MULTIPLIER}；满${Math.round(TORPEDO_ARM_DURATION_MS / 3600000)}小时可引爆，鱼价35分钟×${TORPEDO_DETONATE_PRICE_MULTIPLIER}。`,
   item_sign_koi: "许愿保留至下一次咬钩并消耗，常规渔获必定异色。",
   item_charm_river: "35分钟内鱼线永不断裂；每次成功保线，会按本竿鱼饵市价获得等额樱花币。",
   item_lamp_fog: "35分钟内个人天气固定为雾，享受雾倍率，宝藏权重×2、噩梦×0.5，且不会钓到垃圾。",
@@ -1601,7 +1600,7 @@ async function generateRewardsGuide() {
   }
   drawTextBlock(
     ctx,
-    "最大重量只在成功钓获时刷新；鱼雷爆破收获不计入图鉴。指定钓点时只展示带该钓点标记的渔获，通用鱼不占地点图鉴分母。",
+    "最大重量只在成功钓获时刷新。指定钓点时只展示带该钓点标记的渔获，通用鱼不占地点图鉴分母。",
     138,
     638,
     WIDTH - 276,
