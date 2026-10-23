@@ -153,12 +153,11 @@ categories:
     handler: fishing_special
     items:
       - id: fortune_bag
-        name: 漂流福袋
-        aliases: [福袋]
+        name: 福袋
         price: 400
         type: consumable
         handler: fishing_fortune_bag
-        description: 装着樱花币的漂流福袋，会随钓到的次数增加而增加樱花币，钓起失败后自动消失。
+        description: 上钩直接领钱；本人钓到重置金额，他人钓到增值，并有机会使投放者获得财神祝福后消失。
 
       - id: torpedo
         name: 鱼雷

@@ -772,6 +772,7 @@ export default class Fishing extends plugin {
       hasRiverBless: river,
       hasDoubleCoin: doubleCoin,
       hasTimeSand: timeSand,
+      wealthBonus: new FortuneBagManager({ group_id: groupId, user_id: userId }).getWealthBonus(),
     };
   }
 
@@ -954,7 +955,7 @@ export default class Fishing extends plugin {
           },
         );
       state.fish = selectedFish;
-      // 福袋重量为面额一半，困难度同当地宝箱，不吃天气数值倍率。
+      // 福袋与鱼雷无重量、无困难度，收竿命中后直接结算。
       // 真实鱼重用于展示、出售和记录；天气只把它换算为本竿承受的有效拉力。
       // 首领保持固定的传说级基准，天气不改变其有效拉力与困难度。
       selectedFish.effectiveWeight = calculateEffectiveFishWeight(
@@ -999,6 +1000,7 @@ export default class Fishing extends plugin {
         koiWishConsumed ? "\n🎏 锦鲤许愿签生效中" : "",
         buffFlags.hasRiverBless ? "\n🌊 河神注视着你的鱼线" : "",
         buffFlags.hasDoubleCoin ? "\n💰 双倍金币卡生效中" : "",
+        buffFlags.wealthBonus > 0 ? `\n🧧 财神生效中，钓鱼收益 +${buffFlags.wealthBonus} 樱花币` : "",
         buffFlags.hasTimeSand ? "\n⏳ 时之沙生效中" : "",
         nightmareStatus.brideNightmareMultiplier > 1
           ? `\n💍 ${brideMarkLayers} 层花嫁印记生效中`
@@ -1036,6 +1038,7 @@ export default class Fishing extends plugin {
         hasRiverBless: buffFlags.hasRiverBless,
         hasDoubleCoin: buffFlags.hasDoubleCoin,
         hasTimeSand: buffFlags.hasTimeSand,
+        wealthBonus: buffFlags.wealthBonus,
         deepPressureMultiplier: nightmareStatus.deepPressureMultiplier,
         locationId,
         environment,
@@ -1071,7 +1074,7 @@ export default class Fishing extends plugin {
         const lineCapacity = lineConfig.capacity + lineBonus;
 
         currentState.phase = FISHING_PHASE.weightCheck;
-        currentState.isOverweight = !fish.isTorpedo &&
+        currentState.isOverweight = !fish.isTorpedo && !fish.isFortuneBag &&
           fishWeight > lineCapacity &&
           !currentState.hasLucky;
         const shinyHint = fish.isShiny ? `🌈 水面泛起一层奇异的虹光…！\n` : "";
@@ -1235,6 +1238,11 @@ export default class Fishing extends plugin {
       if (!reelAccuracy.hit) {
         await this.finishFailedAttempt(e, state, { recordCatch: false });
         await e.reply("🌫️ 眼前一片模糊，你慌忙收紧鱼线，却只拉回一枚空钩。");
+        return;
+      }
+
+      if (fish.isFortuneBag) {
+        await this.finishSuccess(e, state, fishingManager);
         return;
       }
 
@@ -1767,7 +1775,6 @@ export default class Fishing extends plugin {
       if (!result.success && result.reason !== "duplicate") {
         logger.warn(`[钓鱼] 失败结算未完成: ${result.reason}`);
       }
-      if (result.ended) await e.reply([segment.at(result.ownerId), ` 🧧 有只装着 ${result.amount} 樱花币的福袋沉没了。`]);
       const debtMsg = formatGhostDebtSettlement(result);
       if (debtMsg) await e.reply(debtMsg.trimEnd(), false, true);
     } catch (err) {
@@ -2072,8 +2079,13 @@ export default class Fishing extends plugin {
         });
         if (!result.success) throw new Error(`福袋结算失败：${result.reason}`);
         const message = `🌊 鱼线拖出一只鼓鼓的福袋，袋口一松，樱花币叮当落下。\n🧧 ${fish.name}${fish.description ? `：${fish.description}` : ""}`;
-        const rewardMessage = `\n💰 获得 ${result.amount} 樱花币，福袋已回池。${formatGhostDebtSettlement(result)}`;
-        await e.reply(fish.image ? [message + "\n", segment.image(fish.image), rewardMessage] : message + rewardMessage);
+        const bagStatus = result.ended ? "福袋已消失"
+          : result.ownCatch ? `福袋金额已重置为 ${result.nextAmount} 樱花币并回池` : "福袋已回池";
+        const rewardMessage = `\n💰 获得 ${result.amount} 樱花币，${bagStatus}。${formatGhostDebtSettlement(result)}`;
+        const reply = fish.image ? [message + "\n", segment.image(fish.image), rewardMessage] : [message + rewardMessage];
+        if (result.wealthBuff) reply.push("\n🧧 财神降临！", segment.at(result.ownerId),
+          ` 接下来35分钟，钓鱼收益 +${result.wealthBuff.bonus} 樱花币。`);
+        await e.reply(reply);
         return true;
       }
       if (fish.rarity === "噩梦") {
@@ -2189,7 +2201,11 @@ export default class Fishing extends plugin {
         : fishingManager.getMerchantCoinMultiplier(userId);
       // 首领的异色倍率已在独立奖励包中计算，普通渔获在这里计算。
       const shinyMultiplier = bossVictory || !isShiny ? 1 : SHINY_PRICE_MULTIPLIER;
-      const finalPrice = applyEncounterReward(Math.round(price * buffMultiplier * merchantMultiplier * shinyMultiplier), encounterMultiplier);
+      // 普通有价鱼及垃圾享受财神加钱，零价值垃圾同样参与后续金币倍率。
+      const wealthBonus = !bossVictory && !fish.isTorpedo &&
+        (fish.rarity === "垃圾" || (fish.base_price > 0 && price > 0))
+        ? (state.wealthBonus || 0) : 0;
+      const finalPrice = applyEncounterReward(Math.round((price + wealthBonus) * buffMultiplier * merchantMultiplier * shinyMultiplier), encounterMultiplier);
 
       const settleResult = settlement.settleCoinCatch({
         sessionId: state.id,
@@ -2220,8 +2236,9 @@ export default class Fishing extends plugin {
       }
 
       let buffMsg = "";
+      if (wealthBonus > 0) buffMsg = `🧧 财神加成：+${wealthBonus} 樱花币！\n`;
       if (buffMultiplier > 1) {
-        buffMsg = `✨ 金币加成：×${buffMultiplier}！\n`;
+        buffMsg += `✨ 金币加成：×${buffMultiplier}！\n`;
       }
 
       let merchantMsg = "";
@@ -2607,7 +2624,13 @@ export default class Fishing extends plugin {
         : `${hours} 小时`;
     };
 
-    // 所有限时道具 buff 都来自 special_items.yaml 中 type: buff 的条目
+    const wealthBuff = new FortuneBagManager(e).getWealthBuff();
+    if (wealthBuff) effects.push({
+      icon: "🧧", name: "财神",
+      detail: `钓鱼收益 +${wealthBuff.bonus} 樱花币 · 剩余 ${formatEffectTime((wealthBuff.expiresAt - Date.now()) / 1000)}`,
+      tone: "positive",
+    });
+    // 道具 buff 来自 special_items.yaml，福袋触发的财神独立保存。
     const buffItems = new ShopManager().getAllItems().filter((item) => item.type === "buff");
     const buffTtls = await Promise.all(
       buffItems.map((item) =>
@@ -2939,7 +2962,7 @@ export default class Fishing extends plugin {
     return true;
   });
 
-  deployFortuneBag = Command(/^#?(?:投放|放置)(?:漂流)?福袋\s*([\s\S]*)$/, async (e) => {
+  deployFortuneBag = Command(/^#?(?:投放|放置)福袋\s*([\s\S]*)$/, async (e) => {
     if (!this.checkWhitelist(e)) return false;
     let locationId = new FishingManager(e.group_id).getFishingLocation(e.user_id);
     let message = (e.match?.[1] || "").trim();
@@ -2969,11 +2992,11 @@ export default class Fishing extends plugin {
     return true;
   });
 
-  myFortuneBags = Command(/^#?(?:我的(?:漂流)?福袋|查询(?:我的)?(?:漂流)?福袋)$/, async (e) => {
+  myFortuneBags = Command(/^#?(?:我的福袋|查询(?:我的)?福袋)$/, async (e) => {
     if (!this.checkWhitelist(e)) return false;
     const bags = new FortuneBagManager(e).listOwn();
     if (!bags.length) {
-      await e.reply("你在本群没有尚未沉没的福袋。", 10);
+      await e.reply("你在本群没有尚未消失的福袋。", 10);
       return true;
     }
     const statuses = { active: "漂流中", hooked: "正在被钓" };
@@ -2987,7 +3010,7 @@ export default class Fishing extends plugin {
       });
       await e.sendForwardMsg(nodes, {
         source: "我的福袋", prompt: "🧧 我的福袋", summary: `共 ${bags.length} 只福袋`,
-        news: [{ text: `本群尚未沉没的福袋：${bags.length} 只` }],
+        news: [{ text: `本群尚未消失的福袋：${bags.length} 只` }],
       });
     } catch (error) {
       logger.warn(`[福袋] 查询转发失败: ${error.message}`);

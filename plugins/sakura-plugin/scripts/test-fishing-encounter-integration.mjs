@@ -198,6 +198,41 @@ test("未遭遇和好运护符仍可完美收竿，生图故障也保留原判�
   }
 });
 
+test("财神加钱参与金币倍率、商人、异色和遭遇收益链，无价鱼不加钱", async () => {
+  for (const [basePrice, doubleCoin, monsterBait, expected] of [
+    [100, false, false, 150], [100, true, false, 300],
+    [100, false, true, 450], [100, true, true, 900], [0, true, true, 0],
+  ]) {
+    const h = await harness({ chance: 0 });
+    const state = h.create({ ...ordinary, base_price: basePrice }, {
+      wealthBonus: 50, hasDoubleCoin: doubleCoin, hasMonsterBait: monsterBait,
+    });
+    await h.instance.finishSuccess(h.e, state, new h.Manager());
+    assert.equal(h.calls.settlements[0].earnings, expected);
+  }
+  const h = await harness();
+  h.Manager.prototype.getMerchantCoinMultiplier = () => 1.2;
+  h.create({ ...ordinary, isShiny: true }, { wealthBonus: 50, hasDoubleCoin: true });
+  await h.instance.handleFishing(h.e);
+  await h.answer(h.correct(), 30_000);
+  assert.equal(h.calls.settlements[0].earnings, 150 * 2 * 1.2 * rules.SHINY_PRICE_MULTIPLIER * 2);
+});
+
+test("零价值垃圾获得财神加钱，并参与双倍金币和怪物诱饵倍率", async () => {
+  for (const [hasDoubleCoin, hasMonsterBait, expected] of [
+    [false, false, 50], [true, false, 100], [false, true, 150], [true, true, 300],
+  ]) {
+    const h = await harness({ chance: 0 });
+    h.create({ ...ordinary, rarity: "垃圾", base_price: 0 }, {
+      hasLucky: true, wealthBonus: 50, hasDoubleCoin, hasMonsterBait,
+    });
+    await h.instance.handleFishing(h.e);
+    assert.equal(h.calls.settlements.length, 1);
+    assert.equal(h.calls.settlements[0].earnings, expected);
+    assert.match(h.calls.replies.at(-1)[0].join(""), /财神加成：\+50/u);
+  }
+});
+
 test("异色鱼金币与经验仍叠加遭遇倍率", async () => {
   const h = await harness();
   const state = h.create(ordinary, { fish: { ...ordinary, actualWeight: 1, isShiny: true } });
@@ -211,7 +246,7 @@ test("噩梦与宝藏只增加经验，答错时不执行噩梦效果和宝箱�
   for (const fish of [fishes.find(fish => fish.rarity === "噩梦"), fishes.find(fish => fish.rarity === "宝藏")]) {
     for (const success of [true, false]) {
       const h = await harness();
-      const state = h.create(fish);
+      const state = h.create(fish, { wealthBonus: 500, hasDoubleCoin: true });
       await h.instance.handleFishing(h.e);
       assert.equal(h.calls.effects, 0);
       assert.equal(h.calls.breaks, 0);
@@ -236,7 +271,7 @@ test("噩梦与宝藏只增加经验，答错时不执行噩梦效果和宝箱�
 test("所有首领直接按原奖励结算，概率为 1 也不触发；概率为 0 关闭普通遭遇", async () => {
   for (const fish of fishes.filter(rules.isBossFish)) {
     const h = await harness();
-    const state = h.create(fish);
+    const state = h.create(fish, { wealthBonus: 500, hasDoubleCoin: true, hasMonsterBait: true });
     const original = rules.calculateBossCatchReward(state.fish);
     await h.instance.finishSuccess(h.e, state, new h.Manager());
     assert.equal(h.calls.generated, 0);

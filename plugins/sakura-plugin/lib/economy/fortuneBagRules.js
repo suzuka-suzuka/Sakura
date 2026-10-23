@@ -1,11 +1,13 @@
 import { TORPEDO_HOOK_WEIGHT_PER_ITEM } from "../fishing/rules.js";
-import { getFishData } from "../fishing/fishData.js";
 
 export const FORTUNE_BAG_ITEM_ID = "fortune_bag";
 export const FORTUNE_BAG_INITIAL_AMOUNT = 10;
 export const FORTUNE_BAG_INCREMENT = 10;
 export const FORTUNE_BAG_HOOK_WEIGHT_PER_ITEM = 5;
 export const FORTUNE_BAG_OWNER_EXP = 1;
+export const FORTUNE_BAG_WEALTH_CHANCE = 0.1;
+export const FORTUNE_BAG_WEALTH_BUFF_ID = "fortune_bag_wealth";
+export const FORTUNE_BAG_WEALTH_DURATION_MS = 35 * 60 * 1000;
 export const FORTUNE_BAG_LEASE_MS = 15 * 60 * 1000;
 export const FORTUNE_BAG_MESSAGE_LIMIT = 120;
 export const FORTUNE_BAG_IMAGE_LIMIT = 2 * 1024 * 1024;
@@ -28,8 +30,6 @@ export function normalizeFortuneBagMessage(message) {
 }
 
 export function fortuneBagAsCatch(bag) {
-  const weight = bag.amount / 2;
-  const difficulty = getFishData().find(fish => fish.id === `chest_${bag.location}`)?.difficulty ?? 10;
   return {
     id: `fortune_bag_${bag.id}`,
     name: `福袋 F${bag.id}`,
@@ -39,10 +39,10 @@ export function fortuneBagAsCatch(bag) {
     amount: bag.amount,
     description: bag.message,
     image: bag.image || null,
-    difficulty,
-    actualWeight: weight,
-    effectiveWeight: weight,
-    weight: [weight, weight],
+    difficulty: 0,
+    actualWeight: 0,
+    effectiveWeight: 0,
+    weight: [0, 0],
     base_price: 0,
   };
 }

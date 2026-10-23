@@ -7,6 +7,9 @@ import {
   FORTUNE_BAG_INCREMENT,
   FORTUNE_BAG_LEASE_MS,
   FORTUNE_BAG_IMAGE_LIMIT,
+  FORTUNE_BAG_WEALTH_CHANCE,
+  FORTUNE_BAG_WEALTH_BUFF_ID,
+  FORTUNE_BAG_WEALTH_DURATION_MS,
   normalizeFortuneBagMessage,
 } from "./fortuneBagRules.js";
 
@@ -91,6 +94,32 @@ export default class FortuneBagManager {
     `).run(this.groupId, String(sessionId)).changes;
   }
 
+  getWealthBuff(userId = this.userId, now = Date.now()) {
+    const row = db.prepare(`SELECT effect, expire_time FROM user_buffs
+      WHERE group_id = ? AND user_id = ? AND buff_id = ? AND expire_time > ?`)
+      .get(this.groupId, String(userId), FORTUNE_BAG_WEALTH_BUFF_ID, now);
+    return row ? { bonus: JSON.parse(row.effect).value, expiresAt: row.expire_time } : null;
+  }
+
+  getWealthBonus(userId = this.userId, now = Date.now()) {
+    return this.getWealthBuff(userId, now)?.bonus || 0;
+  }
+
+  // 与发钱、福袋消失共用事务，避免只消耗福袋却没有发出祝福。
+  grantWealthBuff(ownerId, amount, now = Date.now()) {
+    const bonus = Math.max(amount / 2, this.getWealthBonus(ownerId, now));
+    const expiresAt = now + FORTUNE_BAG_WEALTH_DURATION_MS;
+    db.prepare(`INSERT INTO user_buffs
+      (group_id, user_id, buff_id, name, effect, activated_at, expire_time)
+      VALUES (?, ?, ?, '财神', ?, ?, ?)
+      ON CONFLICT(group_id, user_id, buff_id) DO UPDATE SET
+        name = excluded.name, effect = excluded.effect,
+        activated_at = excluded.activated_at, expire_time = excluded.expire_time`)
+      .run(this.groupId, String(ownerId), FORTUNE_BAG_WEALTH_BUFF_ID,
+        JSON.stringify({ type: "fishing_coin_bonus", value: bonus }), now, expiresAt);
+    return { bonus, expiresAt };
+  }
+
   settle({ bagId, sessionId, success, rodId = null, expGain = 0, masteryGain = 0, locationId }) {
     try {
       return db.transaction(() => {
@@ -105,9 +134,14 @@ export default class FortuneBagManager {
             ownerId: bag.owner_id, rodId, expGain })
           : settlement.settleAttempt({ sessionId, success: false, rodId, masteryGain, recordCatch: false });
         if (!result.success) throw new SettlementRollback(result);
-        const nextAmount = success ? bag.amount + FORTUNE_BAG_INCREMENT : bag.amount;
+        const ownCatch = String(bag.owner_id) === this.userId;
+        const wealthTriggered = success && !ownCatch && Math.random() < FORTUNE_BAG_WEALTH_CHANCE;
+        const wealthBuff = wealthTriggered ? this.grantWealthBuff(bag.owner_id, bag.amount) : null;
+        const nextAmount = success && !wealthTriggered
+          ? (ownCatch ? FORTUNE_BAG_INITIAL_AMOUNT : bag.amount + FORTUNE_BAG_INCREMENT)
+          : bag.amount;
         if (!Number.isSafeInteger(nextAmount)) throw new Error("福袋金额超出整数范围");
-        const ended = !success;
+        const ended = wealthTriggered;
         const nextLocation = success && FISHING_LOCATIONS[locationId] ? locationId : bag.location;
         db.prepare(`
           UPDATE pond_fortune_bags SET amount = ?, location = ?, status = ?,
@@ -116,7 +150,8 @@ export default class FortuneBagManager {
           WHERE id = ?
         `).run(nextAmount, nextLocation,
           ended ? "ended" : "active", success ? 1 : 0, success ? bag.amount : 0, bag.id);
-        return { ...result, amount: bag.amount, nextAmount, ended, ownerId: bag.owner_id };
+        return { ...result, amount: bag.amount, nextAmount, ended, ownerId: bag.owner_id,
+          ownCatch, wealthBuff };
       }).immediate();
     } catch (error) {
       if (error instanceof SettlementRollback) return error.result;
