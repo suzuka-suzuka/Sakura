@@ -54,9 +54,8 @@ export const FISHING_LOCATIONS = Object.freeze({
 export const DEFAULT_FISHING_LOCATION = "pond";
 export const BOSS_BAIT_ID = "bait_boss";
 export const BOSS_ATTACK_INTERVAL_MS = 5000;
-// 「攻」的冷却与首领反击（5 秒）错开：同周期会把最优解锁死成「反击一落地就攻」，
-// 行动预算刚好被冷却填满，攻/拉/溜之间没有取舍。4:5 不整除，攻击窗口相对反击持续漂移。
-export const BOSS_PLAYER_ATTACK_COOLDOWN_MS = 4000;
+// 玩家「攻」指令的冷却时间为 5 秒。
+export const BOSS_PLAYER_ATTACK_COOLDOWN_MS = 5000;
 export const BOSS_FIGHT_TIMEOUT_MS = 60 * 1000;
 // 六名首领共用同一拉距门槛；为满传说竿、熟练20的战中损耗预留余量。
 // 该基准必须通过全胜验收，强度差异由反击机制体现。
