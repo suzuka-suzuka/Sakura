@@ -2078,7 +2078,7 @@ export default class Fishing extends plugin {
         if (!result.success) throw new Error(`福袋结算失败：${result.reason}`);
         const message = `🌊 鱼线拖出一只鼓鼓的福袋，袋口一松，樱花币叮当落下。\n🧧 ${fish.name}${fish.description ? `：${fish.description}` : ""}`;
         const bagStatus = result.ended ? "福袋已消失"
-          : result.ownCatch ? `福袋金额已重置为 ${result.nextAmount} 樱花币并回池` : "福袋已回池";
+          : result.ownCatch ? "福袋已重置并回池" : "福袋已回池";
         const rewardMessage = `\n💰 获得 ${result.amount} 樱花币，${bagStatus}。${formatGhostDebtSettlement(result)}`;
         const reply = fish.image ? [message + "\n", segment.image(fish.image), rewardMessage] : [message + rewardMessage];
         if (result.wealthBuff) reply.push("\n🧧 财神降临！", segment.at(result.ownerId),
