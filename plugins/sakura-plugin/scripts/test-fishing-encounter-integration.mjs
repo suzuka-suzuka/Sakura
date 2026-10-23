@@ -198,7 +198,7 @@ test("未遭遇和好运护符仍可完美收竿，生图故障也保留原判�
   }
 });
 
-test("财神加钱参与金币倍率、商人、异色和遭遇收益链，无价鱼不加钱", async () => {
+test("异色先计入鱼价，财神再参与金币、商人和遭遇倍率，无价鱼不加钱", async () => {
   for (const [basePrice, doubleCoin, monsterBait, expected] of [
     [100, false, false, 150], [100, true, false, 300],
     [100, false, true, 450], [100, true, true, 900], [0, true, true, 0],
@@ -215,7 +215,24 @@ test("财神加钱参与金币倍率、商人、异色和遭遇收益链，无�
   h.create({ ...ordinary, isShiny: true }, { wealthBonus: 50, hasDoubleCoin: true });
   await h.instance.handleFishing(h.e);
   await h.answer(h.correct(), 30_000);
-  assert.equal(h.calls.settlements[0].earnings, 150 * 2 * 1.2 * rules.SHINY_PRICE_MULTIPLIER * 2);
+  assert.equal(h.calls.settlements[0].earnings, (100 * rules.SHINY_PRICE_MULTIPLIER + 50) * 2 * 1.2 * 2);
+  const message = h.calls.replies.at(-1)[0].join("");
+  const shinyIndex = message.indexOf("🌈 异色个体！");
+  const wealthIndex = message.indexOf("🧧 财神加成：");
+  const buffIndex = message.indexOf("✨ 金币加成：");
+  assert.ok(shinyIndex >= 0 && shinyIndex < wealthIndex && wealthIndex < buffIndex);
+});
+
+test("异色鱼100币加财神50再双倍得900，零价值异色垃圾只放大财神的金币buff", async () => {
+  for (const [rarity, basePrice, expected] of [["普通", 100, 900], ["垃圾", 0, 100]]) {
+    const h = await harness({ chance: 0 });
+    h.create({ ...ordinary, rarity, base_price: basePrice, isShiny: true }, {
+      hasLucky: true, wealthBonus: 50, hasDoubleCoin: true,
+    });
+    await h.instance.handleFishing(h.e);
+    assert.equal(h.calls.settlements.length, 1);
+    assert.equal(h.calls.settlements[0].earnings, expected);
+  }
 });
 
 test("零价值垃圾获得财神加钱，并参与双倍金币和怪物诱饵倍率", async () => {

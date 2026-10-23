@@ -998,7 +998,7 @@ export default class Fishing extends plugin {
         koiWishConsumed ? "\n🎏 锦鲤许愿签生效中" : "",
         buffFlags.hasRiverBless ? "\n🌊 河神注视着你的鱼线" : "",
         buffFlags.hasDoubleCoin ? "\n💰 双倍金币卡生效中" : "",
-        buffFlags.wealthBonus > 0 ? `\n🧧 财神生效中，钓鱼收益 +${buffFlags.wealthBonus} 樱花币` : "",
+        buffFlags.wealthBonus > 0 ? "\n🧧 财神生效中" : "",
         buffFlags.hasTimeSand ? "\n⏳ 时之沙生效中" : "",
         nightmareStatus.brideNightmareMultiplier > 1
           ? `\n💍 ${brideMarkLayers} 层花嫁印记生效中`
@@ -2203,7 +2203,8 @@ export default class Fishing extends plugin {
       const wealthBonus = !bossVictory && !fish.isTorpedo &&
         (fish.rarity === "垃圾" || (fish.base_price > 0 && price > 0))
         ? (state.wealthBonus || 0) : 0;
-      const finalPrice = applyEncounterReward(Math.round((price + wealthBonus) * buffMultiplier * merchantMultiplier * shinyMultiplier), encounterMultiplier);
+      // 异色属于鱼本身的价格，先乘异色再加财神，财神金额不吃异色倍率。
+      const finalPrice = applyEncounterReward(Math.round((price * shinyMultiplier + wealthBonus) * buffMultiplier * merchantMultiplier), encounterMultiplier);
 
       const settleResult = settlement.settleCoinCatch({
         sessionId: state.id,
@@ -2233,8 +2234,8 @@ export default class Fishing extends plugin {
         }
       }
 
+      const wealthMsg = wealthBonus > 0 ? `🧧 财神加成：+${wealthBonus} 樱花币！\n` : "";
       let buffMsg = "";
-      if (wealthBonus > 0) buffMsg = `🧧 财神加成：+${wealthBonus} 樱花币！\n`;
       if (buffMultiplier > 1) {
         buffMsg += `✨ 金币加成：×${buffMultiplier}！\n`;
       }
@@ -2279,10 +2280,11 @@ export default class Fishing extends plugin {
           ? `🎮 玩家操作：${state.fightingRounds} 次｜承受反击：${state.bossAttackRounds || 0} 次\n`
           : "",
         `📈 熟练度：${newMastery}\n`,
+        shinyMsg,
+        wealthMsg,
         priceBoostMsg,
         buffMsg,
         merchantMsg,
-        shinyMsg,
         encounterMsg,
         bossRewardMsg,
         debtPenaltyMsg,
