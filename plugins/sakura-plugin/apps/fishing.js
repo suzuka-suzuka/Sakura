@@ -1991,18 +1991,15 @@ export default class Fishing extends plugin {
         const devoured = [];
         const shopManager = new ShopManager();
         for (let index = 0; index < multiplier; index++) {
-          const result = fishingManager.devourRandomInventoryItem(e.user_id, [rodConfig.id]);
+          const result = fishingManager.devourRandomInventoryItem(e.user_id);
           if (!result) break;
+          // 背包删除已清理装备及竿状态，结算时也不能重新写入丢失鱼竿的熟练度。
+          rodBroken ||= result.itemId === rodConfig.id;
           const item = shopManager.findItemById(result.itemId) || shopManager.findItemByName(result.itemId);
           devoured.push(`【${item?.name || result.itemId}】×1`);
         }
         if (devoured.length > 0) {
           message = `🌑 食星之影吞掉了${devoured.join("、")}！`;
-        } else {
-          message = fallbackRodDamage(
-            effect.fallback_rod_damage || 20,
-            "🌑 背包里没有可吞噬的物品，它转而啃噬鱼竿！",
-          );
         }
         break;
       }

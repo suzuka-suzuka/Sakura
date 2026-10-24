@@ -147,7 +147,7 @@ async function harness({ withImages = false } = {}) {
     applyBrideNightmareMultiplier(user, factor) { player.bride = (player.bride || 1) * factor; return { total: player.bride }; }
     addDeepPressureLayers(user, amount) { player.deep = (player.deep || 0) + amount; return { added: amount, total: player.deep }; }
     stealHighestValueBait() { return player.baits?.shift() || { stolen: false }; }
-    devourRandomInventoryItem(user, excluded) { assert.deepEqual(Array.from(excluded), ["rod_legendary"]); return player.items?.shift() || null; }
+    devourRandomInventoryItem(user, excluded = []) { assert.deepEqual(Array.from(excluded), []); return player.items?.shift() || null; }
     getRodMastery() { return 20; }
     getRodControl() { return player.durability; }
     getRodDurabilityInfo() { return { currentDurability: player.durability, maxDurability: player.maxDurability || 190 }; }
@@ -399,7 +399,7 @@ test("易伤覆盖伤竿、偷钱、各类叠层和借款，完整免疫与重�
   }
 });
 
-test("易伤偷取两件时库存不足不追加伤竿，空库存和零余额才触发双倍兜底", async () => {
+test("易伤偷取不足不追加伤竿，食星之影无伤竿兜底，其他偷取保留兜底", async () => {
   for (const id of ["nightmare_river_water_monkey", "nightmare_mystic_star_eater"]) {
     for (const count of [0, 1, 2]) {
       const h = await harness();
@@ -408,7 +408,7 @@ test("易伤偷取两件时库存不足不追加伤竿，空库存和零余额�
       h.player.items = Array.from({ length: count }, (_, i) => ({ itemId: `item-${i}` }));
       const state = h.create(fish.find(f => f.id === id));
       await h.instance.finishSuccess(h.e, state, new h.Manager());
-      assert.equal(h.calls.rodDamage, count === 0 ? 40 : 0);
+      assert.equal(h.calls.rodDamage, id === "nightmare_river_water_monkey" && count === 0 ? 40 : 0);
       assert.equal(id.includes("monkey") ? h.player.baits.length : h.player.items.length, 0);
       assert.equal(h.calls.breaks, 1);
       const message = h.calls.replies.flat(2).join("\n");
@@ -501,6 +501,25 @@ test("真实噩梦结算：捞尸人叠层并断线，完整免疫挡下两者�
   assert.equal(h.player.durability, 0);
   assert.equal(h.calls.breaks, 1);
   assert.equal(h.calls.settlements[0].rodId, null);
+});
+
+test("食星之影吞掉当前鱼竿后不再结算该竿熟练度，易伤仍继续吞取", async () => {
+  for (const items of [
+    [{ itemId: "rod_legendary" }],
+    [{ itemId: "rod_legendary" }, { itemId: "bait_worm" }],
+    [{ itemId: "bait_worm" }, { itemId: "rod_legendary" }],
+    [{ itemId: "rod_carbon" }],
+  ]) {
+    const h = await harness();
+    const losesCurrentRod = items.some(item => item.itemId === "rod_legendary");
+    h.player.vulnerable = true;
+    h.player.items = [...items];
+    const state = h.create(fish.find(f => f.id === "nightmare_mystic_star_eater"));
+    await h.instance.finishSuccess(h.e, state, new h.Manager());
+    assert.equal(h.calls.settlements[0].rodId, losesCurrentRod ? null : "rod_legendary");
+    assert.equal(h.player.items.length, 0);
+    assert.equal(h.calls.rodDamage, 0);
+  }
 });
 
 test("真实首领反击没有临时线池或累计断线，锯鲨按命中前张力伤竿", async () => {

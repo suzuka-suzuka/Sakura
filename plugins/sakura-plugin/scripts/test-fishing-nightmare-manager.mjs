@@ -269,6 +269,16 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
     assert.equal(itemCount("chest_pond"), 0);
     assert.equal(manager.devourRandomInventoryItem(userId, ["rod_carbon"], () => 0), null);
     assert.equal(itemCount("rod_carbon"), 1);
+    manager.equipRod(userId, "rod_carbon");
+    manager.damageRod(userId, "rod_carbon", 5);
+    manager.increaseRodMastery(userId, "rod_carbon");
+    const devouredRod = manager.devourRandomInventoryItem(userId);
+    assert.equal(devouredRod.itemId, "rod_carbon");
+    assert.equal(itemCount("rod_carbon"), 0);
+    assert.equal(db.prepare("SELECT rod FROM fishing_stats WHERE group_id = ? AND user_id = ?")
+      .get("group-a", userId).rod, null);
+    assert.equal(db.prepare("SELECT * FROM rod_stats WHERE group_id = ? AND user_id = ? AND rod_id = ?")
+      .get("group-a", userId, "rod_carbon"), undefined);
     process.exit(0);
   `;
 

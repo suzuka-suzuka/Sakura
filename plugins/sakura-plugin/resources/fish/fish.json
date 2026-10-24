@@ -2562,8 +2562,7 @@
     "base_price": 0,
     "difficulty": 81,
     "nightmare_effect": {
-      "type": "devour_inventory",
-      "fallback_rod_damage": 20
+      "type": "devour_inventory"
     },
     "weight": [
       35,
