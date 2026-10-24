@@ -107,7 +107,7 @@ export default class FortuneBagManager {
 
   // 与发钱、福袋消失共用事务，避免只消耗福袋却没有发出祝福。
   grantWealthBuff(ownerId, amount, now = Date.now()) {
-    const bonus = Math.max(amount / 2, this.getWealthBonus(ownerId, now));
+    const bonus = amount / 2;
     const expiresAt = now + FORTUNE_BAG_WEALTH_DURATION_MS;
     db.prepare(`INSERT INTO user_buffs
       (group_id, user_id, buff_id, name, effect, activated_at, expire_time)
