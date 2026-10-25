@@ -340,6 +340,7 @@ export default class Economy extends plugin {
         count,
         bossBait: Boolean(item?.boss_bait),
         convertible: item?.convertible === true,
+        exclusiveGroup: item?.exclusive_group,
         equipped: itemId === equippedRodId || itemId === equippedLineId || itemId === equippedBaitId,
       };
 
@@ -1133,8 +1134,7 @@ export default class Economy extends plugin {
     const conflict = await this.findExclusiveBuffConflict(item, shopManager, groupId, userId);
     if (conflict) {
       await e.reply(
-        `⚠️ 【${conflict.name}】还剩 ${conflict.remainText}，和【${item.name}】不能同时生效~\n` +
-        `道具没有被消耗，等它结束后再用吧。`,
+        `⚠️ 【${conflict.name}】还剩 ${conflict.remainText}，请结束后再用。\n本次未消耗道具。`,
         10,
       );
       return true;
@@ -1258,57 +1258,41 @@ export default class Economy extends plugin {
         return true;
       }
 
-      case "koi_wish": {
-        if (fishingManager.getPendingWishes(userId).koiWish) {
-          await e.reply("🎏 已有一枚锦鲤许愿签在等待下一次咬钩~", 10);
-          return true;
-        }
-        if (!inventoryManager.removeItem(item.id, 1)) {
-          await e.reply(`你没有【${item.name}】，无法使用~`, 10);
-          return true;
-        }
-        // 许愿不设时限，一直挂到下一次咬钩把它消耗掉，所以存库而不是 Redis。
-        if (!fishingManager.setKoiWish(userId)) {
-          await inventoryManager.forceAddItem(item.id, 1);
-          await e.reply("🎏 已有一枚锦鲤许愿签在等待下一次咬钩~", 10);
-          return true;
-        }
-        await e.reply(
-          `🎏 你将【${item.name}】系在了樱枝上……\n` +
-          `🌸 许愿保留至下一次咬钩并消耗，常规渔获必定异色！`,
-        );
-        return true;
-      }
-
+      case "koi_wish":
       case "star_wish": {
+        const isKoiWish = item.instant_effect === "koi_wish";
         const rarity = String(argument || "").trim();
-        const availableRarities = Object.keys(RARITY_CONFIG);
-        if (!RARITY_CONFIG[rarity]) {
+        if (!isKoiWish && !RARITY_CONFIG[rarity]) {
           await e.reply(
             `🌠 请指定星愿品质：#使用 ${item.name} <品质>\n` +
-            `可选：${availableRarities.join("、")}`,
+            `可选：${Object.keys(RARITY_CONFIG).join("、")}`,
             10,
           );
           return true;
         }
-        const existingWish = fishingManager.getPendingWishes(userId).starWish;
-        if (existingWish) {
-          await e.reply(`⭐ 已有“${existingWish}”品质的星愿在等待下一次咬钩~`, 10);
+        const pending = fishingManager.getPendingWishes(userId);
+        const pendingMessage = "🌠 已有许愿在等待下一次咬钩，请完成后再用。\n本次未消耗道具。";
+        if (pending.koiWish || pending.starWish) {
+          await e.reply(pendingMessage, 10);
           return true;
         }
         if (!inventoryManager.removeItem(item.id, 1)) {
           await e.reply(`你没有【${item.name}】，无法使用~`, 10);
           return true;
         }
-        // 星愿同样不设时限，等到下一次普通咬钩才会兑现并消耗。
-        if (!fishingManager.setStarWish(userId, rarity)) {
+        // 许愿不设时限，由数据库保证同群同玩家只能保留一种。
+        const activated = isKoiWish
+          ? fishingManager.setKoiWish(userId)
+          : fishingManager.setStarWish(userId, rarity);
+        if (!activated) {
           await inventoryManager.forceAddItem(item.id, 1);
-          await e.reply("⭐ 已有一枚星愿在等待下一次咬钩~", 10);
+          await e.reply(pendingMessage, 10);
           return true;
         }
         await e.reply(
-          `🌠 你对着瓶中的流星许下“${rarity}”心愿……\n` +
-          `⭐ 星愿会一直留到下一次普通咬钩，届时必定为【${rarity}】品质！`,
+          isKoiWish
+            ? `🎏 你将【${item.name}】系在了樱枝上……\n🌸 许愿保留至下一次咬钩并消耗，常规渔获必定异色！`
+            : `🌠 你对着瓶中的流星许下“${rarity}”心愿……\n⭐ 星愿会一直留到下一次普通咬钩，届时必定为【${rarity}】品质！`,
         );
         return true;
       }

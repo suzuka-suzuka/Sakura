@@ -26,6 +26,7 @@ async function fixture(t) {
   const redisValues = new Map(), redisWrites = [];
   let timerId = 0, sessions;
   let randomValue = 0.5;
+  let selectionHook = () => {};
   let imageFetch = async () => { throw new Error("未配置图片下载"); };
   class SessionStore extends session.FishingSessionStore {
     constructor() { super({ clearTimer: id => timers.delete(id) }); sessions = this; }
@@ -57,6 +58,7 @@ async function fixture(t) {
     [path.join(root, "lib/setting.js"), { default: { getEconomy: name => configuration[name], getConfig: () => ({ gamegroups: ["g"], enable: true }) } }],
     [path.join(root, "lib/fishing/rules.js"), { ...fishingRules, selectFishFromData: (data, options) => {
       selections.push(options);
+      selectionHook();
       return fishingRules.selectFishFromData(data, options);
     } }], [path.join(root, "lib/economy/rules.js"), economyRules],
     [path.join(root, "lib/economy/inventoryRules.js"), await import("../lib/economy/inventoryRules.js")],
@@ -148,6 +150,7 @@ async function fixture(t) {
   return { db, Manager, event, stock, load, fishing, buffs, timers, errors, configuration, selections,
     redisWrites,
     setRandom: value => { randomValue = value; },
+    setSelectionHook: callback => { selectionHook = callback; },
     setImageFetch: value => { imageFetch = value; } };
 }
 
@@ -327,6 +330,28 @@ test("真实钓起匿名发图并保留原图回池，后续咬钩及结算仍�
   assert.equal(manager.settle({ bagId, sessionId: "second-catch", success: true }).success, true);
   assert.equal(f.db.prepare("SELECT success_count FROM pond_fortune_bags WHERE id=?").get(bagId).success_count, 2);
 });
+
+for (const startupFailure of [false, true]) {
+  test(`抛竿选鱼期间的新许愿留给下一竿${startupFailure ? "，启动失败返还原许愿道具" : "，不会叠入本竿"}`, async t => {
+    const f = await fixture(t), e = f.event();
+    const { app, state, fm } = await f.fishing(e);
+    state.cleanup();
+    assert.equal(fm.setStarWish(e.user_id, "普通"), true);
+    let selections = 0;
+    f.setSelectionHook(() => {
+      selections++;
+      assert.equal(fm.setKoiWish(e.user_id), true);
+      if (startupFailure) throw new Error("测试选鱼失败");
+    });
+    await app.startFishing(e);
+    assert.equal(selections, 1);
+    assert.equal(fm.getPendingWishes(e.user_id).koiWish, true);
+    assert.equal(fm.getPendingWishes(e.user_id).starWish, null);
+    const refunded = f.db.prepare("SELECT count FROM inventory WHERE group_id='g' AND user_id='u' AND item_id='item_bottle_wish'").get()?.count || 0;
+    assert.equal(refunded, startupFailure ? 1 : 0);
+    if (startupFailure) assert.ok(f.errors.some(message => message.includes("测试选鱼失败")));
+  });
+}
 
 for (const stopped of [false, true]) {
   test(`真实抛竿：诅咒${stopped ? "停止累加后仍保留原权重" : "继续累加并使用新权重"}，启动失败只回滚新增层`, async t => {

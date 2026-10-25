@@ -927,6 +927,9 @@ export default class Fishing extends plugin {
       }
       state.wishConsumed = Boolean(wishRarity);
       state.wishRarity = wishRarity;
+      // 在异步选鱼前一并记录许愿签，途中新许的愿留给下一竿。
+      const koiWishConsumed = fishingManager.consumeKoiWish(userId);
+      state.koiWishConsumed = koiWishConsumed;
 
       // 雾灯只改本人选鱼用的天气，不影响全局天气播报
       const effectiveWeather = buffFlags.hasFogLamp ? "雾" : pondWeather.name;
@@ -969,9 +972,6 @@ export default class Fishing extends plugin {
         );
       }
       // 许愿签由本次咬钩无条件消耗；只有垃圾至传说的非首领鱼会被强制为异色。
-      // 抛竿阶段先原子占用许愿，使其与其他Buff一起进入本次会话快照。
-      const koiWishConsumed = fishingManager.consumeKoiWish(userId);
-      state.koiWishConsumed = koiWishConsumed;
       const shinyResult = resolveKoiWishShiny(selectedFish, koiWishConsumed);
       selectedFish.isShiny = shinyResult.isShiny;
       state.koiWishApplied = shinyResult.koiWishApplied;
@@ -1147,7 +1147,9 @@ export default class Fishing extends plugin {
       }
       if (state.wishConsumed) {
         try {
-          fishingManager.restoreStarWish(userId, state.wishRarity);
+          if (!fishingManager.restoreStarWish(userId, state.wishRarity)) {
+            await new InventoryManager(groupId, userId).forceAddItem("item_bottle_wish", 1);
+          }
           state.wishConsumed = false;
         } catch (refundErr) {
           logger.error(`[钓鱼] 启动失败后退还星愿异常: ${refundErr.stack || refundErr}`);
@@ -1155,7 +1157,9 @@ export default class Fishing extends plugin {
       }
       if (state.koiWishConsumed) {
         try {
-          fishingManager.restoreKoiWish(userId);
+          if (!fishingManager.restoreKoiWish(userId)) {
+            await new InventoryManager(groupId, userId).forceAddItem("item_sign_koi", 1);
+          }
           state.koiWishConsumed = false;
         } catch (refundErr) {
           logger.error(`[钓鱼] 启动失败后退还锦鲤许愿异常: ${refundErr.stack || refundErr}`);

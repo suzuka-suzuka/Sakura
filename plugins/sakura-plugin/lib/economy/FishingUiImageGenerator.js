@@ -32,6 +32,11 @@ const HANDLER_META = Object.freeze({
   fishing_fortune_bag: { icon: "🧧", label: "福袋", color: "#C35656" },
 })
 
+const EXCLUSIVE_GROUP_STYLES = Object.freeze({
+  coin_boost: { fill: "#FFF7E6", border: "#D4A04B" },
+  fishing_wish: { fill: "#F3EEFF", border: "#9A7BCC" },
+})
+
 function toFiniteNumber(value, fallback = 0) {
   const number = Number(value)
   return Number.isFinite(number) ? number : fallback
@@ -493,11 +498,12 @@ export default class FishingUiImageGenerator extends EconomyImageGenerator {
         const x = 36 + col * (cardWidth + cardGap)
         const y = cardsTop + row * (cardHeight + cardGap)
         const meta = HANDLER_META[item.handler] || HANDLER_META.fishing_special
+        const groupStyle = EXCLUSIVE_GROUP_STYLES[item.exclusiveGroup]
         this.drawPanel(ctx, x, y, cardWidth, cardHeight, {
-          fill: item.equipped ? "rgba(255, 239, 247, 0.96)" : COLORS.panelSoft,
-          border: item.equipped ? "rgba(224, 92, 145, 0.58)" : COLORS.border,
+          fill: item.equipped ? "rgba(255, 239, 247, 0.96)" : groupStyle?.fill || COLORS.panelSoft,
+          border: item.equipped ? "rgba(224, 92, 145, 0.58)" : groupStyle?.border || COLORS.border,
           radius: 20,
-          lineWidth: item.equipped ? 2.5 : 1.5,
+          lineWidth: item.equipped || groupStyle ? 2.5 : 1.5,
         })
         await this.drawItemImage(ctx, item.id, x + 16, y + 18, 94, item.icon || meta.icon)
 

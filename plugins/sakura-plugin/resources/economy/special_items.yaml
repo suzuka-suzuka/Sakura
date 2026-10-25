@@ -49,6 +49,7 @@ categories:
         type: consumable
         convertible: true
         instant_effect: koi_wish
+        exclusive_group: fishing_wish
         description: 樱花池塘专属道具。许愿保留至下一次咬钩并消耗，常规渔获必定异色。
 
       - id: item_charm_river
@@ -87,7 +88,7 @@ categories:
         convertible: true
         duration: 2100
         exclusive_group: coin_boost
-        description: 深渊海沟专属道具。35分钟内噩梦率提升，金币与经验×3，与双倍金币卡互斥。
+        description: 深渊海沟专属道具。35分钟内噩梦率提升，金币与经验×3。
         activation_message: "🩸 怪物诱饵撒入水中！\n💀 接下来35分钟内更容易遭遇噩梦，钓鱼金币与经验 ×3！"
 
       - id: item_bottle_wish
@@ -96,6 +97,7 @@ categories:
         type: consumable
         convertible: true
         instant_effect: star_wish
+        exclusive_group: fishing_wish
         description: 星辉秘境专属道具。使用时指定品质，许愿一直保留，下一次咬钩必定为该品质。
 
   treasures:

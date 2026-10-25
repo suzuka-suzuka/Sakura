@@ -751,14 +751,14 @@ export default class FishingManager {
     };
   }
 
-  // 已经挂着一枚时返回 false，调用方据此退还道具。
+  // 已有任意一种许愿时返回 false，调用方据此退还道具。
   setKoiWish(userId) {
     userId = String(userId);
     this._ensureUser(userId);
     const result = db.prepare(`
         UPDATE fishing_stats
         SET koi_wish = 1
-        WHERE group_id = ? AND user_id = ? AND COALESCE(koi_wish, 0) = 0
+        WHERE group_id = ? AND user_id = ? AND COALESCE(koi_wish, 0) = 0 AND star_wish IS NULL
     `).run(this.groupId, userId);
     return result.changes > 0;
   }
@@ -775,15 +775,9 @@ export default class FishingManager {
     return result.changes > 0;
   }
 
-  // 抛竿启动失败时原样退还，不判断当前状态。
+  // 启动失败时恢复许愿；已有新许愿则由调用方返还道具。
   restoreKoiWish(userId) {
-    userId = String(userId);
-    this._ensureUser(userId);
-    db.prepare(`
-        UPDATE fishing_stats
-        SET koi_wish = 1
-        WHERE group_id = ? AND user_id = ?
-    `).run(this.groupId, userId);
+    return this.setKoiWish(userId);
   }
 
   setStarWish(userId, rarity) {
@@ -794,7 +788,7 @@ export default class FishingManager {
     const result = db.prepare(`
         UPDATE fishing_stats
         SET star_wish = ?
-        WHERE group_id = ? AND user_id = ? AND star_wish IS NULL
+        WHERE group_id = ? AND user_id = ? AND star_wish IS NULL AND COALESCE(koi_wish, 0) = 0
     `).run(safeRarity, this.groupId, userId);
     return result.changes > 0;
   }
@@ -820,15 +814,7 @@ export default class FishingManager {
   }
 
   restoreStarWish(userId, rarity) {
-    userId = String(userId);
-    const safeRarity = String(rarity || "").trim();
-    if (!safeRarity) return;
-    this._ensureUser(userId);
-    db.prepare(`
-        UPDATE fishing_stats
-        SET star_wish = ?
-        WHERE group_id = ? AND user_id = ?
-    `).run(safeRarity, this.groupId, userId);
+    return this.setStarWish(userId, rarity);
   }
 
   getRodControl(userId, rodId) {
