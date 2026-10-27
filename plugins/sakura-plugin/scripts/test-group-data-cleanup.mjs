@@ -142,18 +142,46 @@ for (const value of [null, [], [{ user_id: 2 }], [{ user_id: 900 }, { user_id: n
   });
 }
 
-test('没有在线 Bot 或存在已配置的离线账号时不删数据', async t => {
-  const f = fixture(t, [], { getConfiguredSelfIds: () => [901] }); f.seed();
-  assert.equal(await f.cleaner.run(), false);
-  f.setOnline([bot()]);
+test('没有在线 Bot 时保留数据并说明原因', async t => {
+  const warnings = [];
+  const f = fixture(t, [], { logger: { warn: message => warnings.push(message), info() {} } }); f.seed();
   assert.equal(await f.cleaner.run(), false);
   assert.equal(f.count('economy'), 1);
+  assert.ok(warnings.some(message => message.includes('没有在线 Bot')));
 });
 
-test('曾出现的 Bot 离线，重新创建清理器后也跳过整群删除', async t => {
-  const f = fixture(t, [bot(900), bot(901, [])]); f.seed(); f.cleaner.observeBots();
-  const next = new GroupDataCleaner(f.db, { getBots: () => [bot(900, [])] });
-  assert.equal(await next.run(), false);
+test('已配置账号离线时仍清理在线群的离群成员，保留未确认的群和在群成员', async t => {
+  const f = fixture(t, [], { getConfiguredSelfIds: () => [901] }); f.seed();
+  assert.equal(await f.cleaner.run(), false);
+  f.seed(100, 2); f.seed(200, 1);
+  f.setOnline([bot()]);
+  assert.equal(await f.cleaner.run(), true);
+  assert.equal(f.count('economy'), 1);
+  assert.equal(f.db.prepare("SELECT user_id FROM economy WHERE group_id = '100'").get().user_id, '2');
+  assert.equal(f.count('economy', 200), 1);
+});
+
+test('换过 Bot 且重建清理器后，旧账号不会阻塞当前群成员清理', async t => {
+  const f = fixture(t, [bot(901, [])]); f.seed(); f.seed(100, 2); f.seed(200, 1); f.cleaner.observeBots();
+  const warnings = [], infos = [], current = bot(900);
+  const next = new GroupDataCleaner(f.db, { getBots: () => [current],
+    logger: { warn: message => warnings.push(message), info: message => infos.push(message) } });
+  assert.equal(await next.run(), true);
+  assert.equal(f.count('economy'), 1);
+  assert.equal(f.db.prepare("SELECT user_id FROM economy WHERE group_id = '100'").get().user_id, '2');
+  assert.equal(f.count('economy', 200), 1);
+  assert.ok(warnings.some(message => message.includes('历史 Bot 离线')));
+  assert.ok(warnings.some(message => message.includes('无法确认所有 Bot 均已离群')));
+  assert.ok(infos.some(message => message.includes('本轮核对结束')));
+  // 历史记录仍保留，不能为了恢复成员清理而失去整群保护。
+  assert.equal(f.db.prepare("SELECT count(*) AS n FROM data_cleanup_accounts WHERE self_id = '901'").get().n, 1);
+});
+
+test('旧账号离线且当前群成员列表异常时，仍保留所有成员数据', async t => {
+  const current = bot();
+  current.getGroupMemberList = async () => [{ user_id: 2 }];
+  const f = fixture(t, [current], { getConfiguredSelfIds: () => [901] }); f.seed();
+  await f.cleaner.run();
   assert.equal(f.count('economy'), 1);
 });
 

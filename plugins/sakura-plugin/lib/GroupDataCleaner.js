@@ -71,20 +71,32 @@ export class GroupDataCleaner {
 
   async snapshot() {
     const bots = this.observeBots();
-    if (bots.length === 0) return null;
+    if (bots.length === 0) {
+      this.logger.warn('[数据清理] 跳过本轮：没有在线 Bot');
+      return null;
+    }
     const known = [...this.getConfiguredSelfIds(), ...this.db.prepare('SELECT self_id FROM data_cleanup_accounts').all().map(row => row.self_id)];
-    if (known.some(id => !bots.some(bot => String(bot.self_id) === String(id)))) return null;
+    const offline = new Set(known.map(String).filter(id => !bots.some(bot => String(bot.self_id) === id)));
+    const complete = offline.size === 0;
+    if (!complete) this.logger.warn(`[数据清理] 有 ${offline.size} 个已配置或历史 Bot 离线：保留无法确认的整群数据，继续核对在线 Bot 所在群的成员`);
     const groups = new Map();
     for (const bot of bots) {
       const list = await bot.getGroupList();
-      if (!Array.isArray(list) || list.some(row => !validId(row?.group_id))) return null;
+      if (!Array.isArray(list) || list.some(row => !validId(row?.group_id))) {
+        this.logger.warn('[数据清理] 跳过本轮：群列表格式异常');
+        return null;
+      }
       for (const row of list) {
         const id = String(row.group_id);
         if (!groups.has(id)) groups.set(id, []);
         groups.get(id).push(bot);
       }
     }
-    return this.isCurrent(bots) ? { bots, groups } : null;
+    if (!this.isCurrent(bots)) {
+      this.logger.warn('[数据清理] 跳过本轮：核对期间在线 Bot 发生变化');
+      return null;
+    }
+    return { bots, groups, complete };
   }
 
   async liveMembers(owners, groupId) {
@@ -100,9 +112,19 @@ export class GroupDataCleaner {
 
   async cleanGroup(snapshot, groupId, userId = null) {
     const owners = snapshot.groups.get(String(groupId));
-    if (!owners) return this.isCurrent(snapshot.bots) ? this.deleteData(groupId) : 0;
+    // 历史账号离线只影响整群归属判断，不应阻塞当前群的成员清理。
+    if (!owners) {
+      if (!snapshot.complete) {
+        this.logger.warn(`[数据清理] 跳过群 ${groupId}：存在离线 Bot，无法确认所有 Bot 均已离群`);
+        return 0;
+      }
+      return this.isCurrent(snapshot.bots) ? this.deleteData(groupId) : 0;
+    }
     const members = await this.liveMembers(owners, groupId);
-    if (!members || !this.isCurrent(snapshot.bots)) return 0;
+    if (!members || !this.isCurrent(snapshot.bots)) {
+      this.logger.warn(`[数据清理] 跳过群 ${groupId}：成员列表异常或在线 Bot 发生变化`);
+      return 0;
+    }
     const stale = userId == null ? this.members(groupId) : [String(userId)];
     let deleted = 0;
     for (const user of stale) {
@@ -120,15 +142,18 @@ export class GroupDataCleaner {
       const snapshot = await this.snapshot();
       if (!snapshot) return false;
       const groups = event ? [String(event.group_id)] : this.groups();
+      let totalDeleted = 0;
       for (const group of groups) {
         try {
           const user = event && String(event.user_id) !== String(event.self_id) ? event.user_id : null;
           const deleted = await this.cleanGroup(snapshot, group, user);
+          totalDeleted += deleted;
           if (deleted > 0) this.logger.info(`[数据清理] 群 ${group}${user == null ? '' : ` 成员 ${user}`}：删除 ${deleted} 条记录`);
         } catch (error) {
           this.logger.warn(`[数据清理] 跳过群 ${group}：${error.message}`);
         }
       }
+      this.logger.info(`[数据清理] 本轮核对结束：检查 ${groups.length} 个群，删除 ${totalDeleted} 条记录`);
       return true;
     } catch (error) {
       this.logger.warn(`[数据清理] 本轮核对失败：${error.message}`);
