@@ -1233,50 +1233,46 @@ export default class FishingManager {
     return transaction.immediate();
   }
 
-  stealHighestValueBait(userId) {
+  convertHighestQualityBaitsToWorms(userId, kinds = 1) {
     userId = String(userId);
     this._ensureUser(userId);
     const transaction = db.transaction(() => {
       const inventory = new InventoryManager(this.groupId, userId).getInventory();
-      const bait = this.getAllBaits()
-        .filter((candidate) => inventory[candidate.id] > 0)
-        .sort((left, right) => (
-          (Number(right.price) || 0) - (Number(left.price) || 0)
-        ))[0];
-      if (!bait) return { stolen: false, bait: null, remaining: 0 };
+      const baits = this.getAllBaits();
+      // 首领饵在调包判定中比寻宝饵高一级，不改变其召唤首领的规则。
+      const bossQuality = Number(baits.find(bait => bait.id === "bait_treasure")?.quality || 6) + 1;
+      const quality = bait => bait.boss_bait || bait.id === "bait_boss"
+        ? bossQuality : Number(bait.quality) || 0;
+      const targets = baits
+        .filter(bait => bait.id !== "bait_worm" && inventory[bait.id] > 0)
+        .sort((left, right) => quality(right) - quality(left))
+        .slice(0, kinds === 2 ? 2 : 1);
+      const converted = targets.map(bait => ({ bait, count: inventory[bait.id] }));
+      const total = converted.reduce((sum, entry) => sum + entry.count, 0);
+      if (!total) return { converted, total: 0, onlyWorms: inventory.bait_worm > 0 };
 
-      const removed = db.prepare(`
-          UPDATE inventory
-          SET count = count - 1
-          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count >= 1
-      `).run(this.groupId, userId, bait.id);
-      if (removed.changes !== 1) return { stolen: false, bait: null, remaining: 0 };
-
-      db.prepare(`
+      const remove = db.prepare(`
           DELETE FROM inventory
-          WHERE group_id = ? AND user_id = ? AND item_id = ? AND count <= 0
-      `).run(this.groupId, userId, bait.id);
-      const remaining = db.prepare(`
-          SELECT count FROM inventory
           WHERE group_id = ? AND user_id = ? AND item_id = ?
-      `).get(this.groupId, userId, bait.id)?.count || 0;
+      `);
+      for (const { bait } of converted) remove.run(this.groupId, userId, bait.id);
+      db.prepare(`
+          INSERT INTO inventory (group_id, user_id, item_id, count)
+          VALUES (?, ?, 'bait_worm', ?)
+          ON CONFLICT(group_id, user_id, item_id)
+          DO UPDATE SET count = count + excluded.count
+      `).run(this.groupId, userId, total);
 
       const equippedBait = db.prepare(`
           SELECT bait FROM fishing_stats WHERE group_id = ? AND user_id = ?
       `).get(this.groupId, userId)?.bait;
-      if (equippedBait === bait.id && remaining <= 0) {
-        const remainingInventory = new InventoryManager(this.groupId, userId).getInventory();
-        const availableBaits = this.getAllBaits()
-          .filter((candidate) => remainingInventory[candidate.id] > 0);
-        const nextBait = availableBaits
-          .filter((candidate) => !candidate.boss_bait)
-          .sort((a, b) => (a.price || 0) - (b.price || 0))[0]?.id || null;
+      if (converted.some(({ bait }) => bait.id === equippedBait)) {
         db.prepare(`
             UPDATE fishing_stats SET bait = ?
             WHERE group_id = ? AND user_id = ?
-        `).run(nextBait || availableBaits[0]?.id || null, this.groupId, userId);
+        `).run("bait_worm", this.groupId, userId);
       }
-      return { stolen: true, bait, remaining };
+      return { converted, total };
     });
     return transaction.immediate();
   }

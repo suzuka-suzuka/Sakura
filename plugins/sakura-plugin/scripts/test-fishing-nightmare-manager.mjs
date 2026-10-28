@@ -254,12 +254,58 @@ test("噩梦持久状态、鱼竿耐久和背包偷取按当前规则结算", ()
     assert.equal(forced.current, 1);
 
     addItem("bait_worm", 2);
-    addItem("bait_divine", 1);
-    addItem("bait_treasure", 1);
-    const stolen = manager.stealHighestValueBait(userId);
-    assert.equal(stolen.stolen, true);
-    assert.equal(stolen.bait.id, "bait_treasure");
+    addItem("bait_divine", 30);
+    addItem("bait_treasure", 10);
+    addItem("bait_boss", 3);
+    manager.equipBait(userId, "bait_boss");
+    const swapped = manager.convertHighestQualityBaitsToWorms(userId);
+    assert.equal(swapped.total, 3);
+    assert.equal(swapped.converted[0].bait.id, "bait_boss");
+    assert.equal(itemCount("bait_boss"), 0);
+    assert.equal(itemCount("bait_worm"), 5);
+    assert.equal(itemCount("bait_treasure"), 10);
+    assert.equal(manager.getUserData(userId).bait, "bait_worm");
+    addItem("bait_shrimp", 50);
+    const doubled = manager.convertHighestQualityBaitsToWorms(userId, 2);
+    assert.deepEqual(doubled.converted.map(entry => entry.bait.id), ["bait_treasure", "bait_divine"]);
+    assert.equal(doubled.total, 40);
+    assert.equal(itemCount("bait_worm"), 45);
+    assert.equal(itemCount("bait_shrimp"), 50);
+    assert.equal(itemCount("bait_divine"), 0);
     assert.equal(itemCount("bait_treasure"), 0);
+    assert.equal(itemCount("rod_carbon"), 1);
+    assert.equal(manager.convertHighestQualityBaitsToWorms(userId, 2).total, 50);
+    assert.equal(itemCount("bait_worm"), 95);
+    assert.deepEqual(manager.convertHighestQualityBaitsToWorms(userId, 2), { converted: [], total: 0, onlyWorms: true });
+    assert.equal(itemCount("bait_worm"), 95);
+
+    // 易伤同时处理首领饵与寻宝饵；其他用户、群及未被调包的装备保持原样。
+    addItem("bait_boss", 2);
+    addItem("bait_treasure", 7);
+    addItem("bait_magic", 4);
+    manager.equipBait(userId, "bait_magic");
+    db.prepare("INSERT INTO inventory (group_id, user_id, item_id, count) VALUES (?, ?, ?, ?)")
+      .run("group-a", "other-user", "bait_boss", 8);
+    db.prepare("INSERT INTO inventory (group_id, user_id, item_id, count) VALUES (?, ?, ?, ?)")
+      .run("other-group", userId, "bait_boss", 9);
+    const bossAndTreasure = manager.convertHighestQualityBaitsToWorms(userId, 2);
+    assert.deepEqual(bossAndTreasure.converted.map(entry => entry.bait.id), ["bait_boss", "bait_treasure"]);
+    assert.equal(bossAndTreasure.total, 9);
+    assert.equal(itemCount("bait_worm"), 104);
+    assert.equal(itemCount("bait_magic"), 4);
+    assert.equal(manager.getUserData(userId).bait, "bait_magic");
+    assert.equal(db.prepare("SELECT count FROM inventory WHERE group_id = ? AND user_id = ? AND item_id = ?")
+      .get("group-a", "other-user", "bait_boss").count, 8);
+    assert.equal(db.prepare("SELECT count FROM inventory WHERE group_id = ? AND user_id = ? AND item_id = ?")
+      .get("other-group", userId, "bait_boss").count, 9);
+    // 没有原有蚯蚓时也会创建库存；完全无饵时交由指令层损竿。
+    db.prepare("DELETE FROM inventory WHERE group_id = ? AND user_id = ? AND item_id = 'bait_worm'")
+      .run("group-a", userId);
+    assert.equal(manager.convertHighestQualityBaitsToWorms(userId).total, 4);
+    assert.equal(itemCount("bait_worm"), 4);
+    db.prepare("DELETE FROM inventory WHERE group_id = ? AND user_id = ? AND item_id = 'bait_worm'")
+      .run("group-a", userId);
+    assert.deepEqual(manager.convertHighestQualityBaitsToWorms(userId), { converted: [], total: 0, onlyWorms: false });
 
     db.prepare("DELETE FROM inventory WHERE group_id = ? AND user_id = ? AND item_id LIKE 'bait_%'")
       .run("group-a", userId);

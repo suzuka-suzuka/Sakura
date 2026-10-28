@@ -146,7 +146,7 @@ async function harness({ withImages = false } = {}) {
     applyNightmareVulnerability() { const applied = !player.vulnerable; player.vulnerable = true; return { applied }; }
     applyBrideNightmareMultiplier(user, factor) { player.bride = (player.bride || 1) * factor; return { total: player.bride }; }
     addDeepPressureLayers(user, amount) { player.deep = (player.deep || 0) + amount; return { added: amount, total: player.deep }; }
-    stealHighestValueBait() { return player.baits?.shift() || { stolen: false }; }
+    convertHighestQualityBaitsToWorms(user, kinds) { const converted = player.baits?.splice(0, kinds) || []; return { converted, total: converted.reduce((sum, entry) => sum + entry.count, 0) }; }
     devourRandomInventoryItem(user, excluded = []) { assert.deepEqual(Array.from(excluded), []); return player.items?.shift() || null; }
     getRodMastery() { return 20; }
     getRodControl() { return player.durability; }
@@ -404,7 +404,7 @@ test("易伤偷取不足不追加伤竿，食星之影无伤竿兜底，其他�
     for (const count of [0, 1, 2]) {
       const h = await harness();
       h.player.vulnerable = true;
-      h.player.baits = Array.from({ length: count }, (_, i) => ({ stolen: true, bait: { name: `bait-${i}` }, remaining: 0 }));
+      h.player.baits = Array.from({ length: count }, (_, i) => ({ bait: { name: `bait-${i}` }, count: 10 + i }));
       h.player.items = Array.from({ length: count }, (_, i) => ({ itemId: `item-${i}` }));
       const state = h.create(fish.find(f => f.id === id));
       await h.instance.finishSuccess(h.e, state, new h.Manager());
@@ -423,6 +423,22 @@ test("易伤偷取不足不追加伤竿，食星之影无伤竿兜底，其他�
     assert.equal(h.calls.rodDamage, coins === 0 ? 40 : 0);
     assert.ok(h.player.coins >= 0);
     if (id.includes("murloc")) assert.equal(h.player.coins, 0);
+  }
+});
+
+test("水猴普通调包一种、易伤两种，免疫和重复结算不调包，无目标按易伤损竿", async () => {
+  for (const vulnerable of [false, true]) for (const immune of [false, true]) for (const count of [0, 1, 3]) {
+    const h = await harness();
+    Object.assign(h.player, { vulnerable, immune, baits: Array.from({ length: count }, (_, i) => ({ bait: { name: `鱼饵${i}` }, count: 30 + i })) });
+    const state = h.create(fish.find(f => f.id === "nightmare_river_water_monkey"));
+    await h.instance.finishSuccess(h.e, state, new h.Manager());
+    await h.instance.finishSuccess(h.e, state, new h.Manager());
+    const kinds = immune ? 0 : Math.min(count, vulnerable ? 2 : 1);
+    assert.equal(h.player.baits.length, count - kinds);
+    assert.equal(h.calls.rodDamage, !immune && count === 0 ? (vulnerable ? 40 : 20) : 0);
+    const message = h.calls.replies.flat(2).join("\n");
+    if (kinds) assert.ok(message.includes(`蚯蚓 ×${kinds === 2 ? 61 : 30}`));
+    assert.equal(h.calls.settlements.length, 1);
   }
 });
 

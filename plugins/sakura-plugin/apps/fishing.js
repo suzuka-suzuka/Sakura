@@ -1941,18 +1941,16 @@ export default class Fishing extends plugin {
       }
 
       case "steal_bait": {
-        const stolen = [];
-        for (let index = 0; index < multiplier; index++) {
-          const result = fishingManager.stealHighestValueBait(e.user_id);
-          if (!result.stolen) break;
-          stolen.push(`【${result.bait.name}】×1，剩余 ${result.remaining} 个`);
-        }
-        if (stolen.length > 0) {
-          message = `🐒 水猴按价值从高到低偷走了鱼饵：${stolen.join("；")}！`;
+        const result = fishingManager.convertHighestQualityBaitsToWorms(e.user_id, multiplier);
+        if (result.total > 0) {
+          const swapped = result.converted.map(({ bait, count }) => `【${bait.name}】×${count}`);
+          message = `🐒 水猴把${swapped.join("、")}全部调包成了蚯蚓 ×${result.total}！`;
         } else {
           message = fallbackRodDamage(
             effect.fallback_rod_damage || 20,
-            "🐒 水猴没摸到鱼饵，恼怒地抓伤了鱼竿！",
+            result.onlyWorms
+              ? "🐒 水猴发现饵盒里只有蚯蚓，恼怒地抓伤了鱼竿！"
+              : "🐒 水猴翻了个空饵盒，恼怒地抓伤了鱼竿！",
           );
         }
         break;
