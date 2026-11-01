@@ -152,6 +152,15 @@ categories:
     description: "可投放到钓点的趣味道具"
     handler: fishing_special
     items:
+      - id: item_holy_water
+        name: 净化圣水
+        icon: 💧
+        price: 3333
+        type: consumable
+        convertible: true
+        instant_effect: clear_debuffs
+        description: 清除骷髅诅咒、花嫁印记、亡者高利贷（含全部抽成印记）、全部致盲和易伤。
+
       - id: fortune_bag
         name: 福袋
         price: 400

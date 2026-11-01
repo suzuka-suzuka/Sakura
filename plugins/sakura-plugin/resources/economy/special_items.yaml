@@ -23,14 +23,6 @@ categories:
         instant_effect: repair_rod
         description: 完全修复当前鱼竿的耐久，并解除深压回响造成的控制力减益。
 
-      - id: item_holy_water
-        name: 净化圣水
-        icon: 💧
-        type: consumable
-        convertible: true
-        instant_effect: clear_debuffs
-        description: 清除骷髅诅咒、花嫁印记、亡者高利贷（含全部抽成印记）、全部致盲和易伤。
-
       - id: item_sand_time
         name: 时之沙
         icon: ⏳
