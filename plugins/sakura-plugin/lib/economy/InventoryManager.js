@@ -15,6 +15,29 @@ export default class InventoryManager {
     }
 
     this.economyManager = new EconomyManager(this.e);
+    this._migrateLegacyHolyWater();
+  }
+
+  // 兼容圣水上架初期按中文名入包的记录，与宝箱奖励的正式 ID 合并。
+  _migrateLegacyHolyWater() {
+    const legacyId = "净化圣水";
+    const legacy = db.prepare(`
+      SELECT count FROM inventory WHERE group_id = ? AND user_id = ? AND item_id = ?
+    `);
+    if (!legacy.get(this.groupId, this.userId, legacyId)) return;
+    db.transaction(() => {
+      const row = legacy.get(this.groupId, this.userId, legacyId);
+      if (!row) return;
+      if (row.count > 0) {
+        db.prepare(`
+          INSERT INTO inventory (group_id, user_id, item_id, count) VALUES (?, ?, ?, ?)
+          ON CONFLICT(group_id, user_id, item_id) DO UPDATE SET count = count + excluded.count
+        `).run(this.groupId, this.userId, "item_holy_water", row.count);
+      }
+      db.prepare(`
+        DELETE FROM inventory WHERE group_id = ? AND user_id = ? AND item_id = ?
+      `).run(this.groupId, this.userId, legacyId);
+    }).immediate();
   }
 
   getInventory() {

@@ -19,11 +19,17 @@ async function fixture(t) {
   const db = new Database(":memory:");
   t.after(() => db.close());
   db.exec(`
+    CREATE TABLE economy (group_id TEXT, user_id TEXT, coins INTEGER, PRIMARY KEY (group_id, user_id));
     CREATE TABLE fishing_stats (
       group_id TEXT, user_id TEXT, total_catch INTEGER, total_earnings INTEGER,
       torpedo_hits INTEGER, profession TEXT, profession_level INTEGER,
       fishing_stamina INTEGER, fishing_stamina_updated_at INTEGER,
       koi_wish INTEGER DEFAULT 0, star_wish TEXT,
+      nightmare_curse_layers INTEGER DEFAULT 0, nightmare_curse_stopped INTEGER DEFAULT 0,
+      nightmare_curse_prank_revealed INTEGER DEFAULT 0, bride_nightmare_multiplier REAL DEFAULT 1,
+      ghost_debt INTEGER DEFAULT 0, ghost_debt_turns_remaining INTEGER DEFAULT 0,
+      ghost_debt_mark INTEGER DEFAULT 0, blindness_layers INTEGER DEFAULT 0,
+      nightmare_vulnerable INTEGER DEFAULT 0,
       PRIMARY KEY (group_id, user_id)
     );
     CREATE TABLE inventory (
@@ -65,6 +71,10 @@ async function fixture(t) {
     return module.namespace.default;
   }
   class EconomyManager {
+    constructor(e) { this.e = e; }
+    ensureUser() { return this.e.user_id; }
+    getUserData() { return db.prepare("SELECT coins FROM economy WHERE group_id = ? AND user_id = ?").get(this.e.group_id, this.e.user_id); }
+    recordTransaction() {}
     getBagCapacity() { return 100; }
     getBagLevel() { return 1; }
     getCoins() { return 0; }
@@ -123,8 +133,50 @@ async function fixture(t) {
     e.match = ["", name, argument];
     await app.useItem(e);
   };
-  return { db, app, event, stock, count, use, FishingManager, redisValues,
+  return { db, app, event, stock, count, use, FishingManager, ShopManager, InventoryManager, redisValues,
     getInventoryData: () => inventoryData };
+}
+
+test("商店购买圣水按正式 ID 入包，使用后扣一瓶并清除诅咒", async t => {
+  const f = await fixture(t), e = f.event();
+  f.db.prepare("INSERT INTO economy VALUES (?, ?, ?)").run(e.group_id, e.user_id, 10000);
+  const result = await new f.ShopManager().buyItem(e, "净化圣水", 2);
+  assert.equal(result.success, true);
+  assert.equal(f.db.prepare("SELECT coins FROM economy").get().coins, 3334);
+  assert.equal(f.count(e, "item_holy_water"), 2);
+  assert.equal(f.count(e, "净化圣水"), 0);
+  const fm = new f.FishingManager(e.group_id);
+  fm.getUserData(e.user_id);
+  f.db.prepare("UPDATE fishing_stats SET nightmare_curse_layers = 3").run();
+  await f.use(e, "净化圣水");
+  assert.equal(f.count(e, "item_holy_water"), 1);
+  assert.equal(fm.getUserData(e.user_id).nightmare_curse_layers, 0);
+  assert.match(e.replies.at(-1), /已彻底洗净/u);
+  await f.use(e, "净化圣水");
+  assert.equal(f.count(e, "item_holy_water"), 1, "没有减益时不消耗");
+});
+
+for (const existing of [0, 2]) {
+  test(`旧购买圣水与已有 ${existing} 瓶奖励合并，数量不丢失且可直接使用`, async t => {
+    const f = await fixture(t), e = f.event();
+    f.stock(e, "净化圣水", 3);
+    if (existing) f.stock(e, "item_holy_water", existing);
+    f.stock(f.event("other"), "净化圣水", 7);
+    f.stock(f.event("u", "h"), "净化圣水", 9);
+    const fm = new f.FishingManager(e.group_id);
+    fm.getUserData(e.user_id);
+    f.db.prepare("UPDATE fishing_stats SET nightmare_curse_layers = 1 WHERE group_id = ? AND user_id = ?").run(e.group_id, e.user_id);
+    await f.use(e, "净化圣水");
+    assert.match(e.replies.at(-1), /已彻底洗净/u);
+    for (let i = 0; i < 3; i++) {
+      const inventory = new f.InventoryManager(e);
+      assert.equal(inventory.getItemCount("item_holy_water"), existing + 2);
+      assert.equal(inventory.getItemCount("净化圣水"), 0);
+      assert.equal(inventory.getCurrentSize(), existing + 2);
+    }
+    assert.equal(f.db.prepare("SELECT count FROM inventory WHERE group_id = 'g' AND user_id = 'other' AND item_id = '净化圣水'").get().count, 7);
+    assert.equal(f.db.prepare("SELECT count FROM inventory WHERE group_id = 'h' AND user_id = 'u' AND item_id = '净化圣水'").get().count, 9);
+  });
 }
 
 for (const first of ["koi", "star"]) {
