@@ -84,8 +84,8 @@ export function parseImageCommandArgs(rawText) {
 export function parseGifCommandArgs(rawText) {
   let text = String(rawText || "");
   const animation = {};
-  for (const [name, field] of [["frames", "frameCount"], ["delay", "frameDurationMs"]]) {
-    const pattern = new RegExp(`(?:^|\\s)(?:--)?${name}=([^\\s]+)`, "gi");
+  for (const [names, field] of [["frames|f", "frameCount"], ["delay|d", "frameDurationMs"]]) {
+    const pattern = new RegExp(`(?:^|\\s)(?:--)?(?:${names})=([^\\s]+)`, "gi");
     text = text.replace(pattern, (_, value) => {
       animation[field] = Number(value);
       return " ";

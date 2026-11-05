@@ -71,6 +71,12 @@ test("GIF 参数解析不改变静态图片提示词", () => {
   assert.equal(args.channel, "animation");
   assert.equal(args.aspectRatio, "16:9");
   assert.equal(args.promptText, "小猫挥手");
+  assert.deepEqual(parser.parseGifCommandArgs("route=animation f=16 d=100 16:9 小猫挥手"), args);
+  assert.deepEqual(parser.parseGifCommandArgs("route=animation --F=16 --D=100 16:9 小猫挥手"), args);
+  const mixed = parser.parseGifCommandArgs("frames=8 f=16 d=200 delay=100 小猫挥手");
+  assert.equal(mixed.frameCount, 16);
+  assert.equal(mixed.frameDurationMs, 100);
+  assert.equal(mixed.promptText, "小猫挥手");
   assert.equal(parser.parseImageCommandArgs("frames=16 小猫挥手").promptText, "frames=16 小猫挥手");
 });
 
@@ -221,10 +227,11 @@ const event = (msg, inputs = []) => ({ msg, inputs, self_id: 10001, replies: [],
 
 test("真实命令入口完成预检、生成和 GIF 消息发送", async () => {
   const app = await loadEntry("../apps/ImageEdit.js", "EditImage");
-  const e = event("#gif frames=16 delay=100 小猫挥手");
+  const e = event("#gif f=16 d=100 小猫挥手");
   assert.equal((await app.preflightImageEdit(e)).charge, true);
   assert.equal(await app.dispatchHandler(e), true);
   assert.equal(requests[0].frame_count, 16);
+  assert.equal(requests[0].frame_duration_ms, 100);
   assert.deepEqual(e.replies[0][0].buffer, gif);
   const withReference = event("#gif 让它眨眼", [png]);
   assert.equal(await app.dispatchHandler(withReference), true);
