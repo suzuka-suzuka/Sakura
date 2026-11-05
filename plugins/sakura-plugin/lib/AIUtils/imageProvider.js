@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import OpenAI, { toFile } from "openai";
 import sharp from "sharp";
 import Setting from "../setting.js";
+import { VALID_IMAGE_QUALITIES } from "./imageCommandParser.js";
 import { tagMediaError } from "./mediaErrorMessages.js";
 import {
   createRouteExecutionPlan,
@@ -82,14 +83,32 @@ export function normalizeImageGenerationOptions(
   const warnings = [];
   const model = `${modelName || ""}`.toLowerCase();
   const usesGrokImage = provider === "grok" || isGrokImageModel(model);
+  const usesGptImage = provider === "openai" && model.includes("gpt-image");
   const providerName = imageProviderName(provider, model);
   let sourceImageLimit = sourceImageCount;
 
   if (!normalized.aspectRatio || normalized.aspectRatio === "auto") {
     normalized.aspectRatio = null;
   }
-  if (!normalized.imageSize && normalized.outputFormat !== "gif") normalized.imageSize = "1K";
+  if (!normalized.imageSize && normalized.outputFormat !== "gif" && !usesGptImage) {
+    normalized.imageSize = "1K";
+  }
   if (!Number.isInteger(normalized.count)) normalized.count = 1;
+
+  if (usesGptImage) {
+    normalized.quality = normalized.quality ?? normalized.defaultGptQuality;
+  }
+  if (normalized.quality === "auto") normalized.quality = undefined;
+  if (normalized.quality) {
+    if (!usesGptImage) {
+      warnings.push(`${modelName} 当前接口不支持独立画质参数，已忽略 q=${normalized.quality}`);
+      normalized.quality = undefined;
+    } else if (["xhigh", "max"].includes(normalized.quality) &&
+      !/^gpt-image-2\.[56]-(sunburst|flare)(?:-|$)/i.test(model)) {
+      warnings.push(`${modelName} 最高支持 high 画质，已将 ${normalized.quality} 降为 high`);
+      normalized.quality = "high";
+    }
+  }
 
   if (provider === "gemini" || provider === "vertex") {
     if (Number.isInteger(normalized.count) && normalized.count > 1) {
@@ -659,8 +678,12 @@ function pickOpenAISize(modelName, aspectRatio, imageSize) {
   return "1024x1024";
 }
 
-function pickOpenAIQuality(modelName, imageSize) {
+function pickOpenAIQuality(modelName, imageSize, quality) {
   const normalizedModel = `${modelName || ""}`.toLowerCase();
+
+  if (normalizedModel.includes("gpt-image")) {
+    return quality || null;
+  }
 
   if (isGrokImageModel(normalizedModel)) {
     return null;
@@ -751,7 +774,7 @@ async function callOpenAIImage(
     options.aspectRatio,
     options.imageSize
   );
-  const quality = pickOpenAIQuality(imageConfig.model, options.imageSize);
+  const quality = pickOpenAIQuality(imageConfig.model, options.imageSize, options.quality);
 
   if (options.outputFormat === "gif") {
     request.output_format = "gif";
@@ -873,10 +896,14 @@ export async function generateImagesWithProvider(
   options = {},
   hooks = {}
 ) {
+  if (options.quality != null && !VALID_IMAGE_QUALITIES.includes(options.quality)) {
+    throw new Error(`图片画质 q 必须是 ${VALID_IMAGE_QUALITIES.join("、")} 之一。`);
+  }
+  const config = options.selfId == null
+    ? imageConfig
+    : Setting.getConfig("EditImage", { selfId: options.selfId });
+  options = { ...options, defaultGptQuality: config.gptQuality ?? "auto" };
   if (options.outputFormat === "gif") {
-    const config = options.selfId == null
-      ? imageConfig
-      : Setting.getConfig("EditImage", { selfId: options.selfId });
     options = {
       ...options,
       frameCount: options.frameCount ?? config.gifFrameCount ?? 9,

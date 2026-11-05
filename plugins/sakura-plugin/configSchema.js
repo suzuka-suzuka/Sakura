@@ -307,6 +307,7 @@ const EditTaskSchema = z.object({
 
 const EditImageObjectSchema = z.object({
     imageRoute: z.string().default('').describe('默认图片路由|#imageRouteSelect|未在命令中指定时使用'),
+    gptQuality: z.enum(['auto', 'low', 'medium', 'high', 'xhigh', 'max']).default('auto').describe('GPT 默认画质'),
     gifRoute: z.string().default('').describe('GIF 路由|#imageRouteSelect'),
     gifFrameCount: z.number().int().min(2).max(16).default(9).describe('GIF 帧数|#step:1'),
     gifFrameDurationMs: z.number().int().min(20).max(2000).multipleOf(10).default(200).describe('GIF 每帧时长（毫秒）|#step:10'),

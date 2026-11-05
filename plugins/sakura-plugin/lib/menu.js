@@ -42,8 +42,8 @@ export const menuGroups = [
   {
     id: "creation", title: "AI 创作", desc: "生图、绘图、视频和语音生成。",
     items: [
-      { name: "AI图片生成/编辑", command: "#i [route=路由ID|grok|gpt|gemini|vertex] [比例] [1K/2K/4K] [n=1-6] <提示词>", desc: "通过图片路由使用 Grok、OpenAI、Gemini 或 Vertex 生图；省略路由时使用后台默认路由，引用图片即可改图。回退时会按目标能力转换比例、尺寸和数量。", costCommand: charge("EditImage.dispatchHandler"), examples: ["#i 16:9 2K 赛博风格城市夜景", "#i route=image-main n=4 二次元头像"] },
-      { name: "AI动图生成", command: "#gif [route=路由ID] [frames=9] [delay=200] <动画描述>", desc: "GPT Image 2.6 文字或参考图生成循环 GIF；frames 为 2～16 帧，delay 为每帧毫秒数（20～2000，10 的倍数）。", costCommand: charge("EditImage.dispatchHandler"), examples: ["#gif 小猫眨眼挥手，循环播放", "#gif route=gif-main frames=16 delay=100 樱花飘落"] },
+      { name: "AI图片生成/编辑", command: "#i [route=路由ID|grok|gpt|gemini|vertex] [比例] [1K/2K/4K] [q=画质] [n=1-6] <提示词>", desc: "通过图片路由使用 Grok、OpenAI、Gemini 或 Vertex 生图；省略路由时使用后台默认路由，引用图片即可改图。q 支持 auto/low/medium/high/xhigh/max；GPT Image 尺寸与画质独立，省略画质时使用后台默认画质。回退时会按目标能力转换参数。", costCommand: charge("EditImage.dispatchHandler"), examples: ["#i 16:9 2K 赛博风格城市夜景", "#i route=image-main n=4 二次元头像"] },
+      { name: "AI动图生成", command: "#gif [route=路由ID] [q=画质] [frames=9] [delay=200] <动画描述>", desc: "GPT Image 2.6 文字或参考图生成循环 GIF；frames 为 2～16 帧，delay 为每帧毫秒数（20～2000，10 的倍数）。", costCommand: charge("EditImage.dispatchHandler"), examples: ["#gif 小猫眨眼挥手，循环播放", "#gif route=gif-main frames=16 delay=100 樱花飘落"] },
       { name: "自定义图片指令", command: "配置的 EditImage 触发词", desc: "按后台配置的图片编辑触发词处理引用图片。", costCommand: charge("EditImage.dispatchHandler") },
       { name: "NAI绘图", command: "#绘图 <场景> [@横,纵: 角色]", desc: "坐标范围 0-100（百分号可省略）；V5 不兼容时自动切换 V4.5。", costCommand: charge("NaiPainting.naiParams") },
       { name: "NAI余额", command: "#查询nai余额", desc: "查看 Anlas 余额和 NAI5 剩余额度卡片；也支持 #查询nai额度。", permission: "主人" },

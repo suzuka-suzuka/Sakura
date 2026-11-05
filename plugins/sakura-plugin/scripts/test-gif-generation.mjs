@@ -52,7 +52,7 @@ mock.module(new URL("../node_modules/openai/index.mjs", import.meta.url).href, {
 const oldLogger = globalThis.logger;
 const oldFetch = globalThis.fetch;
 globalThis.logger = { warn() {}, error() {}, info() {}, mark() {} };
-const { generateImagesWithProvider } = await import("../lib/AIUtils/imageProvider.js");
+const { generateImagesWithProvider, normalizeImageGenerationOptions } = await import("../lib/AIUtils/imageProvider.js");
 beforeEach(() => {
   featureConfig = { imageRoute: "static", gifRoute: "animation", gifFrameCount: 12, gifFrameDurationMs: 100 };
   routes = [route("static", ["gpt-image-2"]), route("animation", ["gpt-image-2.6-flare"])];
@@ -83,6 +83,9 @@ test("GIF 参数解析不改变静态图片提示词", () => {
 test("GIF 配置补齐默认值并校验帧参数范围", () => {
   const config = EditImageSchema.parse({ imageRoute: "static" });
   assert.equal(config.gifRoute, "");
+  assert.equal(config.gptQuality, "auto");
+  assert.equal(EditImageSchema.parse({ gptQuality: "max" }).gptQuality, "max");
+  assert.equal(EditImageSchema.safeParse({ gptQuality: "ultra" }).success, false);
   assert.equal(config.gifFrameCount, 9);
   assert.equal(config.gifFrameDurationMs, 200);
   assert.equal(EditImageSchema.safeParse({ gifFrameCount: 17 }).success, false);
@@ -196,6 +199,76 @@ test("普通静态生图仍走原始路由且不附带 GIF 参数", async () => 
   assert.equal(requests[0].model, "gpt-image-2");
   assert.equal(requests[0].output_format, undefined);
   assert.equal(requests[0].frame_count, undefined);
+  assert.equal(Object.hasOwn(requests[0], "size"), false);
+  assert.equal(Object.hasOwn(requests[0], "quality"), false);
+});
+
+test("画质参数独立于尺寸，支持简称、完整名称和自动值", async () => {
+  const parsed = parser.parseImageCommandArgs("2K q=low quality=MAX 小猫");
+  assert.equal(parsed.quality, "max");
+  assert.equal(parsed.imageSize, "2K");
+  assert.equal(parsed.promptText, "小猫");
+  for (const quality of ["low", "medium", "high", "xhigh", "max", "auto"]) {
+    await generate({ imageSize: "1K", quality });
+    const request = requests.at(-1);
+    assert.equal(request.size, "1024x1024");
+    assert.equal(request.quality, quality === "auto" ? undefined : quality);
+  }
+  await generate({ imageSize: "2K" });
+  assert.equal(requests.at(-1).size, "2048x2048");
+  assert.equal(Object.hasOwn(requests.at(-1), "quality"), false);
+  await generate({ quality: "max" });
+  assert.equal(Object.hasOwn(requests.at(-1), "size"), false);
+  const requestCount = requests.length;
+  await assert.rejects(generate({ quality: "ultra" }), /图片画质/);
+  assert.equal(requests.length, requestCount);
+});
+
+test("GPT 默认画质支持命令覆盖、显式自动和账号配置", async () => {
+  featureConfig.gptQuality = "max";
+  await generate({}, [png]);
+  assert.equal(editRequests[0].quality, "max");
+  await generate({ quality: "low" });
+  assert.equal(requests[0].quality, "low");
+  await generate({ quality: "auto" });
+  assert.equal(Object.hasOwn(requests[1], "quality"), false);
+  response = async () => ({ data: [{ b64_json: png.toString("base64") }] });
+  await generateImagesWithProvider({ ...featureConfig, gptQuality: "low" }, "小猫", [], {
+    selfId: 10001, channel: "animation",
+  });
+  assert.equal(requests[2].quality, "max");
+  await generateImagesWithProvider({ ...featureConfig, gptQuality: "medium" }, "小猫", [], {
+    channel: "animation",
+  });
+  assert.equal(requests[3].quality, "medium");
+  for (const [provider, model] of [["gemini", "gemini-3-pro-image-preview"], ["openai", "grok-imagine-image"], ["openai", "dall-e-3"]]) {
+    const normalized = normalizeImageGenerationOptions(provider, model, { defaultGptQuality: "max" });
+    assert.equal(normalized.options.quality, undefined);
+    assert.deepEqual(normalized.warnings, []);
+  }
+});
+
+test("每次路由回退按目标模型调整默认画质并提示", async () => {
+  featureConfig.gptQuality = "max";
+  routes[0].targets = [target("gpt-image-2.6-sunburst", 3), target("gpt-image-2", 2), target("gpt-image-2.5-flare", 1)];
+  routes[0].maxAttempts = 3;
+  response = async (request) => {
+    if (request.model === "gpt-image-2.6-sunburst") throw new Error("模拟上游失败");
+    return { data: [{ b64_json: png.toString("base64") }] };
+  };
+  const warnings = [];
+  await generateImagesWithProvider(featureConfig, "小猫", [], {}, {
+    onParameterWarnings: (items) => warnings.push(...items),
+  });
+  assert.deepEqual(requests.map((request) => request.quality), ["max", "high"]);
+  assert.match(warnings.join(" "), /max.*high/);
+  const modern = normalizeImageGenerationOptions("openai", "gpt-image-2.5-flare-2026-09-08", { quality: "max" });
+  assert.equal(modern.options.quality, "max");
+  for (const [provider, model] of [["gemini", "gemini-3-pro-image-preview"], ["openai", "grok-imagine-image"], ["openai", "dall-e-3"]]) {
+    const normalized = normalizeImageGenerationOptions(provider, model, { quality: "max" });
+    assert.equal(normalized.options.quality, undefined);
+    assert.match(normalized.warnings.join(" "), /忽略 q=max/);
+  }
 });
 
 async function loadEntry(relativePath, exportName) {
@@ -230,15 +303,29 @@ const event = (msg, inputs = []) => ({ msg, inputs, self_id: 10001, replies: [],
 
 test("真实命令入口完成预检、生成和 GIF 消息发送", async () => {
   const app = await loadEntry("../apps/ImageEdit.js", "EditImage");
-  const e = event("#gif f=16 d=100 小猫挥手");
+  const e = event("#gif f=16 d=100 q=max 小猫挥手");
   assert.equal((await app.preflightImageEdit(e)).charge, true);
   assert.equal(await app.dispatchHandler(e), true);
   assert.equal(requests[0].frame_count, 16);
   assert.equal(requests[0].frame_duration_ms, 100);
+  assert.equal(requests[0].quality, "max");
   assert.deepEqual(e.replies[0][0].buffer, gif);
-  const withReference = event("#gif 让它眨眼", [png]);
+  const withReference = event("#gif quality=xhigh 让它眨眼", [png]);
   assert.equal(await app.dispatchHandler(withReference), true);
   assert.deepEqual(editRequests[0].image, png);
+  assert.equal(editRequests[0].quality, "xhigh");
+});
+
+test("普通生图和自定义编辑命令将画质传入请求", async () => {
+  const app = await loadEntry("../apps/ImageEdit.js", "EditImage");
+  response = async () => ({ data: [{ b64_json: png.toString("base64") }] });
+  await app.dispatchHandler(event("#i 1K quality=high 小猫"));
+  assert.equal(requests[0].size, "1024x1024");
+  assert.equal(requests[0].quality, "high");
+  assert.equal(requests[0].prompt, "小猫");
+  await app.dynamicImageHandler(event("#修改 q=medium 小猫", [png]), { prompt: "变成水彩" }, ["#修改"], [png]);
+  assert.equal(editRequests[0].quality, "medium");
+  assert.equal(editRequests[0].prompt, "变成水彩 小猫");
 });
 
 test("命令缺少提示词时免扣费，已受理请求的拒绝输入和生成失败均保留扣费", async () => {

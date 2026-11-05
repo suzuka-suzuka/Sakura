@@ -92,6 +92,7 @@ function providerName(provider, kind) {
 function isSafeConfigurationMessage(message) {
   return matches(message, [
     /^GIF /,
+    /^图片画质 /,
     /^未配置生图渠道/,
     /^未配置图片路由/,
     /^未找到名为/,

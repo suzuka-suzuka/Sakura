@@ -194,8 +194,8 @@ AI 对话与记忆：
 
 AI 创作：
 
-- `#i [grok|gpt|gemini|vertex] [比例] [1K/2K/4K] [n=1-6] <提示词>`：统一生图或改图。
-- `#gif [route=路由ID] [比例] [1K/2K/4K] [n=1-6] [frames=9] [delay=200] <动画描述>`：文字或参考图生成循环 GIF。后台 `EditImage.gifRoute` 选择包含 `gpt-image-2.6-sunburst` 或 `gpt-image-2.6-flare` 的图片路由，留空使用默认图片路由；仅向支持 GIF 的目标发送请求。`gifFrameCount` 默认 9 帧，`gifFrameDurationMs` 默认每帧 200 毫秒。命令中的 `frames`（简称 `f`）、`delay`（简称 `d`）优先于后台配置，省略时使用配置值。frames 支持 2～16，delay 支持 20～2000 且为 10 的倍数。省略比例和尺寸时使用 API 自动尺寸，显式指定时仍受上游总像素预算限制。支持引用图片、当前图片及头像作为参考图（最多 16 张），AI 工具可通过 seq 引用图片。无参考图调用 /images/generations，有参考图调用 /images/edits，并传入 output_format=gif 与动画参数。2026-11-05 已使用官方 GPT Image 2.6 Flare 实测参考图返回多帧 GIF；当前官方指南的编辑接口限制说明与实测存在差异，兼容服务需确认已适配。沿用“AI图片编辑”指令费用，有提示词的请求受理时扣费，失败、空结果或上游拒绝均不退费；缺少提示词时静默结束，不扣费。AI 生图工具也支持 `outputFormat=gif`。
+- `#i [grok|gpt|gemini|vertex] [比例] [1K/2K/4K] [q=画质] [n=1-6] <提示词>`：统一生图或改图。GPT Image 的尺寸和画质独立设置，`q`（或 `quality`）支持 `auto/low/medium/high/xhigh/max`，普通图片及 GIF 均可使用；省略画质时使用 `EditImage.gptQuality`（默认 `auto`），命令显式指定的 `q` 优先，`q=auto` 使用 API 默认画质；该配置仅用于 GPT Image，普通图片和 GIF 均生效。省略比例和尺寸时由 API 自动决定。旧 GPT Image 模型会将 `xhigh/max` 降为 `high` 并提示，其他不支持独立画质的渠道会忽略该参数并提示。
+- `#gif [route=路由ID] [比例] [1K/2K/4K] [q=画质] [n=1-6] [frames=9] [delay=200] <动画描述>`：文字或参考图生成循环 GIF。后台 `EditImage.gifRoute` 选择包含 `gpt-image-2.6-sunburst` 或 `gpt-image-2.6-flare` 的图片路由，留空使用默认图片路由；仅向支持 GIF 的目标发送请求。`gifFrameCount` 默认 9 帧，`gifFrameDurationMs` 默认每帧 200 毫秒。命令中的 `frames`（简称 `f`）、`delay`（简称 `d`）优先于后台配置，省略时使用配置值。frames 支持 2～16，delay 支持 20～2000 且为 10 的倍数。省略比例和尺寸时使用 API 自动尺寸，显式指定时仍受上游总像素预算限制。支持引用图片、当前图片及头像作为参考图（最多 16 张），AI 工具可通过 seq 引用图片。无参考图调用 /images/generations，有参考图调用 /images/edits，并传入 output_format=gif 与动画参数。2026-11-05 已使用官方 GPT Image 2.6 Flare 实测参考图返回多帧 GIF；当前官方指南的编辑接口限制说明与实测存在差异，兼容服务需确认已适配。沿用“AI图片编辑”指令费用，有提示词的请求受理时扣费，失败、空结果或上游拒绝均不退费；缺少提示词时静默结束，不扣费。AI 生图工具也支持 `outputFormat=gif`。
 - `#绘图 <提示词>`：NovelAI 绘图。
 - `#v [grok|gemini] [比例] [分辨率] [时长] <提示词>`：Grok 或 Gemini Omni 视频。
 - `说 <内容>` / `<角色名>说 <内容>`：语音生成。

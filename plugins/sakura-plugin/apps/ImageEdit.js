@@ -170,18 +170,19 @@ export class EditImage extends plugin {
     let {
       aspectRatio: userRatio,
       imageSize: userSize,
+      quality: userQuality,
       count: userCount,
       channel: userChannel,
       promptText: userPrompt,
     } = this.parseArgs(remainingMsg);
 
-    if ((!userRatio || !userSize) && match.length > 1) {
+    if ((!userRatio || !userSize || !userQuality) && match.length > 1) {
       for (let i = 1; i < match.length; i += 1) {
         if (!match[i]) {
           continue;
         }
 
-        const { aspectRatio: groupRatio, imageSize: groupSize } =
+        const { aspectRatio: groupRatio, imageSize: groupSize, quality: groupQuality } =
           this.parseArgs(match[i]);
 
         if (groupRatio && !userRatio) {
@@ -190,6 +191,9 @@ export class EditImage extends plugin {
 
         if (groupSize && !userSize) {
           userSize = groupSize;
+        }
+        if (groupQuality && !userQuality) {
+          userQuality = groupQuality;
         }
       }
     }
@@ -215,6 +219,7 @@ export class EditImage extends plugin {
     return this._processAndCallAPI(e, finalPrompt, inputImages, {
       aspectRatio,
       imageSize,
+      quality: userQuality,
       count: userCount,
       channel: userChannel,
     });
@@ -230,6 +235,7 @@ export class EditImage extends plugin {
     const {
       aspectRatio,
       imageSize: parsedSize,
+      quality,
       count,
       channel,
       promptText,
@@ -245,6 +251,7 @@ export class EditImage extends plugin {
       imageSize,
       count,
       channel,
+      quality,
     });
   }
 
@@ -260,6 +267,7 @@ export class EditImage extends plugin {
         {
           aspectRatio: options.aspectRatio,
           imageSize: options.imageSize,
+          quality: options.quality,
           count: options.count,
           channel: options.channel,
           selfId: e.self_id,

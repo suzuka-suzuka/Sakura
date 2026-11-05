@@ -12,6 +12,8 @@ export const VALID_IMAGE_ASPECT_RATIOS = [
   "21:9",
 ];
 
+export const VALID_IMAGE_QUALITIES = ["auto", "low", "medium", "high", "xhigh", "max"];
+
 function clampImageCount(value) {
   const count = Number.parseInt(value, 10);
   if (!Number.isFinite(count)) return 1;
@@ -47,6 +49,11 @@ export function parseImageCommandArgs(rawText) {
   let aspectRatio = null;
   let imageSize = null;
   let count = 1;
+  let quality;
+  promptText = promptText.replace(/(?:^|\s)(?:--)?(?:quality|q)=([^\s]+)/gi, (_, value) => {
+    quality = value.toLowerCase();
+    return " ";
+  });
 
   const ratioRegex = new RegExp(
     `(?:^|\\s)(${VALID_IMAGE_ASPECT_RATIOS.join("|")})(?=\\s|$)`,
@@ -75,6 +82,7 @@ export function parseImageCommandArgs(rawText) {
   return {
     aspectRatio,
     imageSize,
+    ...(quality === undefined ? {} : { quality }),
     count,
     channel,
     promptText: promptText.replace(/\s+/g, " ").trim(),
