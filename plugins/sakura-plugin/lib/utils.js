@@ -125,7 +125,7 @@ export async function getImg(e, getAvatar = false, toBase64 = false) {
       imageUrls = e.message
         .filter((segment) => segment.type === "at")
         .map((segment) => String(segment.data?.qq ?? ""))
-        .filter((qq) => /^[1-9]\d*$/.test(qq) && qq !== String(e.self_id))
+        .filter((qq) => /^[1-9]\d*$/.test(qq))
         .map((qq) => `https://q1.qlogo.cn/g?b=qq&s=640&nk=${qq}`);
     }
     imageUrls = [...new Set([...imageUrls, ...directImageUrls])];

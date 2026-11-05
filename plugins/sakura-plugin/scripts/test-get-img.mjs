@@ -148,10 +148,10 @@ test("关闭头像提取后仍能混合当前和引用图片", async () => {
   assert.equal(await getImg(event([at(10001)])), null);
 });
 
-test("全体、机器人自身和无效 @ 不进入头像列表", async () => {
+test("手动艾特机器人自身可提取头像，全体和无效 @ 被过滤", async () => {
   const { getImg, event } = await harness();
   const e = event([at("all"), at(99999), at(null), at("abc"), at(0), at(10001)]);
-  assert.deepEqual(plain(await getImg(e, true)), [avatar(10001)]);
+  assert.deepEqual(plain(await getImg(e, true)), [avatar(99999), avatar(10001)]);
 });
 
 test("不完整消息返回空结果，不请求下载", async () => {
@@ -199,6 +199,18 @@ test("#i 真实入口在同一次请求里传入两个人的头像和当前图�
   assert.equal(await app.dispatchHandler(event([at(10001), image("当前"), at(10002)])), true);
   assert.equal(calls.imageRequests.length, 1);
   assert.deepEqual(decoded(calls.imageRequests[0].images), [avatar(10001), avatar(10002), "当前"]);
+});
+
+test("#gif 和 #i 真实入口将手动艾特的机器人头像传入生成请求", async () => {
+  const { event, calls, loadApp } = await harness();
+  const app = await loadApp("ImageEdit", "EditImage");
+  await app.dispatchHandler(event([at(99999)], { msg: "#gif 眨眼" }));
+  assert.equal(calls.imageRequests[0].options.outputFormat, "gif");
+  assert.deepEqual(calls.imageRequests[0].images, [avatar(99999)]);
+  await app.dispatchHandler(event([at(99999)], { msg: "#i 画成水彩" }));
+  assert.deepEqual(decoded(calls.imageRequests[1].images), [avatar(99999)]);
+  await app.dispatchHandler(event([at(99999)], { msg: "#gif 眨眼", reply: [image("引用")] }));
+  assert.deepEqual(calls.imageRequests[2].images, ["引用"]);
 });
 
 test("#i 真实入口传入引用与当前图片，不传自动 @ 的头像", async () => {
