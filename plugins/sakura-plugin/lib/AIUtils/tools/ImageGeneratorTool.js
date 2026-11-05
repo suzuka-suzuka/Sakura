@@ -21,7 +21,7 @@ export class ImageGeneratorTool extends AbstractTool {
         type: "integer",
         minimum: 2,
         maximum: 64,
-        description: "GIF 帧数，省略时使用后台默认值。",
+        description: "GIF 帧数，可省略，省略时使用 API 默认值。",
       },
       frameDurationMs: {
         type: "integer",

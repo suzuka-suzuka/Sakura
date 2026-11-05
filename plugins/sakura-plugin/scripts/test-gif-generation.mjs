@@ -74,24 +74,23 @@ test("GIF 参数解析不改变静态图片提示词", () => {
   assert.equal(parser.parseImageCommandArgs("frames=16 小猫挥手").promptText, "frames=16 小猫挥手");
 });
 
-test("旧配置补齐 GIF 默认值，配置拒绝越界参数", () => {
-  const config = EditImageSchema.parse({ imageRoute: "static" });
+test("配置不再包含 GIF 帧参数，忽略旧配置中的残留值", () => {
+  const config = EditImageSchema.parse({ imageRoute: "static", gifFrameCount: 9, gifFrameDurationMs: 200 });
   assert.equal(config.gifRoute, "");
-  assert.equal(config.gifFrameCount, 9);
-  assert.equal(config.gifFrameDurationMs, 200);
-  assert.equal(EditImageSchema.safeParse({ gifFrameDurationMs: 25 }).success, false);
+  assert.equal(Object.hasOwn(config, "gifFrameCount"), false);
+  assert.equal(Object.hasOwn(config, "gifFrameDurationMs"), false);
 });
 
-test("请求使用 GIF 路由和后台默认参数，保留多帧原始字节", async () => {
+test("请求使用 GIF 路由且忽略旧配置帧参数，保留多帧原始字节", async () => {
   const buffers = await generate({ selfId: 10001 });
   assert.deepEqual(buffers, [gif]);
   assert.deepEqual(requests[0], {
     model: "gpt-image-2.6-flare", prompt: "小猫挥手", output_format: "gif",
-    frame_count: 12, frame_duration_ms: 100, size: "auto",
+    size: "auto",
   });
 });
 
-test("显式路由与动画参数覆盖默认值", async () => {
+test("请求传递显式路由与动画参数", async () => {
   routes.push(route("override", ["gpt-image-2.6-sunburst"]));
   await generate({ channel: "override", frameCount: 64, frameDurationMs: 20, count: 2 });
   assert.equal(requests[0].model, "gpt-image-2.6-sunburst");
@@ -103,8 +102,17 @@ test("显式路由与动画参数覆盖默认值", async () => {
 test("未设置专用路由和帧参数时兼容旧配置", async () => {
   featureConfig = { imageRoute: "animation" };
   await generate();
-  assert.equal(requests[0].frame_count, 9);
-  assert.equal(requests[0].frame_duration_ms, 200);
+  assert.equal(Object.hasOwn(requests[0], "frame_count"), false);
+  assert.equal(Object.hasOwn(requests[0], "frame_duration_ms"), false);
+});
+
+test("两个 GIF 帧参数可独立省略", async () => {
+  await generate({ frameCount: 8 });
+  assert.equal(requests[0].frame_count, 8);
+  assert.equal(Object.hasOwn(requests[0], "frame_duration_ms"), false);
+  await generate({ frameDurationMs: 100 });
+  assert.equal(Object.hasOwn(requests[1], "frame_count"), false);
+  assert.equal(requests[1].frame_duration_ms, 100);
 });
 
 test("GIF 在 maxAttempts 截断前筛选模型，保留可用目标", async () => {
@@ -160,6 +168,8 @@ test("GIF 参考图通过编辑接口提交原图字节和动画参数", async (
   assert.deepEqual(editRequests[0].image, png);
   await generate({}, [png, png]);
   assert.deepEqual(editRequests[1].image, [png, png]);
+  assert.equal(Object.hasOwn(editRequests[1], "frame_count"), false);
+  assert.equal(Object.hasOwn(editRequests[1], "frame_duration_ms"), false);
 });
 
 test("拒绝伪装成 GIF 的 PNG 和单帧 GIF", async () => {

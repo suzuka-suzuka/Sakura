@@ -33,13 +33,15 @@ function validateGifOptions(options, sourceImageCount) {
   if (sourceImageCount > 16) {
     throw new Error("GIF 参考图片最多支持 16 张，请减少图片数量。");
   }
-  if (!Number.isInteger(options.frameCount) || options.frameCount < 2 || options.frameCount > 64) {
+  if (options.frameCount != null &&
+    (!Number.isInteger(options.frameCount) || options.frameCount < 2 || options.frameCount > 64)) {
     throw new Error("GIF 帧数 frames 必须是 2～64 的整数。");
   }
   if (
+    options.frameDurationMs != null && (
     !Number.isInteger(options.frameDurationMs) ||
     options.frameDurationMs < 20 || options.frameDurationMs > 2000 ||
-    options.frameDurationMs % 10 !== 0
+    options.frameDurationMs % 10 !== 0)
   ) {
     throw new Error("GIF 每帧时长 delay 必须是 20～2000 毫秒，且为 10 的倍数。");
   }
@@ -755,8 +757,8 @@ async function callOpenAIImage(
 
   if (options.outputFormat === "gif") {
     request.output_format = "gif";
-    request.frame_count = options.frameCount;
-    request.frame_duration_ms = options.frameDurationMs;
+    if (options.frameCount != null) request.frame_count = options.frameCount;
+    if (options.frameDurationMs != null) request.frame_duration_ms = options.frameDurationMs;
   }
 
   if (size) {
@@ -874,14 +876,6 @@ export async function generateImagesWithProvider(
   hooks = {}
 ) {
   if (options.outputFormat === "gif") {
-    const config = options.selfId == null
-      ? imageConfig
-      : Setting.getConfig("EditImage", { selfId: options.selfId });
-    options = {
-      ...options,
-      frameCount: options.frameCount ?? config.gifFrameCount ?? 9,
-      frameDurationMs: options.frameDurationMs ?? config.gifFrameDurationMs ?? 200,
-    };
     validateGifOptions(options, sourceInputs.length);
   }
   const selection = resolveImageSelection(
