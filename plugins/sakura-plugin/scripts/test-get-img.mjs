@@ -245,3 +245,14 @@ test("#v 真实入口按引用图片、当前图片的顺序传入素材", async
   })), true);
   assert.deepEqual(decoded(calls.videoRequests[0].images), ["引用", "当前"]);
 });
+
+test("#gif 真实入口收集引用图和当前图，交给公共调用层下载", async () => {
+  const { event, calls, loadApp } = await harness();
+  const app = await loadApp("ImageEdit", "EditImage");
+  assert.equal(await app.dispatchHandler(event([at(10001), image("当前")], {
+    msg: "#gif 让角色挥手", reply: [image("引用")],
+  })), true);
+  assert.deepEqual(calls.imageRequests[0].images, ["引用", "当前"]);
+  assert.equal(calls.imageRequests[0].options.outputFormat, "gif");
+  assert.equal(calls.downloads.length, 0);
+});

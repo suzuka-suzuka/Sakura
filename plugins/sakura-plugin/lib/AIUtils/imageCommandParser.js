@@ -80,3 +80,16 @@ export function parseImageCommandArgs(rawText) {
     promptText: promptText.replace(/\s+/g, " ").trim(),
   };
 }
+
+export function parseGifCommandArgs(rawText) {
+  let text = String(rawText || "");
+  const animation = {};
+  for (const [name, field] of [["frames", "frameCount"], ["delay", "frameDurationMs"]]) {
+    const pattern = new RegExp(`(?:^|\\s)(?:--)?${name}=([^\\s]+)`, "gi");
+    text = text.replace(pattern, (_, value) => {
+      animation[field] = Number(value);
+      return " ";
+    });
+  }
+  return { ...parseImageCommandArgs(text), ...animation, outputFormat: "gif" };
+}

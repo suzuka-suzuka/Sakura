@@ -234,6 +234,9 @@ export function createRouteExecutionPlan(routeId, options = {}) {
     if (protocol && provider.protocol !== protocol) {
       continue;
     }
+    if (options.targetMatches && !options.targetMatches({ route, target, provider })) {
+      continue;
+    }
     const credentials = orderScheduledItems(
       provider.credentials || [],
       CREDENTIAL_SCHEDULING_STRATEGY,

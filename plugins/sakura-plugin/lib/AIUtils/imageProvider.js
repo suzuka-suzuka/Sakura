@@ -24,6 +24,27 @@ const GPT_IMAGE_2_2K_MAX_PIXELS = 4194304;
 
 const channelApiKeyIndex = new Map();
 
+function supportsGif({ target, provider }) {
+  return provider.protocol === "openai" &&
+    /^gpt-image-2\.6-(sunburst|flare)(?:-|$)/i.test(target.model || "");
+}
+
+function validateGifOptions(options, sourceImageCount) {
+  if (sourceImageCount > 16) {
+    throw new Error("GIF 参考图片最多支持 16 张，请减少图片数量。");
+  }
+  if (!Number.isInteger(options.frameCount) || options.frameCount < 2 || options.frameCount > 64) {
+    throw new Error("GIF 帧数 frames 必须是 2～64 的整数。");
+  }
+  if (
+    !Number.isInteger(options.frameDurationMs) ||
+    options.frameDurationMs < 20 || options.frameDurationMs > 2000 ||
+    options.frameDurationMs % 10 !== 0
+  ) {
+    throw new Error("GIF 每帧时长 delay 必须是 20～2000 毫秒，且为 10 的倍数。");
+  }
+}
+
 function normalizeProvider(provider) {
   return provider || "gemini";
 }
@@ -65,7 +86,7 @@ export function normalizeImageGenerationOptions(
   if (!normalized.aspectRatio || normalized.aspectRatio === "auto") {
     normalized.aspectRatio = null;
   }
-  if (!normalized.imageSize) normalized.imageSize = "1K";
+  if (!normalized.imageSize && normalized.outputFormat !== "gif") normalized.imageSize = "1K";
   if (!Number.isInteger(normalized.count)) normalized.count = 1;
 
   if (provider === "gemini" || provider === "vertex") {
@@ -203,7 +224,8 @@ async function notifyParameterWarnings(callback, warnings) {
 function resolveImageSelection(
   imageConfig = {},
   requestedRoute = null,
-  selfId = null
+  selfId = null,
+  outputFormat = null
 ) {
   const scope = selfId == null ? {} : { selfId };
   const featureConfig = selfId == null
@@ -211,6 +233,7 @@ function resolveImageSelection(
     : Setting.getConfig("EditImage", scope);
   const routeReference = `${
     requestedRoute ||
+    (outputFormat === "gif" && (featureConfig.gifRoute || imageConfig.gifRoute)) ||
     featureConfig.imageRoute ||
     imageConfig.imageRoute ||
     ""
@@ -234,15 +257,20 @@ function resolveImageSelection(
   const routeId = resolveRouteReference(routeReference, {
     selfId,
     routeModule: "ImageRoutes",
-    targetMatches: aliasMatchers[alias],
+    targetMatches: aliasMatchers[alias] && ((candidate) =>
+      aliasMatchers[alias](candidate) && (outputFormat !== "gif" || supportsGif(candidate))),
   });
 
   const plan = createRouteExecutionPlan(routeId, {
     selfId,
     routeModule: "ImageRoutes",
     routeLabel: "图片",
+    targetMatches: outputFormat === "gif" ? supportsGif : undefined,
   });
   if (plan.attempts.length === 0) {
+    if (outputFormat === "gif") {
+      throw new Error("GIF 路由没有可用的 GPT Image 2.6 Sunburst/Flare 目标，请检查图片路由及凭据。");
+    }
     throw new Error(`图片路由 ${routeId} 没有可用的目标或凭据。`);
   }
   return { routeId, plan };
@@ -385,7 +413,7 @@ async function normalizeDownloadedImage(buffer, mimeType) {
   return { buffer, mimeType };
 }
 
-async function fetchImageBytes(imageUrl) {
+async function fetchImageBytes(imageUrl, preserveAnimation = false) {
   const response = await fetch(imageUrl);
   if (!response.ok) {
     throw new Error(`Failed to download image: ${response.status}`);
@@ -394,7 +422,9 @@ async function fetchImageBytes(imageUrl) {
   const arrayBuffer = await response.arrayBuffer();
   const rawBuffer = Buffer.from(arrayBuffer);
   const mimeType = response.headers.get("content-type") || "image/png";
-  const normalized = await normalizeDownloadedImage(rawBuffer, mimeType);
+  const normalized = preserveAnimation
+    ? { buffer: rawBuffer, mimeType }
+    : await normalizeDownloadedImage(rawBuffer, mimeType);
 
   return {
     buffer: normalized.buffer,
@@ -686,7 +716,7 @@ async function extractOpenAIImageBuffers(response) {
     }
 
     if (item?.url) {
-      const downloaded = await fetchImageBytes(item.url);
+      const downloaded = await fetchImageBytes(item.url, true);
       buffers.push(downloaded.buffer);
     }
   }
@@ -714,12 +744,20 @@ async function callOpenAIImage(
     model: imageConfig.model,
     prompt: promptText,
   };
-  const size = pickOpenAISize(
-    imageConfig.model,
-    options.aspectRatio,
-    options.imageSize
-  );
+  const size = options.outputFormat === "gif" && !options.aspectRatio && !options.imageSize
+    ? "auto"
+    : pickOpenAISize(
+      imageConfig.model,
+      options.aspectRatio,
+      options.imageSize
+    );
   const quality = pickOpenAIQuality(imageConfig.model, options.imageSize);
+
+  if (options.outputFormat === "gif") {
+    request.output_format = "gif";
+    request.frame_count = options.frameCount;
+    request.frame_duration_ms = options.frameDurationMs;
+  }
 
   if (size) {
     request.size = size;
@@ -763,7 +801,19 @@ async function callOpenAIImage(
     response = await client.images.generate(request);
   }
 
-  return await extractOpenAIImageBuffers(response);
+  const buffers = await extractOpenAIImageBuffers(response);
+  if (options.outputFormat === "gif") {
+    for (const buffer of buffers) {
+      if (!/^GIF8[79]a$/.test(buffer.subarray(0, 6).toString("ascii"))) {
+        throw new Error("GIF 渠道返回了其他格式，请确认渠道支持 GIF 输出。");
+      }
+      const metadata = await sharp(buffer).metadata();
+      if ((metadata.pages || 1) < 2) {
+        throw new Error("GIF 渠道返回了单帧图片，请确认渠道支持动画输出。");
+      }
+    }
+  }
+  return buffers;
 }
 
 async function generateImagesOnce(
@@ -823,10 +873,22 @@ export async function generateImagesWithProvider(
   options = {},
   hooks = {}
 ) {
+  if (options.outputFormat === "gif") {
+    const config = options.selfId == null
+      ? imageConfig
+      : Setting.getConfig("EditImage", { selfId: options.selfId });
+    options = {
+      ...options,
+      frameCount: options.frameCount ?? config.gifFrameCount ?? 9,
+      frameDurationMs: options.frameDurationMs ?? config.gifFrameDurationMs ?? 200,
+    };
+    validateGifOptions(options, sourceInputs.length);
+  }
   const selection = resolveImageSelection(
     imageConfig,
     options.channel,
-    options.selfId
+    options.selfId,
+    options.outputFormat
   );
   const sourceImages = await normalizeImageInputs(sourceInputs);
 

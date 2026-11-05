@@ -12,6 +12,23 @@ export class ImageGeneratorTool extends AbstractTool {
         type: "string",
         description: "Prompt used to generate or edit an image.",
       },
+      outputFormat: {
+        type: "string",
+        enum: ["png", "gif"],
+        description: "输出格式，默认静态图片。gif 用于循环动画，可通过 seq 引用图片生成动图。",
+      },
+      frameCount: {
+        type: "integer",
+        minimum: 2,
+        maximum: 64,
+        description: "GIF 帧数，省略时使用后台默认值。",
+      },
+      frameDurationMs: {
+        type: "integer",
+        minimum: 20,
+        maximum: 2000,
+        description: "GIF 每帧时长，单位毫秒，必须为 10 的倍数。",
+      },
       seq: {
         type: "array",
         items: {
@@ -44,10 +61,10 @@ export class ImageGeneratorTool extends AbstractTool {
     required: ["prompt"],
   };
 
-  description = "Generate or edit images, including redraw, style transfer, and P-editing.";
+  description = "生成或编辑图片，包括重绘、风格转换和修图；也可通过 outputFormat=gif 从文字或参考图片生成循环动图。";
 
   func = async function (opts, e) {
-    let { prompt, seq, aspectRatio, imageSize } = opts;
+    let { prompt, seq, aspectRatio, imageSize, outputFormat, frameCount, frameDurationMs } = opts;
     const imageUrls = [];
 
     if (seq) {
@@ -91,12 +108,17 @@ export class ImageGeneratorTool extends AbstractTool {
           aspectRatio,
           imageSize,
           selfId: e?.self_id,
+          outputFormat,
+          frameCount,
+          frameDurationMs,
         }
       );
 
       if (imageBuffers.length > 0) {
         await e.reply(segment.image(imageBuffers[0]));
-        return "已成功生成并发送图片，禁止回复[图片]";
+        return outputFormat === "gif"
+          ? "已成功生成并发送 GIF 动图，禁止回复[图片]"
+          : "已成功生成并发送图片，禁止回复[图片]";
       }
 
       return "未能生成图片，可能被安全策略拦截。";

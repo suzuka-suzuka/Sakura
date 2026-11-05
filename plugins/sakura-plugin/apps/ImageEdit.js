@@ -2,12 +2,14 @@ import { generateImagesWithProvider } from "../lib/AIUtils/imageProvider.js";
 import { formatMediaUserError } from "../lib/AIUtils/mediaErrorMessages.js";
 import {
   parseImageCommandArgs,
+  parseGifCommandArgs,
   VALID_IMAGE_ASPECT_RATIOS,
 } from "../lib/AIUtils/imageCommandParser.js";
 import { getImg } from "../lib/utils.js";
 import Setting from "../lib/setting.js";
 
 const IMAGE_COMMAND_PATTERN = /^#i(?![a-z])/i;
+const GIF_COMMAND_PATTERN = /^#gif(?![a-z])/i;
 
 async function replyParameterWarnings(e, warnings) {
   await e.reply(
@@ -59,6 +61,16 @@ export class EditImage extends plugin {
       return false;
     }
 
+    if (GIF_COMMAND_PATTERN.test(e.msg)) {
+      const { promptText } = parseGifCommandArgs(e.msg.replace(GIF_COMMAND_PATTERN, ""));
+      return {
+        accepted: true,
+        command: "AI图片编辑",
+        charge: Boolean(promptText),
+        refundOnFalse: false,
+      };
+    }
+
     if (IMAGE_COMMAND_PATTERN.test(e.msg)) {
       const msg = e.msg.replace(IMAGE_COMMAND_PATTERN, "").trim();
       const { promptText } = this.parseArgs(msg);
@@ -107,6 +119,10 @@ export class EditImage extends plugin {
       return false;
     }
 
+    if (GIF_COMMAND_PATTERN.test(e.msg)) {
+      return this.gifHandler(e);
+    }
+
     if (IMAGE_COMMAND_PATTERN.test(e.msg)) {
       return this.editImageHandler(e);
     }
@@ -126,6 +142,17 @@ export class EditImage extends plugin {
 
   parseArgs(msg) {
     return parseImageCommandArgs(msg);
+  }
+
+  async gifHandler(e) {
+    const { promptText, ...options } = parseGifCommandArgs(e.msg.replace(GIF_COMMAND_PATTERN, ""));
+    if (!promptText) {
+      await e.reply("用法：#gif [route=路由ID] [frames=9] [delay=200] <动画描述>，delay 单位为毫秒。");
+      return true;
+    }
+    // 复用生图的引用、当前图片和头像收集规则，由公共调用层下载参考图。
+    const inputImages = await getImg(e, { mode: "mixed", getAvatar: true, toBase64: false });
+    return this._processAndCallAPI(e, promptText, inputImages, options);
   }
 
   async dynamicImageHandler(e, matchedTask, match, cachedInputImages = null) {
@@ -237,6 +264,9 @@ export class EditImage extends plugin {
           count: options.count,
           channel: options.channel,
           selfId: e.self_id,
+          outputFormat: options.outputFormat,
+          frameCount: options.frameCount,
+          frameDurationMs: options.frameDurationMs,
         },
         {
           onParameterWarnings: (warnings) =>
