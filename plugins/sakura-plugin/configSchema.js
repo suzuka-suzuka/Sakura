@@ -308,6 +308,8 @@ const EditTaskSchema = z.object({
 const EditImageObjectSchema = z.object({
     imageRoute: z.string().default('').describe('默认图片路由|#imageRouteSelect|未在命令中指定时使用'),
     gifRoute: z.string().default('').describe('GIF 路由|#imageRouteSelect'),
+    gifFrameCount: z.number().int().min(2).max(16).default(9).describe('GIF 帧数|#step:1'),
+    gifFrameDurationMs: z.number().int().min(20).max(2000).multipleOf(10).default(200).describe('GIF 每帧时长（毫秒）|#step:10'),
     videoRoute: z.string().default('grok-video').describe('默认视频路由|#videoRouteSelect|未在命令中指定时使用'),
     tasks: z.array(EditTaskSchema).default([]).describe('编辑指令列表|配置自定义的图片编辑指令'),
 }).describe('图片与视频生成与编辑');

@@ -21,13 +21,13 @@ export class ImageGeneratorTool extends AbstractTool {
         type: "integer",
         minimum: 2,
         maximum: 16,
-        description: "GIF 帧数，可省略，省略时使用 API 默认值。",
+        description: "GIF 帧数，可省略，省略时使用后台配置值。",
       },
       frameDurationMs: {
         type: "integer",
         minimum: 20,
         maximum: 2000,
-        description: "GIF 每帧时长，单位毫秒，必须为 10 的倍数。",
+        description: "GIF 每帧时长，单位毫秒，必须为 10 的倍数，省略时使用后台配置值。",
       },
       seq: {
         type: "array",

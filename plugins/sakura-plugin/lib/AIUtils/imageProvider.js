@@ -874,6 +874,14 @@ export async function generateImagesWithProvider(
   hooks = {}
 ) {
   if (options.outputFormat === "gif") {
+    const config = options.selfId == null
+      ? imageConfig
+      : Setting.getConfig("EditImage", { selfId: options.selfId });
+    options = {
+      ...options,
+      frameCount: options.frameCount ?? config.gifFrameCount ?? 9,
+      frameDurationMs: options.frameDurationMs ?? config.gifFrameDurationMs ?? 200,
+    };
     validateGifOptions(options, sourceInputs.length);
   }
   const selection = resolveImageSelection(
