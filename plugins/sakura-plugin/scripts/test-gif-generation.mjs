@@ -91,9 +91,9 @@ test("请求使用 GIF 路由且忽略旧配置帧参数，保留多帧原始字
 
 test("请求传递显式路由与动画参数", async () => {
   routes.push(route("override", ["gpt-image-2.6-sunburst"]));
-  await generate({ channel: "override", frameCount: 64, frameDurationMs: 20, count: 2 });
+  await generate({ channel: "override", frameCount: 16, frameDurationMs: 20, count: 2 });
   assert.equal(requests[0].model, "gpt-image-2.6-sunburst");
-  assert.equal(requests[0].frame_count, 64);
+  assert.equal(requests[0].frame_count, 16);
   assert.equal(requests[0].frame_duration_ms, 20);
   assert.equal(requests[0].n, 2);
 });
@@ -147,7 +147,7 @@ test("gpt 别名选择包含 GIF 模型的路由", async () => {
 
 test("拒绝超量参考图、非法帧参数和不兼容路由，均不发模型请求", async () => {
   await assert.rejects(generate({}, Array(17).fill("https://example.invalid/input.png")), /最多支持 16 张/);
-  for (const frameCount of [1, 65, 2.5, NaN]) {
+  for (const frameCount of [1, 17, 64, 65, 2.5, NaN]) {
     await assert.rejects(generate({ frameCount }), /帧数/);
   }
   for (const frameDurationMs of [0, 25, 2010, NaN]) {

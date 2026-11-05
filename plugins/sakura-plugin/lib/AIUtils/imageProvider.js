@@ -34,8 +34,8 @@ function validateGifOptions(options, sourceImageCount) {
     throw new Error("GIF 参考图片最多支持 16 张，请减少图片数量。");
   }
   if (options.frameCount != null &&
-    (!Number.isInteger(options.frameCount) || options.frameCount < 2 || options.frameCount > 64)) {
-    throw new Error("GIF 帧数 frames 必须是 2～64 的整数。");
+    (!Number.isInteger(options.frameCount) || options.frameCount < 2 || options.frameCount > 16)) {
+    throw new Error("GIF 帧数 frames 必须是 2～16 的整数。");
   }
   if (
     options.frameDurationMs != null && (
