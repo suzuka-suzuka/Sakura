@@ -86,7 +86,6 @@ test("请求使用 GIF 路由且忽略旧配置帧参数，保留多帧原始字
   assert.deepEqual(buffers, [gif]);
   assert.deepEqual(requests[0], {
     model: "gpt-image-2.6-flare", prompt: "小猫挥手", output_format: "gif",
-    size: "auto",
   });
 });
 
@@ -170,6 +169,8 @@ test("GIF 参考图通过编辑接口提交原图字节和动画参数", async (
   assert.deepEqual(editRequests[1].image, [png, png]);
   assert.equal(Object.hasOwn(editRequests[1], "frame_count"), false);
   assert.equal(Object.hasOwn(editRequests[1], "frame_duration_ms"), false);
+  assert.equal(Object.hasOwn(editRequests[1], "size"), false);
+  assert.equal(Object.hasOwn(editRequests[1], "quality"), false);
 });
 
 test("拒绝伪装成 GIF 的 PNG 和单帧 GIF", async () => {
@@ -234,7 +235,10 @@ test("命令缺少提示词时免扣费，已受理请求的拒绝输入和生�
   const app = await loadEntry("../apps/ImageEdit.js", "EditImage");
   const empty = event("#gif frames=16");
   assert.equal((await app.preflightImageEdit(empty)).charge, false);
-  assert.equal(await app.dispatchHandler(empty), true);
+  assert.equal(await app.dispatchHandler(empty), false);
+  assert.deepEqual(empty.replies, []);
+  assert.equal(requests.length, 0);
+  assert.equal(editRequests.length, 0);
   const invalid = event("#gif frames=1 小猫挥手");
   const rejected = await app.dispatchHandler(invalid);
   assert.equal(rejected, true);

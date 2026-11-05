@@ -746,13 +746,11 @@ async function callOpenAIImage(
     model: imageConfig.model,
     prompt: promptText,
   };
-  const size = options.outputFormat === "gif" && !options.aspectRatio && !options.imageSize
-    ? "auto"
-    : pickOpenAISize(
-      imageConfig.model,
-      options.aspectRatio,
-      options.imageSize
-    );
+  const size = pickOpenAISize(
+    imageConfig.model,
+    options.aspectRatio,
+    options.imageSize
+  );
   const quality = pickOpenAIQuality(imageConfig.model, options.imageSize);
 
   if (options.outputFormat === "gif") {

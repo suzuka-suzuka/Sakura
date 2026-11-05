@@ -147,8 +147,7 @@ export class EditImage extends plugin {
   async gifHandler(e) {
     const { promptText, ...options } = parseGifCommandArgs(e.msg.replace(GIF_COMMAND_PATTERN, ""));
     if (!promptText) {
-      await e.reply("用法：#gif [route=路由ID] [frames=9] [delay=200] <动画描述>，delay 单位为毫秒。");
-      return true;
+      return false;
     }
     // 复用生图的引用、当前图片和头像收集规则，由公共调用层下载参考图。
     const inputImages = await getImg(e, { mode: "mixed", getAvatar: true, toBase64: false });
