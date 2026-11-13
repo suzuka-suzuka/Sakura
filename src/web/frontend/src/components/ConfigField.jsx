@@ -4,6 +4,7 @@ import DraftInput from './DraftInput';
 import Icon from './Icon';
 import { readAuthToken } from '../utils/authStorage';
 import { useDynamicOptions } from '../hooks/useDynamicOptions';
+import { moveItem, useDragReorder } from '../hooks/useDragReorder';
 import {
     fieldAnchorId,
     formatSummaryValue,
@@ -638,7 +639,8 @@ function ServerDirectoryModal({ initialPath, onCancel, onConfirm }) {
 
     useEffect(() => {
         const handleKeyDown = (event) => {
-            if (event.key === 'Escape') onCancel();
+            // 下拉框会先处理 Esc 并 preventDefault，这时只关下拉、不关外层
+            if (event.key === 'Escape' && !event.defaultPrevented) onCancel();
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
@@ -1090,13 +1092,10 @@ function ObjectArrayField({
         setEditing(null);
     };
 
-    const move = (index, offset) => {
-        const target = index + offset;
-        if (target < 0 || target >= items.length) return;
-        const next = [...items];
-        [next[index], next[target]] = [next[target], next[index]];
-        onChange(next);
-    };
+    const { listRef, rowProps, handleProps, dragging } = useDragReorder((from, to) => {
+        setConfirmIndex(-1);
+        onChange(moveItem(items, from, to));
+    });
 
     const remove = (index) => {
         onChange(items.filter((_, i) => i !== index));
@@ -1110,7 +1109,7 @@ function ObjectArrayField({
 
     return (
         <FieldShell label={displayName} help={help} layout="stack" extra={<span className="field-count">{items.length}</span>}>
-            <div className="item-list">
+            <div ref={listRef} className={`item-list ${dragging ? 'is-sorting' : ''}`}>
                 {items.length === 0 && (
                     <div className="item-list-empty">{emptyText || '还没有添加任何项'}</div>
                 )}
@@ -1120,7 +1119,12 @@ function ObjectArrayField({
                         .filter(Boolean);
                     const disabled = item?.enabled === false;
                     return (
-                        <div key={index} className={`item-row ${disabled ? 'is-disabled' : ''}`}>
+                        <div key={index} className={`item-row ${disabled ? 'is-disabled' : ''}`} {...rowProps(index)}>
+                            {!fixed && items.length > 1 && (
+                                <button type="button" className="drag-handle" {...handleProps(index)}>
+                                    <Icon name="grip" size={16} />
+                                </button>
+                            )}
                             <button type="button" className="item-main" onClick={() => openEditor(index)}>
                                 <span className="item-title">{itemTitle(item, index, meta.nameField)}</span>
                                 {summaries.length > 0 && (
@@ -1141,12 +1145,6 @@ function ObjectArrayField({
                                 <div className="item-actions">
                                     {!fixed && (
                                         <>
-                                            <button type="button" className="icon-btn" title="上移" aria-label="上移" disabled={index === 0} onClick={() => move(index, -1)}>
-                                                <Icon name="arrowUp" size={15} />
-                                            </button>
-                                            <button type="button" className="icon-btn" title="下移" aria-label="下移" disabled={index === items.length - 1} onClick={() => move(index, 1)}>
-                                                <Icon name="arrowDown" size={15} />
-                                            </button>
                                             <button type="button" className="icon-btn" title="复制" aria-label="复制" onClick={() => duplicate(index)}>
                                                 <Icon name="copy" size={15} />
                                             </button>
@@ -1198,7 +1196,8 @@ function ItemDrawer({ title, itemMeta, initialDraft, getContext, submitLabel, on
 
     useEffect(() => {
         const handleKeyDown = (event) => {
-            if (event.key === 'Escape') onCancel();
+            // 下拉框会先处理 Esc 并 preventDefault，这时只关下拉、不关外层
+            if (event.key === 'Escape' && !event.defaultPrevented) onCancel();
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
@@ -1327,17 +1326,11 @@ function ModelListField({ displayName, help, value, onChange, uiType, scopeSelfI
     });
     const available = candidates.filter((name) => !items.includes(name));
 
-    const move = (index, offset) => {
-        const target = index + offset;
-        if (target < 0 || target >= items.length) return;
-        const next = [...items];
-        [next[index], next[target]] = [next[target], next[index]];
-        onChange(next);
-    };
+    const { listRef, rowProps, handleProps, dragging } = useDragReorder((from, to) => onChange(moveItem(items, from, to)));
 
     return (
         <FieldShell label={displayName} help={help} layout="stack">
-            <div className="model-list">
+            <div ref={listRef} className={`model-list ${dragging ? 'is-sorting' : ''}`}>
                 {items.length === 0 && <div className="model-list-empty">未选择模型</div>}
                 {items.map((name, index) => {
                     const info = details?.[name];
@@ -1346,7 +1339,12 @@ function ModelListField({ displayName, help, value, onChange, uiType, scopeSelfI
                     const wrongProtocol = info && protocolFilter && providerDetails?.[info.provider]
                         && providerDetails[info.provider].protocol !== protocolFilter;
                     return (
-                        <div key={name} className={`model-pill ${missing || wrongKind || wrongProtocol ? 'is-invalid' : ''} ${info?.enabled === false ? 'is-disabled' : ''}`}>
+                        <div key={name} className={`model-pill ${missing || wrongKind || wrongProtocol ? 'is-invalid' : ''} ${info?.enabled === false ? 'is-disabled' : ''}`} {...rowProps(index)}>
+                            {items.length > 1 && (
+                                <button type="button" className="drag-handle" {...handleProps(index)}>
+                                    <Icon name="grip" size={15} />
+                                </button>
+                            )}
                             <span className="model-pill-order">{index + 1}</span>
                             <span className="model-pill-name">{name}</span>
                             {info?.provider && <span className="model-pill-provider">{info.provider}</span>}
@@ -1355,12 +1353,6 @@ function ModelListField({ displayName, help, value, onChange, uiType, scopeSelfI
                             {wrongProtocol && <span className="chip chip-warn">不是 {protocolFilter === 'gemini' ? 'Gemini' : protocolFilter} 供应商，会被跳过</span>}
                             {info?.enabled === false && <span className="chip chip-muted">已停用</span>}
                             <span className="model-pill-actions">
-                                <button type="button" className="icon-btn" aria-label="上移" title="上移" disabled={index === 0} onClick={() => move(index, -1)}>
-                                    <Icon name="arrowUp" size={14} />
-                                </button>
-                                <button type="button" className="icon-btn" aria-label="下移" title="下移" disabled={index === items.length - 1} onClick={() => move(index, 1)}>
-                                    <Icon name="arrowDown" size={14} />
-                                </button>
                                 <button type="button" className="icon-btn icon-btn-danger" aria-label="移除" title="移除" onClick={() => onChange(items.filter((item) => item !== name))}>
                                     <Icon name="x" size={14} />
                                 </button>
@@ -1588,6 +1580,171 @@ function VertexCredentialListField({ displayName, help, value, onChange }) {
     );
 }
 
+/**
+ * 可输入的下拉框：点开时列出全部选项，输入后按关键字筛选，也允许填列表外的值。
+ * 不用原生 datalist——它会按输入框里已有的值过滤，已经填了模型名时下拉几乎是空的。
+ */
+function Combobox({ value, options, onChange, disabled = false, loading = false, placeholder, emptyText = '没有匹配的选项' }) {
+    const inputRef = useRef(null);
+    const listRef = useRef(null);
+    const listId = useId();
+    const [open, setOpen] = useState(false);
+    const [query, setQuery] = useState(''); // 空字符串表示刚打开，显示全部
+    const [active, setActive] = useState(-1);
+    const [box, setBox] = useState(null);
+
+    const filtered = useMemo(() => {
+        const keyword = query.trim().toLowerCase();
+        return keyword ? options.filter((option) => option.toLowerCase().includes(keyword)) : options;
+    }, [options, query]);
+
+    const measure = useCallback(() => {
+        const rect = inputRef.current?.getBoundingClientRect();
+        if (rect) setBox({ left: rect.left, width: rect.width, top: rect.top, bottom: rect.bottom });
+    }, []);
+
+    // 打开期间每帧跟随输入框位置（滚动、窗口缩放、抽屉滑入动画都会让它移动）
+    useEffect(() => {
+        if (!open) return undefined;
+        let frame = 0;
+        const follow = () => {
+            const rect = inputRef.current?.getBoundingClientRect();
+            if (rect) {
+                setBox((prev) => (prev && prev.left === rect.left && prev.top === rect.top && prev.width === rect.width
+                    ? prev
+                    : { left: rect.left, width: rect.width, top: rect.top, bottom: rect.bottom }));
+            }
+            frame = requestAnimationFrame(follow);
+        };
+        frame = requestAnimationFrame(follow);
+        return () => cancelAnimationFrame(frame);
+    }, [open]);
+
+    useEffect(() => {
+        if (open && active >= 0) listRef.current?.children[active]?.scrollIntoView({ block: 'nearest' });
+    }, [open, active]);
+
+    const openList = () => {
+        if (disabled) return;
+        measure();
+        setQuery('');
+        setActive(options.indexOf(value));
+        setOpen(true);
+    };
+
+    const close = () => {
+        setOpen(false);
+        setQuery('');
+    };
+
+    const choose = (option) => {
+        onChange(option);
+        close();
+    };
+
+    const handleKeyDown = (event) => {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            if (!open) {
+                openList();
+                return;
+            }
+            if (filtered.length === 0) return;
+            const step = event.key === 'ArrowDown' ? 1 : -1;
+            setActive((current) => (current + step + filtered.length) % filtered.length);
+        } else if (event.key === 'Enter' && open) {
+            event.preventDefault();
+            if (active >= 0 && filtered[active]) choose(filtered[active]);
+            else close();
+        } else if (event.key === 'Escape' && open) {
+            // 只关下拉，不要连带关掉外面的抽屉
+            event.preventDefault();
+            event.stopPropagation();
+            close();
+        }
+    };
+
+    let popupStyle = null;
+    if (open && box) {
+        const below = window.innerHeight - box.bottom - 12;
+        const above = box.top - 12;
+        const placeAbove = below < 220 && above > below;
+        popupStyle = placeAbove
+            ? { left: box.left, width: box.width, bottom: window.innerHeight - box.top + 4, maxHeight: Math.min(300, above) }
+            : { left: box.left, width: box.width, top: box.bottom + 4, maxHeight: Math.min(300, below) };
+    }
+
+    return (
+        <div className="combobox">
+            <input
+                ref={inputRef}
+                className="field-input"
+                role="combobox"
+                aria-expanded={open}
+                aria-controls={listId}
+                aria-autocomplete="list"
+                autoComplete="off"
+                value={value}
+                disabled={disabled}
+                placeholder={placeholder}
+                onClick={() => { if (!open) openList(); }}
+                onBlur={close}
+                onKeyDown={handleKeyDown}
+                onChange={(event) => {
+                    onChange(event.target.value);
+                    setQuery(event.target.value);
+                    setActive(event.target.value.trim() ? 0 : -1);
+                    if (!open) {
+                        measure();
+                        setOpen(true);
+                    }
+                }}
+            />
+            <button
+                type="button"
+                className="combobox-toggle"
+                tabIndex={-1}
+                disabled={disabled}
+                aria-label="展开选项"
+                onMouseDown={(event) => {
+                    event.preventDefault();
+                    if (open) {
+                        close();
+                    } else {
+                        inputRef.current?.focus();
+                        openList();
+                    }
+                }}
+            >
+                <Icon name="chevronDown" size={16} />
+            </button>
+            {popupStyle && createPortal(
+                <ul ref={listRef} id={listId} role="listbox" className="combobox-popup" style={popupStyle}>
+                    {filtered.length === 0 && (
+                        <li className="combobox-empty">
+                            {loading ? '正在加载…' : options.length === 0 ? '暂无可选项，可以直接输入' : emptyText}
+                        </li>
+                    )}
+                    {filtered.map((option, index) => (
+                        <li
+                            key={option}
+                            role="option"
+                            aria-selected={option === value}
+                            className={`combobox-option ${index === active ? 'active' : ''} ${option === value ? 'selected' : ''}`}
+                            onMouseDown={(event) => { event.preventDefault(); choose(option); }}
+                            onMouseEnter={() => setActive(index)}
+                        >
+                            <span className="combobox-option-text">{option}</span>
+                            {option === value && <Icon name="check" size={15} />}
+                        </li>
+                    ))}
+                </ul>,
+                document.body
+            )}
+        </div>
+    );
+}
+
 /** 模型名：可以从供应商的模型列表里选，也可以直接输入。 */
 function ModelSelectField({ displayName, help, value, onChange, providerId, scopeSelfId = null }) {
     const [models, setModels] = useState([]);
@@ -1595,7 +1752,6 @@ function ModelSelectField({ displayName, help, value, onChange, providerId, scop
     const [error, setError] = useState('');
     const [cached, setCached] = useState(false);
     const requestIdRef = useRef(0);
-    const listId = `models-${useId().replace(/:/g, '')}`;
 
     const loadModels = useCallback(async (force = false) => {
         const requestId = ++requestIdRef.current;
@@ -1640,17 +1796,15 @@ function ModelSelectField({ displayName, help, value, onChange, providerId, scop
             help={help}
         >
             <div className="input-with-action">
-                <input
-                    className="field-input"
-                    list={listId}
+                <Combobox
                     value={value ?? ''}
+                    options={models}
+                    loading={loading}
                     disabled={!providerId}
                     placeholder={!providerId ? '请先选择供应商' : loading ? '正在加载模型列表…' : '输入或选择模型名'}
-                    onChange={(event) => onChange(event.target.value.trim())}
+                    emptyText="没有匹配的模型，将直接使用输入的名字"
+                    onChange={(next) => onChange(next.trim())}
                 />
-                <datalist id={listId}>
-                    {models.map((model) => <option key={model} value={model} />)}
-                </datalist>
                 <button
                     type="button"
                     className="icon-btn"

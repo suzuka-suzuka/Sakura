@@ -794,6 +794,79 @@ select.field-input {
   flex: 1;
 }
 
+/* 可输入的下拉框 */
+.combobox {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.combobox .field-input {
+  padding-right: 34px;
+}
+
+.combobox-toggle {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  width: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text-3);
+}
+
+.combobox-toggle:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.combobox-popup {
+  position: fixed;
+  z-index: 300;
+  overflow-y: auto;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  animation: fade 0.1s ease-out;
+}
+
+.combobox-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-xs);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.combobox-option.active {
+  background: var(--surface-3);
+}
+
+.combobox-option.selected {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.combobox-option-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.combobox-empty {
+  padding: 10px;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
 /* 开关 */
 .toggle {
   position: relative;
@@ -1224,6 +1297,72 @@ select.field-input {
   padding: 8px 10px;
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-sm);
+}
+
+/* ========== 拖动排序 ========== */
+
+.drag-handle {
+  display: inline-grid;
+  place-items: center;
+  align-self: stretch;
+  width: 26px;
+  flex-shrink: 0;
+  margin-left: 4px;
+  border-radius: var(--radius-xs);
+  color: var(--text-3);
+  cursor: grab;
+  touch-action: none;
+  opacity: 0.55;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+
+.item-row:hover .drag-handle,
+.model-pill:hover .drag-handle,
+.drag-handle:focus-visible {
+  opacity: 1;
+}
+
+.drag-handle:hover {
+  color: var(--text);
+  background: var(--surface-3);
+}
+
+.drag-handle + .item-main {
+  padding-left: 4px;
+}
+
+.model-pill .drag-handle {
+  width: 22px;
+  margin-left: -2px;
+  margin-right: -4px;
+}
+
+/* 拖动中：其他行平滑让位，被拖的行浮起 */
+.is-sorting {
+  user-select: none;
+  cursor: grabbing;
+}
+
+.is-sorting .drag-handle {
+  cursor: grabbing;
+}
+
+.is-sorting > [data-drag-index] {
+  position: relative;
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.is-sorting > [data-dragging] {
+  z-index: 2;
+  transition: none;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-2), 0 0 0 1px var(--accent);
+}
+
+.is-sorting > [data-dragging] .drag-handle {
+  opacity: 1;
+  color: var(--accent);
 }
 
 /* ========== 模型列表 ========== */
