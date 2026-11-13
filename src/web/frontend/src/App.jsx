@@ -328,7 +328,7 @@ function App() {
         if (route.kind === 'monitor') {
             return (
                 <div className="page">
-                    <PageHeader title="系统概览" description="机器人账号、主机资源和运行状态。" />
+                    <PageHeader title="系统概览" icon="activity" />
                     <SystemMonitor staticInfo={staticInfo} dynamicInfo={dynamicInfo} botInfo={botInfo} loading={systemLoading} />
                 </div>
             );
@@ -337,7 +337,7 @@ function App() {
         if (route.kind === 'files') {
             return (
                 <div className="page page--wide">
-                    <PageHeader title="文件管理" description="浏览和编辑服务器上的文件。" />
+                    <PageHeader title="文件管理" icon="folder" />
                     <FileManager token={token} onUnauthorized={logout} onToast={addToast} />
                 </div>
             );
@@ -358,9 +358,8 @@ function App() {
             ];
             return (
                 <ObjectConfigPage
-                    eyebrow="框架"
                     title="连接与基础"
-                    description="QQ 客户端连接、Redis、配置面板和权限名单，保存后立即生效。"
+                    icon="plug"
                     schema={schema}
                     config={config}
                     sections={sections}
@@ -382,9 +381,8 @@ function App() {
             return (
                 <ObjectConfigPage
                     key={`account:${scopeKey}`}
-                    eyebrow="框架"
                     title="账号设置"
-                    description={botAccounts.length > 1 ? '每个机器人账号可以有自己的设置，右上角切换账号。' : '当前机器人账号的设置。'}
+                    icon="user"
                     schema={accountSchema}
                     config={accountConfigs[scopeKey] ?? null}
                     sections={accountSchema?.children ? [{ key: null, title: '', meta: accountSchema }] : []}
@@ -401,7 +399,6 @@ function App() {
                 <PluginConfigPage
                     key={`${activeKey}:${scopeKey}`}
                     page={activeItem.page}
-                    eyebrow={activeItem.groupTitle || pluginMeta?.[pluginName]?.displayName || pluginName}
                     schemas={pluginSchemas[pluginName] || {}}
                     configs={pluginConfigs[pluginName]?.[scopeKey] || {}}
                     scopeSelfId={effectivePluginSelfId}
@@ -418,7 +415,7 @@ function App() {
 
         return (
             <div className="page">
-                <PageHeader title="页面不存在" description="这个页面可能已经改名或移除了。" />
+                <PageHeader title="页面不存在" />
                 <button type="button" className="btn btn-secondary" onClick={() => navigate({ kind: 'monitor' })}>回到概览</button>
             </div>
         );

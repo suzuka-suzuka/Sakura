@@ -34,9 +34,53 @@ function getAuthToken() {
 }
 
 /**
- * 字段外壳：左侧标签与说明，右侧控件。
- * layout: inline（左右两栏，默认）| stack（控件占满整行）| switch（开关，控件靠右）
- * 窄容器（如编辑抽屉）里由 CSS 自动改成上下排列。
+ * 说明气泡：标签旁的小问号，悬停或点按时显示说明，平时不占版面。
+ */
+export function HelpTip({ text }) {
+    const [anchor, setAnchor] = useState(null);
+    const tipId = useId();
+    if (!text) return null;
+
+    const show = (event) => setAnchor(event.currentTarget.getBoundingClientRect());
+    const hide = () => setAnchor(null);
+
+    let style = null;
+    if (anchor) {
+        // 气泡从问号左侧展开，靠近右边缘时整体左移，保证不超出窗口
+        const maxWidth = Math.min(300, window.innerWidth - 24);
+        const left = Math.max(12, Math.min(anchor.left - 10, window.innerWidth - maxWidth - 12));
+        const below = anchor.top < 120;
+        style = below
+            ? { left, maxWidth, top: anchor.bottom + 8 }
+            : { left, maxWidth, bottom: window.innerHeight - anchor.top + 8 };
+    }
+
+    return (
+        <>
+            <button
+                type="button"
+                className="help-tip"
+                aria-label="说明"
+                aria-describedby={anchor ? tipId : undefined}
+                onMouseEnter={show}
+                onMouseLeave={hide}
+                onFocus={show}
+                onBlur={hide}
+                onClick={(event) => (anchor ? hide() : show(event))}
+            >
+                ?
+            </button>
+            {anchor && createPortal(
+                <div id={tipId} role="tooltip" className="help-tip-bubble" style={style}>{text}</div>,
+                document.body
+            )}
+        </>
+    );
+}
+
+/**
+ * 字段外壳：标签在上、控件在下，说明收进标签旁的问号。
+ * layout: inline / stack 都是上下排列（stack 在网格里占满整行）| switch（开关小块，标签左、开关右）
  */
 // 为 true 时字段只渲染控件（标签已经作为卡片标题显示）
 const BareFieldContext = createContext(false);
@@ -48,14 +92,24 @@ export function FieldShell({ label, help, extra = null, layout = 'inline', child
         <div className={`field-row field-row--${layout}`}>
             <div className="field-meta">
                 <div className="field-label">
-                    <span>{label}</span>
+                    <span className="field-label-text">{label}</span>
+                    <HelpTip text={help} />
                     {extra}
                 </div>
-                {help && <div className="field-help">{help}</div>}
             </div>
             <div className="field-control">{children}</div>
         </div>
     );
+}
+
+/** 字段在网格里占多宽：full 占满整行，wide 占两格，其余占一格。 */
+function fieldSpan(meta) {
+    if (meta.type === 'object' && meta.children) return 'full';
+    if (meta.type === 'array') return 'full';
+    if (['textarea', 'cron', 'commandCost', 'serverDirectory'].includes(meta.uiType)) return 'full';
+    if (meta.type === 'boolean') return 'switch';
+    if (meta.type === 'number' || meta.type === 'enum') return 'normal';
+    return 'wide';
 }
 
 /**
@@ -110,9 +164,11 @@ function FieldGroup({ title, fields, value, onFieldChange, scopeSelfId, context,
     const renderField = ([key, meta]) => {
         if (meta.type === 'object' && meta.children) {
             return (
-                <div key={key} className="nested-card" id={anchorScope ? fieldAnchorId(anchorScope, key) : undefined}>
-                    <div className="nested-card-title">{meta.label || meta.description || key}</div>
-                    {meta.help && <div className="nested-card-help">{meta.help}</div>}
+                <div key={key} className="nested-card field-span--full" id={anchorScope ? fieldAnchorId(anchorScope, key) : undefined}>
+                    <div className="nested-card-title">
+                        {meta.label || meta.description || key}
+                        <HelpTip text={meta.help} />
+                    </div>
                     <FieldList
                         children={meta.children}
                         value={value?.[key] || {}}
@@ -126,7 +182,7 @@ function FieldGroup({ title, fields, value, onFieldChange, scopeSelfId, context,
             );
         }
         return (
-            <div key={key} className="field-anchor" id={anchorScope ? fieldAnchorId(anchorScope, key) : undefined}>
+            <div key={key} className={`field-anchor field-span--${fieldSpan(meta)}`} id={anchorScope ? fieldAnchorId(anchorScope, key) : undefined}>
                 <ConfigField
                     name={key}
                     meta={meta}
@@ -141,7 +197,7 @@ function FieldGroup({ title, fields, value, onFieldChange, scopeSelfId, context,
 
     const body = (
         <>
-            {basic.map(renderField)}
+            {basic.length > 0 && <div className="field-grid">{basic.map(renderField)}</div>}
             {advanced.length > 0 && (
                 <>
                     <button
@@ -152,7 +208,7 @@ function FieldGroup({ title, fields, value, onFieldChange, scopeSelfId, context,
                         <Icon name="chevronDown" size={15} />
                         {showAdvanced ? '收起高级选项' : `高级选项（${advanced.length}）`}
                     </button>
-                    {showAdvanced && <div className="advanced-fields">{advanced.map(renderField)}</div>}
+                    {showAdvanced && <div className="field-grid advanced-fields">{advanced.map(renderField)}</div>}
                 </>
             )}
         </>
@@ -170,8 +226,8 @@ function FieldGroup({ title, fields, value, onFieldChange, scopeSelfId, context,
                     <h3 className="card-title">
                         {title || soleMeta.label || soleMeta.description}
                         {soleMeta.items?.type === 'object' && <span className="field-count">{count}</span>}
+                        <HelpTip text={soleMeta.help} />
                     </h3>
-                    {soleMeta.help && <p className="card-help">{soleMeta.help}</p>}
                 </header>
                 <div className="card-body card-body--bare">
                     <BareFieldContext.Provider value>
@@ -352,8 +408,9 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
         return (
             <FieldShell
                 label={displayName}
-                help={help}
-                extra={meta.min != null && meta.max != null ? <span className="field-hint">{meta.min} ~ {meta.max}</span> : null}
+                help={meta.min != null && meta.max != null
+                    ? [help, `取值范围 ${meta.min} ~ ${meta.max}`].filter(Boolean).join('\n')
+                    : help}
             >
                 <DraftInput
                     type={hideSpinner ? 'text' : 'number'}
@@ -1581,7 +1638,6 @@ function ModelSelectField({ displayName, help, value, onChange, providerId, scop
         <FieldShell
             label={displayName}
             help={help}
-            extra={providerId && models.length > 0 ? <span className="field-hint">{models.length} 个{cached ? ' · 缓存' : ''}</span> : null}
         >
             <div className="input-with-action">
                 <input
@@ -1600,7 +1656,7 @@ function ModelSelectField({ displayName, help, value, onChange, providerId, scop
                     className="icon-btn"
                     disabled={!providerId || loading}
                     onClick={() => loadModels(true)}
-                    title="重新拉取模型列表"
+                    title={models.length > 0 ? `重新拉取模型列表（当前 ${models.length} 个${cached ? '，来自缓存' : ''}）` : '重新拉取模型列表'}
                     aria-label="重新拉取模型列表"
                 >
                     <Icon name="refresh" size={16} className={loading ? 'spin' : ''} />
@@ -2042,38 +2098,28 @@ function CommandCostField({ displayName, help, value, onChange }) {
         );
     }
 
-    // 将指令列表分成三列显示
-    const rows = [];
-    for (let i = 0; i < commandList.length; i += 3) {
-        rows.push(commandList.slice(i, i + 3));
-    }
-
     return (
         <FieldShell layout="stack" label={displayName} help={help} extra={<><span className="field-count">{value?.length || 0}</span></>}>
             <div className="command-cost-grid">
-                {rows.map((row, rowIndex) => (
-                    <div key={rowIndex} className="command-cost-row">
-                        {row.map(cmdName => (
-                            <div key={cmdName} className="command-cost-item">
-                                <span className="command-cost-label">{cmdName}：</span>
-                                <DraftInput
-                                    type="number"
-                                    inputMode="numeric"
-                                    className="command-cost-input"
-                                    min="0"
-                                    step="1"
-                                    placeholder="0"
-                                    value={costMap.get(cmdName) ?? 0}
-                                    parse={(text) => {
-                                        const number = Number(text);
-                                        return text.trim() && Number.isSafeInteger(number) && number >= 0
-                                            ? number : undefined;
-                                    }}
-                                    onChange={(cost) => handleCostChange(cmdName, cost)}
-                                />
-                            </div>
-                        ))}
-                    </div>
+                {commandList.map((cmdName) => (
+                    <label key={cmdName} className="command-cost-item">
+                        <span className="command-cost-label" title={cmdName}>{cmdName}</span>
+                        <DraftInput
+                            type="number"
+                            inputMode="numeric"
+                            className="command-cost-input"
+                            min="0"
+                            step="1"
+                            placeholder="0"
+                            value={costMap.get(cmdName) ?? 0}
+                            parse={(text) => {
+                                const number = Number(text);
+                                return text.trim() && Number.isSafeInteger(number) && number >= 0
+                                    ? number : undefined;
+                            }}
+                            onChange={(cost) => handleCostChange(cmdName, cost)}
+                        />
+                    </label>
                 ))}
             </div>
         </FieldShell>

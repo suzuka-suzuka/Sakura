@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { FieldList } from './ConfigField';
+import { FieldList, HelpTip } from './ConfigField';
 import Icon from './Icon';
 import { DraftContext } from '../hooks/draftContext';
 
@@ -25,14 +25,13 @@ function describeIssue(issue, meta) {
     return where ? `${where}：${issue.message}` : issue?.message || '配置无效';
 }
 
-export function PageHeader({ eyebrow, title, description, actions }) {
+export function PageHeader({ title, icon = null, actions }) {
     return (
         <header className="page-header">
-            <div className="page-header-text">
-                {eyebrow && <div className="page-eyebrow">{eyebrow}</div>}
-                <h1 className="page-title">{title}</h1>
-                {description && <p className="page-description">{description}</p>}
-            </div>
+            <h1 className="page-title">
+                {icon && <span className="page-title-icon"><Icon name={icon} size={18} /></span>}
+                {title}
+            </h1>
             {actions && <div className="page-actions">{actions}</div>}
         </header>
     );
@@ -80,7 +79,6 @@ function IssueList({ issues, meta }) {
  */
 export function PluginConfigPage({
     page,
-    eyebrow,
     schemas,
     configs,
     onSaveModule,
@@ -139,7 +137,7 @@ export function PluginConfigPage({
     return (
         <DraftContext.Provider value={moduleValues}>
             <div className="page">
-                <PageHeader eyebrow={eyebrow} title={page.title} description={page.description} actions={headerActions} />
+                <PageHeader title={page.title} icon={page.icon || 'puzzle'} actions={headerActions} />
                 {modules.map((module) => {
                     const schema = schemas?.[module];
                     const value = moduleValues[module];
@@ -154,11 +152,11 @@ export function PluginConfigPage({
                     const title = schema.label || schema.description || module;
                     return (
                         <div key={module} className="module" id={`module-${module}`}>
-                            {(showModuleHeadings || (schema.help && !page.description)) && Object.keys(schema.children || {}).length > 1 && (
-                                <div className="module-heading">
-                                    {showModuleHeadings && <h2 className="module-title">{title}</h2>}
-                                    {schema.help && <p className="module-help">{schema.help}</p>}
-                                </div>
+                            {showModuleHeadings && Object.keys(schema.children || {}).length > 1 && (
+                                <h2 className="module-title">
+                                    {title}
+                                    <HelpTip text={schema.help} />
+                                </h2>
                             )}
                             <IssueList issues={issues[module]} meta={schema} />
                             {schema.children ? (
@@ -205,8 +203,7 @@ export function PluginConfigPage({
  */
 export function ObjectConfigPage({
     title,
-    eyebrow,
-    description,
+    icon = null,
     schema,
     config,
     sections,
@@ -240,7 +237,7 @@ export function ObjectConfigPage({
     if (!value || !schema) {
         return (
             <div className="page">
-                <PageHeader eyebrow={eyebrow} title={title} description={description} actions={headerActions} />
+                <PageHeader title={title} icon={icon} actions={headerActions} />
                 <section className="card card-loading"><div className="skeleton" /><div className="skeleton short" /></section>
             </div>
         );
@@ -248,7 +245,7 @@ export function ObjectConfigPage({
 
     return (
         <div className="page">
-            <PageHeader eyebrow={eyebrow} title={title} description={description} actions={headerActions} />
+            <PageHeader title={title} icon={icon} actions={headerActions} />
             {warnings}
             <IssueList issues={issues} meta={schema} />
             {sections.map((section) => {
@@ -264,8 +261,7 @@ export function ObjectConfigPage({
                             groupByCard={false}
                             header={section.title ? (
                                 <header className="card-header">
-                                    <h3 className="card-title">{section.title}</h3>
-                                    {section.help && <p className="card-help">{section.help}</p>}
+                                    <h3 className="card-title">{section.title}<HelpTip text={section.help} /></h3>
                                 </header>
                             ) : null}
                         />
@@ -283,8 +279,7 @@ export function ObjectConfigPage({
                         groupByCard={false}
                         header={(
                             <header className="card-header" id={`section-${section.key}`}>
-                                <h3 className="card-title">{section.title}</h3>
-                                {section.help && <p className="card-help">{section.help}</p>}
+                                <h3 className="card-title">{section.title}<HelpTip text={section.help} /></h3>
                             </header>
                         )}
                     />
