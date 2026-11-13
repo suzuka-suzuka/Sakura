@@ -21,7 +21,7 @@ function clampImageCount(value) {
 }
 
 function extractChannel(text) {
-  const routeMatched = text.match(/(?:^|\s)(?:route|路由)=([^\s]+)/i);
+  const routeMatched = text.match(/(?:^|\s)(?:model|模型|route|路由)=([^\s]+)/i);
   if (routeMatched) {
     return {
       channel: routeMatched[1].trim(),

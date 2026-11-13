@@ -160,7 +160,7 @@ export class ActiveChatScheduler extends plugin {
       }
 
       const geminiResponse = await getAI(
-        profile.route,
+        profile.models,
         mockE,
         queryParts,
         Prompt,

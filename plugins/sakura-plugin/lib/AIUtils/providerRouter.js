@@ -1,4 +1,13 @@
 import Setting from "../setting.js";
+import {
+  formatModelList,
+  modelKey,
+  modelListKey,
+  modelTimeoutMs,
+  normalizeModelList,
+  providerCredentials,
+  providerName,
+} from "./aiModels.js";
 
 const scheduleCursors = new Map();
 export const CREDENTIAL_SCHEDULING_STRATEGY = "priority_weighted";
@@ -177,141 +186,168 @@ export function resolveGenerationSettings(_route, target) {
   };
 }
 
-function buildRequestConfig(route, target, provider, credential) {
+const ROUTE_KIND_BY_MODULE = {
+  Routes: "chat",
+  ImageRoutes: "image",
+  VideoRoutes: "video",
+};
+const MODEL_KIND_LABELS = { chat: "对话", image: "图片", video: "视频" };
+const ROUTE_RETRY_DELAY_MS = 1000;
+const MAX_ROUTE_ATTEMPTS = 8;
+
+function resolveKind(options = {}) {
+  if (options.kind) return options.kind;
+  if (options.routeModule) return ROUTE_KIND_BY_MODULE[options.routeModule] || "chat";
+  return "chat";
+}
+
+function scopeOptions(options) {
+  return options.selfId == null ? {} : { selfId: options.selfId };
+}
+
+function loadModelConfig(options) {
+  const scope = scopeOptions(options);
+  const providers = Setting.getConfig("Providers", scope)?.providers || [];
+  const models = Setting.getConfig("Models", scope)?.models || [];
   return {
-    name: `${route.id}/${target.id}`,
+    providerMap: new Map(providers.map((provider) => [providerName(provider), provider])),
+    models,
+  };
+}
+
+function findModelEntry(models, key, kind) {
+  return models.find((entry) => modelKey(entry) === key && (entry.type || "chat") === kind)
+    || null;
+}
+
+function buildRequestConfig(target, provider, credential) {
+  return {
+    name: target.id,
     channelType: provider.protocol,
     baseURL: provider.baseURL,
     vertex: provider.vertex === true,
     apiKey: credential.apiKey,
     serviceAccountRef: credential.serviceAccountRef,
     model: target.model,
-    ...resolveGenerationSettings(route, target),
+    ...resolveGenerationSettings(null, target),
     nativeWebSearch: target.nativeWebSearch === true,
     providerId: provider.id,
     credentialId: credential.id,
     targetId: target.id,
-    timeoutMs: route.timeoutMs,
+    timeoutMs: modelTimeoutMs(target),
   };
 }
 
-export function createRouteExecutionPlan(routeId, options = {}) {
-  const scope = options.selfId == null ? {} : { selfId: options.selfId };
+/**
+ * 根据有序模型列表生成一次请求的执行计划。
+ * reference 是模型名（或别名）数组；兼容只传一个字符串。
+ * 按列表顺序逐个尝试，每个模型内部轮流使用供应商的 Key。
+ */
+export function createRouteExecutionPlan(reference, options = {}) {
+  const kind = resolveKind(options);
   const scopeKey = options.selfId == null ? "default" : String(options.selfId);
   const protocol = String(options.protocol || "").trim().toLowerCase();
-  const routeModule = String(options.routeModule || "Routes").trim() || "Routes";
-  const routeLabel = String(
-    options.routeLabel || (routeModule === "Routes" ? "AI" : routeModule)
-  ).trim();
-  const providers = Setting.getConfig("Providers", scope)?.providers || [];
-  const routes = Setting.getConfig(routeModule, scope)?.routes || [];
-  const route = routes.find((item) => item.id === routeId);
-  if (!route) {
-    const message = routeModule === "Routes"
-      ? `未找到 AI 路由：${routeId}`
-      : `未找到${routeLabel}路由：${routeId}`;
-    const error = new Error(message);
+  const names = normalizeModelList(reference);
+  const kindLabel = MODEL_KIND_LABELS[kind] || "";
+
+  if (names.length === 0) {
+    const error = new Error(`没有选择${kindLabel}模型`);
     error.code = "ROUTE_NOT_FOUND";
-    error.routeId = routeId;
-    error.routeModule = routeModule;
+    error.routeId = "";
     throw error;
   }
 
-  const providerMap = new Map(providers.map((provider) => [provider.id, provider]));
-  const targets = orderScheduledItems(
-    route.targets || [],
-    route.strategy,
-    `scope:${scopeKey}:module:${routeModule}:route:${route.id}`
-  );
-  const resolvedTargets = [];
-
-  for (const target of targets) {
-    const provider = providerMap.get(target.provider);
-    if (!provider) {
-      logger.warn(`[AI Router] 路由 ${route.id} 的目标 ${target.id} 引用了不存在的供应商 ${target.provider}`);
-      continue;
-    }
-    if (protocol && provider.protocol !== protocol) {
-      continue;
-    }
-    if (options.targetMatches && !options.targetMatches({ route, target, provider })) {
-      continue;
-    }
-    const credentials = orderScheduledItems(
-      provider.credentials || [],
-      CREDENTIAL_SCHEDULING_STRATEGY,
-      `scope:${scopeKey}:provider:${provider.id}`
-    );
-    resolvedTargets.push({ target, provider, credentials });
-  }
-
-  const makeAttempt = ({ target, provider }, credential) => ({
-    route,
-    target,
-    provider,
-    credential,
-    requestConfig: buildRequestConfig(route, target, provider, credential),
-  });
-  const interleave = (entries) => {
-    const result = [];
-    const maxCredentials = Math.max(0, ...entries.map((entry) => entry.credentials.length));
-    for (let index = 0; index < maxCredentials; index++) {
-      for (const entry of entries) {
-        const credential = entry.credentials[index];
-        if (credential) result.push(makeAttempt(entry, credential));
-      }
-    }
-    return result;
+  const { providerMap, models } = loadModelConfig(options);
+  const route = {
+    id: formatModelList(names),
+    key: modelListKey(names),
+    kind,
+    models: names,
+    retryDelayMs: ROUTE_RETRY_DELAY_MS,
   };
 
-  let attempts = [];
-  if (route.strategy === "round_robin" || route.strategy === "weighted_round_robin") {
-    attempts = interleave(resolvedTargets);
-  } else {
-    const priorityGroups = new Map();
-    for (const entry of resolvedTargets) {
-      const priority = priorityOf(entry.target);
-      if (!priorityGroups.has(priority)) priorityGroups.set(priority, []);
-      priorityGroups.get(priority).push(entry);
+  const missing = [];
+  const attempts = [];
+  for (const name of names) {
+    const entry = findModelEntry(models, name, kind);
+    if (!entry) {
+      missing.push(name);
+      continue;
     }
-    for (const priority of [...priorityGroups.keys()].sort((a, b) => b - a)) {
-      const entries = priorityGroups.get(priority);
-      if (route.strategy === "priority_weighted") {
-        attempts.push(...interleave(entries));
-      } else {
-        for (const entry of entries) {
-          attempts.push(...entry.credentials.map((credential) => makeAttempt(entry, credential)));
-        }
-      }
+    if (entry.enabled === false) continue;
+
+    const provider = providerMap.get(entry.provider);
+    if (!provider) {
+      logger.warn(`[AI Router] 模型 ${name} 引用了不存在的供应商 ${entry.provider}`);
+      continue;
+    }
+    const runtimeProvider = { ...provider, id: providerName(provider) };
+    if (protocol && runtimeProvider.protocol !== protocol) continue;
+
+    const target = { ...entry, id: name };
+    if (options.targetMatches && !options.targetMatches({ route, target, provider: runtimeProvider })) {
+      continue;
+    }
+
+    const credentials = orderScheduledItems(
+      providerCredentials(runtimeProvider),
+      "round_robin",
+      `scope:${scopeKey}:provider:${runtimeProvider.id}`
+    );
+    for (const credential of credentials) {
+      attempts.push({
+        route,
+        target,
+        provider: runtimeProvider,
+        credential,
+        requestConfig: buildRequestConfig(target, runtimeProvider, credential),
+      });
     }
   }
 
-  const maxAttempts = positiveInteger(route.maxAttempts, attempts.length || 1);
-  return { route, attempts: attempts.slice(0, maxAttempts) };
+  if (missing.length > 0) {
+    logger.warn(`[AI Router] 未找到${kindLabel}模型：${missing.join("、")}，已跳过`);
+  }
+  if (missing.length === names.length) {
+    const error = new Error(`未找到${kindLabel}模型：${missing.join("、")}`);
+    error.code = "ROUTE_NOT_FOUND";
+    error.routeId = route.id;
+    throw error;
+  }
+
+  return { route, attempts: attempts.slice(0, MAX_ROUTE_ATTEMPTS) };
 }
 
+/**
+ * 解析命令里临时指定的模型：可以是模型名/别名，也可以是 grok、gpt 这类简写
+ * （简写会展开成配置里所有匹配的同类模型）。返回模型名数组。
+ */
 export function resolveRouteReference(routeReference, options = {}) {
-  const reference = String(routeReference || "").trim();
-  if (!reference) return reference;
+  const reference = String(Array.isArray(routeReference) ? "" : routeReference || "").trim();
+  if (Array.isArray(routeReference)) return normalizeModelList(routeReference);
+  if (!reference) return [];
 
-  const scope = options.selfId == null ? {} : { selfId: options.selfId };
-  const routeModule = String(options.routeModule || "Routes").trim() || "Routes";
-  const routes = Setting.getConfig(routeModule, scope)?.routes || [];
-  if (routes.some((route) => route?.id === reference)) return reference;
-  if (typeof options.targetMatches !== "function") return reference;
+  const kind = resolveKind(options);
+  const { providerMap, models } = loadModelConfig(options);
+  const sameKind = models.filter((entry) => (entry.type || "chat") === kind);
+  const exact = sameKind.find((entry) => modelKey(entry) === reference)
+    || sameKind.find((entry) => modelKey(entry).toLowerCase() === reference.toLowerCase());
+  if (exact) return [modelKey(exact)];
+  if (typeof options.targetMatches !== "function") return [reference];
 
-  const providers = Setting.getConfig("Providers", scope)?.providers || [];
-  const providerMap = new Map(providers.map((provider) => [provider.id, provider]));
-  const matchedRoute = routes.find((route) =>
-    (route?.targets || []).some((target) => {
-      if (target?.enabled === false) return false;
-      const provider = providerMap.get(target?.provider);
-      return provider && options.targetMatches({ route, target, provider });
-    })
-  );
-  return matchedRoute?.id || reference;
+  const matched = sameKind.filter((entry) => {
+    if (entry.enabled === false) return false;
+    const provider = providerMap.get(entry.provider);
+    if (!provider) return false;
+    return options.targetMatches({
+      route: null,
+      target: { ...entry, id: modelKey(entry) },
+      provider: { ...provider, id: providerName(provider) },
+    });
+  });
+  return matched.length > 0 ? matched.map(modelKey) : [reference];
 }
 
-export function resolveRouteTarget(routeId, options = {}) {
-  return createRouteExecutionPlan(routeId, options).attempts[0] || null;
+export function resolveRouteTarget(reference, options = {}) {
+  return createRouteExecutionPlan(reference, options).attempts[0] || null;
 }

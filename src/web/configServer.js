@@ -1102,7 +1102,7 @@ async function handleApi(req, res) {
                 { selfId }
             );
             const provider = providersConfig?.providers?.find(
-                (item) => item.id === providerId
+                (item) => item.name === providerId
             );
             if (!provider) {
                 sendJson(res, { success: false, error: `未找到供应商：${providerId}` }, 404);
@@ -1148,7 +1148,10 @@ async function handleApi(req, res) {
                     if (!Array.isArray(arr)) continue;
 
                     for (const item of arr) {
-                        const value = source.valueKey ? item?.[source.valueKey] : item;
+                        // valueKey 可以是字段数组：取第一个非空字段（例如模型的 别名 → 模型名）
+                        const value = Array.isArray(source.valueKey)
+                            ? source.valueKey.map((key) => String(item?.[key] ?? '').trim()).find(Boolean)
+                            : source.valueKey ? item?.[source.valueKey] : item;
                         if (value && !values.includes(value)) {
                             values.push(value);
                         }
@@ -1282,10 +1285,10 @@ async function handleApi(req, res) {
             if (isProvidersConfig) {
                 const missingReferences = (proposedConfig?.providers || []).flatMap((provider, providerIndex) =>
                     provider?.protocol === 'gemini' && provider?.vertex === true
-                        ? (provider.credentials || [])
-                            .map((credential, credentialIndex) => ({
-                                reference: credential?.serviceAccountRef,
-                                path: ['providers', providerIndex, 'credentials', credentialIndex, 'serviceAccountRef'],
+                        ? (provider.serviceAccounts || [])
+                            .map((reference, referenceIndex) => ({
+                                reference,
+                                path: ['providers', providerIndex, 'serviceAccounts', referenceIndex],
                             }))
                             .filter((item) => item.reference && !getManagedVertexCredentialPath(item.reference))
                         : []
@@ -1322,7 +1325,7 @@ async function handleApi(req, res) {
                             refreshResults.forEach((refreshResult, index) => {
                                 if (refreshResult.status === 'rejected') {
                                     logger.warn(
-                                        `[ConfigServer] 供应商 ${providers[index]?.id || index + 1} 自动刷新模型失败: ${refreshResult.reason?.message || refreshResult.reason}`
+                                        `[ConfigServer] 供应商 ${providers[index]?.name || index + 1} 自动刷新模型失败: ${refreshResult.reason?.message || refreshResult.reason}`
                                     );
                                 }
                             });

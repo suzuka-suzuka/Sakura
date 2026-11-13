@@ -13,6 +13,7 @@ import {
   formatRouteAttemptFailure,
   resolveRouteReference,
 } from "./providerRouter.js";
+import { formatModelList, normalizeModelList } from "./aiModels.js";
 import {
   clampInteger,
   GROK_CPA_ASPECT_RATIOS,
@@ -36,29 +37,33 @@ const VIDEO_REFERENCE_LIMITS = {
 function resolveVideoSelection(requestedRoute = null, selfId = null) {
   const scope = selfId == null ? {} : { selfId };
   const featureConfig = Setting.getConfig("EditImage", scope);
-  const routeReference = `${
-    requestedRoute || featureConfig.videoRoute || "grok-video"
-  }`.trim();
+  const requested = String(requestedRoute || "").trim();
+  const configuredModels = normalizeModelList(featureConfig.videoModels);
+  if (!requested && configuredModels.length === 0) {
+    throw new Error("未配置视频模型，请在面板的“图片与视频生成”里选择默认视频模型。");
+  }
 
-  const alias = routeReference.toLowerCase();
+  const alias = requested.toLowerCase();
   const aliasMatchers = {
     grok: ({ target, provider }) =>
       provider.protocol === "openai" && /grok/i.test(target.model),
     gemini: ({ provider }) => provider.protocol === "gemini",
   };
-  const routeId = resolveRouteReference(routeReference, {
-    selfId,
-    routeModule: "VideoRoutes",
-    targetMatches: aliasMatchers[alias],
-  });
+  const models = requested
+    ? resolveRouteReference(requested, {
+      selfId,
+      kind: "video",
+      targetMatches: aliasMatchers[alias],
+    })
+    : configuredModels;
+  const routeId = formatModelList(models);
 
-  const plan = createRouteExecutionPlan(routeId, {
+  const plan = createRouteExecutionPlan(models, {
     selfId,
-    routeModule: "VideoRoutes",
-    routeLabel: "视频",
+    kind: "video",
   });
   if (plan.attempts.length === 0) {
-    throw new Error(`视频路由 ${routeId} 没有可用的目标或凭据。`);
+    throw new Error(`视频模型 ${routeId} 没有可用的供应商或 Key。`);
   }
   return { routeId, plan };
 }
@@ -499,5 +504,5 @@ export async function generateVideoWithProvider({
     }
   }
 
-  throw lastError || new Error(`视频路由 ${routeId} 没有可用的目标。`);
+  throw lastError || new Error(`视频模型 ${routeId} 没有可用的供应商。`);
 }

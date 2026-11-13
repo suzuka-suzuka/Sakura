@@ -33,7 +33,7 @@ class PluginConfigManager {
         this._listeners = {};
     }
 
-    register(pluginName, schemaMap, categories, pluginMeta, dynamicOptionsConfig) {
+    register(pluginName, schemaMap, categories, pluginMeta, dynamicOptionsConfig, options = {}) {
         if (!schemaMap || typeof schemaMap !== 'object') {
             logger.warn(`[插件配置] ${pluginName} 提供了无效的 schemaMap，跳过注册`);
             return;
@@ -56,6 +56,16 @@ class PluginConfigManager {
         if (!fs.existsSync(pluginDir)) {
             fs.mkdirSync(pluginDir, { recursive: true });
             logger.info(`[插件配置] 已创建配置目录 config/${pluginName}/`);
+        }
+
+        // 插件可以提供迁移函数，把旧格式配置转换成当前 schema；
+        // 必须在清理未注册模块之前执行，否则旧模块文件会先被删掉。
+        if (typeof options.migrate === 'function') {
+            try {
+                options.migrate(pluginDir, { logger });
+            } catch (error) {
+                logger.error(`[插件配置] ${pluginName} 配置迁移失败: ${error?.stack || error}`);
+            }
         }
 
         this._removeUnregisteredConfigFiles(pluginName, schemaMap, pluginDir);
@@ -460,6 +470,12 @@ class PluginConfigManager {
         let fixed = false;
         let nameField = null;
         let optionLabels = null;
+        let group = '';
+        let advanced = false;
+        let placeholder = '';
+        let protocol = '';
+        let summary = null;
+        const showIf = [];
 
         if (description) {
             const parts = description.split('|');
@@ -480,6 +496,26 @@ class PluginConfigManager {
                         fixed = true;
                     } else if (directive.startsWith('nameField:')) {
                         nameField = directive.slice(10);
+                    } else if (directive === 'advanced') {
+                        advanced = true;
+                    } else if (directive.startsWith('group:')) {
+                        group = directive.slice('group:'.length).trim();
+                    } else if (directive.startsWith('placeholder:')) {
+                        placeholder = directive.slice('placeholder:'.length).trim();
+                    } else if (directive.startsWith('protocol:')) {
+                        protocol = directive.slice('protocol:'.length).trim();
+                    } else if (directive.startsWith('summary:')) {
+                        summary = directive.slice('summary:'.length).split(',').map((item) => item.trim()).filter(Boolean);
+                    } else if (directive.startsWith('showIf:')) {
+                        // showIf:字段=值1,值2 或 showIf:字段!=值；多个 showIf 需要同时满足
+                        const matched = directive.slice('showIf:'.length).match(/^([^!=]+)(!?=)(.*)$/);
+                        if (matched) {
+                            showIf.push({
+                                field: matched[1].trim(),
+                                negate: matched[2] === '!=',
+                                values: matched[3].split(',').map((item) => item.trim()),
+                            });
+                        }
                     } else if (directive.startsWith('optionLabels:')) {
                         optionLabels = Object.fromEntries(
                             directive
@@ -500,6 +536,13 @@ class PluginConfigManager {
 
         const displayName = label || labelFallback;
         const typeName = inner._zod?.def?.type || '';
+        const layout = {
+            ...(group && { group }),
+            ...(advanced && { advanced }),
+            ...(placeholder && { placeholder }),
+            ...(protocol && { protocol }),
+            ...(showIf.length > 0 && { showIf }),
+        };
 
         if (typeName === 'object') {
             const shape = inner._zod?.def?.shape || inner.shape || {};
@@ -507,7 +550,7 @@ class PluginConfigManager {
             for (const [key, childSchema] of Object.entries(shape)) {
                 children[key] = this._schemaToMeta(childSchema, key);
             }
-            return { type: 'object', description: displayName, label, help, children, default: defaultValue, ...(uiType && { uiType }) };
+            return { type: 'object', description: displayName, label, help, children, default: defaultValue, ...layout, ...(uiType && { uiType }) };
         }
 
         if (typeName === 'array') {
@@ -523,6 +566,8 @@ class PluginConfigManager {
                 ...(uiType && { uiType }),
                 ...(fixed && { fixed }),
                 ...(nameField && { nameField }),
+                ...(summary && { summary }),
+                ...layout,
             };
         }
 
@@ -540,6 +585,7 @@ class PluginConfigManager {
                 default: defaultValue,
                 ...(optionLabels && { optionLabels }),
                 ...(uiType && { uiType }),
+                ...layout,
             };
         }
 
@@ -547,7 +593,7 @@ class PluginConfigManager {
             const options = inner._zod?.def?.options || [];
             const types = options.map((option) => option._zod?.def?.type).filter(Boolean);
             if (types.includes('number') && types.includes('string')) {
-                return { type: 'number|string', description: displayName, label, help, default: defaultValue, ...(uiType && { uiType }) };
+                return { type: 'number|string', description: displayName, label, help, default: defaultValue, ...layout, ...(uiType && { uiType }) };
             }
         }
 
@@ -569,6 +615,7 @@ class PluginConfigManager {
             ...(step != null && { step }),
             ...(min != null && { min }),
             ...(max != null && { max }),
+            ...layout,
         };
     }
 

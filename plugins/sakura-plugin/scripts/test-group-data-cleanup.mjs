@@ -6,6 +6,9 @@ import vm from 'node:vm';
 import Database from 'better-sqlite3';
 import { GroupDataCleaner, dataCleanupGuards, canDeleteGroupData } from '../lib/GroupDataCleaner.js';
 
+// vm 模块链接后若没有强引用，可能在 evaluate 前被 GC 回收，导致 V8 访问已释放内存（0xC0000005 崩溃）。
+const retained = [];
+
 const schema = fs.readFileSync(new URL('../lib/Database.js', import.meta.url), 'utf8')
   .match(/this\.db\.exec\(`([\s\S]*?)`\)/)[1];
 
@@ -226,9 +229,14 @@ test('插件仅每天凌晨 4 点核对，退群和账号记录事件不触发�
     '../../../src/api/client.js': { getBots: () => [] },
     '../../../src/core/accountConfig.js': { default: { listConfiguredSelfIds: () => [] } },
   };
-  await source.link(specifier => new vm.SyntheticModule(Object.keys(imports[specifier]), function () {
-    for (const [name, value] of Object.entries(imports[specifier])) this.setExport(name, value);
-  }, { context }));
+  retained.push(source, context);
+  await source.link(specifier => {
+    const dependency = new vm.SyntheticModule(Object.keys(imports[specifier]), function () {
+      for (const [name, value] of Object.entries(imports[specifier])) this.setExport(name, value);
+    }, { context });
+    retained.push(dependency);
+    return dependency;
+  });
   await source.evaluate();
   const app = new source.namespace.DataCleanup();
   assert.equal(app.handleDecrease, undefined);

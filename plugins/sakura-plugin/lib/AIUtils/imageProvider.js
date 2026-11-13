@@ -9,6 +9,7 @@ import {
   formatRouteAttemptFailure,
   resolveRouteReference,
 } from "./providerRouter.js";
+import { formatModelList, normalizeModelList } from "./aiModels.js";
 import {
   GROK_CPA_ASPECT_RATIOS,
   nearestSupportedAspectRatio,
@@ -252,19 +253,19 @@ function resolveImageSelection(
   const featureConfig = selfId == null
     ? imageConfig
     : Setting.getConfig("EditImage", scope);
-  const routeReference = `${
-    requestedRoute ||
-    (outputFormat === "gif" && (featureConfig.gifRoute || imageConfig.gifRoute)) ||
-    featureConfig.imageRoute ||
-    imageConfig.imageRoute ||
-    ""
-  }`.trim();
+  const requested = String(requestedRoute || "").trim();
+  const configuredModels = [
+    outputFormat === "gif" ? featureConfig.gifModels : null,
+    outputFormat === "gif" ? imageConfig.gifModels : null,
+    featureConfig.imageModels,
+    imageConfig.imageModels,
+  ].map(normalizeModelList).find((models) => models.length > 0) || [];
 
-  if (!routeReference) {
-    throw new Error("未配置图片路由，请在 EditImage.imageRoute 中选择一个 ImageRoutes 路由。");
+  if (!requested && configuredModels.length === 0) {
+    throw new Error("未配置图片模型，请在面板的“图片与视频生成”里选择默认图片模型。");
   }
 
-  const alias = routeReference.toLowerCase();
+  const alias = requested.toLowerCase();
   const aliasMatchers = {
     grok: ({ target, provider }) =>
       provider.protocol === "openai" && isGrokImageModel(target.model),
@@ -275,24 +276,26 @@ function resolveImageSelection(
     vertex: ({ provider }) =>
       provider.protocol === "gemini" && provider.vertex === true,
   };
-  const routeId = resolveRouteReference(routeReference, {
-    selfId,
-    routeModule: "ImageRoutes",
-    targetMatches: aliasMatchers[alias] && ((candidate) =>
-      aliasMatchers[alias](candidate) && (outputFormat !== "gif" || supportsGif(candidate))),
-  });
+  const models = requested
+    ? resolveRouteReference(requested, {
+      selfId,
+      kind: "image",
+      targetMatches: aliasMatchers[alias] && ((candidate) =>
+        aliasMatchers[alias](candidate) && (outputFormat !== "gif" || supportsGif(candidate))),
+    })
+    : configuredModels;
+  const routeId = formatModelList(models);
 
-  const plan = createRouteExecutionPlan(routeId, {
+  const plan = createRouteExecutionPlan(models, {
     selfId,
-    routeModule: "ImageRoutes",
-    routeLabel: "图片",
+    kind: "image",
     targetMatches: outputFormat === "gif" ? supportsGif : undefined,
   });
   if (plan.attempts.length === 0) {
     if (outputFormat === "gif") {
-      throw new Error("GIF 路由没有可用的 GPT Image 2.6 Sunburst/Flare 目标，请检查图片路由及凭据。");
+      throw new Error("GIF 模型里没有可用的 GPT Image 2.6 Sunburst/Flare，请检查 GIF 模型及供应商 Key。");
     }
-    throw new Error(`图片路由 ${routeId} 没有可用的目标或凭据。`);
+    throw new Error(`图片模型 ${routeId} 没有可用的供应商或 Key。`);
   }
   return { routeId, plan };
 }
@@ -951,7 +954,7 @@ export async function generateImagesWithProvider(
     }
   }
 
-  throw lastError || new Error(`图片路由 ${routeId} 没有可用的目标。`);
+  throw lastError || new Error(`图片模型 ${routeId} 没有可用的供应商。`);
 }
 
 function validateResolvedImageConfig(imageConfig, provider) {

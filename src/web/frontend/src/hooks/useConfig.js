@@ -24,7 +24,8 @@ function buildScopedQuery(selfId) {
 export function useConfig() {
     const [config, setConfig] = useState(null);
     const [schema, setSchema] = useState(null);
-    const [loading, setLoading] = useState(true);
+    // 登录后首轮数据是否加载完成；loading 由它派生，避免在 effect 里同步 setState
+    const [bootLoaded, setBootLoaded] = useState(false);
     const [saving, setSaving] = useState(false);
     const [errors, setErrors] = useState(null);
     const [token, setToken] = useState(() => readAuthToken());
@@ -98,6 +99,7 @@ export function useConfig() {
         setAccountSchema(null);
         setAccountConfigs({});
         setSelectedPluginSelfIdState(null);
+        setBootLoaded(false);
         clearAuthState();
         localStorage.removeItem(PLUGIN_SELF_ID_STORAGE_KEY);
     }, []);
@@ -134,10 +136,9 @@ export function useConfig() {
         }
     }, [headers, logout]);
 
-    const fetchAccountConfig = useCallback(async (selfId) => {
+    /** 只负责请求，返回账号配置数据；失败返回 null。 */
+    const requestAccountConfig = useCallback(async (selfId) => {
         const normalizedSelfId = normalizeSelfId(selfId);
-        const scopeKey = scopeKeyOf(normalizedSelfId);
-
         try {
             const res = await fetch(
                 `${API_BASE}/api/account-config${buildScopedQuery(normalizedSelfId)}`,
@@ -145,19 +146,26 @@ export function useConfig() {
             );
             if (res.status === 401) {
                 logout();
-                return;
+                return null;
             }
             const data = await res.json();
-            if (data.success) {
-                setAccountConfigs((prev) => ({ ...prev, [scopeKey]: data.data }));
-            }
+            return data.success ? data.data : null;
         } catch (error) {
             console.error(
                 `Failed to fetch ${normalizedSelfId == null ? 'default' : `account ${normalizedSelfId}`} config:`,
                 error
             );
+            return null;
         }
     }, [headers, logout]);
+
+    const fetchAccountConfig = useCallback(async (selfId) => {
+        const scopeKey = scopeKeyOf(normalizeSelfId(selfId));
+        const data = await requestAccountConfig(selfId);
+        if (data) {
+            setAccountConfigs((prev) => ({ ...prev, [scopeKey]: data }));
+        }
+    }, [requestAccountConfig]);
 
     const saveAccountConfig = useCallback(async (selfId, newConfig) => {
         const normalizedSelfId = normalizeSelfId(selfId);
@@ -400,20 +408,24 @@ export function useConfig() {
         }
     }, [headers, selectedPluginSelfId]);
 
+    const loading = isLoggedIn && !bootLoaded;
+
     useEffect(() => {
         if (!isLoggedIn) {
-            setLoading(false);
             return;
         }
 
-        setLoading(true);
-        Promise.all([
-            fetchSchema(),
-            fetchConfig(),
-            fetchPlugins(),
-            fetchBotAccounts(),
-            fetchAccountSchema(),
-        ]).finally(() => setLoading(false));
+        // 这些请求函数在 401 时会调用 logout()（含 setState），lint 无法判断那发生在 await 之后，
+        // 所以从 Promise 回调里发起，明确不在 effect 同步阶段改状态
+        Promise.resolve()
+            .then(() => Promise.all([
+                fetchSchema(),
+                fetchConfig(),
+                fetchPlugins(),
+                fetchBotAccounts(),
+                fetchAccountSchema(),
+            ]))
+            .finally(() => setBootLoaded(true));
     }, [isLoggedIn, fetchSchema, fetchConfig, fetchPlugins, fetchBotAccounts, fetchAccountSchema]);
 
     useEffect(() => {
@@ -423,11 +435,22 @@ export function useConfig() {
 
         const scopeKey = scopeKeyOf(selectedPluginSelfId);
         if (accountConfigs[scopeKey] !== undefined) {
-            return;
+            return undefined;
         }
 
-        fetchAccountConfig(selectedPluginSelfId);
-    }, [isLoggedIn, selectedPluginSelfId, accountConfigs, fetchAccountConfig]);
+        // 请求完成后再写入状态；切换账号或卸载时丢弃过期结果
+        let cancelled = false;
+        Promise.resolve()
+            .then(() => requestAccountConfig(selectedPluginSelfId))
+            .then((data) => {
+                if (!cancelled && data) {
+                    setAccountConfigs((prev) => ({ ...prev, [scopeKey]: data }));
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isLoggedIn, selectedPluginSelfId, accountConfigs, requestAccountConfig]);
 
     useEffect(() => {
         if (!isLoggedIn || Object.keys(plugins).length === 0) {

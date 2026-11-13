@@ -16,7 +16,7 @@ mock.module(url("../lib/path.js"), { namedExports: {
   plugindata: fixture, pluginRoot: fileURLToPath(new URL("../", import.meta.url)),
 } });
 mock.module(url("../lib/setting.js"), { defaultExport: { getConfig: () => ({
-  utilityRoute: "测试", toolGroups: [{ name: "记忆", tools: ["Memory"] }, { name: "关闭记忆", tools: [] }],
+  utilityModels: ["测试"], toolGroups: [{ name: "记忆", tools: ["Memory"] }, { name: "关闭记忆", tools: [] }],
 }) } });
 mock.module(url("../lib/AIUtils/getAI.js"), { namedExports: { getAI: async (...args) => {
   assert.ok(aiHandler, "测试禁止真实 AI 请求");

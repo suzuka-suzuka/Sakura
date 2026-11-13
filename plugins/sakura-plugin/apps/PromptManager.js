@@ -1,5 +1,6 @@
 import Setting from "../lib/setting.js"
 import { findProfileByPrefix } from "../lib/AIUtils/profileTriggers.js"
+import { modelKey, normalizeModelList } from "../lib/AIUtils/aiModels.js"
 export class profileManager extends plugin {
   constructor() {
     super({
@@ -34,7 +35,7 @@ export class profileManager extends plugin {
     await this.listAiSettings(e)
   });
 
-  listRouteCmd = Command(/^#列出路由$/, "master", async (e) => {
+  listRouteCmd = Command(/^#列出(路由|模型)$/, "master", async (e) => {
     await this.listRoutes(e)
   });
 
@@ -50,8 +51,12 @@ export class profileManager extends plugin {
     return Setting.setConfig("AI", data)
   }
 
-  getAllRoutes() {
-    return Setting.getConfig("Routes")?.routes || []
+  getChatModelNames() {
+    const models = Setting.getConfig("Models")?.models || []
+    return models
+      .filter(model => (model.type || "chat") === "chat" && model.enabled !== false)
+      .map(modelKey)
+      .filter(Boolean)
   }
 
   getToolGroupNames() {
@@ -242,24 +247,26 @@ export class profileManager extends plugin {
 
         state.data.name = role.name
         state.step = "awaiting_route"
-        await e.reply(`已选择人设：${state.data.name}\n现在，请输入模型路由`)
+        await e.reply(`已选择人设：${state.data.name}\n现在，请输入要使用的模型名，多个用空格隔开，排在前面的优先。可以发送 #列出模型 查看可用模型`)
         break
 
       case "awaiting_route":
-        const routes = this.getAllRoutes()
-        if (!routes.some(item => item.id === userInput)) {
-          await e.reply(`路由 "${userInput}" 无效，请重新输入，可以发送 #列出路由 获取可用路由`)
+        const availableModels = this.getChatModelNames()
+        const requestedModels = normalizeModelList(userInput.split(/[\s,，、]+/))
+        const unknownModels = requestedModels.filter(name => !availableModels.includes(name))
+        if (requestedModels.length === 0 || unknownModels.length > 0) {
+          await e.reply(`模型 "${unknownModels.join("、") || userInput}" 不存在，请重新输入，可以发送 #列出模型 查看可用模型`)
           return
         }
 
-        state.data.route = userInput
+        state.data.models = requestedModels
         state.step = "awaiting_settings"
         const toolGroupNames = this.getToolGroupNames()
         const toolGroupText = toolGroupNames.length > 0
           ? `\n当前可用工具组：${toolGroupNames.join("、")}`
           : "\n当前没有配置工具组，如不使用工具请填 0。"
         await e.reply(
-          `路由已设定为：${state.data.route}\n现在，请一次性输入以下设置，用空格隔开：\n1. 是否【启用群聊上下文】（1为是，0为否）\n2. 是否【启用历史记录】（1为是，0为否）\n3. 【工具组名称】（不使用工具填 0）${toolGroupText}\n\n例如：1 1 默认工具组`,
+          `模型已设定为：${state.data.models.join(" → ")}\n现在，请一次性输入以下设置，用空格隔开：\n1. 是否【启用群聊上下文】（1为是，0为否）\n2. 是否【启用历史记录】（1为是，0为否）\n3. 【工具组名称】（不使用工具填 0）${toolGroupText}\n\n例如：1 1 默认工具组`,
         )
         break
 
@@ -306,22 +313,23 @@ export class profileManager extends plugin {
   }
 
   async listRoutes(e) {
-    const routes = this.getAllRoutes()
+    const models = (Setting.getConfig("Models")?.models || [])
+      .filter(model => (model.type || "chat") === "chat")
 
-    if (routes.length === 0) {
-      await e.reply("当前没有配置任何模型路由。")
+    if (models.length === 0) {
+      await e.reply("当前没有配置任何对话模型。")
       return
     }
 
-    const nodes = routes.map(route => ({
+    const nodes = models.map(model => ({
       user_id: e.bot.self_id,
       nickname: e.bot.nickname,
-      content: `${route.id}${route.name ? `（${route.name}）` : ""}`,
+      content: `${modelKey(model)}（${model.provider}${model.enabled === false ? "，已停用" : ""}）`,
     }))
 
     await e.sendForwardMsg(nodes, {
-      source: "当前可用模型路由",
-      prompt: "查看可用模型路由",
+      source: "当前可用对话模型",
+      prompt: "查看可用对话模型",
     })
   }
 
@@ -337,7 +345,7 @@ export class profileManager extends plugin {
     const nodes = profiles.map(profile => ({
       user_id: e.bot.self_id,
       nickname: e.bot.nickname,
-      content: `前缀：${profile.prefixes.join("、")}\n绑定角色：${profile.name || "未设置"}\n模型路由：${profile.route}`,
+      content: `前缀：${profile.prefixes.join("、")}\n绑定角色：${profile.name || "未设置"}\n模型：${(profile.models || []).join(" → ") || "未设置"}`,
     }))
 
     await e.sendForwardMsg(nodes, {

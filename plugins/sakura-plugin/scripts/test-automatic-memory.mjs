@@ -35,7 +35,7 @@ mock.module(moduleUrl("../lib/setting.js"), { defaultExport: {
   getConfig(name) {
     if (name === "Memory") return memoryConfig;
     if (name === "mimic") return { toolGroup: "记忆" };
-    return { utilityRoute: "test-utility", toolGroups };
+    return { utilityModels: ["test-utility"], toolGroups };
   },
 } });
 mock.module(moduleUrl("../../../src/utils/redis.js"), { namedExports: { getRedis: () => redis } });
@@ -107,6 +107,13 @@ const conversation = (text = "我希望被称为小夜") => [
 ];
 const document = (event, scope = "user", source = "Mimic") => memory.readMemoryDocument(memory.getMemoryLocation({ groupId: event.group_id, userId: event.user_id, scope, source }).memoryFile, { throwOnError: true });
 
+// 等待后台记忆整理完成。按时间而不是事件循环轮数计上限：并行跑全量测试时机器很忙，
+// 固定 50 轮可能在整理写盘之前就用完，导致偶发失败。
+async function waitUntil(predicate, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+}
+
 before(async () => {
   const executable = process.env.SAKURA_TEST_REDIS_SERVER || YAML.load(fs.readFileSync(path.join(root, "config/config.yaml"), "utf8")).redis.execPath;
   assert.ok(executable && fs.existsSync(executable), "需要本机 Redis 可执行文件或 SAKURA_TEST_REDIS_SERVER");
@@ -135,7 +142,7 @@ test("工具与 JSON 共用新增计数，第5条才整理，重复和空列表�
   assert.equal(document(event).revision, 4);
   const result = await tool.func({ scope: "user", content: "第五条稳定事实" }, event);
   assert.match(result, /后台整理/);
-  for (let attempt = 0; document(event).summary.sourceRevision < 5 && attempt < 50; attempt++) await new Promise((resolve) => setImmediate(resolve));
+  await waitUntil(() => document(event).summary.sourceRevision >= 5);
   assert.equal(document(event).summary.sourceRevision, 5);
   assert.equal(document(event).summary.text, "测试摘要");
   const count = aiCalls.length;
@@ -172,9 +179,7 @@ test("不同设定的延迟提取、旧记忆读取和摘要整理分别落入�
     for (const source of sources) {
       await storeMemories({ e: event, scope: "user", source,
         contents: Array.from({ length: 10 }, (_, index) => `${source}旧事实${index}`) });
-      for (let attempt = 0; document(event, "user", source).summary.sourceRevision < 10 && attempt < 100; attempt++) {
-        await new Promise((resolve) => setImmediate(resolve));
-      }
+      await waitUntil(() => document(event, "user", source).summary.sourceRevision >= 10);
       assert.equal(document(event, "user", source).summary.text, `${source}独立摘要`);
       const handle = await automatic.beginPersonalMemory(event, source, { redis, now, toolGroup: "记忆" });
       await automatic.finishPersonalMemory(handle, conversation(`${source}新事实`), { redis, now });
@@ -230,7 +235,7 @@ test("记忆整理按实际存储位置区分本人，群任务发起者不是�
       contents: Array.from({ length: 10 }, (_, index) => `身份上下文回归事实${index}`),
     });
     const readTarget = () => memory.readMemoryDocument(result.location.memoryFile, { throwOnError: true });
-    for (let attempt = 0; readTarget().summary.sourceRevision < 10 && attempt < 50; attempt++) await new Promise((resolve) => setImmediate(resolve));
+    await waitUntil(() => readTarget().summary.sourceRevision >= 10);
     assert.equal(readTarget().summary.sourceRevision, 10);
     const request = aiCalls.at(-1);
     assert.equal(request[1].user_id, caller.user_id);
@@ -816,7 +821,7 @@ test("chat 按角色工具组登记个人记忆，独立遵循各前缀的历史
   const chat = new AIChat();
   const keys = automatic.getPersonalMemoryKeys(event.self_id);
   for (const [prefix, history, toolGroup] of [["*", false, "记忆"], ["#", true, "记忆"], ["!", true, "关闭记忆"]]) {
-    const profile = { route: "test", Prompt: "角色提示", prefixes: [prefix], history, toolGroup };
+    const profile = { models: ["test"], Prompt: "角色提示", prefixes: [prefix], history, toolGroup };
     await chat.doChat(event, profile, "我喜欢简洁");
     assert.equal(agentToolGroups.at(-1), toolGroup);
     assert.equal(agentMemorySources.at(-1), `chat:${prefix}`);
@@ -856,7 +861,7 @@ test("chat 按角色工具组登记个人记忆，独立遵循各前缀的历史
   const failed = { ...e(930014), self_id: event.self_id, reply: async () => {} };
   agentStatus = "model_error";
   try {
-    await chat.doChat(failed, { route: "test", Prompt: "角色提示", prefixes: ["*"], history: false, toolGroup: "记忆" }, "失败请求");
+    await chat.doChat(failed, { models: ["test"], Prompt: "角色提示", prefixes: ["*"], history: false, toolGroup: "记忆" }, "失败请求");
     assert.equal(await redis.hget(keys.jobs, automatic.getPersonalMemoryJobId(failed, "chat:*")), null);
   } finally {
     agentStatus = "completed";
@@ -920,7 +925,7 @@ test("排队期间关闭记忆工具，chat和拟态都跳过提取，拟态仍�
 test("拟态入口承接完整 Redis 连续历史，随机插话保持独立且不续期", async () => {
   const event = { ...e(930015), isMaster: true, getInfo: async () => ({}), reply: async () => {} };
   const instance = new Mimic();
-  const config = { route: "test", Prompt: "角色提示", splitMessage: false, toolGroup: "记忆" };
+  const config = { models: ["test"], Prompt: "角色提示", splitMessage: false, toolGroup: "记忆" };
   event._mimicPreflight = { config, query: "第一轮", mustReply: true };
   await instance.doMimic(event);
   assert.equal(agentMemorySources.at(-1), "Mimic");

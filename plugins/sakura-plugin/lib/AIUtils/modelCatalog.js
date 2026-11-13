@@ -1,9 +1,7 @@
 import { createHash } from "node:crypto";
 import OpenAI from "openai";
-import {
-  CREDENTIAL_SCHEDULING_STRATEGY,
-  orderScheduledItems,
-} from "./providerRouter.js";
+import { orderScheduledItems } from "./providerRouter.js";
+import { providerCredentials, providerName } from "./aiModels.js";
 import { createGeminiClient } from "./vertexAuth.js";
 
 const modelCache = new Map();
@@ -12,21 +10,18 @@ const MODEL_REQUEST_TIMEOUT_MS = 15000;
 const MODEL_LIST_LIMIT = 500;
 
 function getCacheKey(provider, scopeKey) {
-  return `${scopeKey || "default"}:${provider.id}`;
+  return `${scopeKey || "default"}:${providerName(provider)}`;
 }
 
 export function getProviderModelDiscoveryFingerprint(providers) {
   const discoveryConfig = (Array.isArray(providers) ? providers : []).map((provider) => ({
-    id: provider.id,
+    name: providerName(provider),
     protocol: provider.protocol,
     baseURL: provider.baseURL,
     vertex: provider.vertex === true,
-    credentials: (provider.credentials || []).map((credential) => ({
-      auth: provider.vertex === true
-        ? credential.serviceAccountRef
-        : credential.apiKey,
-      enabled: credential.enabled !== false,
-    })),
+    credentials: providerCredentials(provider).map((credential) =>
+      credential.serviceAccountRef || credential.apiKey
+    ),
   }));
   return createHash("sha256").update(JSON.stringify(discoveryConfig)).digest("hex");
 }
@@ -95,7 +90,8 @@ const protocolFetchers = {
 };
 
 export async function listProviderModels(provider, options = {}) {
-  if (!provider?.id) throw new Error("供应商配置无效");
+  const name = providerName(provider);
+  if (!name) throw new Error("供应商配置无效");
 
   const scopeKey = options.scopeKey || "default";
   const cacheKey = getCacheKey(provider, scopeKey);
@@ -110,12 +106,12 @@ export async function listProviderModels(provider, options = {}) {
   const request = (async () => {
     const limit = MODEL_LIST_LIMIT;
     const credentials = orderScheduledItems(
-      provider.credentials || [],
-      CREDENTIAL_SCHEDULING_STRATEGY,
-      `model-catalog:${scopeKey}:${provider.id}`
+      providerCredentials(provider),
+      "round_robin",
+      `model-catalog:${scopeKey}:${name}`
     );
     if (credentials.length === 0) {
-      throw new Error(`供应商 ${provider.id} 没有可用凭据`);
+      throw new Error(`供应商 ${name} 还没有填写 Key`);
     }
 
     const fetcher = options.fetcher || protocolFetchers[provider.protocol];
@@ -132,7 +128,7 @@ export async function listProviderModels(provider, options = {}) {
 
         const fetchedAt = Date.now();
         const result = {
-          providerId: provider.id,
+          providerId: name,
           models,
           fetchedAt,
           cached: false,
@@ -143,7 +139,7 @@ export async function listProviderModels(provider, options = {}) {
         lastError = error;
       }
     }
-    throw new Error(`拉取供应商 ${provider.id} 的模型失败：${lastError?.message || "未知错误"}`);
+    throw new Error(`拉取供应商 ${name} 的模型失败：${lastError?.message || "未知错误"}`);
   })();
 
   inflightRequests.set(cacheKey, request);

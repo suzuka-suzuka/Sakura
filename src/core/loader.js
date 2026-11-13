@@ -148,11 +148,13 @@ export class PluginLoader {
               const schemaUrl = pathToFileURL(schemaPath).href + '?t=' + Date.now();
               const schemaMod = await import(schemaUrl);
               const schemaMap = schemaMod.configSchema || schemaMod.default;
-              const categories = schemaMod.schemaCategories || null;
+              const categories = schemaMod.schemaNavigation || schemaMod.schemaCategories || null;
               const pluginMeta = schemaMod.pluginMeta || null;
               const dynamicOptionsConfig = schemaMod.dynamicOptionsConfig || null;
               if (schemaMap && typeof schemaMap === 'object') {
-                pluginConfigManager.register(pluginName, schemaMap, categories, pluginMeta, dynamicOptionsConfig);
+                pluginConfigManager.register(pluginName, schemaMap, categories, pluginMeta, dynamicOptionsConfig, {
+                  migrate: typeof schemaMod.migrateConfig === 'function' ? schemaMod.migrateConfig : null,
+                });
               }
             } catch {
             }

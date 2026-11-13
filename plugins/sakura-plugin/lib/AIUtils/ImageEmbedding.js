@@ -12,6 +12,7 @@ import {
   generateContentEmbedding,
   generateTextEmbedding as embedText,
 } from "./embeddingProvider.js";
+import { hasModels } from "./aiModels.js";
 
 const EMOJI_DATA_DIR = path.join(plugindata, "emoji_embeddings");
 const VECTRA_INDEX_DIR = path.join(EMOJI_DATA_DIR, "vectra_index");
@@ -302,11 +303,9 @@ class ImageEmbeddingManager {
       },
     ];
 
-    const routeId = String(
-      Setting.getConfig("AI")?.utilityRoute || ""
-    ).trim();
-    if (!routeId) {
-      throw new Error("表情识图需要通用辅助路由，但 AI 设定中没有配置 utilityRoute。");
+    const routeId = Setting.getConfig("AI")?.utilityModels;
+    if (!hasModels(routeId)) {
+      throw new Error("表情识图需要后台辅助模型，但 AI 设定中没有选择。");
     }
     const aiResult = await getAI(
       routeId,

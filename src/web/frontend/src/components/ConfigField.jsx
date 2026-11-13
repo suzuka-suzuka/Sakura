@@ -1,8 +1,17 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { createContext, useContext, useState, useRef, useCallback, useEffect, useMemo, useId } from 'react';
 import { createPortal } from 'react-dom';
 import DraftInput from './DraftInput';
+import Icon from './Icon';
 import { readAuthToken } from '../utils/authStorage';
 import { useDynamicOptions } from '../hooks/useDynamicOptions';
+import {
+    fieldAnchorId,
+    formatSummaryValue,
+    groupFields,
+    isFieldVisible,
+    itemTitle,
+    resetHiddenFields,
+} from '../utils/schemaLayout';
 
 function normalizeScopeSelfId(scopeSelfId) {
     if (scopeSelfId == null) return null;
@@ -25,163 +34,240 @@ function getAuthToken() {
 }
 
 /**
- * 单个配置字段渲染器
- * 根据 schema 元数据中的 type 自动选择对应的输入控件
- *
- * meta 可能包含: { type, description, label, help, default, step?, min?, max?, hideSpinner?, items?, children?, uiType? }
+ * 字段外壳：左侧标签与说明，右侧控件。
+ * layout: inline（左右两栏，默认）| stack（控件占满整行）| switch（开关，控件靠右）
+ * 窄容器（如编辑抽屉）里由 CSS 自动改成上下排列。
  */
-export default function ConfigField({ name, meta, value, onChange, scopeSelfId = null, formValue = null }) {
-    const { type, description, options, label, help, uiType } = meta;
+// 为 true 时字段只渲染控件（标签已经作为卡片标题显示）
+const BareFieldContext = createContext(false);
 
-    // 显示名称: 优先 label > description > name
-    const displayName = label || description || name;
-
-    // 指令消耗配置 → CommandCostField
-    if (uiType === 'commandCost') {
-        return (
-            <CommandCostField
-                name={name}
-                displayName={displayName}
-                help={help}
-                value={value}
-                onChange={onChange}
-            />
-        );
-    }
-
-    // Boolean → Toggle
-    if (type === 'boolean') {
-        return (
-            <div className="field-group">
-                <div className="toggle-wrapper">
-                    <label className="field-label">
-                        {displayName}
-                        <span className="field-type-badge">{name}</span>
-                    </label>
-                    <button
-                        type="button"
-                        className={`toggle ${value ? 'active' : ''}`}
-                        onClick={() => onChange(!value)}
-                    >
-                        <span className="toggle-knob" />
-                    </button>
+export function FieldShell({ label, help, extra = null, layout = 'inline', children }) {
+    const bare = useContext(BareFieldContext);
+    if (bare) return <div className="field-bare">{children}</div>;
+    return (
+        <div className={`field-row field-row--${layout}`}>
+            <div className="field-meta">
+                <div className="field-label">
+                    <span>{label}</span>
+                    {extra}
                 </div>
                 {help && <div className="field-help">{help}</div>}
             </div>
+            <div className="field-control">{children}</div>
+        </div>
+    );
+}
+
+/**
+ * 渲染一组字段：按 group 分卡片、处理 showIf / 协议过滤、把高级选项折叠起来。
+ * value 是包含这些字段的对象，onChange(key, nextValue) 修改单个字段。
+ * variant: page（页面卡片）| drawer（抽屉内，紧凑）
+ */
+export function FieldList({
+    children,
+    value,
+    onFieldChange,
+    scopeSelfId = null,
+    context = {},
+    variant = 'page',
+    anchorScope = '',
+    groupByCard = true,
+    header = null,
+}) {
+    const groups = useMemo(
+        () => (groupByCard ? groupFields(children) : [{ title: '', fields: Object.entries(children || {}) }]),
+        [children, groupByCard]
+    );
+
+    return (
+        <>
+            {groups.map((group, index) => (
+                <FieldGroup
+                    key={group.title || `__group_${index}`}
+                    title={group.title}
+                    fields={group.fields}
+                    value={value}
+                    onFieldChange={onFieldChange}
+                    scopeSelfId={scopeSelfId}
+                    context={context}
+                    variant={variant}
+                    anchorScope={anchorScope}
+                    header={index === 0 ? header : null}
+                />
+            ))}
+        </>
+    );
+}
+
+function FieldGroup({ title, fields, value, onFieldChange, scopeSelfId, context, variant, anchorScope, header }) {
+    const [showAdvanced, setShowAdvanced] = useState(false);
+    const visible = fields.filter(([, meta]) => isFieldVisible(meta, value, context));
+    const basic = visible.filter(([, meta]) => !meta.advanced);
+    const advanced = visible.filter(([, meta]) => meta.advanced);
+
+    if (visible.length === 0 && !header) return null;
+
+    const renderField = ([key, meta]) => {
+        if (meta.type === 'object' && meta.children) {
+            return (
+                <div key={key} className="nested-card" id={anchorScope ? fieldAnchorId(anchorScope, key) : undefined}>
+                    <div className="nested-card-title">{meta.label || meta.description || key}</div>
+                    {meta.help && <div className="nested-card-help">{meta.help}</div>}
+                    <FieldList
+                        children={meta.children}
+                        value={value?.[key] || {}}
+                        onFieldChange={(childKey, childValue) => onFieldChange(key, { ...(value?.[key] || {}), [childKey]: childValue })}
+                        scopeSelfId={scopeSelfId}
+                        context={context}
+                        variant="nested"
+                        groupByCard={false}
+                    />
+                </div>
+            );
+        }
+        return (
+            <div key={key} className="field-anchor" id={anchorScope ? fieldAnchorId(anchorScope, key) : undefined}>
+                <ConfigField
+                    name={key}
+                    meta={meta}
+                    value={value?.[key]}
+                    onChange={(next) => onFieldChange(key, next)}
+                    scopeSelfId={scopeSelfId}
+                    formValue={value}
+                />
+            </div>
+        );
+    };
+
+    const body = (
+        <>
+            {basic.map(renderField)}
+            {advanced.length > 0 && (
+                <>
+                    <button
+                        type="button"
+                        className={`advanced-toggle ${showAdvanced ? 'open' : ''}`}
+                        onClick={() => setShowAdvanced((open) => !open)}
+                    >
+                        <Icon name="chevronDown" size={15} />
+                        {showAdvanced ? '收起高级选项' : `高级选项（${advanced.length}）`}
+                    </button>
+                    {showAdvanced && <div className="advanced-fields">{advanced.map(renderField)}</div>}
+                </>
+            )}
+        </>
+    );
+
+    // 只有一个列表字段时，把字段标签提升为卡片标题，避免标题重复
+    const sole = variant === 'page' && fields.length === 1 && !header && visible.length === 1
+        && visible[0][1].type === 'array' ? visible[0] : null;
+    if (sole) {
+        const [, soleMeta] = sole;
+        const count = Array.isArray(value?.[sole[0]]) ? value[sole[0]].length : 0;
+        return (
+            <section className="card">
+                <header className="card-header">
+                    <h3 className="card-title">
+                        {title || soleMeta.label || soleMeta.description}
+                        {soleMeta.items?.type === 'object' && <span className="field-count">{count}</span>}
+                    </h3>
+                    {soleMeta.help && <p className="card-help">{soleMeta.help}</p>}
+                </header>
+                <div className="card-body card-body--bare">
+                    <BareFieldContext.Provider value>
+                        {renderField(sole)}
+                    </BareFieldContext.Provider>
+                </div>
+            </section>
         );
     }
 
-    // Enum → Select
-    if (type === 'enum' && options) {
+    if (variant !== 'page') {
         return (
-            <div className="field-group">
-                <label className="field-label">
-                    {displayName}
-                    <span className="field-type-badge">{name}</span>
-                </label>
-                {help && <div className="field-help">{help}</div>}
-                <select
-                    className="field-input"
-                    value={value ?? ''}
-                    onChange={(e) => onChange(e.target.value)}
-                >
-                    {options.map(opt => (
-                        <option key={opt} value={opt}>{meta.optionLabels?.[opt] || opt}</option>
-                    ))}
-                </select>
+            <div className="field-group-plain">
+                {title && <div className="field-group-title">{title}</div>}
+                {body}
             </div>
         );
     }
 
-    // Array
+    return (
+        <section className="card">
+            {header}
+            {title && (
+                <header className="card-header">
+                    <h3 className="card-title">{title}</h3>
+                </header>
+            )}
+            <div className="card-body">{body}</div>
+        </section>
+    );
+}
+
+/**
+ * 单个配置字段渲染器：根据 schema 元数据选择控件。
+ */
+export default function ConfigField({ name, meta, value, onChange, scopeSelfId = null, formValue = null }) {
+    const { type, description, options, label, help, uiType } = meta;
+    const displayName = label || description || name;
+
+    if (uiType === 'commandCost') {
+        return <CommandCostField name={name} displayName={displayName} help={help} value={value} onChange={onChange} />;
+    }
+
+    if (type === 'boolean') {
+        return (
+            <FieldShell label={displayName} help={help} layout="switch">
+                <button
+                    type="button"
+                    role="switch"
+                    aria-checked={Boolean(value)}
+                    aria-label={displayName}
+                    className={`toggle ${value ? 'active' : ''}`}
+                    onClick={() => onChange(!value)}
+                >
+                    <span className="toggle-knob" />
+                </button>
+            </FieldShell>
+        );
+    }
+
+    if (type === 'enum' && options) {
+        if (options.length <= 4 && options.every((opt) => (meta.optionLabels?.[opt] || opt).length <= 8)) {
+            return (
+                <FieldShell label={displayName} help={help}>
+                    <div className="segmented" role="radiogroup" aria-label={displayName}>
+                        {options.map((opt) => (
+                            <button
+                                key={opt}
+                                type="button"
+                                role="radio"
+                                aria-checked={value === opt}
+                                className={value === opt ? 'active' : ''}
+                                onClick={() => onChange(opt)}
+                            >
+                                {meta.optionLabels?.[opt] || opt}
+                            </button>
+                        ))}
+                    </div>
+                </FieldShell>
+            );
+        }
+        return (
+            <FieldShell label={displayName} help={help}>
+                <select className="field-input" value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
+                    {options.map((opt) => (
+                        <option key={opt} value={opt}>{meta.optionLabels?.[opt] || opt}</option>
+                    ))}
+                </select>
+            </FieldShell>
+        );
+    }
+
     if (type === 'array') {
-        if (uiType === 'providerCredentials' && meta.items?.type === 'object') {
+        if (uiType?.startsWith('modelList')) {
             return (
-                <ProviderCredentialsField
-                    name={name}
-                    displayName={displayName}
-                    help={help}
-                    value={value}
-                    onChange={onChange}
-                    itemMeta={meta.items}
-                    providerDraft={formValue}
-                    scopeSelfId={scopeSelfId}
-                />
-            );
-        }
-        if (uiType === 'routeTargets' && meta.items?.type === 'object') {
-            return (
-                <RouteTargetsField
-                    name={name}
-                    displayName={displayName}
-                    help={help}
-                    value={value}
-                    onChange={onChange}
-                    itemMeta={meta.items}
-                    scopeSelfId={scopeSelfId}
-                />
-            );
-        }
-        if (uiType === 'repeatRules' && meta.items?.type === 'object') {
-            return (
-                <RepeatRulesField
-                    name={name}
-                    displayName={displayName}
-                    help={help}
-                    value={value}
-                    onChange={onChange}
-                    itemMeta={meta.items}
-                    nameField={meta.nameField}
-                    scopeSelfId={scopeSelfId}
-                />
-            );
-        }
-        // Array of objects → ObjectArrayField
-        if (meta.items?.type === 'object' && meta.items?.children) {
-            return (
-                <ObjectArrayField
-                    name={name}
-                    displayName={displayName}
-                    help={help}
-                    value={value}
-                    onChange={onChange}
-                    itemMeta={meta.items}
-                    fixed={meta.fixed}
-                    nameField={meta.nameField}
-                    scopeSelfId={scopeSelfId}
-                />
-            );
-        }
-        // Group select array → GroupSelectField
-        if (uiType === 'groupSelect' || meta.items?.uiType === 'groupSelect') {
-            return (
-                <GroupSelectField
-                    name={name}
-                    displayName={displayName}
-                    help={help}
-                    value={value}
-                    onChange={onChange}
-                    scopeSelfId={scopeSelfId}
-                />
-            );
-        }
-        // Tool multi-select → ToolMultiSelectField
-        if (uiType === 'toolMultiSelect') {
-            return (
-                <ToolMultiSelectField
-                    name={name}
-                    displayName={displayName}
-                    help={help}
-                    value={value}
-                    onChange={onChange}
-                />
-            );
-        }
-        // Dynamic select array (roleSelectArray, channelSelectArray, etc.)
-        if (uiType && uiType.endsWith('Array')) {
-            return (
-                <DynamicSelectArrayField
-                    name={name}
+                <ModelListField
                     displayName={displayName}
                     help={help}
                     value={value}
@@ -191,7 +277,57 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
                 />
             );
         }
-        // Simple array → Tag Input
+        if (uiType === 'secretList') {
+            return <SecretListField displayName={displayName} help={help} value={value} onChange={onChange} />;
+        }
+        if (uiType === 'vertexCredentialList') {
+            return <VertexCredentialListField displayName={displayName} help={help} value={value} onChange={onChange} />;
+        }
+        if (uiType === 'modelEntries' && meta.items?.type === 'object') {
+            return (
+                <ModelEntriesField
+                    displayName={displayName}
+                    help={help}
+                    value={value}
+                    onChange={onChange}
+                    meta={meta}
+                    scopeSelfId={scopeSelfId}
+                />
+            );
+        }
+        if (uiType === 'repeatRules' && meta.items?.type === 'object') {
+            return (
+                <RepeatRulesField
+                    displayName={displayName}
+                    help={help}
+                    value={value}
+                    onChange={onChange}
+                    meta={meta}
+                    scopeSelfId={scopeSelfId}
+                />
+            );
+        }
+        if (meta.items?.type === 'object' && meta.items?.children) {
+            return (
+                <ObjectArrayField
+                    displayName={displayName}
+                    help={help}
+                    value={value}
+                    onChange={onChange}
+                    meta={meta}
+                    scopeSelfId={scopeSelfId}
+                />
+            );
+        }
+        if (uiType === 'groupSelect' || meta.items?.uiType === 'groupSelect') {
+            return <GroupSelectField name={name} displayName={displayName} help={help} value={value} onChange={onChange} scopeSelfId={scopeSelfId} />;
+        }
+        if (uiType === 'toolMultiSelect') {
+            return <ToolMultiSelectField name={name} displayName={displayName} help={help} value={value} onChange={onChange} />;
+        }
+        if (uiType && uiType.endsWith('Array')) {
+            return <DynamicSelectArrayField name={name} displayName={displayName} help={help} value={value} onChange={onChange} uiType={uiType} scopeSelfId={scopeSelfId} />;
+        }
         return (
             <ArrayField
                 name={name}
@@ -200,47 +336,34 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
                 value={value}
                 onChange={onChange}
                 itemType={meta.items?.type || 'string'}
+                placeholder={meta.placeholder}
             />
         );
     }
 
-    // Number
     if (type === 'number') {
-        // Single group select → SingleGroupSelectField
         if (uiType === 'groupSelect') {
-            return (
-                <SingleGroupSelectField
-                    name={name}
-                    displayName={displayName}
-                    help={help}
-                    value={value}
-                    onChange={onChange}
-                    scopeSelfId={scopeSelfId}
-                />
-            );
+            return <SingleGroupSelectField name={name} displayName={displayName} help={help} value={value} onChange={onChange} scopeSelfId={scopeSelfId} />;
         }
 
         const hasStep = meta.step != null;
         const hideSpinner = meta.hideSpinner || !hasStep;
 
         return (
-            <div className="field-group">
-                <label className="field-label">
-                    {displayName}
-                    <span className="field-type-badge">{name}</span>
-                    {meta.min != null && meta.max != null && (
-                        <span className="field-type-badge">{meta.min} ~ {meta.max}</span>
-                    )}
-                </label>
-                {help && <div className="field-help">{help}</div>}
+            <FieldShell
+                label={displayName}
+                help={help}
+                extra={meta.min != null && meta.max != null ? <span className="field-hint">{meta.min} ~ {meta.max}</span> : null}
+            >
                 <DraftInput
                     type={hideSpinner ? 'text' : 'number'}
                     inputMode="decimal"
-                    className="field-input"
+                    className="field-input field-input--number"
                     value={value}
                     step={meta.step ?? 'any'}
                     min={meta.min ?? undefined}
                     max={meta.max ?? undefined}
+                    placeholder={meta.placeholder || undefined}
                     parse={(text) => {
                         if (!text.trim() || !Number.isFinite(Number(text))) return undefined;
                         let number = Number(text);
@@ -250,82 +373,40 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
                     }}
                     onChange={onChange}
                 />
-            </div>
+            </FieldShell>
         );
     }
 
-    if ((type === 'string' || !type) && uiType === 'serverDirectory') {
-        return (
-            <ServerDirectoryField
-                name={name}
-                displayName={displayName}
-                help={help}
-                value={value}
-                onChange={onChange}
-            />
-        );
+    const isString = type === 'string' || !type;
+
+    if (isString && uiType === 'serverDirectory') {
+        return <ServerDirectoryField name={name} displayName={displayName} help={help} value={value} onChange={onChange} />;
     }
 
-    if ((type === 'string' || !type) && uiType === 'workspaceSelect') {
-        return (
-            <WorkspaceSelectField
-                name={name}
-                displayName={displayName}
-                help={help}
-                value={value}
-                onChange={onChange}
-                workspaces={formValue?.workspaces}
-            />
-        );
+    if (isString && uiType === 'workspaceSelect') {
+        return <WorkspaceSelectField name={name} displayName={displayName} help={help} value={value} onChange={onChange} workspaces={formValue?.workspaces} />;
     }
 
-    // String with #textarea uiType → Textarea
-    if ((type === 'string' || !type) && uiType === 'textarea') {
+    if (isString && uiType === 'textarea') {
         return (
-            <div className="field-group">
-                <label className="field-label">
-                    {displayName}
-                    <span className="field-type-badge">{name}</span>
-                </label>
-                {help && <div className="field-help">{help}</div>}
+            <FieldShell label={displayName} help={help} layout="stack">
                 <textarea
                     className="field-input field-textarea"
                     value={value ?? ''}
+                    placeholder={meta.placeholder || undefined}
                     onChange={(e) => onChange(e.target.value)}
                 />
-            </div>
+            </FieldShell>
         );
     }
 
-    // Cron expression editor
-    if ((type === 'string' || !type) && uiType === 'cron') {
-        return (
-            <CronField
-                name={name}
-                displayName={displayName}
-                help={help}
-                value={value}
-                onChange={onChange}
-            />
-        );
+    if (isString && uiType === 'cron') {
+        return <CronField name={name} displayName={displayName} help={help} value={value} onChange={onChange} />;
     }
 
-    if ((type === 'string' || !type) && uiType === 'vertexCredentialSelect') {
-        return (
-            <VertexCredentialSelectField
-                name={name}
-                displayName={displayName}
-                help={help}
-                value={value}
-                onChange={onChange}
-            />
-        );
-    }
-
-    if ((type === 'string' || !type) && uiType === 'modelSelect') {
+    if (isString && uiType === 'modelSelect') {
         return (
             <ModelSelectField
-                name={name}
                 displayName={displayName}
                 help={help}
                 value={value}
@@ -336,44 +417,22 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
         );
     }
 
-    // Dynamic select fields (roleSelect, channelSelect, etc.)
-    // 检查 uiType 是否在动态选项配置中（不以 Array 结尾的单选类型）
-    if ((type === 'string' || !type) && uiType && !uiType.endsWith('Array')) {
-        // 可能是动态选择类型，让 DynamicSelectField 去判断
-        return (
-                <DynamicSelectField
-                    name={name}
-                    displayName={displayName}
-                    help={help}
-                    value={value}
-                    onChange={onChange}
-                    uiType={uiType}
-                    scopeSelfId={scopeSelfId}
-                />
-        );
+    if (isString && uiType && !uiType.endsWith('Array')) {
+        return <DynamicSelectField name={name} displayName={displayName} help={help} value={value} onChange={onChange} uiType={uiType} scopeSelfId={scopeSelfId} />;
     }
 
-    // String / Union / Default
-    const isApiKey = /api.?key/i.test(name) || /api.?key/i.test(displayName);
-    const isPassword = !isApiKey && /(password|token|secret)/i.test(name);
+    const isSecret = /api.?key|password|token|secret/i.test(name);
 
     return (
-        <div className="field-group">
-            <label className="field-label">
-                {displayName}
-                <span className="field-type-badge">{name}</span>
-            </label>
-            {help && <div className="field-help">{help}</div>}
-            {isPassword ? (
-                <PasswordField
-                    value={value}
-                    onChange={onChange}
-                />
+        <FieldShell label={displayName} help={help}>
+            {isSecret ? (
+                <PasswordField value={value} onChange={onChange} placeholder={meta.placeholder} />
             ) : (
                 <DraftInput
                     type="text"
                     className="field-input"
                     value={value}
+                    placeholder={meta.placeholder || undefined}
                     parse={(text) => {
                         if (type === 'number|string' || type === 'string|number') {
                             const number = Number(text);
@@ -384,49 +443,37 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
                     onChange={onChange}
                 />
             )}
-        </div>
+        </FieldShell>
     );
 }
 
-function PasswordField({ value, onChange }) {
+function PasswordField({ value, onChange, placeholder }) {
     const [show, setShow] = useState(false);
 
     return (
-        <div style={{ position: 'relative' }}>
+        <div className="input-with-action">
             <input
                 type={show ? 'text' : 'password'}
                 className="field-input"
-                style={{ paddingRight: 40 }}
                 value={value ?? ''}
+                placeholder={placeholder || undefined}
+                autoComplete="off"
                 onChange={(e) => onChange(e.target.value)}
             />
             <button
                 type="button"
+                className="icon-btn"
                 onClick={() => setShow(!show)}
-                style={{
-                    position: 'absolute',
-                    right: 10,
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontSize: 16,
-                    opacity: 0.6,
-                    padding: 4,
-                    display: 'flex',
-                    alignItems: 'center',
-                    color: 'var(--text-secondary)'
-                }}
-                title={show ? '隐藏密码' : '显示密码'}
+                title={show ? '隐藏' : '显示'}
+                aria-label={show ? '隐藏' : '显示'}
             >
-                {show ? '👁️' : '🔒'}
+                <Icon name={show ? 'eyeOff' : 'eye'} size={16} />
             </button>
         </div>
     );
 }
 
-function WorkspaceSelectField({ name, displayName, help, value, onChange, workspaces }) {
+function WorkspaceSelectField({ displayName, help, value, onChange, workspaces }) {
     const options = [];
     const seen = new Set();
 
@@ -438,12 +485,7 @@ function WorkspaceSelectField({ name, displayName, help, value, onChange, worksp
     }
 
     return (
-        <div className="field-group">
-            <label className="field-label">
-                {displayName}
-                <span className="field-type-badge">{name}</span>
-            </label>
-            {help && <div className="field-help">{help}</div>}
+        <FieldShell label={displayName} help={help}>
             <select
                 className="field-input"
                 value={options.includes(value) ? value : ''}
@@ -457,20 +499,15 @@ function WorkspaceSelectField({ name, displayName, help, value, onChange, worksp
                     <option key={workspaceName} value={workspaceName}>{workspaceName}</option>
                 ))}
             </select>
-        </div>
+        </FieldShell>
     );
 }
 
-function ServerDirectoryField({ name, displayName, help, value, onChange }) {
+function ServerDirectoryField({ displayName, help, value, onChange }) {
     const [showBrowser, setShowBrowser] = useState(false);
 
     return (
-        <div className="field-group">
-            <label className="field-label">
-                {displayName}
-                <span className="field-type-badge">{name}</span>
-            </label>
-            {help && <div className="field-help">{help}</div>}
+        <FieldShell label={displayName} help={help}>
             <div className="server-directory-input">
                 <input
                     type="text"
@@ -497,7 +534,7 @@ function ServerDirectoryField({ name, displayName, help, value, onChange }) {
                     }}
                 />
             )}
-        </div>
+        </FieldShell>
     );
 }
 
@@ -560,7 +597,7 @@ function ServerDirectoryModal({ initialPath, onCancel, onConfirm }) {
             <div className="modal-card directory-browser-modal" onClick={(event) => event.stopPropagation()}>
                 <div className="modal-header">
                     <span className="modal-title">选择服务器文件夹</span>
-                    <button type="button" className="modal-close" onClick={onCancel}>✕</button>
+                    <button type="button" className="icon-btn" onClick={onCancel} aria-label="关闭"><Icon name="x" size={18} /></button>
                 </div>
                 <div className="modal-body directory-browser-body">
                     <form className="directory-browser-path" onSubmit={openTypedPath}>
@@ -597,7 +634,7 @@ function ServerDirectoryModal({ initialPath, onCancel, onConfirm }) {
                                 key={directory.path}
                                 onClick={() => loadDirectory(directory.path)}
                             >
-                                <span aria-hidden="true">📁</span>
+                                <Icon name="folder" size={16} />
                                 <span>{directory.name}</span>
                             </button>
                         ))}
@@ -623,7 +660,7 @@ function ServerDirectoryModal({ initialPath, onCancel, onConfirm }) {
 /**
  * 数组字段渲染器 - Tag 式添加/删除（基本类型数组）
  */
-function ArrayField({ name, displayName, help, value, onChange, itemType }) {
+function ArrayField({ displayName, help, value, onChange, itemType, placeholder }) {
     const [inputValue, setInputValue] = useState('');
     const inputRef = useRef(null);
     const items = Array.isArray(value) ? value : [];
@@ -661,13 +698,7 @@ function ArrayField({ name, displayName, help, value, onChange, itemType }) {
     };
 
     return (
-        <div className="field-group">
-            <label className="field-label">
-                {displayName}
-                <span className="field-type-badge">{name}</span>
-                <span className="field-type-badge">{items.length} 项</span>
-            </label>
-            {help && <div className="field-help">{help}</div>}
+        <FieldShell label={displayName} help={help} extra={<><span className="field-count">{items.length}</span></>}>
             <div className="array-field" onClick={() => inputRef.current?.focus()}>
                 {items.map((item, index) => (
                     <span key={index} className="array-tag">
@@ -690,16 +721,17 @@ function ArrayField({ name, displayName, help, value, onChange, itemType }) {
                     onChange={(e) => setInputValue(e.target.value)}
                     onKeyDown={handleKeyDown}
                     onBlur={addItem}
+                    placeholder={items.length === 0 ? (placeholder || '输入后按回车添加') : ''}
                 />
             </div>
-        </div>
+        </FieldShell>
     );
 }
 
 /**
  * 群号选择字段 — 弹窗多选 bot 已加入的群，标签显示群名
  */
-function GroupSelectField({ name, displayName, help, value, onChange, scopeSelfId = null }) {
+function GroupSelectField({ displayName, help, value, onChange, scopeSelfId = null }) {
     const [showModal, setShowModal] = useState(false);
     const [groupMap, setGroupMap] = useState(new Map());
     const items = Array.isArray(value) ? value : [];
@@ -730,13 +762,7 @@ function GroupSelectField({ name, displayName, help, value, onChange, scopeSelfI
     };
 
     return (
-        <div className="field-group">
-            <label className="field-label">
-                {displayName}
-                <span className="field-type-badge">{name}</span>
-                <span className="field-type-badge">{items.length} 项</span>
-            </label>
-            {help && <div className="field-help">{help}</div>}
+        <FieldShell layout="stack" label={displayName} help={help} extra={<><span className="field-count">{items.length}</span></>}>
             <div className="array-field group-select-field">
                 {items.map((item, index) => (
                     <span key={index} className="array-tag" title={String(item)}>
@@ -766,7 +792,7 @@ function GroupSelectField({ name, displayName, help, value, onChange, scopeSelfI
                     scopeSelfId={scopeSelfId}
                 />
             )}
-        </div>
+        </FieldShell>
     );
 }
 
@@ -837,7 +863,7 @@ function GroupSelectModal({ selected, onConfirm, onCancel, scopeSelfId = null })
             <div className="modal-card group-select-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="modal-header">
                     <span className="modal-title">选择群 ({checked.size} 已选)</span>
-                    <button className="modal-close" onClick={onCancel}>✕</button>
+                    <button type="button" className="icon-btn" onClick={onCancel} aria-label="关闭"><Icon name="x" size={18} /></button>
                 </div>
                 <div className="group-select-search">
                     <input
@@ -898,7 +924,7 @@ function GroupSelectModal({ selected, onConfirm, onCancel, scopeSelfId = null })
 /**
  * 单选群号字段 — 下拉选择 bot 已加入的单个群
  */
-function SingleGroupSelectField({ name, displayName, help, value, onChange, scopeSelfId = null }) {
+function SingleGroupSelectField({ displayName, help, value, onChange, scopeSelfId = null }) {
     const [groups, setGroups] = useState([]);
     const [loading, setLoading] = useState(true);
 
@@ -918,12 +944,7 @@ function SingleGroupSelectField({ name, displayName, help, value, onChange, scop
     }, [scopeSelfId]);
 
     return (
-        <div className="field-group">
-            <label className="field-label">
-                {displayName}
-                <span className="field-type-badge">{name}</span>
-            </label>
-            {help && <div className="field-help">{help}</div>}
+        <FieldShell label={displayName} help={help}>
             {loading ? (
                 <div className="field-input" style={{ color: 'var(--text-secondary)' }}>加载中...</div>
             ) : (
@@ -940,339 +961,660 @@ function SingleGroupSelectField({ name, displayName, help, value, onChange, scop
                     ))}
                 </select>
             )}
-        </div>
+        </FieldShell>
     );
 }
 
-/**
- * 对象数组字段渲染器 - 列表 + 弹窗添加/编辑
- * 点击项目打开编辑弹窗，不再使用展开模式
- * fixed: 是否为固定长度数组（不能添加/删除）
- * nameField: 指定用于显示标题的字段名
- */
-function ObjectArrayField({
-    name,
-    displayName,
-    help,
-    value,
-    onChange,
-    itemMeta,
-    fixed,
-    nameField,
-    scopeSelfId = null,
-    resolveItemMeta = null,
-}) {
-    const [showAddModal, setShowAddModal] = useState(false);
-    const [editIndex, setEditIndex] = useState(-1);
-    const items = Array.isArray(value) ? value : [];
-
-    const removeItem = (index) => {
-        onChange(items.filter((_, i) => i !== index));
-        if (editIndex === index) setEditIndex(-1);
-    };
-
-    const handleAddItem = (newItem) => {
-        onChange([...items, newItem]);
-        setShowAddModal(false);
-    };
-
-    const handleEditItem = (updatedItem) => {
-        const updated = structuredClone(items);
-        updated[editIndex] = updatedItem;
-        onChange(updated);
-        setEditIndex(-1);
-    };
-
-    // 为每个 item 生成摘要标签
-    const getItemSummary = (item, index) => {
-        // 优先使用指定的 nameField
-        if (nameField && item[nameField] !== undefined && item[nameField] !== '') {
-            return `${item[nameField]}`;
-        }
-        // 回退到默认字段
-        const defaultNameFields = ['name', 'cmd', 'trigger', 'prefix', 'group'];
-        for (const f of defaultNameFields) {
-            if (item[f] !== undefined && item[f] !== '') {
-                return `${item[f]}`;
-            }
-        }
-        return <span className="array-item-number">{index + 1}</span>;
-    };
-
-    return (
-        <div className="field-group">
-            <label className="field-label">
-                {displayName}
-                <span className="field-type-badge">{name}</span>
-                <span className="field-type-badge">{items.length} 项</span>
-                {fixed && <span className="field-type-badge" title="固定数组，不能添加/删除">🔒</span>}
-            </label>
-            {help && <div className="field-help">{help}</div>}
-
-            <div className="object-array-container">
-                {items.map((item, index) => (
-                    <div key={index} className="object-array-item">
-                        <div
-                            className="object-array-header"
-                            onClick={() => setEditIndex(index)}
-                        >
-                            <span className="object-array-toggle">✏️</span>
-                            <span className="object-array-summary">
-                                {getItemSummary(item, index)}
-                            </span>
-                            {!fixed && (
-                                <button
-                                    type="button"
-                                    className="object-array-remove"
-                                    onClick={(e) => { e.stopPropagation(); removeItem(index); }}
-                                    title="删除"
-                                >
-                                    ✕
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                ))}
-
-                {!fixed && (
-                    <button
-                        type="button"
-                        className="btn btn-secondary object-array-add"
-                        onClick={() => setShowAddModal(true)}
-                    >
-                        + 添加
-                    </button>
-                )}
-            </div>
-
-            {/* Add Modal - 仅在非固定数组时显示 */}
-            {!fixed && showAddModal && (
-                <AddObjectModal
-                    title={`添加 ${displayName}`}
-                    itemMeta={itemMeta}
-                    resolveItemMeta={resolveItemMeta}
-                    nextIndex={items.length}
-                    onConfirm={handleAddItem}
-                    onCancel={() => setShowAddModal(false)}
-                    scopeSelfId={scopeSelfId}
-                />
-            )}
-
-            {/* Edit Modal */}
-            {editIndex >= 0 && editIndex < items.length && (
-                <EditObjectModal
-                    title={
-                        <>
-                            编辑 {displayName}{' '}
-                            <span className="modal-item-number">
-                                {nameField && items[editIndex][nameField]
-                                    ? items[editIndex][nameField]
-                                    : editIndex + 1}
-                            </span>
-                        </>
-                    }
-                    itemMeta={itemMeta}
-                    resolveItemMeta={resolveItemMeta}
-                    initialData={items[editIndex]}
-                    onConfirm={handleEditItem}
-                    onCancel={() => setEditIndex(-1)}
-                    readOnlyFields={fixed && nameField ? [nameField] : []}
-                    scopeSelfId={scopeSelfId}
-                />
-            )}
-        </div>
-    );
-}
-
-/**
- * 添加对象的弹窗表单
- * 所有字段初始为空，不填充默认值
- */
-function buildDefaultFieldValue(meta, nextIndex, key = '') {
-    if (meta?.default !== undefined) {
-        if (
-            key === 'name' &&
-            typeof meta.default === 'string' &&
-            /\d+$/.test(meta.default)
-        ) {
-            return meta.default.replace(/\d+$/, String(nextIndex + 1));
-        }
-        return structuredClone(meta.default);
-    }
+function buildDefaultFieldValue(meta) {
+    if (meta?.default !== undefined) return structuredClone(meta.default);
     if (meta?.type === 'boolean') return false;
     if (meta?.type === 'number') return 0;
     if (meta?.type === 'array') return [];
     if (meta?.type === 'object') {
         const obj = {};
-        if (meta.children) {
-            for (const [childKey, childMeta] of Object.entries(meta.children)) {
-                obj[childKey] = buildDefaultFieldValue(childMeta, nextIndex, childKey);
-            }
+        for (const [childKey, childMeta] of Object.entries(meta.children || {})) {
+            obj[childKey] = buildDefaultFieldValue(childMeta);
         }
         return obj;
     }
     return '';
 }
 
-function buildEmptyObjectItem(itemMeta, nextIndex) {
+function buildEmptyObjectItem(itemMeta) {
     const item = {};
-    if (itemMeta.children) {
-        for (const [key, childMeta] of Object.entries(itemMeta.children)) {
-            item[key] = buildDefaultFieldValue(childMeta, nextIndex, key);
-        }
+    for (const [key, childMeta] of Object.entries(itemMeta.children || {})) {
+        item[key] = buildDefaultFieldValue(childMeta);
     }
     return item;
 }
 
-function AddObjectModal({
-    title,
-    itemMeta,
-    resolveItemMeta = null,
-    nextIndex = 0,
-    onConfirm,
-    onCancel,
+/**
+ * 对象数组：列表行（标题 + 摘要）+ 右侧抽屉编辑。
+ * getContext(item) 为抽屉里的字段提供额外上下文（例如所选供应商的协议）。
+ * renderBadges(item) 在行尾附加状态标签。
+ */
+function ObjectArrayField({
+    displayName,
+    help,
+    value,
+    onChange,
+    meta,
     scopeSelfId = null,
+    getContext = null,
+    renderBadges = null,
+    emptyText = null,
+    addLabel = '添加',
 }) {
-    const [draft, setDraft] = useState(() => buildEmptyObjectItem(itemMeta, nextIndex));
-    const visibleItemMeta = resolveItemMeta?.(itemMeta, draft) || itemMeta;
+    const items = Array.isArray(value) ? value : [];
+    const itemMeta = meta.items;
+    const [editing, setEditing] = useState(null); // { index, draft } index=-1 表示新增
+    const [confirmIndex, setConfirmIndex] = useState(-1);
+    const summaryFields = meta.summary || [];
+    const fixed = meta.fixed === true;
 
-    const handleFieldChange = useCallback((key, val) => {
-        setDraft(prev => ({ ...prev, [key]: val }));
+    const openEditor = (index) => {
+        setConfirmIndex(-1);
+        setEditing({
+            index,
+            draft: index >= 0 ? structuredClone(items[index]) : buildEmptyObjectItem(itemMeta),
+        });
+    };
+
+    const commit = (draft) => {
+        const context = getContext?.(draft) || {};
+        const cleaned = resetHiddenFields(itemMeta.children, draft, context);
+        if (editing.index >= 0) {
+            const next = [...items];
+            next[editing.index] = cleaned;
+            onChange(next);
+        } else {
+            onChange([...items, cleaned]);
+        }
+        setEditing(null);
+    };
+
+    const move = (index, offset) => {
+        const target = index + offset;
+        if (target < 0 || target >= items.length) return;
+        const next = [...items];
+        [next[index], next[target]] = [next[target], next[index]];
+        onChange(next);
+    };
+
+    const remove = (index) => {
+        onChange(items.filter((_, i) => i !== index));
+        setConfirmIndex(-1);
+    };
+
+    const duplicate = (index) => {
+        const copy = structuredClone(items[index]);
+        onChange([...items.slice(0, index + 1), copy, ...items.slice(index + 1)]);
+    };
+
+    return (
+        <FieldShell label={displayName} help={help} layout="stack" extra={<span className="field-count">{items.length}</span>}>
+            <div className="item-list">
+                {items.length === 0 && (
+                    <div className="item-list-empty">{emptyText || '还没有添加任何项'}</div>
+                )}
+                {items.map((item, index) => {
+                    const summaries = summaryFields
+                        .map((field) => formatSummaryValue(itemMeta.children?.[field], item?.[field]))
+                        .filter(Boolean);
+                    const disabled = item?.enabled === false;
+                    return (
+                        <div key={index} className={`item-row ${disabled ? 'is-disabled' : ''}`}>
+                            <button type="button" className="item-main" onClick={() => openEditor(index)}>
+                                <span className="item-title">{itemTitle(item, index, meta.nameField)}</span>
+                                {summaries.length > 0 && (
+                                    <span className="item-summary">
+                                        {summaries.map((text, i) => <span key={i} className="chip">{text}</span>)}
+                                    </span>
+                                )}
+                                {renderBadges?.(item)}
+                                {disabled && <span className="chip chip-muted">已停用</span>}
+                            </button>
+                            {confirmIndex === index ? (
+                                <div className="item-confirm">
+                                    <span>确定删除？</span>
+                                    <button type="button" className="btn btn-danger btn-xs" onClick={() => remove(index)}>删除</button>
+                                    <button type="button" className="btn btn-ghost btn-xs" onClick={() => setConfirmIndex(-1)}>取消</button>
+                                </div>
+                            ) : (
+                                <div className="item-actions">
+                                    {!fixed && (
+                                        <>
+                                            <button type="button" className="icon-btn" title="上移" aria-label="上移" disabled={index === 0} onClick={() => move(index, -1)}>
+                                                <Icon name="arrowUp" size={15} />
+                                            </button>
+                                            <button type="button" className="icon-btn" title="下移" aria-label="下移" disabled={index === items.length - 1} onClick={() => move(index, 1)}>
+                                                <Icon name="arrowDown" size={15} />
+                                            </button>
+                                            <button type="button" className="icon-btn" title="复制" aria-label="复制" onClick={() => duplicate(index)}>
+                                                <Icon name="copy" size={15} />
+                                            </button>
+                                        </>
+                                    )}
+                                    <button type="button" className="icon-btn" title="编辑" aria-label="编辑" onClick={() => openEditor(index)}>
+                                        <Icon name="pencil" size={15} />
+                                    </button>
+                                    {!fixed && (
+                                        <button type="button" className="icon-btn icon-btn-danger" title="删除" aria-label="删除" onClick={() => setConfirmIndex(index)}>
+                                            <Icon name="trash" size={15} />
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+                {!fixed && (
+                    <button type="button" className="item-add" onClick={() => openEditor(-1)}>
+                        <Icon name="plus" size={16} />
+                        {addLabel}
+                    </button>
+                )}
+            </div>
+
+            {editing && (
+                <ItemDrawer
+                    title={editing.index >= 0
+                        ? `编辑 · ${itemTitle(items[editing.index], editing.index, meta.nameField)}`
+                        : `添加${displayName}`}
+                    itemMeta={itemMeta}
+                    initialDraft={editing.draft}
+                    getContext={getContext}
+                    submitLabel={editing.index >= 0 ? '完成' : '添加'}
+                    onCancel={() => setEditing(null)}
+                    onConfirm={commit}
+                    scopeSelfId={scopeSelfId}
+                />
+            )}
+        </FieldShell>
+    );
+}
+
+function ItemDrawer({ title, itemMeta, initialDraft, getContext, submitLabel, onCancel, onConfirm, scopeSelfId }) {
+    const [draft, setDraft] = useState(initialDraft);
+    const context = getContext?.(draft) || {};
+    const formRef = useRef(null);
+
+    useEffect(() => {
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape') onCancel();
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [onCancel]);
+
+    useEffect(() => {
+        const first = formRef.current?.querySelector('input, select, textarea');
+        first?.focus({ preventScroll: true });
     }, []);
 
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+    const handleSubmit = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
         onConfirm(draft);
     };
 
     return createPortal(
-        <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-            <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-                <div className="modal-header">
-                    <span className="modal-title">{title}</span>
-                    <button className="modal-close" onClick={onCancel}>✕</button>
+        <div className="drawer-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+            <form ref={formRef} className="drawer" onSubmit={handleSubmit} role="dialog" aria-modal="true" aria-label={String(title)}>
+                <header className="drawer-header">
+                    <h2 className="drawer-title">{title}</h2>
+                    <button type="button" className="icon-btn" onClick={onCancel} aria-label="关闭">
+                        <Icon name="x" size={18} />
+                    </button>
+                </header>
+                <div className="drawer-body">
+                    <BareFieldContext.Provider value={false}>
+                    <FieldList
+                        children={itemMeta.children}
+                        value={draft}
+                        onFieldChange={(key, next) => setDraft((prev) => ({ ...prev, [key]: next }))}
+                        scopeSelfId={scopeSelfId}
+                        context={context}
+                        variant="drawer"
+                    />
+                    </BareFieldContext.Provider>
                 </div>
-                <form onSubmit={handleSubmit}>
-                    <div className="modal-body">
-                        {visibleItemMeta.children && Object.entries(visibleItemMeta.children).map(([childKey, childMeta]) => (
-                            <ConfigField
-                                key={childKey}
-                                name={childKey}
-                                meta={childMeta}
-                                value={draft[childKey]}
-                                onChange={(val) => handleFieldChange(childKey, val)}
-                                scopeSelfId={scopeSelfId}
-                                formValue={draft}
-                            />
+                <footer className="drawer-footer">
+                    <button type="button" className="btn btn-ghost" onClick={onCancel}>取消</button>
+                    <button type="submit" className="btn btn-primary">{submitLabel}</button>
+                </footer>
+            </form>
+        </div>,
+        document.body
+    );
+}
+
+const REPEAT_TEXT_ACTIONS = new Set(['text', 'mute']);
+
+function RepeatRulesField(props) {
+    const getContext = useCallback(() => ({}), []);
+    const meta = useMemo(() => {
+        const children = props.meta.items.children;
+        return {
+            ...props.meta,
+            items: {
+                ...props.meta.items,
+                children: {
+                    ...children,
+                    text: { ...children.text, showIf: [{ field: 'action', negate: false, values: [...REPEAT_TEXT_ACTIONS] }] },
+                    muteDuration: { ...children.muteDuration, showIf: [{ field: 'action', negate: false, values: ['mute'] }] },
+                },
+            },
+            summary: props.meta.summary || ['action', 'text'],
+        };
+    }, [props.meta]);
+    return <ObjectArrayField {...props} meta={meta} getContext={getContext} />;
+}
+
+const MODEL_TYPE_LABELS = { chat: '对话', image: '图片', video: '视频' };
+
+/** 模型列表：按所选供应商的协议显示对应的思考参数。 */
+function ModelEntriesField(props) {
+    const { details: providerDetails } = useDynamicOptions(props.scopeSelfId, 'providerSelect');
+    const getContext = useCallback(
+        (item) => ({ protocol: providerDetails?.[item?.provider]?.protocol || '' }),
+        [providerDetails]
+    );
+    const renderBadges = useCallback((item) => (
+        <>
+            {item?.name && <span className="chip chip-outline">{item.model}</span>}
+            {item?.nativeWebSearch && item?.type === 'chat' && <span className="chip chip-accent">联网</span>}
+            {!providerDetails?.[item?.provider] && item?.provider && <span className="chip chip-warn">供应商不存在</span>}
+        </>
+    ), [providerDetails]);
+    const meta = useMemo(() => ({
+        ...props.meta,
+        nameField: 'name',
+        summary: ['provider', 'type'],
+        items: {
+            ...props.meta.items,
+            children: {
+                ...props.meta.items.children,
+                type: { ...props.meta.items.children.type, optionLabels: { ...MODEL_TYPE_LABELS, ...(props.meta.items.children.type?.optionLabels || {}) } },
+            },
+        },
+    }), [props.meta]);
+    return (
+        <ObjectArrayField
+            {...props}
+            meta={meta}
+            getContext={getContext}
+            renderBadges={renderBadges}
+            addLabel="添加模型"
+            emptyText="还没有模型。先在上面添加供应商，再点“添加模型”从它的模型列表里挑选。"
+        />
+    );
+}
+
+/**
+ * 使用处的模型列表：有序、可调整顺序，排在前面的优先，失败时换下一个。
+ * uiType 形如 modelList:chat 或 modelList:chat:gemini（只显示 Gemini 协议的模型）。
+ */
+function ModelListField({ displayName, help, value, onChange, uiType, scopeSelfId }) {
+    const [, kind = 'chat', protocolFilter = ''] = uiType.split(':');
+    const items = Array.isArray(value) ? value : [];
+    const { options, details, loading } = useDynamicOptions(scopeSelfId, 'modelEntrySelect');
+    const { details: providerDetails } = useDynamicOptions(scopeSelfId, 'providerSelect');
+    const [picking, setPicking] = useState(false);
+
+    const candidates = options.filter((name) => {
+        const info = details?.[name] || {};
+        if ((info.type || 'chat') !== kind) return false;
+        if (protocolFilter && providerDetails?.[info.provider]?.protocol !== protocolFilter) return false;
+        return true;
+    });
+    const available = candidates.filter((name) => !items.includes(name));
+
+    const move = (index, offset) => {
+        const target = index + offset;
+        if (target < 0 || target >= items.length) return;
+        const next = [...items];
+        [next[index], next[target]] = [next[target], next[index]];
+        onChange(next);
+    };
+
+    return (
+        <FieldShell label={displayName} help={help} layout="stack">
+            <div className="model-list">
+                {items.length === 0 && <div className="model-list-empty">未选择模型</div>}
+                {items.map((name, index) => {
+                    const info = details?.[name];
+                    const missing = !loading && !info;
+                    const wrongKind = info && (info.type || 'chat') !== kind;
+                    const wrongProtocol = info && protocolFilter && providerDetails?.[info.provider]
+                        && providerDetails[info.provider].protocol !== protocolFilter;
+                    return (
+                        <div key={name} className={`model-pill ${missing || wrongKind || wrongProtocol ? 'is-invalid' : ''} ${info?.enabled === false ? 'is-disabled' : ''}`}>
+                            <span className="model-pill-order">{index + 1}</span>
+                            <span className="model-pill-name">{name}</span>
+                            {info?.provider && <span className="model-pill-provider">{info.provider}</span>}
+                            {missing && <span className="chip chip-warn">模型不存在</span>}
+                            {wrongKind && <span className="chip chip-warn">用途不符</span>}
+                            {wrongProtocol && <span className="chip chip-warn">不是 {protocolFilter === 'gemini' ? 'Gemini' : protocolFilter} 供应商，会被跳过</span>}
+                            {info?.enabled === false && <span className="chip chip-muted">已停用</span>}
+                            <span className="model-pill-actions">
+                                <button type="button" className="icon-btn" aria-label="上移" title="上移" disabled={index === 0} onClick={() => move(index, -1)}>
+                                    <Icon name="arrowUp" size={14} />
+                                </button>
+                                <button type="button" className="icon-btn" aria-label="下移" title="下移" disabled={index === items.length - 1} onClick={() => move(index, 1)}>
+                                    <Icon name="arrowDown" size={14} />
+                                </button>
+                                <button type="button" className="icon-btn icon-btn-danger" aria-label="移除" title="移除" onClick={() => onChange(items.filter((item) => item !== name))}>
+                                    <Icon name="x" size={14} />
+                                </button>
+                            </span>
+                        </div>
+                    );
+                })}
+                {picking ? (
+                    <select
+                        className="field-input"
+                        autoFocus
+                        value=""
+                        onBlur={() => setPicking(false)}
+                        onChange={(event) => {
+                            if (event.target.value) onChange([...items, event.target.value]);
+                            setPicking(false);
+                        }}
+                    >
+                        <option value="">{available.length > 0 ? '选择要添加的模型…' : '没有更多可选的模型'}</option>
+                        {available.map((name) => (
+                            <option key={name} value={name}>
+                                {name}{details?.[name]?.provider ? ` · ${details[name].provider}` : ''}{details?.[name]?.enabled === false ? '（已停用）' : ''}
+                            </option>
                         ))}
-                    </div>
-                    <div className="modal-footer">
-                        <button type="button" className="btn btn-secondary" onClick={onCancel}>
-                            取消
-                        </button>
-                        <button type="submit" className="btn btn-primary">
-                            确定添加
-                        </button>
-                    </div>
-                </form>
+                    </select>
+                ) : (
+                    <button type="button" className="item-add item-add--compact" onClick={() => setPicking(true)} disabled={loading}>
+                        <Icon name="plus" size={15} />
+                        {loading ? '加载模型…' : candidates.length === 0 ? '还没有可选的模型，请先在“模型与供应商”里添加' : '添加模型'}
+                    </button>
+                )}
             </div>
-        </div>,
-        document.body
+        </FieldShell>
     );
 }
 
-/**
- * 编辑对象的弹窗表单
- * 所有字段预填充当前值
- * readOnlyFields: 只读字段列表（固定数组中的标识字段）
- */
-function EditObjectModal({
-    title,
-    itemMeta,
-    resolveItemMeta = null,
-    initialData,
-    onConfirm,
-    onCancel,
-    readOnlyFields = [],
-    scopeSelfId = null,
-}) {
-    const [draft, setDraft] = useState(() => structuredClone(initialData));
-    const visibleItemMeta = resolveItemMeta?.(itemMeta, draft) || itemMeta;
+/** API Key 列表：每个 Key 一行，默认隐藏。 */
+function SecretListField({ displayName, help, value, onChange }) {
+    const items = Array.isArray(value) ? value : [];
+    const [visible, setVisible] = useState(() => new Set());
+    const [draft, setDraft] = useState('');
 
-    const handleFieldChange = useCallback((key, val) => {
-        setDraft(prev => ({ ...prev, [key]: val }));
-    }, []);
+    const toggle = (index) => setVisible((prev) => {
+        const next = new Set(prev);
+        if (next.has(index)) next.delete(index);
+        else next.add(index);
+        return next;
+    });
 
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onConfirm(draft);
+    const add = () => {
+        const text = draft.trim();
+        if (!text || items.includes(text)) return;
+        onChange([...items, text]);
+        setDraft('');
     };
 
-    return createPortal(
-        <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-            <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-                <div className="modal-header">
-                    <span className="modal-title">{title}</span>
-                    <button className="modal-close" onClick={onCancel}>✕</button>
-                </div>
-                <form onSubmit={handleSubmit}>
-                    <div className="modal-body">
-                        {visibleItemMeta.children && Object.entries(visibleItemMeta.children).map(([childKey, childMeta]) => {
-                            const isReadOnly = readOnlyFields.includes(childKey);
-                            if (isReadOnly) {
-                                // 只读字段显示为禁用状态
-                                return (
-                                    <div key={childKey} className="field-group">
-                                        <label className="field-label">
-                                            {childMeta.label || childMeta.description || childKey}
-                                            <span className="field-type-badge">{childKey}</span>
-                                            <span className="field-type-badge" title="此字段不可编辑">🔒</span>
-                                        </label>
-                                        <input
-                                            type="text"
-                                            className="field-input"
-                                            value={draft[childKey] ?? ''}
-                                            disabled
-                                            style={{ opacity: 0.6, cursor: 'not-allowed' }}
-                                        />
-                                    </div>
-                                );
+    return (
+        <FieldShell label={displayName} help={help} layout="stack" extra={<span className="field-count">{items.length}</span>}>
+            <div className="secret-list">
+                {items.map((secret, index) => (
+                    <div key={index} className="input-with-action">
+                        <span className="secret-index">{index + 1}</span>
+                        <input
+                            type={visible.has(index) ? 'text' : 'password'}
+                            className="field-input"
+                            value={secret}
+                            autoComplete="off"
+                            onChange={(event) => {
+                                const next = [...items];
+                                next[index] = event.target.value;
+                                onChange(next);
+                            }}
+                        />
+                        <button type="button" className="icon-btn" aria-label={visible.has(index) ? '隐藏' : '显示'} onClick={() => toggle(index)}>
+                            <Icon name={visible.has(index) ? 'eyeOff' : 'eye'} size={16} />
+                        </button>
+                        <button type="button" className="icon-btn icon-btn-danger" aria-label="删除" onClick={() => onChange(items.filter((_, i) => i !== index))}>
+                            <Icon name="trash" size={16} />
+                        </button>
+                    </div>
+                ))}
+                <div className="input-with-action">
+                    <span className="secret-index"><Icon name="key" size={14} /></span>
+                    <input
+                        type="password"
+                        className="field-input"
+                        value={draft}
+                        autoComplete="off"
+                        placeholder="粘贴新的 Key，按回车添加"
+                        onChange={(event) => setDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                                event.preventDefault();
+                                add();
                             }
-                            return (
-                                <ConfigField
-                                    key={childKey}
-                                    name={childKey}
-                                    meta={childMeta}
-                                    value={draft[childKey]}
-                                    onChange={(val) => handleFieldChange(childKey, val)}
-                                    scopeSelfId={scopeSelfId}
-                                    formValue={draft}
-                                />
-                            );
-                        })}
-                    </div>
-                    <div className="modal-footer">
-                        <button type="button" className="btn btn-secondary" onClick={onCancel}>
-                            取消
-                        </button>
-                        <button type="submit" className="btn btn-primary">
-                            确定保存
-                        </button>
-                    </div>
-                </form>
+                        }}
+                        onBlur={add}
+                    />
+                </div>
             </div>
-        </div>,
-        document.body
+        </FieldShell>
     );
 }
 
-/**
- * 工具多选字段 — 从 /api/available-tools 获取可选工具列表
- * 用于工具组内的 tools 数组字段（uiType = toolMultiSelect）
- */
-function ToolMultiSelectField({ name, displayName, help, value, onChange }) {
+function useVertexCredentials() {
+    const [credentials, setCredentials] = useState([]);
+    const [error, setError] = useState('');
+
+    const load = useCallback(async () => {
+        try {
+            const response = await fetch('/api/ai/vertex-credentials', {
+                headers: { Authorization: `Bearer ${getAuthToken()}` },
+            });
+            const payload = await response.json();
+            if (!response.ok || !payload.success) throw new Error(payload.error || '服务账号列表加载失败');
+            setCredentials(Array.isArray(payload.data) ? payload.data : []);
+        } catch (loadError) {
+            setError(loadError.message || '服务账号列表加载失败');
+        }
+    }, []);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => { void load(); }, 0);
+        return () => window.clearTimeout(timer);
+    }, [load]);
+    return { credentials, error, reload: load };
+}
+
+async function importVertexCredentialFile(file) {
+    if (file.size > 64 * 1024) throw new Error('服务账号 JSON 不能超过 64 KB');
+    let credential;
+    try {
+        credential = JSON.parse(await file.text());
+    } catch {
+        throw new Error('文件不是有效的 JSON');
+    }
+    const response = await fetch('/api/ai/vertex-credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthToken()}` },
+        body: JSON.stringify({ credential }),
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.error || '服务账号校验失败');
+    return payload.data;
+}
+
+/** Vertex 服务账号列表：导入 JSON 后保存引用。 */
+function VertexCredentialListField({ displayName, help, value, onChange }) {
+    const items = Array.isArray(value) ? value : [];
+    const { credentials, error: loadError, reload } = useVertexCredentials();
+    const [busy, setBusy] = useState(false);
+    const [status, setStatus] = useState('');
+    const [error, setError] = useState('');
+    const fileInputRef = useRef(null);
+
+    const describe = (reference) => {
+        const found = credentials.find((item) => item.reference === reference);
+        if (!found) return { text: `${reference}（未找到文件）`, invalid: true };
+        if (found.validation === 'invalid' || !found.clientEmail) return { text: `${reference}（无效）`, invalid: true };
+        return { text: `${found.projectId} / ${found.clientEmail}`, invalid: false };
+    };
+
+    const handleFile = async (event) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file) return;
+        setBusy(true);
+        setError('');
+        setStatus('正在校验凭据和 Vertex 权限…');
+        try {
+            const data = await importVertexCredentialFile(file);
+            if (!items.includes(data.reference)) onChange([...items, data.reference]);
+            setStatus(`验证通过：${data.projectId} / ${data.clientEmail}`);
+            await reload();
+        } catch (uploadError) {
+            setStatus('');
+            setError(uploadError.message || '服务账号导入失败');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const unused = credentials.filter((item) => !items.includes(item.reference) && item.validation !== 'invalid');
+
+    return (
+        <FieldShell label={displayName} help={help} layout="stack">
+            <div className="secret-list">
+                {items.map((reference) => {
+                    const info = describe(reference);
+                    return (
+                        <div key={reference} className={`credential-row ${info.invalid ? 'is-invalid' : ''}`}>
+                            <Icon name="key" size={15} />
+                            <span className="credential-text">{info.text}</span>
+                            <button type="button" className="icon-btn icon-btn-danger" aria-label="移除" onClick={() => onChange(items.filter((item) => item !== reference))}>
+                                <Icon name="x" size={15} />
+                            </button>
+                        </div>
+                    );
+                })}
+                <div className="credential-actions">
+                    {unused.length > 0 && (
+                        <select
+                            className="field-input"
+                            value=""
+                            onChange={(event) => {
+                                if (event.target.value) onChange([...items, event.target.value]);
+                            }}
+                        >
+                            <option value="">选择已导入的服务账号…</option>
+                            {unused.map((item) => (
+                                <option key={item.reference} value={item.reference}>{item.projectId} / {item.clientEmail}</option>
+                            ))}
+                        </select>
+                    )}
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => fileInputRef.current?.click()}>
+                        <Icon name="upload" size={15} />
+                        {busy ? '校验中…' : '导入 JSON'}
+                    </button>
+                    <input ref={fileInputRef} type="file" accept=".json,application/json" hidden onChange={handleFile} />
+                </div>
+                {status && <div className="field-note field-note--ok">{status}</div>}
+                {(error || loadError) && <div className="field-note field-note--warn">{error || loadError}</div>}
+            </div>
+        </FieldShell>
+    );
+}
+
+/** 模型名：可以从供应商的模型列表里选，也可以直接输入。 */
+function ModelSelectField({ displayName, help, value, onChange, providerId, scopeSelfId = null }) {
+    const [models, setModels] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const [cached, setCached] = useState(false);
+    const requestIdRef = useRef(0);
+    const listId = `models-${useId().replace(/:/g, '')}`;
+
+    const loadModels = useCallback(async (force = false) => {
+        const requestId = ++requestIdRef.current;
+        if (!providerId) {
+            setModels([]);
+            setError('');
+            setCached(false);
+            return;
+        }
+
+        setLoading(true);
+        setError('');
+        try {
+            const query = `/api/ai/models?providerId=${encodeURIComponent(providerId)}${force ? '&refresh=1' : ''}`;
+            const response = await fetch(buildScopedUrl(query, scopeSelfId), {
+                headers: { Authorization: `Bearer ${getAuthToken()}` },
+            });
+            const payload = await response.json();
+            if (response.status === 404) throw new Error('这个供应商还没保存，保存后才能拉取模型列表');
+            if (!response.ok || !payload.success) throw new Error(payload.error || '模型列表加载失败');
+            if (requestId !== requestIdRef.current) return;
+            setModels(Array.isArray(payload.data?.models) ? payload.data.models : []);
+            setCached(payload.data?.cached === true);
+        } catch (fetchError) {
+            if (requestId !== requestIdRef.current) return;
+            setModels([]);
+            setCached(false);
+            setError(fetchError.message || '模型列表加载失败');
+        } finally {
+            if (requestId === requestIdRef.current) setLoading(false);
+        }
+    }, [providerId, scopeSelfId]);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => { void loadModels(false); }, 0);
+        return () => window.clearTimeout(timer);
+    }, [loadModels]);
+
+    return (
+        <FieldShell
+            label={displayName}
+            help={help}
+            extra={providerId && models.length > 0 ? <span className="field-hint">{models.length} 个{cached ? ' · 缓存' : ''}</span> : null}
+        >
+            <div className="input-with-action">
+                <input
+                    className="field-input"
+                    list={listId}
+                    value={value ?? ''}
+                    disabled={!providerId}
+                    placeholder={!providerId ? '请先选择供应商' : loading ? '正在加载模型列表…' : '输入或选择模型名'}
+                    onChange={(event) => onChange(event.target.value.trim())}
+                />
+                <datalist id={listId}>
+                    {models.map((model) => <option key={model} value={model} />)}
+                </datalist>
+                <button
+                    type="button"
+                    className="icon-btn"
+                    disabled={!providerId || loading}
+                    onClick={() => loadModels(true)}
+                    title="重新拉取模型列表"
+                    aria-label="重新拉取模型列表"
+                >
+                    <Icon name="refresh" size={16} className={loading ? 'spin' : ''} />
+                </button>
+            </div>
+            {error && <div className="field-note field-note--warn">{error}</div>}
+            {value && models.length > 0 && !models.includes(value) && (
+                <div className="field-note field-note--warn">供应商的模型列表里没有“{value}”，请确认名字是否正确</div>
+            )}
+        </FieldShell>
+    );
+}
+
+function ToolMultiSelectField({ displayName, help, value, onChange }) {
     const [showModal, setShowModal] = useState(false);
     const [toolOptions, setToolOptions] = useState([]);
     const items = Array.isArray(value) ? value : [];
@@ -1299,13 +1641,7 @@ function ToolMultiSelectField({ name, displayName, help, value, onChange }) {
     const labelMap = Object.fromEntries(toolOptions.map(t => [t.key, t.label]));
 
     return (
-        <div className="field-group">
-            <label className="field-label">
-                {displayName}
-                <span className="field-type-badge">{name}</span>
-                <span className="field-type-badge">{items.length} 项</span>
-            </label>
-            {help && <div className="field-help">{help}</div>}
+        <FieldShell layout="stack" label={displayName} help={help} extra={<><span className="field-count">{items.length}</span></>}>
             <div className="array-field group-select-field">
                 {items.map((item, index) => (
                     <span key={index} className="array-tag">
@@ -1336,7 +1672,7 @@ function ToolMultiSelectField({ name, displayName, help, value, onChange }) {
                     onCancel={() => setShowModal(false)}
                 />
             )}
-        </div>
+        </FieldShell>
     );
 }
 
@@ -1387,7 +1723,7 @@ function ToolMultiSelectModal({ title, options, selected, onConfirm, onCancel })
             <div className="modal-card group-select-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="modal-header">
                     <span className="modal-title">{title} ({checked.size} 已选)</span>
-                    <button className="modal-close" onClick={onCancel}>✕</button>
+                    <button type="button" className="icon-btn" onClick={onCancel} aria-label="关闭"><Icon name="x" size={18} /></button>
                 </div>
                 <div className="group-select-search">
                     <input
@@ -1444,397 +1780,20 @@ function ToolMultiSelectModal({ title, options, selected, onConfirm, onCancel })
  * 动态选择字段 — 从 API 获取选项列表
  * uiType: 动态选项类型标识（如 roleSelect, channelSelect）
  */
-function VertexCredentialSelectField({ name, displayName, help, value, onChange }) {
-    const [credentials, setCredentials] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
-    const [status, setStatus] = useState('');
-    const fileInputRef = useRef(null);
-
-    const loadCredentials = useCallback(async () => {
-        try {
-            const response = await fetch('/api/ai/vertex-credentials', {
-                headers: { Authorization: `Bearer ${getAuthToken()}` },
-            });
-            const payload = await response.json();
-            if (!response.ok || !payload.success) {
-                throw new Error(payload.error || '服务账号列表加载失败');
-            }
-            setCredentials(Array.isArray(payload.data) ? payload.data : []);
-        } catch (loadError) {
-            setError(loadError.message || '服务账号列表加载失败');
-        }
-    }, []);
-
-    useEffect(() => {
-        void loadCredentials();
-    }, [loadCredentials]);
-
-    const handleFileChange = async (event) => {
-        const file = event.target.files?.[0];
-        event.target.value = '';
-        if (!file) return;
-        setError('');
-        setStatus('');
-        if (file.size > 64 * 1024) {
-            setError('服务账号 JSON 不能超过 64 KB');
-            return;
-        }
-
-        let credential;
-        try {
-            credential = JSON.parse(await file.text());
-        } catch {
-            setError('文件不是有效的 JSON');
-            return;
-        }
-
-        setLoading(true);
-        setStatus('正在校验凭据和 Vertex 权限…');
-        try {
-            const response = await fetch('/api/ai/vertex-credentials', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${getAuthToken()}`,
-                },
-                body: JSON.stringify({ credential }),
-            });
-            const payload = await response.json();
-            if (!response.ok || !payload.success) {
-                throw new Error(payload.error || '服务账号校验失败');
-            }
-            onChange(payload.data.reference);
-            setStatus(`验证通过：${payload.data.projectId} / ${payload.data.clientEmail}`);
-            await loadCredentials();
-        } catch (uploadError) {
-            setStatus('');
-            setError(uploadError.message || '服务账号导入失败');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const currentExists = credentials.some((item) => item.reference === value);
-    return (
-        <div className="field-group">
-            <label className="field-label">
-                {displayName}
-                <span className="field-type-badge">{name}</span>
-            </label>
-            {help && <div className="field-help">{help}</div>}
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <select
-                    className="field-input"
-                    value={value ?? ''}
-                    disabled={loading}
-                    onChange={(event) => onChange(event.target.value)}
-                >
-                    <option value="">请选择服务账号</option>
-                    {value && !currentExists && <option value={value}>{value}（未找到文件）</option>}
-                    {credentials.map((credential) => (
-                        <option
-                            key={credential.reference}
-                            value={credential.reference}
-                            disabled={credential.validation === 'invalid'}
-                        >
-                            {credential.projectId && credential.clientEmail
-                                ? `${credential.projectId} / ${credential.clientEmail}`
-                                : `${credential.reference}（无效）`}
-                        </option>
-                    ))}
-                </select>
-                <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    disabled={loading}
-                    onClick={() => fileInputRef.current?.click()}
-                >
-                    {loading ? '校验中' : '导入 JSON'}
-                </button>
-                <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".json,application/json"
-                    hidden
-                    onChange={handleFileChange}
-                />
-            </div>
-            {status && <div className="field-help" style={{ color: 'var(--success)' }}>{status}</div>}
-            {error && <div className="field-help" style={{ color: 'var(--warning)' }}>{error}</div>}
-        </div>
-    );
-}
-
-function ModelSelectField({ name, displayName, help, value, onChange, providerId, scopeSelfId = null }) {
-    const [models, setModels] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
-    const [cached, setCached] = useState(false);
-    const requestIdRef = useRef(0);
-
-    const loadModels = useCallback(async (force = false) => {
-        const requestId = ++requestIdRef.current;
-        if (!providerId) {
-            setModels([]);
-            setError('');
-            setCached(false);
-            return;
-        }
-
-        setLoading(true);
-        setError('');
-        try {
-            const query = `/api/ai/models?providerId=${encodeURIComponent(providerId)}${force ? '&refresh=1' : ''}`;
-            const response = await fetch(buildScopedUrl(query, scopeSelfId), {
-                headers: { Authorization: `Bearer ${getAuthToken()}` },
-            });
-            const payload = await response.json();
-            if (!response.ok || !payload.success) {
-                throw new Error(payload.error || '模型列表加载失败');
-            }
-            if (requestId !== requestIdRef.current) return;
-            setModels(Array.isArray(payload.data?.models) ? payload.data.models : []);
-            setCached(payload.data?.cached === true);
-        } catch (fetchError) {
-            if (requestId !== requestIdRef.current) return;
-            setModels([]);
-            setCached(false);
-            setError(fetchError.message || '模型列表加载失败');
-        } finally {
-            if (requestId === requestIdRef.current) setLoading(false);
-        }
-    }, [providerId, scopeSelfId]);
-
-    useEffect(() => {
-        setModels([]);
-        setCached(false);
-        loadModels(false);
-    }, [loadModels]);
-
-    const currentModelAvailable = !value || models.includes(value);
-
-    return (
-        <div className="field-group">
-            <label className="field-label">
-                {displayName}
-                <span className="field-type-badge">{name}</span>
-                {providerId && models.length > 0 && (
-                    <span className="field-type-badge">{models.length} 个 · {cached ? '缓存' : '远程'}</span>
-                )}
-            </label>
-            {help && <div className="field-help">{help}</div>}
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <select
-                    className="field-input"
-                    value={value ?? ''}
-                    disabled={!providerId || loading}
-                    onChange={(event) => onChange(event.target.value)}
-                >
-                    <option value="">
-                        {!providerId ? '请先选择供应商' : loading ? '正在加载模型…' : '请选择模型'}
-                    </option>
-                    {value && !currentModelAvailable && (
-                        <option value={value} disabled>{value}（当前列表中不可用）</option>
-                    )}
-                    {models.map(model => <option key={model} value={model}>{model}</option>)}
-                </select>
-                <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    disabled={!providerId || loading}
-                    onClick={() => loadModels(true)}
-                    title="绕过缓存并重新拉取模型列表"
-                >
-                    {loading ? '加载中' : '刷新'}
-                </button>
-            </div>
-            {error && (
-                <div className="field-help" style={{ color: 'var(--warning)' }}>
-                    {error}；请检查供应商配置或点击刷新重试。
-                </div>
-            )}
-        </div>
-    );
-}
-
-const OPENAI_ROUTE_TARGET_FIELDS = new Set([
-    'openaiEnableThinking',
-    'openaiReasoningEffort',
-]);
-const GEMINI_ROUTE_TARGET_FIELDS = new Set([
-    'geminiThinkingLevel',
-    'geminiThinkingBudget',
-]);
-
-function RouteTargetsField({
-    name,
-    displayName,
-    help,
-    value,
-    onChange,
-    itemMeta,
-    scopeSelfId = null,
-}) {
-    const {
-        details: providerDetails,
-        loading: providerDetailsLoading,
-    } = useDynamicOptions(scopeSelfId, 'providerSelect');
-
-    const resolveItemMeta = useCallback((baseMeta, targetDraft) => {
-        const providerId = targetDraft?.provider;
-        const protocol = providerDetails?.[providerId]?.protocol;
-        const hiddenFields = new Set();
-
-        if (!providerId || providerDetailsLoading) {
-            for (const field of OPENAI_ROUTE_TARGET_FIELDS) hiddenFields.add(field);
-            for (const field of GEMINI_ROUTE_TARGET_FIELDS) hiddenFields.add(field);
-        } else if (protocol === 'openai') {
-            for (const field of GEMINI_ROUTE_TARGET_FIELDS) hiddenFields.add(field);
-        } else if (protocol === 'gemini') {
-            for (const field of OPENAI_ROUTE_TARGET_FIELDS) hiddenFields.add(field);
-        }
-
-        const visibleChildren = Object.fromEntries(
-            Object.entries(baseMeta.children || {}).filter(([field]) => !hiddenFields.has(field))
-        );
-        return { ...baseMeta, children: visibleChildren };
-    }, [providerDetails, providerDetailsLoading]);
-
-    const handleChange = useCallback((targets) => {
-        onChange(targets.map((target) => {
-            const protocol = providerDetails?.[target?.provider]?.protocol;
-            if (protocol === 'openai') {
-                return {
-                    ...target,
-                    geminiThinkingLevel: 'default',
-                    geminiThinkingBudget: -2,
-                };
-            }
-            if (protocol === 'gemini') {
-                return {
-                    ...target,
-                    openaiEnableThinking: false,
-                    openaiReasoningEffort: 'default',
-                };
-            }
-            return target;
-        }));
-    }, [onChange, providerDetails]);
-
-    return (
-        <ObjectArrayField
-            name={name}
-            displayName={displayName}
-            help={help}
-            value={value}
-            onChange={handleChange}
-            itemMeta={itemMeta}
-            nameField="id"
-            scopeSelfId={scopeSelfId}
-            resolveItemMeta={resolveItemMeta}
-        />
-    );
-}
-
-const REPEAT_TEXT_ACTIONS = new Set(['text', 'mute']);
-
-function RepeatRulesField({
-    name,
-    displayName,
-    help,
-    value,
-    onChange,
-    itemMeta,
-    nameField,
-    scopeSelfId = null,
-}) {
-    const resolveItemMeta = useCallback((baseMeta, ruleDraft) => {
-        const action = ruleDraft?.action;
-        const visibleChildren = Object.fromEntries(
-            Object.entries(baseMeta.children || {}).filter(([field]) => {
-                if (field === 'text') return REPEAT_TEXT_ACTIONS.has(action);
-                if (field === 'muteDuration') return action === 'mute';
-                return true;
-            })
-        );
-        return { ...baseMeta, children: visibleChildren };
-    }, []);
-
-    return (
-        <ObjectArrayField
-            name={name}
-            displayName={displayName}
-            help={help}
-            value={value}
-            onChange={onChange}
-            itemMeta={itemMeta}
-            nameField={nameField}
-            scopeSelfId={scopeSelfId}
-            resolveItemMeta={resolveItemMeta}
-        />
-    );
-}
-
-function ProviderCredentialsField({
-    name,
-    displayName,
-    help,
-    value,
-    onChange,
-    itemMeta,
-    providerDraft,
-    scopeSelfId = null,
-}) {
-    const usesVertex = providerDraft?.protocol === 'gemini' && providerDraft?.vertex === true;
-    const visibleChildren = Object.fromEntries(
-        Object.entries(itemMeta.children || {}).filter(([field]) =>
-            usesVertex ? field !== 'apiKey' : field !== 'serviceAccountRef'
-        )
-    );
-    const visibleItemMeta = { ...itemMeta, children: visibleChildren };
-    const handleChange = useCallback((items) => {
-        onChange(items.map((item) => usesVertex
-            ? { ...item, apiKey: '' }
-            : { ...item, serviceAccountRef: '' }
-        ));
-    }, [onChange, usesVertex]);
-
-    return (
-        <ObjectArrayField
-            name={name}
-            displayName={usesVertex ? 'Vertex 服务账号凭据' : displayName}
-            help={usesVertex
-                ? '导入服务账号 JSON 后保存引用；私钥不会写入普通配置。'
-                : help}
-            value={value}
-            onChange={handleChange}
-            itemMeta={visibleItemMeta}
-            nameField="id"
-            scopeSelfId={scopeSelfId}
-        />
-    );
-}
-
-function DynamicSelectField({ name, displayName, help, value, onChange, uiType, scopeSelfId = null }) {
+function DynamicSelectField({ displayName, help, value, onChange, uiType, scopeSelfId = null }) {
     const { options, label: configLabel, loading, isDynamic } = useDynamicOptions(scopeSelfId, uiType);
 
     // 如果不是动态类型，回退到普通文本输入
     if (!loading && !isDynamic) {
         return (
-            <div className="field-group">
-                <label className="field-label">
-                    {displayName}
-                    <span className="field-type-badge">{name}</span>
-                </label>
-                {help && <div className="field-help">{help}</div>}
+            <FieldShell label={displayName} help={help}>
                 <input
                     type="text"
                     className="field-input"
                     value={value ?? ''}
                     onChange={(e) => onChange(e.target.value)}
                 />
-            </div>
+            </FieldShell>
         );
     }
 
@@ -1842,12 +1801,7 @@ function DynamicSelectField({ name, displayName, help, value, onChange, uiType, 
     const allOptions = options.includes(value) || !value ? options : [value, ...options];
 
     return (
-        <div className="field-group">
-            <label className="field-label">
-                {displayName}
-                <span className="field-type-badge">{name}</span>
-            </label>
-            {help && <div className="field-help">{help}</div>}
+        <FieldShell label={displayName} help={help}>
             {loading ? (
                 <div className="field-input" style={{ color: 'var(--text-secondary)' }}>加载中...</div>
             ) : (
@@ -1862,7 +1816,7 @@ function DynamicSelectField({ name, displayName, help, value, onChange, uiType, 
                     ))}
                 </select>
             )}
-        </div>
+        </FieldShell>
     );
 }
 
@@ -1870,7 +1824,7 @@ function DynamicSelectField({ name, displayName, help, value, onChange, uiType, 
  * 动态多选数组字段 — 从 API 获取选项列表，弹窗多选
  * uiType: 动态选项类型标识（如 roleSelectArray, channelSelectArray）
  */
-function DynamicSelectArrayField({ name, displayName, help, value, onChange, uiType, scopeSelfId = null }) {
+function DynamicSelectArrayField({ displayName, help, value, onChange, uiType, scopeSelfId = null }) {
     const [showModal, setShowModal] = useState(false);
     const { options, label: configLabel } = useDynamicOptions(scopeSelfId, uiType);
     const items = Array.isArray(value) ? value : [];
@@ -1880,13 +1834,7 @@ function DynamicSelectArrayField({ name, displayName, help, value, onChange, uiT
     };
 
     return (
-        <div className="field-group">
-            <label className="field-label">
-                {displayName}
-                <span className="field-type-badge">{name}</span>
-                <span className="field-type-badge">{items.length} 项</span>
-            </label>
-            {help && <div className="field-help">{help}</div>}
+        <FieldShell label={displayName} help={help} extra={<><span className="field-count">{items.length}</span></>}>
             <div className="array-field group-select-field">
                 {items.map((item, index) => (
                     <span key={index} className="array-tag">
@@ -1917,7 +1865,7 @@ function DynamicSelectArrayField({ name, displayName, help, value, onChange, uiT
                     onCancel={() => setShowModal(false)}
                 />
             )}
-        </div>
+        </FieldShell>
     );
 }
 
@@ -1967,7 +1915,7 @@ function DynamicSelectModal({ title, options, selected, onConfirm, onCancel }) {
             <div className="modal-card group-select-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="modal-header">
                     <span className="modal-title">{title} ({checked.size} 已选)</span>
-                    <button className="modal-close" onClick={onCancel}>✕</button>
+                    <button type="button" className="icon-btn" onClick={onCancel} aria-label="关闭"><Icon name="x" size={18} /></button>
                 </div>
                 <div className="group-select-search">
                     <input
@@ -2022,7 +1970,7 @@ function DynamicSelectModal({ title, options, selected, onConfirm, onCancel }) {
 /**
  * 指令消耗配置字段 — 直接罗列所有已定义的指令中文名，每行两个，后面可填数字
  */
-function CommandCostField({ name, displayName, help, value, onChange }) {
+function CommandCostField({ displayName, help, value, onChange }) {
     const [commandNames, setCommandNames] = useState({});
     const [loading, setLoading] = useState(true);
 
@@ -2078,29 +2026,19 @@ function CommandCostField({ name, displayName, help, value, onChange }) {
 
     if (loading) {
         return (
-            <div className="field-group">
-                <label className="field-label">
-                    {displayName}
-                    <span className="field-type-badge">{name}</span>
-                </label>
-                {help && <div className="field-help">{help}</div>}
+            <FieldShell layout="stack" label={displayName} help={help}>
                 <div className="field-input" style={{ color: 'var(--text-secondary)' }}>加载中...</div>
-            </div>
+            </FieldShell>
         );
     }
 
     if (commandList.length === 0) {
         return (
-            <div className="field-group">
-                <label className="field-label">
-                    {displayName}
-                    <span className="field-type-badge">{name}</span>
-                </label>
-                {help && <div className="field-help">{help}</div>}
+            <FieldShell layout="stack" label={displayName} help={help}>
                 <div className="empty-state" style={{ padding: '12px', fontSize: '13px' }}>
                     暂无已定义的指令消耗配置
                 </div>
-            </div>
+            </FieldShell>
         );
     }
 
@@ -2111,13 +2049,7 @@ function CommandCostField({ name, displayName, help, value, onChange }) {
     }
 
     return (
-        <div className="field-group">
-            <label className="field-label">
-                {displayName}
-                <span className="field-type-badge">{name}</span>
-                <span className="field-type-badge">{value?.length || 0} 项已配置</span>
-            </label>
-            {help && <div className="field-help">{help}</div>}
+        <FieldShell layout="stack" label={displayName} help={help} extra={<><span className="field-count">{value?.length || 0}</span></>}>
             <div className="command-cost-grid">
                 {rows.map((row, rowIndex) => (
                     <div key={rowIndex} className="command-cost-row">
@@ -2144,7 +2076,7 @@ function CommandCostField({ name, displayName, help, value, onChange }) {
                     </div>
                 ))}
             </div>
-        </div>
+        </FieldShell>
     );
 }
 
@@ -2152,7 +2084,7 @@ function CommandCostField({ name, displayName, help, value, onChange }) {
  * Cron 表达式可视化编辑器
  * 支持 5 段标准格式（分 时 日 月 周）
  */
-function CronField({ name, displayName, help, value, onChange }) {
+function CronField({ displayName, help, value, onChange }) {
     const cronValue = value ?? '0 * * * *';
     const parts = cronValue.trim().split(/\s+/);
 
@@ -2264,12 +2196,7 @@ function CronField({ name, displayName, help, value, onChange }) {
     ];
 
     return (
-        <div className="field-group">
-            <label className="field-label">
-                {displayName}
-                <span className="field-type-badge">{name}</span>
-            </label>
-            {help && <div className="field-help">{help}</div>}
+        <FieldShell layout="stack" label={displayName} help={help}>
 
             {/* Raw input */}
             <input
@@ -2283,12 +2210,12 @@ function CronField({ name, displayName, help, value, onChange }) {
             {/* Human readable description */}
             {allValid && (
                 <div className="cron-description">
-                    ⏰ {getReadable()}
+                    {getReadable()}
                 </div>
             )}
             {!allValid && (
                 <div className="cron-error">
-                    ⚠️ 格式无效，请检查表达式
+                    格式无效，请检查表达式
                 </div>
             )}
 
@@ -2324,6 +2251,6 @@ function CronField({ name, displayName, help, value, onChange }) {
                     </button>
                 ))}
             </div>
-        </div>
+        </FieldShell>
     );
 }

@@ -4,56 +4,56 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   AISchema,
-  RoutesSchema,
+  ModelsSchema,
   EconomySchema,
   TavilyMCPSchema,
 } from "../configSchema.js";
 import { resolveGenerationSettings } from "../lib/AIUtils/providerRouter.js";
 
-test("AI 角色和辅助路由直接使用现行字段，旧字段不再改名", () => {
+test("AI 触发设定和后台任务直接按模型名引用，旧路由字段会被丢弃", () => {
   const parsed = AISchema.parse({
-    utilityRoute: "utility",
-    geminiRoute: "gemini",
-    profiles: [{ prefixes: ["%", "%角色"], route: "chat", history: false, groupContext: true, toolGroup: "工具" }],
+    utilityModels: ["utility"],
+    geminiModels: ["gemini"],
+    profiles: [{ prefixes: ["%", "%角色"], models: ["chat", "backup"], history: false, groupContext: true, toolGroup: "工具" }],
   });
-  assert.equal(parsed.utilityRoute, "utility");
-  assert.equal(parsed.geminiRoute, "gemini");
+  assert.deepEqual(parsed.utilityModels, ["utility"]);
+  assert.deepEqual(parsed.geminiModels, ["gemini"]);
   assert.deepEqual(parsed.profiles[0].prefixes, ["%", "%角色"]);
+  assert.deepEqual(parsed.profiles[0].models, ["chat", "backup"]);
   assert.equal(parsed.profiles[0].history, false);
   assert.equal(parsed.profiles[0].groupContext, true);
   assert.equal(parsed.profiles[0].toolGroup, "工具");
-  const obsolete = AISchema.parse({ appsRoute: "obsolete", toolsRoute: "obsolete" });
-  assert.equal(obsolete.utilityRoute, "default");
-  assert.equal(obsolete.geminiRoute, "");
+  const obsolete = AISchema.parse({ utilityRoute: "obsolete", geminiRoute: "obsolete" });
+  assert.deepEqual(obsolete.utilityModels, []);
+  assert.equal(Object.hasOwn(obsolete, "utilityRoute"), false);
   assert.equal(AISchema.safeParse({ profiles: [{ prefix: "%", Channel: "chat" }] }).success, false);
 });
 
-test("路由目标的零值、思考参数和流式开关进入实际请求配置", () => {
-  const route = RoutesSchema.parse({ routes: [{ id: "chat", targets: [{
-    id: "target", provider: "provider", model: "model",
+test("模型的零值、思考参数和流式开关进入实际请求配置", () => {
+  const model = ModelsSchema.parse({ models: [{
+    provider: "provider", model: "model",
     temperature: 0, topP: 0, openaiReasoningEffort: "none",
     openaiEnableThinking: true, stream: true,
     geminiThinkingLevel: "high", geminiThinkingBudget: -2,
-  }] }] }).routes[0];
-  assert.deepEqual(resolveGenerationSettings(route, route.targets[0]), {
+  }] }).models[0];
+  assert.deepEqual(resolveGenerationSettings(null, model), {
     temperature: 0, topP: 0, openaiEnableThinking: true,
     openaiReasoningEffort: "none", stream: true,
     geminiThinkingLevel: "high", geminiThinkingBudget: undefined,
   });
 });
 
-test("路由公共参数和旧目标覆盖参数不再影响请求", () => {
-  const route = { temperature: 0.7, topP: 0.8, reasoningLevel: "high" };
+test("旧的目标覆盖参数不再影响请求，思考等级不接受 inherit", () => {
   const target = { temperatureOverride: 0.3, topPOverride: 0.4 };
-  const settings = resolveGenerationSettings(route, target);
+  const settings = resolveGenerationSettings(null, target);
   assert.equal(settings.temperature, undefined);
   assert.equal(settings.topP, undefined);
   assert.equal(settings.openaiReasoningEffort, undefined);
   assert.equal(settings.geminiThinkingLevel, undefined);
   for (const field of ["openaiReasoningEffort", "geminiThinkingLevel"]) {
-    assert.equal(RoutesSchema.safeParse({ routes: [{ id: "chat", targets: [{
-      id: "target", provider: "provider", model: "model", [field]: "inherit",
-    }] }] }).success, false);
+    assert.equal(ModelsSchema.safeParse({ models: [{
+      provider: "provider", model: "model", [field]: "inherit",
+    }] }).success, false);
   }
 });
 

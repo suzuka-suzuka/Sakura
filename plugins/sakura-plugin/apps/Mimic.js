@@ -11,6 +11,7 @@ import Setting from "../lib/setting.js";
 import { buildMultimodalQueryParts } from "../lib/AIUtils/messageParts.js";
 import { getMessageIdentifier } from "../lib/AIUtils/messageIdentifiers.js";
 import { getImg, randomReact, smartReplyMsg } from "../lib/utils.js";
+import { hasModels } from "../lib/AIUtils/aiModels.js";
 
 export class Mimic extends plugin {
   constructor() {
@@ -44,6 +45,9 @@ export class Mimic extends plugin {
       return config;
     }
     const mergedConfig = { ...config, ...groupConfig };
+    if (!hasModels(groupConfig.models)) {
+      mergedConfig.models = config.models;
+    }
     if (groupConfig.triggerWords && Array.isArray(groupConfig.triggerWords)) {
       mergedConfig.triggerWords = groupConfig.triggerWords;
     }
@@ -271,7 +275,7 @@ export class Mimic extends plugin {
     logger.info(`mimic触发`);
     await randomReact(e);
     let currentFullHistory = [];
-    const route = config.route;
+    const route = config.models;
     const toolGroup = config.toolGroup || '';
     let memoryTask = null;
     let memoryHistory = null;

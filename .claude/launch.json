@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "panel-backend",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/panel-preview.mjs", "preview-test"],
+      "port": 3457
+    },
+    {
+      "name": "panel-frontend",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "src/web/frontend", "dev", "--port", "5173", "--strictPort"],
+      "port": 5173
+    }
+  ]
+}

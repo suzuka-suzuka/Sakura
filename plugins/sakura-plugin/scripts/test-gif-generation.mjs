@@ -16,19 +16,19 @@ assert.equal((await sharp(gif).metadata()).pages, 2);
 const png = await sharp(gif).png().toBuffer();
 const singleGif = await sharp(png).gif().toBuffer();
 let featureConfig;
-let routes;
+let models;
 let requests;
 let response;
 let editRequests;
-const target = (model, priority = 1) => ({ id: model, model, priority, provider: "openai", enabled: true });
-const route = (id, models) => ({ id, strategy: "priority", maxAttempts: 2, retryDelayMs: 0, targets: models.map((model) => target(model)) });
+const IMAGE_MODELS = ["gpt-image-2", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "gpt-image-2.5-flare"];
+const entry = (model) => ({ model, provider: "openai", type: "image", enabled: true });
 const setting = {
   getConfig(name) {
     if (name === "EditImage") return featureConfig;
-    if (name === "ImageRoutes") return { routes };
+    if (name === "Models") return { models };
     if (name === "Providers") return { providers: [{
-      id: "openai", protocol: "openai", baseURL: "https://example.invalid/v1",
-      credentials: [{ id: "test", apiKey: "test-only", enabled: true }],
+      name: "openai", protocol: "openai", baseURL: "https://example.invalid/v1",
+      apiKeys: ["test-only"],
     }] };
     return {};
   },
@@ -54,8 +54,8 @@ const oldFetch = globalThis.fetch;
 globalThis.logger = { warn() {}, error() {}, info() {}, mark() {} };
 const { generateImagesWithProvider, normalizeImageGenerationOptions } = await import("../lib/AIUtils/imageProvider.js");
 beforeEach(() => {
-  featureConfig = { imageRoute: "static", gifRoute: "animation", gifFrameCount: 12, gifFrameDurationMs: 100 };
-  routes = [route("static", ["gpt-image-2"]), route("animation", ["gpt-image-2.6-flare"])];
+  featureConfig = { imageModels: ["gpt-image-2"], gifModels: ["gpt-image-2.6-flare"], gifFrameCount: 12, gifFrameDurationMs: 100 };
+  models = IMAGE_MODELS.map(entry);
   requests = [];
   editRequests = [];
   response = async () => ({ data: [{ b64_json: gif.toString("base64") }] });
@@ -65,7 +65,7 @@ after(() => { globalThis.logger = oldLogger; globalThis.fetch = oldFetch; mock.r
 const generate = (options = {}, images = []) => generateImagesWithProvider(featureConfig, "小猫挥手", images, { outputFormat: "gif", ...options });
 
 test("GIF 参数解析不改变静态图片提示词", () => {
-  const args = parser.parseGifCommandArgs("route=animation frames=16 delay=100 16:9 小猫挥手");
+  const args = parser.parseGifCommandArgs("模型=animation frames=16 delay=100 16:9 小猫挥手");
   assert.equal(args.frameCount, 16);
   assert.equal(args.frameDurationMs, 100);
   assert.equal(args.channel, "animation");
@@ -81,8 +81,8 @@ test("GIF 参数解析不改变静态图片提示词", () => {
 });
 
 test("GIF 配置补齐默认值并校验帧参数范围", () => {
-  const config = EditImageSchema.parse({ imageRoute: "static" });
-  assert.equal(config.gifRoute, "");
+  const config = EditImageSchema.parse({ imageModels: ["gpt-image-2"] });
+  assert.deepEqual(config.gifModels, []);
   assert.equal(config.gptQuality, "auto");
   assert.equal(EditImageSchema.parse({ gptQuality: "max" }).gptQuality, "max");
   assert.equal(EditImageSchema.safeParse({ gptQuality: "ultra" }).success, false);
@@ -92,7 +92,7 @@ test("GIF 配置补齐默认值并校验帧参数范围", () => {
   assert.equal(EditImageSchema.safeParse({ gifFrameDurationMs: 25 }).success, false);
 });
 
-test("请求使用 GIF 路由和配置帧参数，保留多帧原始字节", async () => {
+test("请求使用 GIF 模型和配置帧参数，保留多帧原始字节", async () => {
   const buffers = await generate({ selfId: 10001 });
   assert.deepEqual(buffers, [gif]);
   assert.deepEqual(requests[0], {
@@ -101,17 +101,16 @@ test("请求使用 GIF 路由和配置帧参数，保留多帧原始字节", asy
   });
 });
 
-test("请求传递显式路由与动画参数", async () => {
-  routes.push(route("override", ["gpt-image-2.6-sunburst"]));
-  await generate({ channel: "override", frameCount: 16, frameDurationMs: 20, count: 2 });
+test("请求传递显式模型与动画参数", async () => {
+  await generate({ channel: "gpt-image-2.6-sunburst", frameCount: 16, frameDurationMs: 20, count: 2 });
   assert.equal(requests[0].model, "gpt-image-2.6-sunburst");
   assert.equal(requests[0].frame_count, 16);
   assert.equal(requests[0].frame_duration_ms, 20);
   assert.equal(requests[0].n, 2);
 });
 
-test("未设置专用路由和帧参数时兼容旧配置", async () => {
-  featureConfig = { imageRoute: "animation" };
+test("未设置 GIF 模型和帧参数时沿用图片模型", async () => {
+  featureConfig = { imageModels: ["gpt-image-2.6-flare"] };
   await generate();
   assert.equal(requests[0].frame_count, 9);
   assert.equal(requests[0].frame_duration_ms, 200);
@@ -126,16 +125,15 @@ test("两个 GIF 帧参数可独立覆盖配置", async () => {
   assert.equal(requests[1].frame_duration_ms, 300);
 });
 
-test("GIF 在 maxAttempts 截断前筛选模型，保留可用目标", async () => {
-  routes[1].targets = [target("gpt-image-2", 10), target("gpt-image-2.6-flare", 1)];
-  routes[1].maxAttempts = 1;
+test("GIF 先筛掉不支持动图的模型，保留可用模型", async () => {
+  featureConfig.gifModels = ["gpt-image-2", "gpt-image-2.6-flare"];
   await generate();
   assert.equal(requests.length, 1);
   assert.equal(requests[0].model, "gpt-image-2.6-flare");
 });
 
 test("GIF 目标失败后只回退到兼容模型", async () => {
-  routes[1].targets = [target("gpt-image-2.6-sunburst", 3), target("gpt-image-2", 2), target("gpt-image-2.6-flare", 1)];
+  featureConfig.gifModels = ["gpt-image-2.6-sunburst", "gpt-image-2", "gpt-image-2.6-flare"];
   response = async (request) => {
     if (request.model.endsWith("sunburst")) throw new Error("模拟上游失败");
     return { data: [{ b64_json: gif.toString("base64") }] };
@@ -152,12 +150,12 @@ test("URL 输出保留完整动画，兼容 GIF 和通用二进制响应头", as
   }
 });
 
-test("gpt 别名选择包含 GIF 模型的路由", async () => {
+test("gpt 简写展开为所有支持 GIF 的 GPT 图片模型", async () => {
   await generate({ channel: "gpt" });
   assert.equal(requests[0].model, "gpt-image-2.6-flare");
 });
 
-test("拒绝超量参考图、非法帧参数和不兼容路由，均不发模型请求", async () => {
+test("拒绝超量参考图、非法帧参数和不兼容模型，均不发模型请求", async () => {
   await assert.rejects(generate({}, Array(17).fill("https://example.invalid/input.png")), /最多支持 16 张/);
   for (const frameCount of [1, 17, 64, 65, 2.5, NaN]) {
     await assert.rejects(generate({ frameCount }), /帧数/);
@@ -165,7 +163,7 @@ test("拒绝超量参考图、非法帧参数和不兼容路由，均不发模�
   for (const frameDurationMs of [0, 25, 2010, NaN]) {
     await assert.rejects(generate({ frameDurationMs }), /每帧时长/);
   }
-  await assert.rejects(generate({ channel: "static" }), /没有可用/);
+  await assert.rejects(generate({ channel: "gpt-image-2" }), /没有可用/);
   assert.equal(requests.length, 0);
   assert.equal(editRequests.length, 0);
 });
@@ -192,7 +190,7 @@ test("拒绝伪装成 GIF 的 PNG 和单帧 GIF", async () => {
   await assert.rejects(generate(), /单帧/);
 });
 
-test("普通静态生图仍走原始路由且不附带 GIF 参数", async () => {
+test("普通静态生图仍走图片模型且不附带 GIF 参数", async () => {
   response = async () => ({ data: [{ b64_json: png.toString("base64") }] });
   const result = await generateImagesWithProvider(featureConfig, "小猫", [], {});
   assert.deepEqual(result, [png]);
@@ -234,11 +232,11 @@ test("GPT 默认画质支持命令覆盖、显式自动和账号配置", async (
   assert.equal(Object.hasOwn(requests[1], "quality"), false);
   response = async () => ({ data: [{ b64_json: png.toString("base64") }] });
   await generateImagesWithProvider({ ...featureConfig, gptQuality: "low" }, "小猫", [], {
-    selfId: 10001, channel: "animation",
+    selfId: 10001, channel: "gpt-image-2.6-flare",
   });
   assert.equal(requests[2].quality, "max");
   await generateImagesWithProvider({ ...featureConfig, gptQuality: "medium" }, "小猫", [], {
-    channel: "animation",
+    channel: "gpt-image-2.6-flare",
   });
   assert.equal(requests[3].quality, "medium");
   for (const [provider, model] of [["gemini", "gemini-3-pro-image-preview"], ["openai", "grok-imagine-image"], ["openai", "dall-e-3"]]) {
@@ -248,10 +246,9 @@ test("GPT 默认画质支持命令覆盖、显式自动和账号配置", async (
   }
 });
 
-test("每次路由回退按目标模型调整默认画质并提示", async () => {
+test("每次模型回退按目标模型调整默认画质并提示", async () => {
   featureConfig.gptQuality = "max";
-  routes[0].targets = [target("gpt-image-2.6-sunburst", 3), target("gpt-image-2", 2), target("gpt-image-2.5-flare", 1)];
-  routes[0].maxAttempts = 3;
+  featureConfig.imageModels = ["gpt-image-2.6-sunburst", "gpt-image-2", "gpt-image-2.5-flare"];
   response = async (request) => {
     if (request.model === "gpt-image-2.6-sunburst") throw new Error("模拟上游失败");
     return { data: [{ b64_json: png.toString("base64") }] };
@@ -271,6 +268,8 @@ test("每次路由回退按目标模型调整默认画质并提示", async () =>
   }
 });
 
+// vm 模块链接后若没有强引用，可能在 evaluate 前被 GC 回收，导致 V8 访问已释放内存（0xC0000005 崩溃）。
+const retained = [];
 async function loadEntry(relativePath, exportName) {
   const context = vm.createContext({
     Buffer, logger: globalThis.logger, plugin: class {},
@@ -289,12 +288,15 @@ async function loadEntry(relativePath, exportName) {
     "../messageLookup.js": { fetchMessageByIdentifier: async () => ({ message_id: 1, message: [{ type: "image", data: { url: "https://example.invalid/reference.png" } }] }) },
   };
   const module = new vm.SourceTextModule(fs.readFileSync(new URL(relativePath, import.meta.url), "utf8"), { context });
+  retained.push(module, context);
   await module.link((specifier) => {
     const exports = imports[specifier];
     assert.ok(exports, specifier);
-    return new vm.SyntheticModule(Object.keys(exports), function () {
+    const dependency = new vm.SyntheticModule(Object.keys(exports), function () {
       for (const [key, value] of Object.entries(exports)) this.setExport(key, value);
     }, { context });
+    retained.push(dependency);
+    return dependency;
   });
   await module.evaluate();
   return new module.namespace[exportName]();

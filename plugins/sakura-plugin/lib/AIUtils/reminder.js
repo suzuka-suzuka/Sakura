@@ -3,6 +3,7 @@ import Setting from '../setting.js';
 import { getRedis, onRedisKeyExpired } from '../../../../src/utils/redis.js';
 import { getAI } from './getAI.js';
 import { getBot, withBotContext } from '../../../../src/api/client.js';
+import { hasModels } from "./aiModels.js";
 
 const ONCE_REMINDER_TRIGGER_PREFIX = 'sakura:reminder:once:trigger:';
 const ONCE_REMINDER_DATA_PREFIX = 'sakura:reminder:once:data:';
@@ -19,8 +20,8 @@ export async function renderReminderContentWithAI(content, context = {}) {
 
   try {
     const aiConfig = Setting.getConfig('AI') || {};
-    const routeId = aiConfig.utilityRoute;
-    if (!routeId) return raw;
+    const routeId = aiConfig.utilityModels;
+    if (!hasModels(routeId)) return raw;
 
     const query = `原始提醒内容：${raw}\n请输出改写后的提醒文本。`;
 

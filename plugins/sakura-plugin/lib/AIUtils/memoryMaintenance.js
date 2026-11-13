@@ -6,6 +6,7 @@ import {
   withMemoryDocumentLock,
   writeMemoryDocument,
 } from "./memoryStore.js";
+import { hasModels } from "./aiModels.js";
 
 const maintenanceJobs = new Map();
 
@@ -33,8 +34,8 @@ async function generateMemoryOrganization(snapshot, e, location) {
   }
 
   const aiConfig = Setting.getConfig("AI", { selfId: e?.self_id }) || {};
-  if (!aiConfig.utilityRoute) {
-    throw new Error("未配置通用辅助路由，无法整理记忆");
+  if (!hasModels(aiConfig.utilityModels)) {
+    throw new Error("未选择后台辅助模型，无法整理记忆");
   }
   const { getAI } = await import("./getAI.js");
   // 群任务的发起者可能是机器人，记忆本人须从实际存储位置确定。
@@ -47,7 +48,7 @@ async function generateMemoryOrganization(snapshot, e, location) {
     order: index,
   }));
   const result = await getAI(
-    aiConfig.utilityRoute,
+    aiConfig.utilityModels,
     e,
     [{
       text: [

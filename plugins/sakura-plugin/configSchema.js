@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MODEL_TYPES } from './lib/AIUtils/aiModels.js';
 import { CronExpressionParser } from 'cron-parser';
 import { DEFAULT_NAI_URL, normalizeNaiUrl } from './lib/nai/apiConfig.js';
 import {
@@ -12,19 +13,13 @@ import {
 
 const OPENAI_REASONING_EFFORT_OPTIONS = ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 const GEMINI_THINKING_LEVEL_OPTIONS = ['default', 'off', 'minimal', 'low', 'medium', 'high'];
-const ROUTING_STRATEGIES = ['round_robin', 'weighted_round_robin', 'priority', 'priority_weighted'];
-const ROUTING_STRATEGY_LABELS = [
-    'round_robin=轮询',
-    'weighted_round_robin=加权轮询',
-    'priority=优先级',
-    'priority_weighted=优先级加权轮询',
-].join(',');
 
 const nonEmptyString = (label) => z.string().trim().min(1, `${label}不能为空`);
 
-const routingStrategy = (label) => z.enum(ROUTING_STRATEGIES)
-    .default('priority_weighted')
-    .describe(`${label}|#optionLabels:${ROUTING_STRATEGY_LABELS}`);
+const DEFAULT_MODEL_LIST_HELP = '可以选多个，排在前面的优先，失败时自动换下一个';
+const modelList = (label, kind, help = DEFAULT_MODEL_LIST_HELP, directives = '') => z.array(z.string().trim().min(1))
+    .default([])
+    .describe(`${label}|${directives ? `${directives}|` : ''}#modelList:${kind}|${help}`);
 
 function addUniqueFieldIssues(items, field, ctx, pathPrefix = []) {
     const seen = new Set();
@@ -35,7 +30,7 @@ function addUniqueFieldIssues(items, field, ctx, pathPrefix = []) {
             ctx.addIssue({
                 code: 'custom',
                 path: [...pathPrefix, index, field],
-                message: `${field} “${value}”重复`,
+                message: `“${value}”重复了`,
             });
         }
         seen.add(value);
@@ -90,19 +85,19 @@ export const GroupInsightSchema = z.object({
 }).describe('群聊洞见');
 
 const ProfileSchema = z.object({
-    prefixes: z.array(nonEmptyString('触发前缀')).min(1, '至少配置一个触发前缀').describe('触发前缀|第一个为主前缀，其余为别名；匹配时最长前缀优先'),
-    name: z.string().default('').describe('角色名称|#roleSelect|AI角色的名称'),
-    route: nonEmptyString('模型路由').describe('模型路由|#routeSelect|选择逻辑模型路由'),
-    groupContext: z.boolean().default(false).describe('群组上下文|是否读取群聊上下文'),
-    history: z.boolean().default(true).describe('历史记录|是否保存对话历史'),
-    toolGroup: z.string().default('').describe('工具组|#toolGroupSelect|选择此角色使用的工具组'),
-    enableNaiPainting: z.boolean().default(false).describe('NAI绘图|是否启用NAI绘图功能'),
-    naiPrompt: z.string().default('').describe('NAI绘图提示词|#textarea|附加到生成的NAI绘图指令后的提示词'),
+    prefixes: z.array(nonEmptyString('触发前缀')).min(1, '至少配置一个触发前缀').describe('触发前缀|消息以这些前缀开头时触发；第一个为主前缀，其余为别名，匹配时最长前缀优先'),
+    name: z.string().default('').describe('人设|#roleSelect|使用哪个人设的提示词，在“人设”页面里编辑'),
+    models: modelList('模型', 'chat'),
+    toolGroup: z.string().default('').describe('工具组|#toolGroupSelect|允许 AI 调用哪些工具，留空则不使用工具'),
+    groupContext: z.boolean().default(false).describe('读取群聊上下文|把最近的群聊消息一起发给 AI'),
+    history: z.boolean().default(true).describe('保存对话历史|关闭后每次对话都从头开始'),
+    enableNaiPainting: z.boolean().default(false).describe('聊天自动配图|回复后用 NovelAI 按当前场景画一张图'),
+    naiPrompt: z.string().default('').describe('配图附加提示词|#textarea|#showIf:enableNaiPainting=true|追加到自动生成的绘图标签后面'),
 });
 
 const ToolGroupSchema = z.object({
     name: z.string().default('').describe('工具组名称'),
-    tools: z.array(z.string()).default([]).describe('工具列表|#toolMultiSelect|选择此组包含的工具'),
+    tools: z.array(z.string()).default([]).describe('工具|#toolMultiSelect|这个组里允许 AI 调用的工具'),
 });
 
 const RunCommandWorkspaceSchema = z.object({
@@ -119,27 +114,27 @@ const RunCommandWorkspaceSchema = z.object({
 });
 
 const AIObjectSchema = z.object({
-    profiles: z.array(ProfileSchema).default([]).describe('AI角色列表|#nameField:name|配置多个AI角色，每个角色可以有多个触发前缀'),
-    toolGroups: z.array(ToolGroupSchema).default([]).describe('工具组|#nameField:name|自定义工具组合，每个角色可绑定一个工具组'),
+    profiles: z.array(ProfileSchema).default([]).describe('触发设定|#group:触发设定|#nameField:prefixes|#summary:name,models|用什么前缀触发、用哪个人设、调用哪些模型'),
+    toolGroups: z.array(ToolGroupSchema).default([]).describe('工具组|#group:工具组|#nameField:name|#summary:tools|把常用的工具组合起来，在触发设定和伪人里选择'),
+    groupContextLength: z.number().int().min(0).default(20).describe('群聊上下文条数|#group:对话参数|开启“读取群聊上下文”时带上的最近消息数'),
+    chatHistoryLength: z.number().int().min(0).default(20).describe('对话历史条数|#group:对话参数|每个用户保留的历史消息数'),
+    maxToolCalls: z.number().int().min(1).default(20).describe('单次最多调用工具次数|#group:对话参数|超过后强制结束本次回复'),
+    enableUserLock: z.boolean().default(false).describe('单人锁|#group:对话参数|同一用户在同一群里一次只处理一条消息（AI 对话和伪人共用）'),
+    enableMarkdownProcess: z.boolean().default(true).describe('处理 Markdown|#group:Markdown 输出|短文本去掉格式，长文本渲染成图片；关闭则原样发送'),
+    markdownPlainTextLimit: z.number().int().min(0).default(300).describe('转图片字数阈值|#group:Markdown 输出|#showIf:enableMarkdownProcess=true|少于这个字数时按纯文本发送'),
+    markdownSplitImageLimit: z.number().int().min(0).default(0).describe('拆图字数阈值|#group:Markdown 输出|#showIf:enableMarkdownProcess=true|超过这个字数时拆成两张图片；0 表示不拆'),
+    utilityModels: modelList('后台辅助模型', 'chat', '用于欢迎词、记忆整理、提醒改写、表情识图等后台任务；可以选多个，排在前面的优先', '#group:后台任务'),
+    geminiModels: modelList('Gemini 能力模型', 'chat:gemini', '用于向量检索和视频分析，只能选 Gemini / Vertex 供应商的模型；不选则这些功能不可用', '#group:后台任务'),
+    gcsBucket: z.string().default('').describe('GCS Bucket|#group:后台任务|#advanced|Vertex 视频分析上传文件用的 Cloud Storage bucket'),
+    gcsPrefix: z.string().default('sakura-message-videos').describe('GCS 目录|#group:后台任务|#advanced|Vertex 视频分析的临时文件目录'),
     workspaces: z.array(RunCommandWorkspaceSchema)
         .min(1, '至少配置一个命令工作区')
         .default([{ name: 'sakura', path: '.' }])
-        .describe('命令工作区|#nameField:name|配置 RunCommand 可选择的命令起点，所有工作区均可读写'),
+        .describe('命令工作区|#group:命令执行|#nameField:name|#summary:path|RunCommand 工具可以选择的起点目录，所有工作区均可读写'),
     defaultWorkspace: z.string()
         .default('sakura')
-        .describe('默认工作区|#workspaceSelect|RunCommand 未传 root 时使用；AI 传入 root 后会同步更新此项'),
-    groupContextLength: z.number().default(20).describe('群上下文长度|群聊上下文记忆的消息条数'),
-    chatHistoryLength: z.number().default(20).describe('对话历史长度|保留的对话历史消息条数'),
-    enableUserLock: z.boolean().default(false).describe('单人锁|统一控制 AI 聊天与拟态回复；每个功能同一用户在同一群内只处理一条消息'),
-    utilityRoute: z.string().default('default').describe('通用辅助路由|#routeSelect|用于应用文案、结构化分析、记忆整理和表情识图等后台 AI 任务'),
-    geminiRoute: z.string().default('').describe('Gemini 能力路由|#routeSelect|用于向量和视频分析；留空时这些功能不可用，选定路由中至少需要一个 Gemini 或 Vertex 目标'),
-    gcsBucket: z.string().default('').describe('GCS Bucket|Vertex 视频分析上传的 Cloud Storage bucket'),
-    gcsPrefix: z.string().default('sakura-message-videos').describe('GCS Prefix|Vertex 视频分析临时文件目录'),
-    maxToolCalls: z.number().default(20).describe('最大工具调用次数|每次对话允许AI连续调用工具的最大次数，超过后将强制结束'),
-    trustAICommand: z.boolean().default(false).describe('完全信任AI|开启后AI调用的全部命令均直接执行，无需用户确认且无视白名单'),
-    enableMarkdownProcess: z.boolean().default(true).describe('处理Markdown消息|开启后会对Markdown消息进行处理（短文本去除格式、长文本转图片），关闭则直接原样发送'),
-    markdownPlainTextLimit: z.number().int().min(0).default(300).describe('Markdown纯文本字数阈值|开启Markdown处理后，低于此字数的消息会去除Markdown格式以纯文本发送，超过则渲染为图片'),
-    markdownSplitImageLimit: z.number().int().min(0).default(0).describe('Markdown分图阈值|大于0且Markdown长度达到此字数时，尝试拆成两张图片发送；0表示关闭'),
+        .describe('默认工作区|#group:命令执行|#workspaceSelect|AI 没指定工作区时使用；AI 指定后会同步更新此项'),
+    trustAICommand: z.boolean().default(false).describe('完全信任 AI|#group:命令执行|开启后 AI 调用的命令全部直接执行，不再询问确认，也不受白名单限制'),
 }).superRefine((config, ctx) => {
     addUniqueFieldIssues(config.workspaces, 'name', ctx, ['workspaces']);
     if (!config.workspaces.some((workspace) => workspace.name === config.defaultWorkspace)) {
@@ -163,7 +158,7 @@ const AIObjectSchema = z.object({
             seen.add(prefix);
         });
     });
-}).describe('AI 对话设定');
+}).describe('AI 对话|触发方式、工具和后台任务模型');
 
 export const AISchema = AIObjectSchema;
 
@@ -190,130 +185,83 @@ export const AutoCleanupSchema = z.object({
     groups: z.array(z.number()).default([]).describe('自动清理群号|#groupSelect|清除小于1级和半年未发言的人'),
 }).describe('自动清理');
 
-const CredentialSchema = z.object({
-    id: nonEmptyString('凭据 ID').describe('凭据 ID|供应商内唯一'),
-    apiKey: z.string().trim().default('').describe('API Key|OpenAI 和 Gemini Developer API 使用'),
-    serviceAccountRef: z.string().trim().default('').describe('服务账号|#vertexCredentialSelect|Vertex AI 使用；从网页导入并验证 JSON'),
-    enabled: z.boolean().default(true).describe('启用'),
-    priority: z.number().int().default(0).describe('优先级|数值越大越优先'),
-    weight: z.number().int().min(1).default(1).describe('权重|同优先级轮询权重'),
-});
-
 const ProviderSchema = z.object({
-    id: nonEmptyString('供应商 ID').describe('供应商 ID'),
-    protocol: z.enum(['openai', 'gemini']).default('openai').describe('接口协议'),
-    baseURL: z.string().trim().default('').describe('API 地址|留空使用对应协议的官方默认地址；自定义 OpenAI 兼容地址通常以 /v1 结尾'),
-    vertex: z.boolean().default(false).describe('Vertex AI|仅 Gemini 协议使用；聊天和模型列表统一使用服务账号 JSON'),
-    credentials: z.array(CredentialSchema).min(1, '至少配置一个凭据').describe('凭据池|#providerCredentials|#nameField:id'),
+    name: nonEmptyString('供应商名称').describe('名称|#placeholder:例如 OpenAI、中转站|添加模型时用这个名字选择供应商'),
+    protocol: z.enum(['openai', 'gemini']).default('openai').describe('接口协议|#optionLabels:openai=OpenAI 兼容,gemini=Google Gemini'),
+    baseURL: z.string().trim().default('').describe('API 地址|#placeholder:留空使用官方地址|OpenAI 兼容的中转地址通常以 /v1 结尾'),
+    vertex: z.boolean().default(false).describe('使用 Vertex AI|#showIf:protocol=gemini|开启后用服务账号 JSON 鉴权，不再使用 API Key'),
+    apiKeys: z.array(z.string().trim().min(1, 'API Key 不能为空')).default([]).describe('API Key|#secretList|#showIf:vertex!=true|可以添加多个，请求时轮流使用，失败自动换下一个'),
+    serviceAccounts: z.array(z.string().trim().min(1)).default([]).describe('服务账号|#vertexCredentialList|#showIf:vertex=true|导入并验证服务账号 JSON，私钥不会写入普通配置'),
 }).superRefine((provider, ctx) => {
-    addUniqueFieldIssues(provider.credentials, 'id', ctx, ['credentials']);
-    const usesVertex = provider.protocol === 'gemini' && provider.vertex === true;
     if (provider.vertex === true && provider.protocol !== 'gemini') {
-        ctx.addIssue({
-            code: 'custom',
-            path: ['vertex'],
-            message: 'Vertex AI 只能用于 Gemini 协议',
-        });
+        ctx.addIssue({ code: 'custom', path: ['vertex'], message: 'Vertex AI 只能用于 Gemini 协议' });
     }
-    provider.credentials.forEach((credential, index) => {
-        const field = usesVertex ? 'serviceAccountRef' : 'apiKey';
-        if (!credential[field]) {
-            ctx.addIssue({
-                code: 'custom',
-                path: ['credentials', index, field],
-                message: usesVertex ? '请选择已验证的服务账号 JSON' : 'API Key 不能为空',
-            });
+    if (provider.protocol === 'gemini' && provider.vertex === true) {
+        if (provider.serviceAccounts.length === 0) {
+            ctx.addIssue({ code: 'custom', path: ['serviceAccounts'], message: `供应商“${provider.name}”至少需要一个服务账号` });
         }
-    });
+    } else if (provider.apiKeys.length === 0) {
+        ctx.addIssue({ code: 'custom', path: ['apiKeys'], message: `供应商“${provider.name}”至少需要一个 API Key` });
+    }
 });
 
 export const ProvidersSchema = z.object({
-    providers: z.array(ProviderSchema).default([]).describe('AI 供应商|#nameField:id'),
+    providers: z.array(ProviderSchema).default([]).describe('供应商|#nameField:name|#summary:protocol,vertex,baseURL|API 地址和 Key 只在这里填一次，所有模型共用'),
 }).superRefine((config, ctx) => {
-    addUniqueFieldIssues(config.providers, 'id', ctx, ['providers']);
-}).describe('AI 供应商管理');
+    addUniqueFieldIssues(config.providers, 'name', ctx, ['providers']);
+}).describe('供应商|填写 API 地址和 Key');
 
-const RouteTargetSchema = z.object({
-    id: nonEmptyString('目标 ID').describe('目标 ID|路由内唯一'),
+const MODEL_TYPE_LABELS = 'chat=对话,image=图片生成,video=视频生成';
+
+const ModelSchema = z.object({
     provider: nonEmptyString('供应商').describe('供应商|#providerSelect'),
-    model: nonEmptyString('模型').describe('模型名称|#modelSelect|只能从供应商模型端点返回的列表中选择'),
-    enabled: z.boolean().default(true).describe('启用'),
-    priority: z.number().int().default(0).describe('优先级|数值越大越优先'),
-    weight: z.number().int().min(1).default(1).describe('权重|同优先级轮询权重'),
-    temperature: z.number().min(-1).max(2).default(-1).describe('温度|-1 使用模型默认值；建议不要和 Top-P 同时调整'),
-    topP: z.number().min(-1).max(1).default(-1).describe('Top-P|-1 使用模型默认值；建议不要和温度同时调整'),
-    openaiEnableThinking: z.boolean().default(false).describe('OpenAI 兼容思考开关|向兼容端点传入非标准 enable_thinking'),
-    openaiReasoningEffort: z.enum(OPENAI_REASONING_EFFORT_OPTIONS).default('default').describe('OpenAI 思考等级|default 不传 reasoning_effort'),
-    stream: z.boolean().default(false).describe('流式响应|OpenAI 兼容端点使用 SSE，Gemini/Vertex 使用 generateContentStream；服务端拼接完成后再回复，并记录不含正文的时序诊断'),
-    geminiThinkingLevel: z.enum(GEMINI_THINKING_LEVEL_OPTIONS).default('default').describe('Gemini 思考等级|default 不传 thinkingConfig'),
-    geminiThinkingBudget: z.number().int().min(-2).default(-2).describe('Gemini 思考预算|-2 忽略固定预算，改用当前目标的 Gemini 思考等级；-1 由模型动态决定；0 关闭；正数为固定 token 预算'),
-    nativeWebSearch: z.boolean().default(false).describe('原生联网搜索|OpenAI 兼容端点传入 web_search；Gemini 3 / Vertex AI 传入 Google Search，并可与自定义工具混用'),
+    model: nonEmptyString('模型').describe('模型|#modelSelect|从供应商的模型列表里选'),
+    type: z.enum(MODEL_TYPES).default('chat').describe(`用途|#optionLabels:${MODEL_TYPE_LABELS}|决定它出现在哪些模型选择框里`),
+    enabled: z.boolean().default(true).describe('启用|停用后所有用到它的地方都会跳过它'),
+    nativeWebSearch: z.boolean().default(false).describe('联网搜索|#showIf:type=chat|使用模型自带的联网搜索；OpenAI 兼容端点传 web_search，Gemini 传 Google Search'),
+    openaiReasoningEffort: z.enum(OPENAI_REASONING_EFFORT_OPTIONS).default('default').describe('思考等级|#showIf:type=chat|#protocol:openai|#optionLabels:default=模型默认,none=不思考,minimal=最少,low=低,medium=中,high=高,xhigh=很高,max=最高'),
+    geminiThinkingLevel: z.enum(GEMINI_THINKING_LEVEL_OPTIONS).default('default').describe('思考等级|#showIf:type=chat|#protocol:gemini|#optionLabels:default=模型默认,off=关闭,minimal=最少,low=低,medium=中,high=高'),
+    name: z.string().trim().default('').describe('别名|#advanced|#placeholder:留空就用模型名|同一个模型要配两套参数，或者不同供应商有同名模型时才需要填'),
+    stream: z.boolean().default(false).describe('流式响应|#advanced|#showIf:type=chat|边生成边接收，全部收完后再回复；某些中转站只有流式才稳定'),
+    temperature: z.number().min(-1).max(2).default(-1).describe('温度|#advanced|#showIf:type=chat|#step:0.1|-1 表示使用模型默认值'),
+    topP: z.number().min(-1).max(1).default(-1).describe('Top-P|#advanced|#showIf:type=chat|#step:0.05|-1 表示使用模型默认值；一般不要和温度同时调整'),
+    openaiEnableThinking: z.boolean().default(false).describe('enable_thinking 开关|#advanced|#showIf:type=chat|#protocol:openai|向兼容端点额外传入非标准的 enable_thinking 参数'),
+    geminiThinkingBudget: z.number().int().min(-2).default(-2).describe('思考预算|#advanced|#showIf:type=chat|#protocol:gemini|-2 跟随思考等级；-1 由模型决定；0 关闭；正数为固定 token 预算'),
+    timeoutSeconds: z.number().int().min(0).max(3600).default(0).describe('超时（秒）|#advanced|0 表示按用途使用默认值：对话和图片 300 秒，视频 900 秒'),
 });
 
-const RouteSchema = z.object({
-    id: nonEmptyString('路由 ID').describe('路由 ID'),
-    strategy: routingStrategy('供应商目标调度策略'),
-    maxAttempts: z.number().int().min(1).default(3).describe('最大尝试次数|一次请求最多尝试的目标与 Key 组合数'),
-    retryDelayMs: z.number().int().min(0).default(1000).describe('重试间隔|毫秒'),
-    timeoutMs: z.number().int().min(1000).default(300000).describe('单目标请求超时|毫秒；超时后由路由尝试下一个目标或 Key'),
-    targets: z.array(RouteTargetSchema).min(1, '至少配置一个路由目标').describe('路由目标|#routeTargets|#nameField:id'),
-}).superRefine((route, ctx) => {
-    addUniqueFieldIssues(route.targets, 'id', ctx, ['targets']);
-});
-
-const RoutesObjectSchema = z.object({
-    routes: z.array(RouteSchema).default([]).describe('逻辑模型路由|#nameField:id'),
+export const ModelsSchema = z.object({
+    models: z.array(ModelSchema).default([]).describe('模型|#modelEntries|#summary:provider,type|每个模型配置一次，之后在角色、伪人、图片生成等地方直接按名字选择'),
 }).superRefine((config, ctx) => {
-    addUniqueFieldIssues(config.routes, 'id', ctx, ['routes']);
-}).describe('AI 路由管理');
-
-export const RoutesSchema = RoutesObjectSchema;
-
-const MediaRouteTargetSchema = z.object({
-    id: nonEmptyString('目标 ID').describe('目标 ID|路由内唯一'),
-    provider: nonEmptyString('供应商').describe('供应商|#providerSelect'),
-    model: nonEmptyString('模型').describe('模型名称|#modelSelect|从所选供应商的模型端点返回列表中选择'),
-    enabled: z.boolean().default(true).describe('启用'),
-    priority: z.number().int().default(0).describe('优先级|数值越大越优先'),
-    weight: z.number().int().min(1).default(1).describe('权重|同优先级轮询权重'),
-});
-
-function createMediaRoutesSchema(label, timeoutMs) {
-    const routeSchema = z.object({
-        id: nonEmptyString(`${label}路由 ID`).describe(`${label}路由 ID`),
-        strategy: routingStrategy('供应商目标调度策略'),
-        maxAttempts: z.number().int().min(1).default(3).describe('最大尝试次数|一次请求最多尝试的目标与 Key 组合数'),
-        retryDelayMs: z.number().int().min(0).default(1000).describe('重试间隔|毫秒'),
-        timeoutMs: z.number().int().min(1000).default(timeoutMs).describe('单目标请求超时|毫秒；超时后由路由尝试下一个目标或 Key'),
-        targets: z.array(MediaRouteTargetSchema).min(1, '至少配置一个路由目标').describe('路由目标|#routeTargets|#nameField:id'),
-    }).superRefine((route, ctx) => {
-        addUniqueFieldIssues(route.targets, 'id', ctx, ['targets']);
+    const seen = new Map();
+    config.models.forEach((entry, index) => {
+        const key = entry.name || entry.model;
+        if (!key) return;
+        if (seen.has(key)) {
+            ctx.addIssue({
+                code: 'custom',
+                path: ['models', index, entry.name ? 'name' : 'model'],
+                message: `模型“${key}”重复了；同一个模型要配两套参数时，请给其中一个填写别名`,
+            });
+        }
+        seen.set(key, index);
     });
-
-    return z.object({
-        routes: z.array(routeSchema).default([]).describe(`${label}路由|#nameField:id`),
-    }).superRefine((config, ctx) => {
-        addUniqueFieldIssues(config.routes, 'id', ctx, ['routes']);
-    }).describe(`${label}路由管理`);
-}
-
-export const ImageRoutesSchema = createMediaRoutesSchema('图片', 300000);
-export const VideoRoutesSchema = createMediaRoutesSchema('视频', 900000);
+}).describe('模型|一个模型配置一次，到处按名字选择');
 
 const EditTaskSchema = z.object({
-    trigger: z.string().default('').describe('触发词|图片编辑触发词'),
-    prompt: z.string().default('').describe('提示词|#textarea|图片编辑指令'),
+    trigger: z.string().default('').describe('触发词|发送这个词并附上图片时执行编辑'),
+    prompt: z.string().default('').describe('提示词|#textarea|发给图片模型的编辑指令'),
 });
 
 const EditImageObjectSchema = z.object({
-    imageRoute: z.string().default('').describe('默认图片路由|#imageRouteSelect|未在命令中指定时使用'),
-    gptQuality: z.enum(['auto', 'low', 'medium', 'high', 'xhigh', 'max']).default('auto').describe('GPT 默认画质'),
-    gifRoute: z.string().default('').describe('GIF 路由|#imageRouteSelect'),
-    gifFrameCount: z.number().int().min(2).max(16).default(9).describe('GIF 帧数|#step:1'),
-    gifFrameDurationMs: z.number().int().min(20).max(2000).multipleOf(10).default(200).describe('GIF 每帧时长（毫秒）|#step:10'),
-    videoRoute: z.string().default('grok-video').describe('默认视频路由|#videoRouteSelect|未在命令中指定时使用'),
-    tasks: z.array(EditTaskSchema).default([]).describe('编辑指令列表|配置自定义的图片编辑指令'),
-}).describe('图片与视频生成与编辑');
+    imageModels: modelList('图片模型', 'image', '命令里没指定模型时使用；可以选多个，排在前面的优先', '#group:图片生成'),
+    gptQuality: z.enum(['auto', 'low', 'medium', 'high', 'xhigh', 'max']).default('auto').describe('GPT 默认画质|#group:图片生成|#optionLabels:auto=自动,low=低,medium=中,high=高,xhigh=很高,max=最高'),
+    gifModels: modelList('GIF 模型', 'image', '生成动图时使用；不选则沿用图片模型', '#group:GIF 动图'),
+    gifFrameCount: z.number().int().min(2).max(16).default(9).describe('帧数|#group:GIF 动图|#step:1'),
+    gifFrameDurationMs: z.number().int().min(20).max(2000).multipleOf(10).default(200).describe('每帧时长（毫秒）|#group:GIF 动图|#step:10'),
+    videoModels: modelList('视频模型', 'video', '命令里没指定模型时使用；可以选多个，排在前面的优先', '#group:视频生成'),
+    tasks: z.array(EditTaskSchema).default([]).describe('快捷编辑指令|#group:快捷编辑指令|#nameField:trigger|#summary:prompt|发送触发词加图片即可按预设提示词编辑'),
+}).describe('图片与视频生成|模型、画质和快捷编辑指令');
 
 export const EditImageSchema = EditImageObjectSchema;
 
@@ -459,25 +407,25 @@ const GroupConfigSchema = z.object({
     enableAtReply: z.boolean().default(true).describe('At回复|被@时是否回复'),
     alternatePromptProbability: z.number().default(0.1).describe('反差人格概率|#step:0.01|0-1之间'),
     recalltime: z.number().default(10).describe('撤回时间(秒)|自动撤回消息的秒数'),
-    route: z.string().default('default').describe('模型路由|#routeSelect'),
+    models: modelList('模型', 'chat', '留空则使用上面的默认模型'),
     toolGroup: z.string().default('').describe('工具组|#toolGroupSelect|选择此群使用的工具组'),
     splitMessage: z.boolean().default(true).describe('拆分消息|是否拆分长消息'),
 });
 
 export const MimicSchema = z.object({
-    name: z.string().default('小叶').describe('默认角色|#roleSelect'),
-    alternateName: z.string().default('雌小鬼').describe('反差角色|#roleSelect'),
-    replyProbability: z.number().default(0.05).describe('回复概率|#step:0.01|0-1之间'),
-    triggerWords: z.array(z.string()).default(['小叶']).describe('触发词列表'),
-    enableAtReply: z.boolean().default(true).describe('At回复'),
-    alternatePromptProbability: z.number().default(0.1).describe('反差人格概率|#step:0.01'),
-    recalltime: z.number().default(10).describe('撤回时间(秒)'),
-    route: z.string().default('default').describe('模型路由|#routeSelect'),
-    toolGroup: z.string().default('').describe('工具组|#toolGroupSelect|选择伪人使用的工具组'),
-    splitMessage: z.boolean().default(true).describe('拆分消息'),
-    Groups: z.array(z.number()).default([]).describe('启用群号|#groupSelect'),
-    GroupConfigs: z.array(GroupConfigSchema).default([]).describe('群独立配置|为每个群设置不同的模拟人参数'),
-}).describe('伪人配置');
+    Groups: z.array(z.number()).default([]).describe('启用群|#group:基本|#groupSelect|伪人只在这些群里说话'),
+    name: z.string().default('小叶').describe('人设|#group:基本|#roleSelect'),
+    alternateName: z.string().default('雌小鬼').describe('反差人设|#group:基本|#roleSelect|偶尔切换成这个人设回复'),
+    models: modelList('模型', 'chat', '可以选多个，排在前面的优先，失败时自动换下一个', '#group:基本'),
+    toolGroup: z.string().default('').describe('工具组|#group:基本|#toolGroupSelect|伪人可以调用的工具'),
+    triggerWords: z.array(z.string()).default(['小叶']).describe('触发词|#group:回复规则|消息里包含这些词时一定回复'),
+    enableAtReply: z.boolean().default(true).describe('被 @ 时回复|#group:回复规则'),
+    replyProbability: z.number().min(0).max(1).default(0.05).describe('随机回复概率|#group:回复规则|#step:0.01|0 到 1 之间，0.05 表示 5%'),
+    alternatePromptProbability: z.number().min(0).max(1).default(0.1).describe('反差人设概率|#group:回复规则|#step:0.01|回复时使用反差人设的概率'),
+    splitMessage: z.boolean().default(true).describe('拆分长消息|#group:回复规则|像真人一样分几条发送'),
+    recalltime: z.number().default(10).describe('反差回复撤回时间（秒）|#group:回复规则'),
+    GroupConfigs: z.array(GroupConfigSchema).default([]).describe('单独设置的群|#group:按群单独设置|#nameField:group|#summary:name,models|这些群使用下面的设置，覆盖上面的默认值'),
+}).describe('伪人|像群友一样随机参与聊天');
 
 const RankingConfigSchema = z.object({
     mode: z.string().describe('排行榜类型'),
@@ -642,106 +590,107 @@ export const pluginMeta = {
 
 export const configSchema = {
     'bot': BotSchema,
-    '60sNews': News60sSchema,
-    'GroupInsight': GroupInsightSchema,
-    'AI': AISchema,
-    'Memory': MemorySchema,
-    'TavilyMCP': TavilyMCPSchema,
-    'ActiveChat': ActiveChatSchema,
-    'AutoCleanup': AutoCleanupSchema,
     'Providers': ProvidersSchema,
-    'Routes': RoutesSchema,
-    'ImageRoutes': ImageRoutesSchema,
-    'VideoRoutes': VideoRoutesSchema,
+    'Models': ModelsSchema,
+    'AI': AISchema,
+    'roles': RolesSchema,
+    'mimic': MimicSchema,
+    'Memory': MemorySchema,
+    'ActiveChat': ActiveChatSchema,
+    'TavilyMCP': TavilyMCPSchema,
     'EditImage': EditImageSchema,
-    'EmojiThief': EmojiThiefSchema,
+    'nai': NaiSchema,
+    'pixiv': PixivSchema,
+    'r18': R18Schema,
+    'SearchImage': SearchImageSchema,
+    'summary': SummarySchema,
     'VoxCPMVoice': VoxCPMVoiceSchema,
     'bilicookie': BilicookieSchema,
     'douyin': DouyinSchema,
-    'cool': CoolSchema,
-    'economy': EconomySchema,
-    'forwardMessage': ForwardMessageSchema,
-    'groupnotice': GroupnoticeSchema,
-    'mimic': MimicSchema,
-    'nai': NaiSchema,
-    'pixiv': PixivSchema,
     'poke': PokeSchema,
-    'r18': R18Schema,
-    'recall': RecallSchema,
     'repeat': RepeatSchema,
-    'roles': RolesSchema,
-    'SearchImage': SearchImageSchema,
-    'summary': SummarySchema,
+    'EmojiThief': EmojiThiefSchema,
+    'groupnotice': GroupnoticeSchema,
+    'recall': RecallSchema,
+    'AutoCleanup': AutoCleanupSchema,
+    'forwardMessage': ForwardMessageSchema,
+    '60sNews': News60sSchema,
     'teatime': TeatimeSchema,
+    'cool': CoolSchema,
+    'GroupInsight': GroupInsightSchema,
     'reminderTask': ReminderTaskSchema,
+    'economy': EconomySchema,
 };
 
-
-export const schemaCategories = {
-    '基础设定': ['bot'],
-    'AI路由': ['Providers', 'Routes', 'ImageRoutes', 'VideoRoutes'],
-    'AI角色': ['roles'],
-    'AI设定': ['AI', 'Memory', 'TavilyMCP', 'mimic', 'ActiveChat'],
-    '戳一戳': ['poke'],
-    '图片功能': ['EditImage', 'nai', 'pixiv', 'r18', 'summary', 'SearchImage', 'cool', 'teatime', 'EmojiThief'],
-    '经济系统': ['economy'],
-    '其他功能': ['60sNews', 'GroupInsight', 'AutoCleanup', 'forwardMessage', 'groupnotice', 'repeat', 'recall', 'bilicookie', 'douyin', 'VoxCPMVoice', 'reminderTask'],
-};
-
-export const schemaLabels = {
-    'TavilyMCP': 'Tavily MCP',
-    'bot': '机器人基础设定',
-    '60sNews': '60秒新闻推送',
-    'GroupInsight': '群聊洞见',
-    'AI': 'AI 对话设定',
-    'Memory': '自动记忆',
-    'ActiveChat': '主动聊天',
-    'AutoCleanup': '自动清理',
-    'Providers': 'AI 供应商管理',
-    'Routes': 'AI 路由管理',
-    'ImageRoutes': '图片路由管理',
-    'VideoRoutes': '视频路由管理',
-    'EditImage': '图片生成与编辑',
-    'EmojiThief': '表情偷取',
-    'VoxCPMVoice': 'VoxCPM 语音生成',
-    'bilicookie': 'B站解析',
-    'douyin': '抖音解析',
-    'cool': '随机冷却',
-    'economy': '经济系统',
-    'forwardMessage': '消息转发',
-    'groupnotice': '群通知',
-    'mimic': '伪人配置',
-    'nai': 'NovelAI 绘画',
-    'pixiv': 'Pixiv 图库',
-    'poke': '戳一戳',
-    'r18': 'R18 管理',
-    'recall': '撤回监听',
-    'repeat': '复读机',
-    'roles': 'AI 角色',
-    'SearchImage': '统一搜图',
-    'summary': '图片外显',
-    'teatime': '下午茶推送',
-    'reminderTask': '重复提醒任务',
-};
+/**
+ * 面板导航：分组 → 页面 → 页面里展示的配置模块。
+ * 同一页面里的模块共用一个保存按钮；icon 对应面板内置图标名。
+ */
+export const schemaNavigation = [
+    {
+        title: 'AI',
+        pages: [
+            {
+                key: 'models',
+                title: '模型与供应商',
+                icon: 'cpu',
+                description: '先添加供应商并填好 Key，再添加模型；角色、伪人、图片生成等地方都直接按模型名选择。',
+                modules: ['Providers', 'Models'],
+            },
+            { key: 'ai-chat', title: 'AI 对话', icon: 'message', description: '触发前缀、工具组、对话参数和后台任务模型。', modules: ['AI'] },
+            { key: 'roles', title: '人设', icon: 'users', description: '角色的系统提示词，在触发设定、伪人和戳一戳里按名字引用。', modules: ['roles'] },
+            { key: 'mimic', title: '伪人', icon: 'ghost', modules: ['mimic'] },
+            { key: 'ai-extra', title: '记忆与联网', icon: 'brain', modules: ['Memory', 'ActiveChat', 'TavilyMCP'] },
+        ],
+    },
+    {
+        title: '图片与媒体',
+        pages: [
+            { key: 'image-gen', title: '图片与视频生成', icon: 'image', modules: ['EditImage'] },
+            { key: 'nai', title: 'NovelAI 绘画', icon: 'brush', modules: ['nai'] },
+            { key: 'pixiv', title: 'Pixiv 图库', icon: 'gallery', modules: ['pixiv', 'r18'] },
+            { key: 'search-image', title: '搜图与图片外显', icon: 'search', modules: ['SearchImage', 'summary'] },
+            { key: 'voice', title: '语音生成', icon: 'mic', modules: ['VoxCPMVoice'] },
+            { key: 'link-parse', title: '链接解析', icon: 'link', modules: ['bilicookie', 'douyin'] },
+        ],
+    },
+    {
+        title: '群聊',
+        pages: [
+            { key: 'bot', title: '机器人名称', icon: 'bot', modules: ['bot'] },
+            { key: 'poke', title: '戳一戳', icon: 'hand', modules: ['poke'] },
+            { key: 'repeat', title: '复读', icon: 'repeat', modules: ['repeat'] },
+            { key: 'emoji', title: '表情包学习', icon: 'smile', modules: ['EmojiThief'] },
+            { key: 'group-manage', title: '群管理', icon: 'shield', modules: ['groupnotice', 'recall', 'AutoCleanup', 'forwardMessage'] },
+        ],
+    },
+    {
+        title: '推送与定时',
+        pages: [
+            { key: 'push', title: '定时推送', icon: 'bell', modules: ['60sNews', 'teatime', 'cool', 'GroupInsight'] },
+            { key: 'reminder', title: '重复提醒', icon: 'clock', modules: ['reminderTask'] },
+        ],
+    },
+    {
+        title: '游戏',
+        pages: [
+            { key: 'economy', title: '经济系统', icon: 'coins', modules: ['economy'] },
+        ],
+    },
+];
 
 export const dynamicOptionsConfig = {
     roleSelect: {
-        label: '角色',
+        label: '人设',
         sources: [
             { module: 'roles', path: 'roles', valueKey: 'name' }
         ],
     },
     roleSelectArray: {
-        label: '角色',
+        label: '人设',
         isArray: true,
         sources: [
             { module: 'roles', path: 'roles', valueKey: 'name' }
-        ],
-    },
-    routeSelect: {
-        label: '模型路由',
-        sources: [
-            { module: 'Routes', path: 'routes', valueKey: 'id' },
         ],
     },
     providerSelect: {
@@ -750,21 +699,20 @@ export const dynamicOptionsConfig = {
             {
                 module: 'Providers',
                 path: 'providers',
-                valueKey: 'id',
+                valueKey: 'name',
                 detailKeys: ['protocol', 'vertex'],
             },
         ],
     },
-    imageRouteSelect: {
-        label: '图片路由',
+    modelEntrySelect: {
+        label: '模型',
         sources: [
-            { module: 'ImageRoutes', path: 'routes', valueKey: 'id' },
-        ],
-    },
-    videoRouteSelect: {
-        label: '视频路由',
-        sources: [
-            { module: 'VideoRoutes', path: 'routes', valueKey: 'id' },
+            {
+                module: 'Models',
+                path: 'models',
+                valueKey: ['name', 'model'],
+                detailKeys: ['type', 'provider', 'model', 'enabled'],
+            },
         ],
     },
     toolGroupSelect: {
@@ -780,3 +728,5 @@ export const dynamicOptionsConfig = {
         ],
     },
 };
+
+export { migrateConfigDirectory as migrateConfig } from './lib/AIUtils/configMigration.js';

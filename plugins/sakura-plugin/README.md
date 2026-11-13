@@ -67,13 +67,11 @@ config/sakura-plugin/
 常用配置文件：
 
 - `bot.yaml`：机器人名称等基础信息。
-- `Providers.yaml`：AI 供应商、接口协议、端点和 Key 池。
-- `Routes.yaml`：逻辑模型路由、供应商目标和调度策略。
-- `ImageRoutes.yaml`：图片模型路由和回退顺序。
-- `VideoRoutes.yaml`：视频模型路由和回退顺序。
+- `Providers.yaml`：AI 供应商的接口协议、API 地址和 Key 列表。
+- `Models.yaml`：模型（对话、图片、视频），每个模型配置一次，其他地方按模型名引用。
 - `AI.yaml`：AI 对话、工具组、上下文、Markdown 处理等设置。
 - `roles.yaml`：AI 角色和人设。
-- `EditImage.yaml`：图片编辑触发词及默认图片、视频路由。
+- `EditImage.yaml`：图片编辑触发词及默认图片、GIF、视频模型。
 - `economy.yaml`：经济系统、启用群、指令消耗价格。
 - `pixiv.yaml`：Pixiv cookie、refresh token、订阅推送。
 - `nai.yaml`：NovelAI API Key、官方或第三方 URL、模型和负面提示词。
@@ -91,33 +89,36 @@ config/sakura-plugin/
 
 ### AI 对话
 
-1. 在 `Providers` 中配置供应商端点和至少一个凭据。
-2. 在 `Routes` 中配置逻辑模型路由和供应商目标。
-3. 在 `roles` 中配置角色。
-4. 在 `AI.profiles` 中配置角色触发前缀列表、角色名和模型路由。
-5. 群内发送任一角色前缀加内容即可触发对话；多个前缀同时匹配时使用最长前缀。
+面板里打开“AI › 模型与供应商”：
 
-`AI.utilityRoute` 是通用辅助路由，用于应用文案、结构化分析、记忆整理和表情识图等后台任务。`AI.geminiRoute` 是 Gemini 能力路由，用于向量和消息视频分析，留空时这些功能不可用；选定的路由中至少需要一个 `protocol: gemini` 的 Gemini 或 Vertex 目标。主对话、工具执行和工具回传后的续答仍沿角色或拟态各自的模型路由执行；只有上述 Gemini 子任务使用 `geminiRoute`。
+1. 添加供应商：填写名称、接口协议、API 地址和 Key。Key 可以填多个，请求时轮流使用，失败自动换下一个。
+2. 添加模型：选择供应商，再从它的模型列表里选模型名（也可以直接输入），并选择用途（对话 / 图片生成 / 视频生成）。
+3. 在“人设”里写好角色提示词。
+4. 在“AI 对话 › 触发设定”里配置触发前缀、人设和要用的模型。
+5. 群内发送任一前缀加内容即可触发对话；多个前缀同时匹配时使用最长前缀。
 
+模型在配置里用**模型名**识别。同一个模型需要两套参数（例如不同思考等级），或不同供应商有同名模型时，给其中一个填写“别名”，之后就用别名引用。
 
-图片和视频分别由 `ImageRoutes`、`VideoRoutes` 管理，共用 `Providers` 中的端点和凭据，但不受 `AI.geminiRoute` 影响。
+所有使用模型的地方（触发设定、伪人、后台辅助模型、图片/视频生成）都可以选多个模型：排在前面的优先，请求失败时按顺序换下一个；每个模型内部会轮流使用供应商的各个 Key。
 
-路由和凭据均支持 `round_robin`、`weighted_round_robin`、`priority`、`priority_weighted`。同一个逻辑路由可以配置多个使用相同模型名的供应商目标。
+`AI.utilityModels` 是后台辅助模型，用于欢迎词、结构化分析、记忆整理、提醒改写和表情识图等后台任务。`AI.geminiModels` 用于向量检索和消息视频分析，只会使用其中 Gemini / Vertex 供应商的模型；不选时这些功能不可用。
 
-生成参数全部放在路由目标层：每个目标独立配置 `temperature`、`topP` 和对应协议的原生思考参数。Provider 只管理连接和凭据，不承载生成参数；网页会根据目标所选供应商的协议，仅显示 OpenAI 或 Gemini 对应的配置项。
+生成参数放在模型上：温度、Top-P、联网搜索和对应协议的思考参数。网页会根据模型所选供应商的协议，只显示 OpenAI 或 Gemini 对应的选项；不常改的参数收在“高级选项”里。超时默认对话和图片 300 秒、视频 900 秒，可在模型的高级选项里单独调整。
+
+旧版的 `Routes.yaml`、`ImageRoutes.yaml`、`VideoRoutes.yaml` 会在启动时自动迁移成 `Models.yaml`，各处引用的路由 ID 换成对应的模型列表（按原优先级排序）；旧文件备份在配置目录的 `_migration-backup/` 里。
 
 - `temperature` / `topP` 为 `-1` 时不发送，使用模型默认值。
 - Gemini `geminiThinkingBudget: -2` 表示使用思考等级，`-1` 表示自动预算，`0` 表示关闭。
 - 一般只调整 temperature 或 Top-P 其中一个。
 
-编辑路由目标时，先选择供应商，模型字段会从该供应商的远程模型端点动态加载。模型列表默认缓存 300 秒，可在供应商配置中调整缓存时间、请求超时和列表上限；“刷新”按钮会绕过缓存。远程列表不可用时仍可手动输入模型名称。
+编辑模型时，先选择供应商，模型名会从该供应商的远程模型端点动态加载并缓存；刷新按钮会绕过缓存。远程列表不可用时可以直接输入模型名。
 
 ### 图片生成和图片编辑
 
 1. 在 `Providers` 中配置 OpenAI-compatible、Gemini Developer API 或 Vertex 供应商。
-2. 在 `ImageRoutes` 中添加图片路由并选择供应商、模型；CPA 下的 GPT Image 与 Grok Image 都使用 OpenAI-compatible 图片接口，由模型名决定具体参数转换。
-3. 在 `EditImage.imageRoute` 中选择默认图片路由。
-4. 使用 `#i 提示词` 生图，或引用图片后使用 `#i 提示词` 改图；可用 `route=路由ID` 临时切换。未指定比例时按 `auto` 处理并静默省略比例参数；未指定清晰度时使用统一的 1K 语义，其中 Grok 使用 `resolution: 1k`，GPT 转换为像素尺寸和质量，Gemini 使用原生 `imageSize: 1K`。路由回退时会从原始参数重新适配目标模型：支持的参数原样传递，不支持的比例映射为同方向最接近值，超限尺寸和数量向下截断。
+2. 在“模型与供应商”中添加用途为“图片生成”的模型；CPA 下的 GPT Image 与 Grok Image 都使用 OpenAI-compatible 图片接口，由模型名决定具体参数转换。
+3. 在“图片与视频生成”里选择默认图片模型（可多选作为备用）。
+4. 使用 `#i 提示词` 生图，或引用图片后使用 `#i 提示词` 改图；可用 `模型=模型名` 临时指定，也可以用 `grok`、`gpt`、`gemini`、`vertex` 简写选择对应的所有图片模型。未指定比例时按 `auto` 处理并静默省略比例参数；未指定清晰度时使用统一的 1K 语义，其中 Grok 使用 `resolution: 1k`，GPT 转换为像素尺寸和质量，Gemini 使用原生 `imageSize: 1K`。换到备用模型时会从原始参数重新适配目标模型：支持的参数原样传递，不支持的比例映射为同方向最接近值，超限尺寸和数量向下截断。
 5. 可在 `EditImage.tasks` 中配置自定义图片编辑触发词。
 
 ### 经济系统
@@ -137,13 +138,13 @@ config/sakura-plugin/
 
 ### AI 视频
 
-视频路由在“AI路由 > 视频路由管理”中配置：
+视频模型在“模型与供应商”里添加（用途选“视频生成”）：
 
-- OpenAI-compatible 目标使用供应商的 `/videos/generations` 原生接口，当前用于 Grok 视频模型。
-- Gemini Omni Flash 视频目标可使用 Gemini Developer API Key，或使用 Vertex 供应商及已导入的服务账号凭据。
-- `EditImage.videoRoute`：不显式指定路由时使用的默认视频路由。
+- OpenAI-compatible 供应商使用 `/videos/generations` 原生接口，当前用于 Grok 视频模型。
+- Gemini Omni Flash 视频模型可使用 Gemini Developer API Key，或使用 Vertex 供应商及已导入的服务账号。
+- `EditImage.videoModels`：命令里没指定模型时使用的默认视频模型。
 
-使用 `#v route=路由ID <提示词>` 临时选择路由；省略时使用默认视频路由。未指定比例时按 `auto` 处理，并对 Grok、Gemini 都省略 `aspect_ratio`：Grok 文生视频使用模型默认比例、图生视频跟随输入图，Gemini Omni 使用默认 16:9。Gemini Omni 当前仅支持 `16:9`/`9:16`、720p 和 3–10 秒视频；显式的不兼容比例会保方向映射，分辨率和时长会截断到目标能力范围。Grok 视频经 CPA 最高使用 720p。实际发生调整时会先提示，不会中断生成。
+使用 `#v 模型=模型名 <提示词>` 临时指定模型（`grok`、`gemini` 简写同样可用）；省略时使用默认视频模型。未指定比例时按 `auto` 处理，并对 Grok、Gemini 都省略 `aspect_ratio`：Grok 文生视频使用模型默认比例、图生视频跟随输入图，Gemini Omni 使用默认 16:9。Gemini Omni 当前仅支持 `16:9`/`9:16`、720p 和 3–10 秒视频；显式的不兼容比例会保方向映射，分辨率和时长会截断到目标能力范围。Grok 视频经 CPA 最高使用 720p。实际发生调整时会先提示，不会中断生成。
 
 ### NovelAI
 
@@ -184,7 +185,7 @@ AI 对话与记忆：
 - 角色前缀 + 内容：AI 聊天。
 - `#停止` / `#强制停止`：停止当前生成。
 - `#清空对话 <角色>`、`#撤销对话 <角色>`、`#篡改对话 <内容>`、`#列出对话 <角色>`。
-- `#人设增加`、`#人设删除`、`#列出人设`、`#列出路由`。
+- `#人设增加`、`#人设删除`、`#列出人设`、`#列出模型`（旧指令 `#列出路由` 仍可用）。
 
 长期记忆按入口隔离：前缀聊天每个设定只读写自己的个人记忆，不能读写群记忆；开启群聊上下文也不会改变此限制。同一设定的前缀别名共用记忆，以主前缀标识设定，修改主前缀会使用新的一套记忆。Mimic 对话与每小时群采集共用 Mimic 的个人记忆和群公共记忆。个人记忆继续按群及用户区分，私聊单独保存。未开启 `Memory` 工具的前缀设定不自动注入记忆，也不登记个人提取任务。
 
@@ -195,7 +196,7 @@ AI 对话与记忆：
 AI 创作：
 
 - `#i [grok|gpt|gemini|vertex] [比例] [1K/2K/4K] [q=画质] [n=1-6] <提示词>`：统一生图或改图。GPT Image 的尺寸和画质独立设置，`q`（或 `quality`）支持 `auto/low/medium/high/xhigh/max`，普通图片及 GIF 均可使用；省略画质时使用 `EditImage.gptQuality`（默认 `auto`），命令显式指定的 `q` 优先，`q=auto` 使用 API 默认画质；该配置仅用于 GPT Image，普通图片和 GIF 均生效。省略比例和尺寸时由 API 自动决定。旧 GPT Image 模型会将 `xhigh/max` 降为 `high` 并提示，其他不支持独立画质的渠道会忽略该参数并提示。
-- `#gif [route=路由ID] [比例] [1K/2K/4K] [q=画质] [n=1-6] [frames=9] [delay=200] <动画描述>`：文字或参考图生成循环 GIF。后台 `EditImage.gifRoute` 选择包含 `gpt-image-2.6-sunburst` 或 `gpt-image-2.6-flare` 的图片路由，留空使用默认图片路由；仅向支持 GIF 的目标发送请求。`gifFrameCount` 默认 9 帧，`gifFrameDurationMs` 默认每帧 200 毫秒。命令中的 `frames`（简称 `f`）、`delay`（简称 `d`）优先于后台配置，省略时使用配置值。frames 支持 2～16，delay 支持 20～2000 且为 10 的倍数。省略比例和尺寸时使用 API 自动尺寸，显式指定时仍受上游总像素预算限制。支持引用图片、当前图片及头像作为参考图（最多 16 张），AI 工具可通过 seq 引用图片。无参考图调用 /images/generations，有参考图调用 /images/edits，并传入 output_format=gif 与动画参数。2026-11-05 已使用官方 GPT Image 2.6 Flare 实测参考图返回多帧 GIF；当前官方指南的编辑接口限制说明与实测存在差异，兼容服务需确认已适配。沿用“AI图片编辑”指令费用，有提示词的请求受理时扣费，失败、空结果或上游拒绝均不退费；缺少提示词时静默结束，不扣费。AI 生图工具也支持 `outputFormat=gif`。
+- `#gif [模型=模型名] [比例] [1K/2K/4K] [q=画质] [n=1-6] [frames=9] [delay=200] <动画描述>`：文字或参考图生成循环 GIF。后台 `EditImage.gifModels` 选择 `gpt-image-2.6-sunburst` 或 `gpt-image-2.6-flare` 等支持 GIF 的图片模型，留空沿用默认图片模型；只向支持 GIF 的模型发送请求。`gifFrameCount` 默认 9 帧，`gifFrameDurationMs` 默认每帧 200 毫秒。命令中的 `frames`（简称 `f`）、`delay`（简称 `d`）优先于后台配置，省略时使用配置值。frames 支持 2～16，delay 支持 20～2000 且为 10 的倍数。省略比例和尺寸时使用 API 自动尺寸，显式指定时仍受上游总像素预算限制。支持引用图片、当前图片及头像作为参考图（最多 16 张），AI 工具可通过 seq 引用图片。无参考图调用 /images/generations，有参考图调用 /images/edits，并传入 output_format=gif 与动画参数。2026-11-05 已使用官方 GPT Image 2.6 Flare 实测参考图返回多帧 GIF；当前官方指南的编辑接口限制说明与实测存在差异，兼容服务需确认已适配。沿用“AI图片编辑”指令费用，有提示词的请求受理时扣费，失败、空结果或上游拒绝均不退费；缺少提示词时静默结束，不扣费。AI 生图工具也支持 `outputFormat=gif`。
 - `#绘图 <提示词>`：NovelAI 绘图。
 - `#v [grok|gemini] [比例] [分辨率] [时长] <提示词>`：Grok 或 Gemini Omni 视频。
 - `说 <内容>` / `<角色名>说 <内容>`：语音生成。
@@ -372,11 +373,11 @@ chmod +x plugins/sakura-plugin/github-mcp-server/github-mcp-server
 
 ### Grok 功能不可用
 
-检查 `VideoRoutes` 的目标模型、对应 `Providers` 中的 API 地址与 Key，以及本地媒体网关进程是否可用。
+检查“图片与视频生成”里选的视频模型、对应供应商的 API 地址与 Key，以及本地媒体网关进程是否可用。
 
-### 生图提示未配置路由
+### 生图提示未配置图片模型
 
-检查 `ImageRoutes` 是否有可用路由，并在 `EditImage.imageRoute` 中选择对应 ID。
+在“模型与供应商”里确认有用途为“图片生成”的模型，并在“图片与视频生成”里选为默认图片模型。
 
 ## 失效群数据清理
 

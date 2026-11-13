@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { readAuthToken } from '../utils/authStorage';
+import { useDraftModules } from './draftContext';
 
 const DEFAULT_SCOPE_KEY = '__default__';
 
@@ -112,7 +113,42 @@ function readState(selfId, uiType) {
         options: entry.data.options?.[uiType] || EMPTY_OPTIONS,
         details: entry.data.details?.[uiType] || EMPTY_DETAILS,
         label: config.label || '',
+        sourceConfig: config,
     };
+}
+
+function pickValue(item, valueKey) {
+    if (Array.isArray(valueKey)) {
+        return valueKey.map((key) => String(item?.[key] ?? '').trim()).find(Boolean) || '';
+    }
+    return valueKey ? item?.[valueKey] : item;
+}
+
+/** 与后端 /api/dynamic-options 相同的取值规则，但数据来自页面草稿。 */
+function computeFromDrafts(sourceConfig, drafts) {
+    const values = [];
+    const details = {};
+    for (const source of sourceConfig.sources || []) {
+        const moduleConfig = drafts[source.module];
+        const items = source.path.split('.').reduce((obj, key) => obj?.[key], moduleConfig);
+        if (!Array.isArray(items)) continue;
+        for (const item of items) {
+            const value = pickValue(item, source.valueKey);
+            if (!value) continue;
+            if (!values.includes(value)) values.push(value);
+            if (Array.isArray(source.detailKeys)) {
+                const picked = {};
+                for (const key of source.detailKeys) {
+                    const detail = item?.[key];
+                    if (detail == null || ['string', 'number', 'boolean'].includes(typeof detail)) {
+                        picked[key] = detail;
+                    }
+                }
+                details[value] = { ...(details[value] || {}), ...picked };
+            }
+        }
+    }
+    return { values, details };
 }
 
 function sameState(a, b) {
@@ -120,7 +156,8 @@ function sameState(a, b) {
         && a.isDynamic === b.isDynamic
         && a.label === b.label
         && a.options === b.options
-        && a.details === b.details;
+        && a.details === b.details
+        && a.sourceConfig === b.sourceConfig;
 }
 
 /**
@@ -159,5 +196,12 @@ export function useDynamicOptions(scopeSelfId, uiType) {
         };
     }, [selfId, uiType]);
 
-    return state;
+    const drafts = useDraftModules();
+    return useMemo(() => {
+        const sources = state.sourceConfig?.sources;
+        if (!drafts || !Array.isArray(sources) || sources.length === 0) return state;
+        if (!sources.every((source) => drafts[source.module])) return state;
+        const { values, details } = computeFromDrafts(state.sourceConfig, drafts);
+        return { ...state, options: values, details };
+    }, [state, drafts]);
 }

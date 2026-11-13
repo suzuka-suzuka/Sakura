@@ -9,6 +9,7 @@ import {
   isRequestConfigComplete,
   prioritizeRouteAttempt,
 } from "./providerRouter.js";
+import { formatModelList, modelListKey } from "./aiModels.js";
 import { createGeminiClient } from "./vertexAuth.js";
 import { prepareHistoryForGemini } from "./toolCallProtocol.js";
 import { buildGeminiToolConfig } from "./geminiToolConfig.js";
@@ -879,7 +880,7 @@ async function _getGeminiResponse(
 }
 
 export async function getAI(
-  routeId,
+  models,
   e,
   queryParts,
   presetPrompt,
@@ -888,21 +889,22 @@ export async function getAI(
   historyContents = [],
   routingContext = null
 ) {
+  const routeId = formatModelList(models);
   let plan;
   try {
     const cachedPlan = routingContext?.plan;
-    plan = cachedPlan?.route?.id === routeId
+    plan = cachedPlan?.route?.key === modelListKey(models)
       ? cachedPlan
-      : createRouteExecutionPlan(routeId, { selfId: e?.self_id });
+      : createRouteExecutionPlan(models, { selfId: e?.self_id });
     if (routingContext && typeof routingContext === "object") {
       routingContext.plan = plan;
     }
   } catch (error) {
-    return `路由配置错误：${error.message}`;
+    return `模型配置错误：${error.message}`;
   }
 
   if (plan.attempts.length === 0) {
-    return `路由“${routeId}”没有可用的供应商目标或凭据。`;
+    return `模型“${routeId}”没有可用的供应商或 Key。`;
   }
 
   let lastError = null;
@@ -912,7 +914,7 @@ export async function getAI(
       ? { ...attempt.requestConfig, nativeWebSearch: false }
       : attempt.requestConfig;
     logger.info(
-      `[AI Router] route=${routeId} target=${attempt.target.id} provider=${attempt.provider.id} credential=${attempt.credential.id} model=${config.model} timeoutMs=${config.timeoutMs}`
+      `[AI Router] models=${routeId} model=${attempt.target.id} provider=${attempt.provider.id} key=${attempt.credential.id} timeoutMs=${config.timeoutMs}`
     );
 
     try {
@@ -959,7 +961,7 @@ export async function getAI(
     }
   }
 
-  const errorMessage = `路由“${routeId}”请求失败：${lastError?.message || "未知错误"}`;
+  const errorMessage = `模型“${routeId}”请求失败：${lastError?.message || "未知错误"}`;
   logger.error(errorMessage);
   return errorMessage;
 }

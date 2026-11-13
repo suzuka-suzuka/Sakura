@@ -213,7 +213,7 @@ export class AIChat extends plugin {
   });
 
   async doChat(e, matchedProfile, query) {
-    let { route, Prompt, groupContext, history, toolGroup, enableNaiPainting, naiPrompt } = matchedProfile;
+    let { models: route, Prompt, groupContext, history, toolGroup, enableNaiPainting, naiPrompt } = matchedProfile;
     let chatDrawCount = 1;
 
     logger.info(`Chat触发`);

@@ -1,432 +1,478 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useConfig } from './hooks/useConfig';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useSystemInfo } from './hooks/useSystemInfo';
 import LoginPage from './components/LoginPage';
-import ConfigForm from './components/ConfigForm';
-import PluginConfigPanel from './components/PluginConfigPanel';
 import SystemMonitor from './components/SystemMonitor';
 import FileManager from './components/FileManager';
+import Sidebar from './components/Sidebar';
+import SearchPalette from './components/SearchPalette';
+import Icon from './components/Icon';
+import { ObjectConfigPage, PageHeader, PluginConfigPage } from './components/ConfigPage';
 import { resolvePluginScopeSelfId } from './utils/accountScope';
+import { buildPluginNavigation, collectFieldLabels, fieldAnchorId } from './utils/schemaLayout';
 
 const DEFAULT_SCOPE_KEY = '__default__';
+const THEME_STORAGE_KEY = 'sakura_theme';
+
+function readRoute() {
+    const hash = window.location.hash.replace(/^#\/?/, '');
+    const [kind = 'monitor', ...rest] = hash.split('/').map((part) => decodeURIComponent(part));
+    if (kind === 'plugin' && rest.length >= 2) return { kind, plugin: rest[0], page: rest[1] };
+    if (['monitor', 'framework', 'account', 'files'].includes(kind)) return { kind };
+    return { kind: 'monitor' };
+}
+
+function routeKey(route) {
+    return route.kind === 'plugin' ? `plugin:${route.plugin}:${route.page}` : route.kind;
+}
+
+function routeHash(route) {
+    if (route.kind === 'plugin') return `#/plugin/${encodeURIComponent(route.plugin)}/${encodeURIComponent(route.page)}`;
+    return `#/${route.kind}`;
+}
+
+function readTheme() {
+    try {
+        const stored = localStorage.getItem(THEME_STORAGE_KEY);
+        if (stored === 'light' || stored === 'dark') return stored;
+    } catch { /* 浏览器禁用存储时使用系统主题 */ }
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function AccountSwitcher({ accounts, selectedSelfId, onSelect }) {
+    if (!accounts || accounts.length < 2) return null;
+    return (
+        <div className="account-switcher" role="radiogroup" aria-label="选择账号">
+            {accounts.map((account) => {
+                const active = Number(account.self_id) === Number(selectedSelfId);
+                return (
+                    <button
+                        key={account.self_id}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        className={`account-chip ${active ? 'active' : ''}`}
+                        onClick={() => onSelect(account.self_id)}
+                        title={`${account.nickname || 'Bot'}（${account.self_id}）`}
+                    >
+                        <img
+                            src={`https://q1.qlogo.cn/g?b=qq&nk=${account.uin || account.self_id}&s=100`}
+                            alt=""
+                            onError={(event) => { event.currentTarget.style.visibility = 'hidden'; }}
+                        />
+                        <span>{account.nickname || account.self_id}</span>
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
 
 function App() {
-  const {
-    config,
-    schema,
-    loading,
-    saving,
-    errors,
-    isLoggedIn,
-    token,
-    login,
-    logout,
-    saveConfig,
-    updateFromWs,
-    plugins,
-    pluginSchemas,
-    pluginConfigs,
-    pluginCategories,
-    pluginMeta,
-    savePluginConfig,
-    updatePluginFromWs,
-    botAccounts,
-    selectedPluginSelfId,
-    setSelectedPluginSelfId,
-    accountSchema,
-    accountConfigs,
-    saveAccountConfig,
-  } = useConfig();
+    const {
+        config,
+        schema,
+        loading,
+        errors,
+        isLoggedIn,
+        token,
+        login,
+        logout,
+        saveConfig,
+        updateFromWs,
+        plugins,
+        pluginSchemas,
+        pluginConfigs,
+        pluginCategories,
+        pluginMeta,
+        savePluginConfig,
+        updatePluginFromWs,
+        botAccounts,
+        selectedPluginSelfId,
+        setSelectedPluginSelfId,
+        accountSchema,
+        accountConfigs,
+        saveAccountConfig,
+    } = useConfig();
 
-  const effectivePluginSelfId = resolvePluginScopeSelfId(
-    botAccounts,
-    selectedPluginSelfId,
-  );
+    const effectivePluginSelfId = resolvePluginScopeSelfId(botAccounts, selectedPluginSelfId);
+    const [route, setRoute] = useState(readRoute);
+    const [toasts, setToasts] = useState([]);
+    const [theme, setTheme] = useState(readTheme);
+    const [searchOpen, setSearchOpen] = useState(false);
+    const [navOpen, setNavOpen] = useState(false);
+    const [pendingAnchor, setPendingAnchor] = useState(null);
 
-  const [toasts, setToasts] = useState([]);
-  const [activeSection, setActiveSection] = useState('monitor');
-  const [activeCategoryIdx, setActiveCategoryIdx] = useState(0);
+    useEffect(() => {
+        document.documentElement.dataset.theme = theme;
+    }, [theme]);
 
-  const addToast = useCallback((message, type = 'info') => {
-    const id = Date.now();
-    setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((item) => item.id !== id));
-    }, 3000);
-  }, []);
+    useEffect(() => {
+        const onHashChange = () => setRoute(readRoute());
+        window.addEventListener('hashchange', onHashChange);
+        return () => window.removeEventListener('hashchange', onHashChange);
+    }, []);
 
-  const onConfigChanged = useCallback((newConfig) => {
-    updateFromWs(newConfig);
-    addToast('框架配置已同步更新', 'info');
-  }, [updateFromWs, addToast]);
+    useEffect(() => {
+        const onKeyDown = (event) => {
+            const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+                event.preventDefault();
+                setSearchOpen((open) => !open);
+            } else if (event.key === '/' && !typing && !searchOpen) {
+                event.preventDefault();
+                setSearchOpen(true);
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [searchOpen]);
 
-  const onPluginConfigChanged = useCallback((pluginName, moduleName, data, selfId) => {
-    updatePluginFromWs(pluginName, moduleName, data, selfId);
-    addToast(`${pluginName}/${moduleName} 已同步更新`, 'info');
-  }, [updatePluginFromWs, addToast]);
-
-  const { connected } = useWebSocket(
-    isLoggedIn ? token : null,
-    onConfigChanged,
-    onPluginConfigChanged,
-    logout,
-  );
-
-  const {
-    staticInfo,
-    dynamicInfo,
-    botInfo,
-    loading: systemLoading,
-  } = useSystemInfo(
-    isLoggedIn ? token : null,
-    isLoggedIn && activeSection === 'monitor',
-    logout,
-  );
-
-  const handleSave = useCallback(async (newConfig) => {
-    const result = await saveConfig(newConfig);
-    if (result.success) {
-      addToast('框架配置保存成功', 'success');
-    } else {
-      const message = result.errors?.map((item) => item.message).join(', ') || '保存失败';
-      addToast(message, 'error');
-    }
-  }, [saveConfig, addToast]);
-
-  const handleAccountSave = useCallback(async (newConfig) => {
-    const result = await saveAccountConfig(effectivePluginSelfId, newConfig);
-    if (result.success) {
-      addToast('账号配置保存成功', 'success');
-    } else {
-      const message = result.errors?.map((item) => item.message).join(', ') || '保存失败';
-      addToast(message, 'error');
-    }
-  }, [saveAccountConfig, addToast, effectivePluginSelfId]);
-
-  const handlePluginSave = useCallback(async (pluginName, moduleName, data) => {
-    const result = await savePluginConfig(pluginName, moduleName, data, effectivePluginSelfId);
-    if (result.success) {
-      addToast('保存成功', 'success');
-    } else {
-      const message = result.errors?.map((item) => item.message).join(', ') || '保存失败';
-      addToast(message, 'error');
-    }
-    return result;
-  }, [savePluginConfig, addToast, effectivePluginSelfId]);
-
-  const pluginNames = Object.keys(plugins || {});
-
-  const navItems = useMemo(() => [
-    { key: 'monitor', label: '系统监控', icon: '📊' },
-    { key: 'framework', label: '框架配置', icon: '🌸' },
-    { key: 'account', label: '账号配置', icon: '👤' },
-    ...pluginNames.flatMap((name) => {
-      const meta = pluginMeta?.[name];
-      const pluginItem = {
-        key: name,
-        label: meta?.displayName || name,
-        icon: meta?.icon || '🧩',
-      };
-      return name === 'sakura-plugin'
-        ? [pluginItem, { key: '__file_manager__', label: '文件管理', icon: '📁', nested: true }]
-        : [pluginItem];
-    }),
-  ], [pluginNames, pluginMeta]);
-
-  const accountTab = useMemo(() => {
-    if (!accountSchema?.children) {
-      return null;
-    }
-
-    return {
-      key: '__account__',
-      label: '账号配置',
-      title: '账号基础配置',
-      isAccount: true,
-      fields: Object.entries(accountSchema.children).map(([key, meta]) => ({ key, meta })),
-    };
-  }, [accountSchema]);
-
-  const categoryTabs = useMemo(() => {
-    if (
-      activeSection === 'monitor'
-      || activeSection === 'account'
-      || activeSection === '__file_manager__'
-    ) {
-      return [];
-    }
-
-    if (activeSection === 'framework') {
-      if (!schema?.children) {
-        return [];
-      }
-
-      const tabs = [];
-      const topLevelFields = [];
-      const objectSections = [];
-
-      for (const [key, meta] of Object.entries(schema.children)) {
-        if (meta.type === 'object' && meta.children) {
-          objectSections.push({ key, meta });
-        } else {
-          topLevelFields.push({ key, meta });
-        }
-      }
-
-      if (topLevelFields.length > 0) {
-        tabs.push({
-          key: '__global_basic__',
-          label: '基础配置',
-          title: '基础配置',
-          fields: topLevelFields,
-          isTop: true,
+    const toggleTheme = useCallback(() => {
+        setTheme((current) => {
+            const next = current === 'dark' ? 'light' : 'dark';
+            try { localStorage.setItem(THEME_STORAGE_KEY, next); } catch { /* 忽略 */ }
+            return next;
         });
-      }
+    }, []);
 
-      for (const section of objectSections) {
-        tabs.push({
-          key: section.key,
-          label: section.meta.label || section.meta.description || section.key,
-          title: section.meta.label || section.meta.description || section.key,
-          meta: section.meta,
-          isObject: true,
-        });
-      }
+    const addToast = useCallback((message, type = 'info') => {
+        const id = `${Date.now()}-${Math.random()}`;
+        setToasts((prev) => [...prev.slice(-3), { id, message, type }]);
+        setTimeout(() => setToasts((prev) => prev.filter((item) => item.id !== id)), 3200);
+    }, []);
 
-      return tabs;
-    }
+    const onConfigChanged = useCallback((newConfig) => {
+        updateFromWs(newConfig);
+        addToast('框架配置已在别处更新', 'info');
+    }, [updateFromWs, addToast]);
 
-    const categories = pluginCategories[activeSection];
-    const modules = plugins[activeSection] || [];
-    if (!categories) {
-      return [{ key: '__all__', label: '全部配置', modules }];
-    }
+    const onPluginConfigChanged = useCallback((pluginName, moduleName, data, selfId) => {
+        updatePluginFromWs(pluginName, moduleName, data, selfId);
+    }, [updatePluginFromWs]);
 
-    const categorizedModules = new Set();
-    Object.values(categories).forEach((moduleList) => {
-      if (Array.isArray(moduleList)) {
-        moduleList.forEach((moduleName) => categorizedModules.add(moduleName));
-      }
-    });
+    const { connected } = useWebSocket(isLoggedIn ? token : null, onConfigChanged, onPluginConfigChanged, logout);
 
-    const uncategorized = modules.filter((moduleName) => !categorizedModules.has(moduleName));
-    const tabs = [];
-
-    for (const [categoryName, moduleList] of Object.entries(categories)) {
-      const validModules = moduleList.filter((moduleName) => modules.includes(moduleName));
-      if (validModules.length > 0) {
-        tabs.push({ key: categoryName, label: categoryName, modules: validModules });
-      }
-    }
-
-    if (uncategorized.length > 0) {
-      tabs.push({ key: '__other__', label: '其他', modules: uncategorized });
-    }
-
-    return tabs;
-  }, [activeSection, schema, pluginCategories, plugins]);
-
-  const safeIdx = Math.min(activeCategoryIdx, Math.max(categoryTabs.length - 1, 0));
-  const currentTab = categoryTabs[safeIdx] || null;
-  const isAccountSection = activeSection === 'account';
-  const isFileManagerSection = activeSection === '__file_manager__';
-  const isPluginSection = activeSection !== 'framework'
-    && activeSection !== 'monitor'
-    && activeSection !== 'account'
-    && !isFileManagerSection;
-
-  const showAccountTopbar = botAccounts.length > 1 && (isPluginSection || isAccountSection);
-
-  const currentPluginScopeKey = effectivePluginSelfId == null
-    ? DEFAULT_SCOPE_KEY
-    : String(effectivePluginSelfId);
-  const currentPluginConfigs = pluginConfigs[activeSection]?.[currentPluginScopeKey] || {};
-  const currentAccountConfig = accountConfigs[currentPluginScopeKey] ?? null;
-
-  const handleSectionChange = useCallback((key) => {
-    setActiveSection(key);
-    setActiveCategoryIdx(0);
-  }, []);
-
-  const currentNav = navItems.find((item) => item.key === activeSection);
-  const sectionLabel = currentNav?.label || activeSection;
-
-  if (!isLoggedIn) {
-    return <LoginPage onLogin={login} />;
-  }
-
-  if (loading) {
-    return (
-      <div className="loading-container">
-        <div className="spinner"></div>
-      </div>
+    const { staticInfo, dynamicInfo, botInfo, loading: systemLoading } = useSystemInfo(
+        isLoggedIn ? token : null,
+        isLoggedIn && route.kind === 'monitor',
+        logout,
     );
-  }
 
-  return (
-    <div className="app-root">
-      <div className="toast-container">
-        {toasts.map((toast) => (
-          <div key={toast.id} className={`toast ${toast.type}`}>
-            {toast.message}
-          </div>
-        ))}
-      </div>
+    // ===== 导航 =====
+    const pluginNav = useMemo(() => {
+        const result = {};
+        for (const name of Object.keys(plugins || {})) {
+            result[name] = buildPluginNavigation(name, pluginCategories?.[name], plugins[name] || []);
+        }
+        return result;
+    }, [plugins, pluginCategories]);
 
-      <div className="app-layout">
-        <aside className="left-nav">
-          <a
-            className="left-nav-brand"
-            href="https://github.com/suzuka-suzuka/Sakura"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="在新标签页打开 Sakura GitHub 仓库"
-          >
-            <span className="left-nav-brand-icon">🌸</span>
-            <span className="left-nav-brand-text">Sakura</span>
-          </a>
-          <div className="left-nav-divider"></div>
+    const navGroups = useMemo(() => {
+        const groups = [
+            { title: '', items: [{ key: 'monitor', title: '系统概览', icon: 'activity', route: { kind: 'monitor' } }] },
+            {
+                title: '框架',
+                items: [
+                    { key: 'framework', title: '连接与基础', icon: 'plug', route: { kind: 'framework' } },
+                    { key: 'account', title: '账号设置', icon: 'user', route: { kind: 'account' } },
+                ],
+            },
+        ];
+        const pluginNames = Object.keys(pluginNav);
+        for (const name of pluginNames) {
+            const displayName = pluginMeta?.[name]?.displayName || name;
+            for (const group of pluginNav[name]) {
+                groups.push({
+                    title: pluginNames.length > 1 ? `${displayName}${group.title ? ` · ${group.title}` : ''}` : (group.title || displayName),
+                    items: group.pages.map((page) => {
+                        const pageRoute = { kind: 'plugin', plugin: name, page: page.key };
+                        return { key: routeKey(pageRoute), title: page.title, icon: page.icon, route: pageRoute, page, groupTitle: group.title };
+                    }),
+                });
+            }
+        }
+        groups.push({ title: '工具', items: [{ key: 'files', title: '文件管理', icon: 'folder', route: { kind: 'files' } }] });
+        return groups;
+    }, [pluginNav, pluginMeta]);
 
-          <div className="left-nav-section">配置</div>
-          {navItems.map((item) => (
-            <button
-              key={item.key}
-              className={`left-nav-item ${item.nested ? 'nested' : ''} ${activeSection === item.key ? 'active' : ''}`}
-              onClick={() => handleSectionChange(item.key)}
-            >
-              <span className="left-nav-icon">{item.icon}</span>
-              <span className="left-nav-label">{item.label}</span>
-            </button>
-          ))}
+    const navItems = useMemo(() => navGroups.flatMap((group) => group.items), [navGroups]);
+    const activeKey = routeKey(route);
+    const activeItem = navItems.find((item) => item.key === activeKey);
 
-          <div className="left-nav-bottom">
-            <div className="left-nav-status">
-              <span className={`status-dot ${connected ? 'connected' : 'disconnected'}`}></span>
-              <span className="left-nav-status-text">{connected ? '已连接' : '未连接'}</span>
+    const navigate = useCallback((nextRoute, anchor = null) => {
+        const hash = routeHash(nextRoute);
+        if (window.location.hash !== hash) window.location.hash = hash;
+        setRoute(nextRoute);
+        setNavOpen(false);
+        setPendingAnchor(anchor);
+        if (!anchor) window.scrollTo({ top: 0 });
+    }, []);
+
+    // 搜索跳转后滚动到具体设置项，并短暂高亮
+    useEffect(() => {
+        if (!pendingAnchor) return undefined;
+        let attempts = 0;
+        const timer = window.setInterval(() => {
+            const element = document.getElementById(pendingAnchor);
+            attempts += 1;
+            if (element) {
+                element.scrollIntoView({ block: 'center' });
+                element.classList.add('flash');
+                // 同页其他模块加载完成后布局会变化，再对齐一次
+                window.setTimeout(() => element.scrollIntoView({ behavior: 'smooth', block: 'center' }), 400);
+                window.setTimeout(() => element.classList.remove('flash'), 2000);
+            }
+            if (element || attempts > 30) {
+                window.clearInterval(timer);
+                setPendingAnchor(null);
+            }
+        }, 60);
+        return () => window.clearInterval(timer);
+    }, [pendingAnchor, route]);
+
+    // ===== 搜索索引 =====
+    const searchEntries = useMemo(() => {
+        const entries = [];
+        for (const item of navItems) {
+            entries.push({
+                id: `page:${item.key}`,
+                kind: 'page',
+                title: item.title,
+                subtitle: item.groupTitle || '',
+                icon: item.icon,
+                keywords: item.page?.description || '',
+                route: item.route,
+            });
+            if (item.route.kind === 'plugin') {
+                for (const module of item.page.modules) {
+                    const moduleSchema = pluginSchemas?.[item.route.plugin]?.[module];
+                    for (const field of collectFieldLabels(moduleSchema)) {
+                        if (field.key.includes('.')) continue;
+                        entries.push({
+                            id: `field:${item.key}:${module}:${field.key}`,
+                            kind: 'field',
+                            title: field.label,
+                            subtitle: [item.title, field.group].filter(Boolean).join(' › '),
+                            keywords: field.help,
+                            route: item.route,
+                            anchor: fieldAnchorId(module, field.key),
+                        });
+                    }
+                }
+            }
+        }
+        if (schema?.children) {
+            for (const [sectionKey, sectionMeta] of Object.entries(schema.children)) {
+                const sectionTitle = sectionMeta.label || sectionMeta.description || sectionKey;
+                if (sectionMeta.type === 'object' && sectionMeta.children) {
+                    for (const field of collectFieldLabels(sectionMeta)) {
+                        if (field.key.includes('.')) continue;
+                        entries.push({
+                            id: `framework:${sectionKey}:${field.key}`,
+                            kind: 'field',
+                            title: field.label,
+                            subtitle: `连接与基础 › ${sectionTitle}`,
+                            route: { kind: 'framework' },
+                            anchor: fieldAnchorId(sectionKey, field.key),
+                        });
+                    }
+                } else {
+                    entries.push({
+                        id: `framework:root:${sectionKey}`,
+                        kind: 'field',
+                        title: sectionTitle,
+                        subtitle: '连接与基础',
+                        route: { kind: 'framework' },
+                        anchor: fieldAnchorId('root', sectionKey),
+                    });
+                }
+            }
+        }
+        return entries;
+    }, [navItems, pluginSchemas, schema]);
+
+    // ===== 保存 =====
+    const toResult = useCallback((result, successMessage) => {
+        if (result.success) addToast(successMessage, 'success');
+        else addToast('保存失败，请检查标红的内容', 'error');
+        return result;
+    }, [addToast]);
+
+    const handleFrameworkSave = useCallback(
+        async (next) => toResult(await saveConfig(next), '框架配置已保存'),
+        [saveConfig, toResult]
+    );
+    const handleAccountSave = useCallback(
+        async (next) => toResult(await saveAccountConfig(effectivePluginSelfId, next), '账号配置已保存'),
+        [saveAccountConfig, effectivePluginSelfId, toResult]
+    );
+
+    // ===== 渲染 =====
+    if (!isLoggedIn) return <LoginPage onLogin={login} />;
+    if (loading) {
+        return (
+            <div className="boot-screen">
+                <div className="spinner" />
             </div>
-            <button className="btn btn-secondary btn-sm" onClick={logout}>退出</button>
-          </div>
-        </aside>
+        );
+    }
 
-        <main className="main-content">
-          {showAccountTopbar && (
-            <div className="account-topbar">
-              {botAccounts.map((account) => (
-                <button
-                  key={account.self_id}
-                  className={`account-tab ${Number(account.self_id) === Number(effectivePluginSelfId) ? 'active' : ''}`}
-                  onClick={() => setSelectedPluginSelfId(account.self_id)}
-                >
-                  <img
-                    className="account-tab-avatar"
-                    src={`https://q1.qlogo.cn/g?b=qq&nk=${account.uin || account.self_id}&s=100`}
-                    alt=""
-                    onError={(event) => {
-                      event.target.src = 'https://q1.qlogo.cn/g?b=qq&nk=10000&s=100';
-                    }}
-                  />
-                  <span className="account-tab-name">{account.nickname || 'Bot'}</span>
-                  <span className="account-tab-id">{account.self_id}</span>
-                </button>
-              ))}
-            </div>
-          )}
+    const scopeKey = effectivePluginSelfId == null ? DEFAULT_SCOPE_KEY : String(effectivePluginSelfId);
+    const accountSwitcher = (
+        <AccountSwitcher accounts={botAccounts} selectedSelfId={effectivePluginSelfId} onSelect={setSelectedPluginSelfId} />
+    );
 
-          <div className="section-heading">
-            <span className="heading-accent">{sectionLabel}</span>
-          </div>
-
-          {categoryTabs.length > 1 && (
-            <div className="category-tabs">
-              {categoryTabs.map((tab, idx) => (
-                <button
-                  key={tab.key}
-                  className={`category-tab ${idx === safeIdx ? 'active' : ''}`}
-                  onClick={() => setActiveCategoryIdx(idx)}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {activeSection === 'framework' && errors && errors.length > 0 && (
-            <div className="config-section" style={{ borderColor: 'rgba(229, 57, 53, 0.2)' }}>
-              <div className="section-title" style={{ color: 'var(--error)' }}>
-                配置校验警告
-              </div>
-              <div className="section-desc">
-                {errors.map((item, index) => (
-                  <div key={index} style={{ color: 'var(--warning)', marginBottom: 3 }}>
-                    {item.path?.join('.') || '?'}: {item.message}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="content-area">
-            {activeSection === 'monitor' && (
-              <SystemMonitor
-                staticInfo={staticInfo}
-                dynamicInfo={dynamicInfo}
-                botInfo={botInfo}
-                loading={systemLoading}
-              />
-            )}
-
-            {activeSection === 'framework' && currentTab && config && schema && (
-              <ConfigForm
-                config={config}
-                schema={schema}
-                onSave={handleSave}
-                saving={saving}
-                activeTab={currentTab}
-              />
-            )}
-
-            {activeSection === 'account' && (
-              currentAccountConfig && accountSchema && accountTab ? (
-                <ConfigForm
-                  config={currentAccountConfig}
-                  schema={accountSchema}
-                  onSave={handleAccountSave}
-                  saving={saving}
-                  activeTab={accountTab}
-                  scopeSelfId={effectivePluginSelfId}
-                />
-              ) : (
-                <div className="loading-container" style={{ minHeight: 120 }}>
-                  <div className="spinner"></div>
+    const renderPage = () => {
+        if (route.kind === 'monitor') {
+            return (
+                <div className="page">
+                    <PageHeader title="系统概览" description="机器人账号、主机资源和运行状态。" />
+                    <SystemMonitor staticInfo={staticInfo} dynamicInfo={dynamicInfo} botInfo={botInfo} loading={systemLoading} />
                 </div>
-              )
-            )}
+            );
+        }
 
-            {isFileManagerSection && (
-              <FileManager
-                token={token}
-                onUnauthorized={logout}
-                onToast={addToast}
-              />
-            )}
+        if (route.kind === 'files') {
+            return (
+                <div className="page page--wide">
+                    <PageHeader title="文件管理" description="浏览和编辑服务器上的文件。" />
+                    <FileManager token={token} onUnauthorized={logout} onToast={addToast} />
+                </div>
+            );
+        }
 
-            {isPluginSection && currentTab && (
-              <PluginConfigPanel
-                pluginName={activeSection}
-                modules={currentTab.modules || []}
-                schemas={pluginSchemas[activeSection] || {}}
-                configs={currentPluginConfigs}
-                saving={saving}
-                onSave={handlePluginSave}
-                scopeSelfId={effectivePluginSelfId}
-              />
+        if (route.kind === 'framework') {
+            const children = schema?.children || {};
+            const rootChildren = Object.fromEntries(
+                Object.entries(children).filter(([, meta]) => !(meta.type === 'object' && meta.children))
+            );
+            const sections = [
+                ...(Object.keys(rootChildren).length > 0
+                    ? [{ key: null, title: '基础', meta: { children: rootChildren } }]
+                    : []),
+                ...Object.entries(children)
+                    .filter(([, meta]) => meta.type === 'object' && meta.children)
+                    .map(([key, meta]) => ({ key, title: meta.label || meta.description || key, help: meta.help, meta })),
+            ];
+            return (
+                <ObjectConfigPage
+                    eyebrow="框架"
+                    title="连接与基础"
+                    description="QQ 客户端连接、Redis、配置面板和权限名单，保存后立即生效。"
+                    schema={schema}
+                    config={config}
+                    sections={sections}
+                    onSave={handleFrameworkSave}
+                    warnings={errors?.length > 0 ? (
+                        <div className="callout callout-warn">
+                            <Icon name="alert" size={16} />
+                            <div>
+                                <div className="callout-title">当前配置文件有问题</div>
+                                <ul>{errors.map((item, index) => <li key={index}>{item.path?.join('.') || '?'}：{item.message}</li>)}</ul>
+                            </div>
+                        </div>
+                    ) : null}
+                />
+            );
+        }
+
+        if (route.kind === 'account') {
+            return (
+                <ObjectConfigPage
+                    key={`account:${scopeKey}`}
+                    eyebrow="框架"
+                    title="账号设置"
+                    description={botAccounts.length > 1 ? '每个机器人账号可以有自己的设置，右上角切换账号。' : '当前机器人账号的设置。'}
+                    schema={accountSchema}
+                    config={accountConfigs[scopeKey] ?? null}
+                    sections={accountSchema?.children ? [{ key: null, title: '', meta: accountSchema }] : []}
+                    onSave={handleAccountSave}
+                    scopeSelfId={effectivePluginSelfId}
+                    headerActions={accountSwitcher}
+                />
+            );
+        }
+
+        if (route.kind === 'plugin' && activeItem?.page) {
+            const pluginName = route.plugin;
+            return (
+                <PluginConfigPage
+                    key={`${activeKey}:${scopeKey}`}
+                    page={activeItem.page}
+                    eyebrow={activeItem.groupTitle || pluginMeta?.[pluginName]?.displayName || pluginName}
+                    schemas={pluginSchemas[pluginName] || {}}
+                    configs={pluginConfigs[pluginName]?.[scopeKey] || {}}
+                    scopeSelfId={effectivePluginSelfId}
+                    headerActions={accountSwitcher}
+                    onSaveModule={async (module, data) => {
+                        const result = await savePluginConfig(pluginName, module, data, effectivePluginSelfId);
+                        if (result.success) addToast(`已保存`, 'success');
+                        else addToast('保存失败，请检查标红的内容', 'error');
+                        return result;
+                    }}
+                />
+            );
+        }
+
+        return (
+            <div className="page">
+                <PageHeader title="页面不存在" description="这个页面可能已经改名或移除了。" />
+                <button type="button" className="btn btn-secondary" onClick={() => navigate({ kind: 'monitor' })}>回到概览</button>
+            </div>
+        );
+    };
+
+    return (
+        <div className="app">
+            <div className="toast-stack" aria-live="polite">
+                {toasts.map((toast) => (
+                    <div key={toast.id} className={`toast toast-${toast.type}`}>
+                        <Icon name={toast.type === 'success' ? 'check' : toast.type === 'error' ? 'alert' : 'info'} size={16} />
+                        {toast.message}
+                    </div>
+                ))}
+            </div>
+
+            <Sidebar
+                groups={navGroups}
+                activeKey={activeKey}
+                onNavigate={(item) => navigate(item.route)}
+                onOpenSearch={() => setSearchOpen(true)}
+                connected={connected}
+                theme={theme}
+                onToggleTheme={toggleTheme}
+                onLogout={logout}
+                open={navOpen}
+                onClose={() => setNavOpen(false)}
+            />
+
+            <main className="main">
+                <div className="mobile-bar">
+                    <button type="button" className="icon-btn" onClick={() => setNavOpen(true)} aria-label="打开导航">
+                        <Icon name="menu" size={20} />
+                    </button>
+                    <span className="mobile-bar-title">{activeItem?.title || 'Sakura'}</span>
+                    <button type="button" className="icon-btn" onClick={() => setSearchOpen(true)} aria-label="搜索设置">
+                        <Icon name="search" size={19} />
+                    </button>
+                </div>
+                {renderPage()}
+            </main>
+
+            {searchOpen && (
+                <SearchPalette
+                    entries={searchEntries}
+                    onClose={() => setSearchOpen(false)}
+                    onSelect={(entry) => {
+                        setSearchOpen(false);
+                        navigate(entry.route, entry.anchor || null);
+                    }}
+                />
             )}
-          </div>
-        </main>
-      </div>
-    </div>
-  );
+        </div>
+    );
 }
 
 export default App;

@@ -10,6 +10,9 @@ import * as fishingRules from "../lib/fishing/rules.js";
 import * as economyRules from "../lib/economy/rules.js";
 import * as inventoryRules from "../lib/economy/inventoryRules.js";
 
+// vm 模块链接后若没有强引用，可能在 evaluate 前被 GC 回收，导致 V8 访问已释放内存（0xC0000005 崩溃）。
+const retained = [];
+
 const configuration = Object.fromEntries(["shop", "special_items"].map(name => [
   name,
   YAML.load(fs.readFileSync(new URL(`../resources/economy/${name}.yaml`, import.meta.url), "utf8")),
@@ -53,6 +56,7 @@ async function fixture(t) {
   async function load(relative, imports) {
     const source = fs.readFileSync(new URL(`../${relative}`, import.meta.url), "utf8");
     const module = new vm.SourceTextModule(source, { context });
+    retained.push(module, context);
     await module.link(specifier => {
       let exports = imports[specifier];
       if (!exports) {
@@ -63,9 +67,11 @@ async function fixture(t) {
           ? declaration.replace(/[{}\s]/gu, "").split(",").filter(Boolean) : ["default"];
         exports = Object.fromEntries(names.map(name => [name, class {}]));
       }
-      return new vm.SyntheticModule(Object.keys(exports), function () {
+      const dependency = new vm.SyntheticModule(Object.keys(exports), function () {
         for (const [name, value] of Object.entries(exports)) this.setExport(name, value);
       }, { context });
+      retained.push(dependency);
+      return dependency;
     });
     await module.evaluate();
     return module.namespace.default;
