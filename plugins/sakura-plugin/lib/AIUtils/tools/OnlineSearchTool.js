@@ -61,16 +61,52 @@ export function buildSearchQuery(query, context = '') {
   return lines.join('\n')
 }
 
-export function formatSearchResult(result, now = new Date()) {
-  const text = String(result?.text || '').trim()
-  const sources = Array.isArray(result?.citations) ? result.citations.slice(0, MAX_LISTED_SOURCES) : []
-  const lines = [`检索时间：${currentTimeText(now)}（北京时间）`, text || '（搜索模型没有返回内容）']
-  if (sources.length > 0) {
-    lines.push('', '来源：')
-    sources.forEach((source, index) => {
-      lines.push(`${index + 1}. ${source.title ? `${source.title} — ` : ''}${source.url}`)
-    })
+// Gemini 的来源是这个域名下的跳转链接：很长、会过期、看不出原网站，不给用户。
+const GEMINI_REDIRECT_HOST = 'vertexaisearch.cloud.google.com'
+
+function parseSourceUrl(url) {
+  try {
+    return new URL(url)
+  } catch {
+    return null
   }
+}
+
+/**
+ * 整理来源：名称优先用标题，没有标题用域名；按名称去重。
+ * 跳转链接只保留名称，不保留 URL。
+ */
+export function summarizeSources(citations = []) {
+  const sources = []
+  const seen = new Set()
+  for (const citation of Array.isArray(citations) ? citations : []) {
+    const parsed = parseSourceUrl(citation?.url)
+    const isRedirect = parsed?.hostname === GEMINI_REDIRECT_HOST
+    const host = parsed && !isRedirect ? parsed.hostname.replace(/^www\./, '') : ''
+    const name = String(citation?.title || '').trim() || host
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    sources.push({ name, url: parsed && !isRedirect ? citation.url : '' })
+    if (sources.length >= MAX_LISTED_SOURCES) break
+  }
+  return sources
+}
+
+export function formatSearchResult(result, { includeLinks = false, now = new Date() } = {}) {
+  const text = String(result?.text || '').trim()
+  const sources = summarizeSources(result?.citations)
+  const lines = [`检索时间：${currentTimeText(now)}（北京时间）`, text || '（搜索模型没有返回内容）']
+  if (sources.length === 0) return lines.join('\n')
+
+  if (!includeLinks) {
+    lines.push('', `来源：${sources.map((source) => source.name).join('、')}`)
+    return lines.join('\n')
+  }
+
+  lines.push('', '来源：')
+  sources.forEach((source, index) => {
+    lines.push(`${index + 1}. ${source.name}${source.url ? ` — ${source.url}` : '（无可用链接）'}`)
+  })
   return lines.join('\n')
 }
 
@@ -88,6 +124,10 @@ export class OnlineSearchTool extends AbstractTool {
       context: {
         type: 'string',
         description: '可选，有助于理解问题的背景，例如群里正在讨论的话题，用来区分同名事物',
+      },
+      includeLinks: {
+        type: 'boolean',
+        description: '是否返回来源链接。默认只返回来源名称；只有用户明确要链接或出处时才设为 true',
       },
     },
     required: ['query'],
@@ -121,6 +161,6 @@ export class OnlineSearchTool extends AbstractTool {
     if (typeof result === 'string') {
       return `联网搜索失败：${result}`
     }
-    return formatSearchResult(result)
+    return formatSearchResult(result, { includeLinks: opts?.includeLinks === true })
   }
 }

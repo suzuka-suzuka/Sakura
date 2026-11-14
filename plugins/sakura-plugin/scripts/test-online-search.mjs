@@ -159,7 +159,30 @@ test("工具把问题交给开启了自带搜索的模型，不带上下文、�
 
   assert.match(output, /^检索时间：/);
   assert.match(output, /3\.2 版本/);
-  assert.match(output, /来源：\n1\. 官方公告 — https:\/\/news\.example\/a\n2\. https:\/\/x\.com\/dev\/status\/1/);
+  // 默认只列来源名称：有标题用标题，没有标题用域名，不带 URL。
+  assert.match(output, /来源：官方公告、x\.com$/);
+  assert.equal(output.includes("https://"), false);
+
+  const withLinks = await new OnlineSearchTool().func({ query: "出处", includeLinks: true }, event);
+  assert.match(withLinks, /来源：\n1\. 官方公告 — https:\/\/news\.example\/a\n2\. x\.com — https:\/\/x\.com\/dev\/status\/1$/);
+});
+
+test("Gemini 的跳转链接只保留名称，要链接时也不给出", () => {
+  const redirect = (id) => `https://vertexaisearch.cloud.google.com/grounding-api-redirect/${id}`;
+  const result = {
+    text: "结论",
+    citations: [
+      { url: redirect("a"), title: "ign.com" },
+      { url: redirect("b"), title: "ign.com" },
+      { url: redirect("c"), title: "" },
+      { url: "https://www.example.com/post", title: "" },
+    ],
+  };
+
+  assert.match(formatSearchResult(result), /来源：ign\.com、example\.com$/);
+  const linked = formatSearchResult(result, { includeLinks: true });
+  assert.match(linked, /1\. ign\.com（无可用链接）\n2\. example\.com — https:\/\/www\.example\.com\/post$/);
+  assert.equal(linked.includes("vertexaisearch"), false);
 });
 
 test("工具的失败与边界情况", async () => {
