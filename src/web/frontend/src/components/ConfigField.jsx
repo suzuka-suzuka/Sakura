@@ -5,7 +5,6 @@ import Icon from './Icon';
 import { readAuthToken } from '../utils/authStorage';
 import { useDynamicOptions } from '../hooks/useDynamicOptions';
 import { moveItem, useDragReorder } from '../hooks/useDragReorder';
-import { TracksContext, packRows, trackColumn, useMeasuredTracks } from '../utils/tracks';
 import {
     fieldAnchorId,
     formatSummaryValue,
@@ -81,25 +80,27 @@ export function HelpTip({ text }) {
 }
 
 /**
- * 字段外壳：标签在上、控件在下，说明收进标签旁的问号。
- * layout: inline / stack 都是上下排列（stack 在网格里占满整行）| switch（开关小块，标签左、开关右）
+ * 字段外壳：设置列表里的一行。说明收进标签旁的问号。
+ * layout:
+ *   switch：名称在左、开关在右
+ *   inline：名称在左、控件在右，控件按 size 定宽（sm 数字 / md 文本和下拉 / auto 按内容）
+ *   stack：名称在上、控件占满整行（长文本、各种列表）
  */
 // 为 true 时字段只渲染控件（标签已经作为卡片标题显示）
 const BareFieldContext = createContext(false);
 
-export function FieldShell({ label, help, extra = null, layout = 'inline', children }) {
+export function FieldShell({ label, help, extra = null, layout = 'inline', size = 'md', children }) {
     const bare = useContext(BareFieldContext);
     if (bare) return <div className="field-bare">{children}</div>;
+    const sized = layout === 'inline' ? ` setting-row--${size}` : '';
     return (
-        <div className={`field-row field-row--${layout}`}>
-            <div className="field-meta">
-                <div className="field-label">
-                    <span className="field-label-text">{label}</span>
-                    <HelpTip text={help} />
-                    {extra}
-                </div>
+        <div className={`setting-row setting-row--${layout}${sized}`}>
+            <div className="setting-label">
+                <span className="setting-label-text">{label}</span>
+                <HelpTip text={help} />
+                {extra}
             </div>
-            <div className="field-control">{children}</div>
+            <div className="setting-control">{children}</div>
         </div>
     );
 }
@@ -111,40 +112,7 @@ function isSegmented(meta) {
         && meta.options.every((opt) => (meta.optionLabels?.[opt] || opt).length <= 8);
 }
 
-/** 字段占几轨：full 占整行，wide 占两轨，short 占一轨。 */
-function fieldSize(meta) {
-    if (meta.type === 'object' && meta.children) return 'full';
-    if (meta.type === 'array') {
-        // 对象列表是一格格的卡片，需要整行；标签、模型顺序这类列表占两轨就够
-        if (meta.items?.type === 'object' || meta.uiType === 'vertexCredentialList') return 'full';
-        return 'wide';
-    }
-    if (['textarea', 'cron', 'commandCost'].includes(meta.uiType)) return 'full';
-    if (meta.type === 'boolean' || meta.type === 'number') return 'short';
-    if (meta.type === 'enum') {
-        if (!isSegmented(meta)) return 'short';
-        // 分段选择的文字加起来太长时，一轨放不下
-        const length = meta.options.reduce((sum, opt) => sum + String(meta.optionLabels?.[opt] || opt).length, 0);
-        return length > 10 ? 'wide' : 'short';
-    }
-    return 'wide';
-}
-
 const MASTER_SWITCH_KEYS = ['enable', 'enabled'];
-
-/** 按竖轨摆放一组字段：每行占满，框的左右边缘都落在轨线上。 */
-function TrackGrid({ fields, renderField, className = '' }) {
-    const tracks = useContext(TracksContext) || 2;
-    const cells = packRows(fields.map(([key, meta]) => ({ key, meta, size: fieldSize(meta) })), tracks);
-    return (
-        <div className={`track-grid tracks-${tracks} ${className}`}>
-            {cells.map((cell) => renderField(
-                [cell.key, cell.meta],
-                { gridRow: cell.row + 1, gridColumn: trackColumn(cell.start, cell.span) }
-            ))}
-        </div>
-    );
-}
 
 /**
  * 渲染一组字段：按 group 分卡片、处理 showIf / 协议过滤、把高级选项折叠起来。
@@ -197,11 +165,11 @@ export function FieldGroup({ title, help = '', cardId, fields, value, onFieldCha
 
     if (visible.length === 0) return null;
 
-    const renderField = ([key, meta], style) => {
+    const renderField = ([key, meta]) => {
         if (meta.type === 'object' && meta.children) {
             return (
-                <div key={key} className="nested-card" style={style} id={anchorScope ? fieldAnchorId(anchorScope, key) : undefined}>
-                    <div className="nested-card-title">
+                <div key={key} className="setting-subgroup field-anchor" id={anchorScope ? fieldAnchorId(anchorScope, key) : undefined}>
+                    <div className="setting-subgroup-title">
                         {meta.label || meta.description || key}
                         <HelpTip text={meta.help} />
                     </div>
@@ -218,12 +186,7 @@ export function FieldGroup({ title, help = '', cardId, fields, value, onFieldCha
             );
         }
         return (
-            <div
-                key={key}
-                className={`field-anchor ${meta.type === 'boolean' ? 'field-anchor--switch' : ''}`}
-                style={style}
-                id={anchorScope ? fieldAnchorId(anchorScope, key) : undefined}
-            >
+            <div key={key} className="field-anchor" id={anchorScope ? fieldAnchorId(anchorScope, key) : undefined}>
                 <ConfigField
                     name={key}
                     meta={meta}
@@ -238,7 +201,7 @@ export function FieldGroup({ title, help = '', cardId, fields, value, onFieldCha
 
     const body = (
         <>
-            {basic.length > 0 && <TrackGrid fields={basic} renderField={renderField} />}
+            {basic.length > 0 && <div className="setting-list">{basic.map(renderField)}</div>}
             {advanced.length > 0 && (
                 <>
                     <button
@@ -249,7 +212,7 @@ export function FieldGroup({ title, help = '', cardId, fields, value, onFieldCha
                         <Icon name="chevronDown" size={15} />
                         {showAdvanced ? '收起高级选项' : `高级选项（${advanced.length}）`}
                     </button>
-                    {showAdvanced && <TrackGrid fields={advanced} renderField={renderField} className="advanced-fields" />}
+                    {showAdvanced && <div className="setting-list advanced-fields">{advanced.map(renderField)}</div>}
                 </>
             )}
         </>
@@ -347,7 +310,7 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
     if (type === 'enum' && options) {
         if (isSegmented(meta)) {
             return (
-                <FieldShell label={displayName} help={help}>
+                <FieldShell label={displayName} help={help} size="auto">
                     <div className="segmented" role="radiogroup" aria-label={displayName}>
                         {options.map((opt) => (
                             <button
@@ -464,6 +427,7 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
         return (
             <FieldShell
                 label={displayName}
+                size="sm"
                 help={meta.min != null && meta.max != null
                     ? [help, `取值范围 ${meta.min} ~ ${meta.max}`].filter(Boolean).join('\n')
                     : help}
@@ -811,7 +775,7 @@ function ArrayField({ displayName, help, value, onChange, itemType, placeholder 
     };
 
     return (
-        <FieldShell label={displayName} help={help} extra={<><span className="field-count">{items.length}</span></>}>
+        <FieldShell label={displayName} help={help} layout="stack" extra={<><span className="field-count">{items.length}</span></>}>
             <div className="array-field" onClick={() => inputRef.current?.focus()}>
                 {items.map((item, index) => (
                     <span key={index} className="array-tag">
@@ -1177,13 +1141,10 @@ function ObjectArrayField({
         setEditing(null);
     };
 
-    // 格子和字段共用同一组竖轨，一轨一个
-    const tracks = useContext(TracksContext) || 2;
-    const slot = (index) => ({ gridColumn: trackColumn(index % tracks) });
 
     return (
         <FieldShell label={displayName} help={help} layout="stack" extra={<span className="field-count">{items.length}</span>}>
-            <div ref={listRef} className={`tile-grid tracks-${tracks} ${dragging ? 'is-sorting' : ''}`}>
+            <div ref={listRef} className={`item-list ${dragging ? 'is-sorting' : ''}`}>
                 {items.map((item, index) => {
                     const summaries = summaryFields
                         .map((field) => formatSummaryValue(itemMeta.children?.[field], item?.[field]))
@@ -1191,67 +1152,66 @@ function ObjectArrayField({
                     const badges = renderBadges?.(item);
                     const disabled = !isOn(item);
                     const confirming = confirmIndex === index;
+                    const name = itemTitle(item, index, meta.nameField);
                     return (
                         <div
                             key={index}
-                            className={`tile ${disabled ? 'is-disabled' : ''} ${confirming ? 'is-confirming' : ''}`}
-                            style={slot(index)}
+                            className={`item-row ${disabled ? 'is-disabled' : ''} ${confirming ? 'is-confirming' : ''}`}
                             onClick={() => { if (!confirming) openEditor(index); }}
                             {...rowProps(index)}
                         >
-                            <button type="button" className="tile-title" title={itemTitle(item, index, meta.nameField)}>
-                                {itemTitle(item, index, meta.nameField)}
-                            </button>
-                            <div className="tile-tools" onClick={(event) => event.stopPropagation()}>
-                                {!fixed && items.length > 1 && (
-                                    <button type="button" className="drag-handle" {...handleProps(index)}>
-                                        <Icon name="grip" size={15} />
-                                    </button>
-                                )}
-                                {!fixed && !confirming && (
-                                    <button type="button" className="icon-btn icon-btn-danger tile-delete" title="删除" aria-label="删除" onClick={() => setConfirmIndex(index)}>
-                                        <Icon name="trash" size={14} />
-                                    </button>
-                                )}
-                                {toggleKey && (
-                                    <button
-                                        type="button"
-                                        role="switch"
-                                        aria-checked={!disabled}
-                                        aria-label={disabled ? '已停用，点击启用' : '已启用，点击停用'}
-                                        title={disabled ? '已停用' : '已启用'}
-                                        className={`toggle toggle-sm ${disabled ? '' : 'active'}`}
-                                        onClick={() => setOn(index, disabled)}
-                                    >
-                                        <span className="toggle-knob" />
-                                    </button>
-                                )}
-                            </div>
+                            {!fixed && items.length > 1 && (
+                                <button type="button" className="drag-handle" {...handleProps(index)}>
+                                    <Icon name="grip" size={15} />
+                                </button>
+                            )}
                             {confirming ? (
-                                <div className="tile-confirm" onClick={(event) => event.stopPropagation()}>
-                                    <span>删除这一项？</span>
+                                <div className="item-row-confirm" onClick={(event) => event.stopPropagation()}>
+                                    <span>删除“{name}”？</span>
                                     <button type="button" className="btn btn-danger btn-xs" onClick={() => remove(index)}>删除</button>
                                     <button type="button" className="btn btn-ghost btn-xs" onClick={() => setConfirmIndex(-1)}>取消</button>
                                 </div>
-                            ) : (summaries.length > 0 || badges) && (
-                                <div className="tile-meta">
-                                    {summaries.map((text, i) => <span key={i} className="chip">{text}</span>)}
-                                    {badges}
-                                </div>
+                            ) : (
+                                <>
+                                    <button type="button" className="item-row-main" title={name}>
+                                        <span className="item-row-title">{name}</span>
+                                        {summaries.length > 0 && <span className="item-row-sub">{summaries.join(' · ')}</span>}
+                                    </button>
+                                    {badges && <span className="item-row-badges">{badges}</span>}
+                                    <div className="item-row-tools" onClick={(event) => event.stopPropagation()}>
+                                        {!fixed && (
+                                            <button type="button" className="icon-btn icon-btn-danger item-row-delete" title="删除" aria-label="删除" onClick={() => setConfirmIndex(index)}>
+                                                <Icon name="trash" size={14} />
+                                            </button>
+                                        )}
+                                        {toggleKey && (
+                                            <button
+                                                type="button"
+                                                role="switch"
+                                                aria-checked={!disabled}
+                                                aria-label={disabled ? '已停用，点击启用' : '已启用，点击停用'}
+                                                title={disabled ? '已停用' : '已启用'}
+                                                className={`toggle toggle-sm ${disabled ? '' : 'active'}`}
+                                                onClick={() => setOn(index, disabled)}
+                                            >
+                                                <span className="toggle-knob" />
+                                            </button>
+                                        )}
+                                    </div>
+                                    <Icon name="chevronRight" size={16} className="item-row-chevron" />
+                                </>
                             )}
                         </div>
                     );
                 })}
+                {items.length === 0 && <div className="item-list-empty">{emptyText || '还没有添加任何项'}</div>}
                 {!fixed && (
-                    <button type="button" className="tile tile-add" style={slot(items.length)} onClick={() => openEditor(-1)}>
-                        <Icon name="plus" size={16} />
+                    <button type="button" className="item-row item-row-add" onClick={() => openEditor(-1)}>
+                        <Icon name="plus" size={15} />
                         {addLabel}
                     </button>
                 )}
             </div>
-            {items.length === 0 && (
-                <div className="tile-empty">{emptyText || '还没有添加任何项'}</div>
-            )}
 
             {editing && (
                 <ItemDrawer
@@ -1276,8 +1236,6 @@ function ItemDrawer({ title, itemMeta, initialDraft, getContext, submitLabel, on
     const [draft, setDraft] = useState(initialDraft);
     const context = getContext?.(draft) || {};
     const formRef = useRef(null);
-    const bodyRef = useRef(null);
-    const tracks = useMeasuredTracks(bodyRef);
 
     useEffect(() => {
         const handleKeyDown = (event) => {
@@ -1308,19 +1266,17 @@ function ItemDrawer({ title, itemMeta, initialDraft, getContext, submitLabel, on
                         <Icon name="x" size={18} />
                     </button>
                 </header>
-                <div ref={bodyRef} className="drawer-body">
-                    <TracksContext.Provider value={tracks}>
-                        <BareFieldContext.Provider value={false}>
-                            <FieldList
-                                children={itemMeta.children}
-                                value={draft}
-                                onFieldChange={(key, next) => setDraft((prev) => ({ ...prev, [key]: next }))}
-                                scopeSelfId={scopeSelfId}
-                                context={context}
-                                variant="drawer"
-                            />
-                        </BareFieldContext.Provider>
-                    </TracksContext.Provider>
+                <div className="drawer-body">
+                    <BareFieldContext.Provider value={false}>
+                        <FieldList
+                            children={itemMeta.children}
+                            value={draft}
+                            onFieldChange={(key, next) => setDraft((prev) => ({ ...prev, [key]: next }))}
+                            scopeSelfId={scopeSelfId}
+                            context={context}
+                            variant="drawer"
+                        />
+                    </BareFieldContext.Provider>
                 </div>
                 <footer className="drawer-footer">
                     {onDuplicate && (
@@ -2130,7 +2086,7 @@ function DynamicSelectArrayField({ displayName, help, value, onChange, uiType, s
     };
 
     return (
-        <FieldShell label={displayName} help={help} extra={<><span className="field-count">{items.length}</span></>}>
+        <FieldShell label={displayName} help={help} layout="stack" extra={<><span className="field-count">{items.length}</span></>}>
             <div className="array-field group-select-field">
                 {items.map((item, index) => (
                     <span key={index} className="array-tag">

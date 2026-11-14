@@ -48,10 +48,8 @@
   --sidebar-width: 248px;
   --page-width: 1320px;
   --control-h: 38px;
-  /* 竖轨：字段之间的间隙、卡片内边距；整宽卡片中间那条间隙要跨过两张半宽卡片之间的空当 */
-  --track-gap: 16px;
   --card-pad: 20px;
-  --track-mid: calc(var(--track-gap) + 2 * var(--card-pad) + 2px);
+  --settings-width: 760px;
 
   /* 旧组件（文件管理、选择弹窗）使用的变量名 */
   --bg-primary: var(--bg);
@@ -480,6 +478,11 @@ kbd {
   max-width: calc(var(--page-width) + 64px);
 }
 
+/* 设置页：限宽单栏，名称和控件离得近，读起来是一张清单 */
+.page--settings {
+  max-width: calc(var(--settings-width) + 64px);
+}
+
 .page-header {
   display: flex;
   align-items: center;
@@ -522,38 +525,15 @@ kbd {
   gap: 8px;
 }
 
-/* 卡片看板：宽屏两栏瀑布流，宽卡片独占一行；每栏最后一张卡片拉到底，两栏底部对齐 */
+/* 设置页的卡片栏：从上到下排列 */
 .board {
   display: flex;
   flex-direction: column;
-  gap: var(--track-gap);
-}
-
-.board-masonry {
-  display: grid;
-  grid-template-columns: repeat(var(--board-columns, 2), minmax(0, 1fr));
-  gap: var(--track-gap);
-}
-
-.board-lane {
-  display: flex;
-  flex-direction: column;
-  gap: var(--track-gap);
-  min-width: 0;
+  gap: 16px;
 }
 
 .board-item {
   min-width: 0;
-}
-
-.board-lane > .board-item:last-child {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.board-lane > .board-item:last-child > .card {
-  flex: 1;
 }
 
 .board-item:empty {
@@ -611,12 +591,29 @@ kbd {
   flex-shrink: 0;
 }
 
+/* 设置行自带上下间距，卡片只留很薄的内边距 */
 .card-body {
-  padding: 16px var(--card-pad) var(--card-pad);
+  padding: 4px var(--card-pad) 8px;
 }
 
 .card-body--bare {
-  padding-top: 14px;
+  padding: 12px var(--card-pad) var(--card-pad);
+}
+
+/* 卡片里只有一个对象列表时，列表铺满卡片，行的文字和卡片标题对齐 */
+.card-body--bare:has(> .field-anchor > .field-bare > .item-list) {
+  padding: 12px 0 0;
+}
+
+.card-body--bare > .field-anchor > .field-bare > .item-list {
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  box-shadow: none;
+  border-top: 1px solid var(--border);
+  background: transparent;
+}
+
+.card-body--bare > .field-anchor > .field-bare > .item-list > :last-child {
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 
 .card-loading {
@@ -645,104 +642,115 @@ kbd {
   }
 }
 
-/* 卡片内的子对象：小标题加分隔线，不再套一层方框，里面的字段仍落在卡片的竖轨上 */
-.nested-card {
-  min-width: 0;
-  padding-top: 14px;
+/* ========== 设置行 ========== */
+
+/* 一组设置：行与行之间一条细线 */
+.setting-list {
+  container-type: inline-size;
+}
+
+.setting-list > * + * {
   border-top: 1px solid var(--border);
-  scroll-margin-top: 80px;
-}
-
-.track-grid > .nested-card:first-child {
-  padding-top: 0;
-  border-top: none;
-}
-
-.nested-card-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  font-size: 13px;
-  font-weight: 650;
-}
-
-/* ========== 字段 ========== */
-
-/*
- * 竖轨网格：字段和列表项都摆在同一组竖轨上，位置由 packRows 算好后写在行内样式里。
- * 轨与轨之间用单独的间隙列隔开，这样整宽卡片（4 轨）中间那条间隙可以比别的宽，
- * 正好跨过两张半宽卡片之间的空当，上下卡片里的框就在同一组竖线上。
- */
-.track-grid,
-.tile-grid {
-  display: grid;
-  grid-template-columns: var(--track-template);
-}
-
-.track-grid {
-  row-gap: 16px;
-  align-items: start;
-}
-
-.tracks-1 {
-  --track-template: minmax(0, 1fr);
-}
-
-.tracks-2 {
-  --track-template: minmax(0, 1fr) var(--track-gap) minmax(0, 1fr);
-}
-
-.tracks-4 {
-  --track-template: minmax(0, 1fr) var(--track-gap) minmax(0, 1fr) var(--track-mid) minmax(0, 1fr) var(--track-gap) minmax(0, 1fr);
-}
-
-/* 开关格子没有上方的标签，和同一行输入框的框体底边对齐 */
-.field-anchor--switch {
-  align-self: end;
 }
 
 .field-anchor {
   min-width: 0;
-  border-radius: var(--radius-sm);
   scroll-margin-top: 80px;
   transition: background 0.4s, box-shadow 0.4s;
 }
 
-.field-anchor.flash,
-.nested-card.flash {
+.field-anchor.flash {
   background: var(--accent-soft);
   box-shadow: 0 0 0 6px var(--accent-soft);
 }
 
-.field-row {
+/* 一行设置：名称在左、控件在右，所有控件的右边缘对齐 */
+.setting-row {
   display: flex;
-  flex-direction: column;
-  gap: 7px;
-  min-width: 0;
-}
-
-.field-row--switch {
-  flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  min-height: var(--control-h);
-  padding: 6px 10px 6px 13px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  box-shadow: inset 0 0 0 1px var(--border);
-  transition: box-shadow 0.15s;
+  gap: 8px 24px;
+  min-height: 56px;
+  padding: 9px 0;
 }
 
-.field-row--switch:hover {
-  box-shadow: inset 0 0 0 1px var(--border-strong);
+.setting-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.4;
 }
 
-.field-meta {
+.setting-label-text {
   min-width: 0;
 }
 
+.setting-control {
+  min-width: 0;
+}
+
+/* 控件按内容定宽：开关、数字、文本和下拉各一种宽度 */
+.setting-row--switch .setting-control,
+.setting-row--auto .setting-control {
+  flex: 0 1 auto;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.setting-row--sm .setting-control {
+  flex: 0 0 128px;
+}
+
+.setting-row--md .setting-control {
+  flex: 0 1 320px;
+}
+
+/* 长文本、各种列表：名称在上，控件占满整行 */
+.setting-row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 14px 0 16px;
+}
+
+/* 窄的时候（手机、抽屉里）文本类控件换到名称下面 */
+@container (max-width: 460px) {
+  .setting-row--md,
+  .setting-row--auto {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 12px 0 14px;
+  }
+
+  .setting-row--md .setting-control,
+  .setting-row--auto .setting-control {
+    flex: none;
+    justify-content: flex-start;
+  }
+}
+
+/* 子对象：一个小标题，后面接它自己的几行设置 */
+.setting-subgroup {
+  padding-top: 16px;
+}
+
+.setting-subgroup-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--text-3);
+}
+
+/* 文件管理等地方仍在用的普通表单标签 */
 .field-label {
   display: flex;
   align-items: center;
@@ -752,16 +760,6 @@ kbd {
   font-weight: 600;
   color: var(--text-2);
   line-height: 1.35;
-}
-
-.field-row--switch .field-label {
-  font-size: 13.5px;
-  font-weight: 500;
-  color: var(--text);
-}
-
-.field-label-text {
-  min-width: 0;
 }
 
 .field-count {
@@ -775,15 +773,6 @@ kbd {
   line-height: 19px;
   text-align: center;
   font-variant-numeric: tabular-nums;
-}
-
-.field-control {
-  min-width: 0;
-}
-
-.field-row--switch .field-control {
-  flex-shrink: 0;
-  display: flex;
 }
 
 .field-bare {
@@ -1273,7 +1262,8 @@ select.field-input {
 }
 
 .advanced-fields {
-  margin-top: 14px;
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
   animation: fade 0.15s ease-out;
 }
 
@@ -1446,153 +1436,174 @@ select.field-input {
 
 /* ========== 对象列表：卡片格子 ========== */
 
-.tile-grid {
-  row-gap: 12px;
+/* 一行一项：名称、摘要、状态标签，开关和删除在右边，点整行进入编辑 */
+.item-list {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 
-.tile {
+.item-list > * + * {
+  border-top: 1px solid var(--border);
+}
+
+.item-row {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-content: start;
+  display: flex;
   align-items: center;
-  gap: 8px 6px;
-  min-height: 56px;
-  padding: 11px 10px 12px 14px;
-  border-radius: var(--radius-md);
-  background: var(--surface-2);
-  box-shadow: inset 0 0 0 1px var(--border);
+  gap: 10px;
+  min-height: 52px;
+  padding: 8px 10px 8px calc(var(--card-pad) + 12px);
+  background: var(--surface);
   cursor: pointer;
   /* 不要过渡 transform：松手后各项内容已换位，再动画回去会看到“跳回”的残影 */
-  transition: background 0.15s, box-shadow 0.15s;
+  transition: background 0.12s;
 }
 
-.tile:hover {
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--border-strong), var(--shadow-2);
+.item-list > :first-child {
+  border-top-left-radius: var(--radius-md);
+  border-top-right-radius: var(--radius-md);
 }
 
-.tile-title {
+.item-list > :last-child {
+  border-bottom-left-radius: var(--radius-md);
+  border-bottom-right-radius: var(--radius-md);
+}
+
+.item-row:hover {
+  background: var(--surface-2);
+}
+
+/* 拖动把手放在左侧留白里，出现时不会把名称挤开 */
+.item-row .drag-handle {
+  position: absolute;
+  left: calc(var(--card-pad) - 14px);
+  top: 50%;
+  margin-top: -13px;
+}
+
+.item-row-main {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex: 1 1 auto;
   min-width: 0;
-  min-height: 26px;
+  text-align: left;
+}
+
+.item-row-title {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 600;
-  text-align: left;
 }
 
-.tile-tools {
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  cursor: default;
+.item-row-sub {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-size: 12.5px;
 }
 
-.tile-tools .toggle {
-  margin-left: 6px;
-}
-
-.tile-tools .icon-btn {
-  width: 26px;
-  height: 26px;
-}
-
-/* 摘要固定一行，放不下的标签收窄或截掉，所有格子一样高 */
-.tile-meta {
-  grid-column: 1 / -1;
+.item-row-badges {
   display: flex;
   gap: 5px;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
 }
 
-.tile-meta .chip {
+.item-row-badges .chip {
   flex: 0 1 auto;
   min-width: 30px;
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--border);
 }
 
-.tile-meta .chip-accent,
-.tile-meta .chip-warn {
-  box-shadow: none;
-}
-
-.tile-meta .chip-accent {
-  background: var(--accent-soft);
-}
-
-.tile-meta .chip-warn {
-  background: var(--warn-soft);
-}
-
-.tile:hover .tile-meta .chip:not(.chip-accent):not(.chip-warn) {
-  background: var(--surface-2);
-}
-
-.tile-confirm {
-  grid-column: 1 / -1;
+.item-row-tools {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 21px;
-  color: var(--danger);
-  font-size: 12.5px;
-  font-weight: 560;
+  flex-shrink: 0;
   cursor: default;
 }
 
-.tile-confirm span {
-  margin-right: auto;
+.item-row-tools .icon-btn {
+  width: 28px;
+  height: 28px;
 }
 
-.tile.is-confirming {
-  background: var(--danger-soft);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent);
+.item-row-chevron {
+  color: var(--text-3);
+  flex-shrink: 0;
 }
 
-.tile.is-disabled .tile-title,
-.tile.is-disabled .tile-meta {
+.item-row.is-disabled .item-row-main,
+.item-row.is-disabled .item-row-badges {
   opacity: 0.45;
 }
 
+.item-row.is-confirming {
+  background: var(--danger-soft);
+  cursor: default;
+}
+
+.item-row-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 560;
+}
+
+.item-row-confirm span {
+  margin-right: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 把手和删除平时隐藏，悬停或键盘聚焦时出现 */
-.tile .drag-handle,
-.tile-delete {
+.item-row .drag-handle,
+.item-row-delete {
   opacity: 0;
 }
 
-.tile:hover .drag-handle,
-.tile:hover .tile-delete,
-.tile:focus-within .drag-handle,
-.tile:focus-within .tile-delete {
+.item-row:hover .drag-handle,
+.item-row:hover .item-row-delete,
+.item-row:focus-within .drag-handle,
+.item-row:focus-within .item-row-delete {
   opacity: 1;
 }
 
-.tile-add {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  background: transparent;
-  box-shadow: none;
-  border: 1.5px dashed var(--border-strong);
+.item-row-add {
+  justify-content: flex-start;
+  gap: 7px;
+  width: 100%;
+  min-height: 46px;
+  padding-left: calc(var(--card-pad) - 2px);
   color: var(--text-2);
   font-weight: 560;
 }
 
-.tile-add:hover {
+.item-row-add:hover {
   background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
   color: var(--accent-strong);
-  box-shadow: none;
 }
 
-.tile-empty {
-  margin-top: 8px;
+.item-list-empty {
+  padding: 14px 16px 14px calc(var(--card-pad) + 12px);
   color: var(--text-3);
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 /* ========== 拖动排序 ========== */
@@ -2884,17 +2895,24 @@ select.field-input {
     border-radius: 10px;
   }
 
-  .card-header {
-    padding: 14px 16px 0;
+  :root {
+    --card-pad: 16px;
   }
 
-  .card-body {
-    padding: 14px 16px 16px;
+  .page--settings {
+    padding-left: 12px;
+    padding-right: 12px;
   }
 
-  .tile .drag-handle,
-  .tile-delete {
-    opacity: 0.7;
+  /* 列表行太窄时，摘要换到名称下面一行 */
+  .item-row-main {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1px;
+  }
+
+  .item-row-sub {
+    flex: none;
   }
 
   .save-bar-inner {
@@ -2926,8 +2944,8 @@ select.field-input {
 }
 
 @media (hover: none) {
-  .tile .drag-handle,
-  .tile-delete {
+  .item-row .drag-handle,
+  .item-row-delete {
     opacity: 0.7;
   }
 }

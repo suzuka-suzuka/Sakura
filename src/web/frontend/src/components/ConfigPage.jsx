@@ -140,7 +140,6 @@ export function PluginConfigPage({
         if (!schema || !value) {
             cards.push({
                 key: `${module}:loading`,
-                weight: 3,
                 node: (
                     <section className="card card-loading">
                         <div className="skeleton" />
@@ -156,8 +155,6 @@ export function PluginConfigPage({
         if (!schema.children) {
             cards.push({
                 key: module,
-                wide: true,
-                weight: 6,
                 node: (
                     <section className="card">
                         {title && <header className="card-header"><h3 className="card-title">{title}</h3></header>}
@@ -192,7 +189,7 @@ export function PluginConfigPage({
 
     return (
         <DraftContext.Provider value={moduleValues}>
-            <div className="page">
+            <div className="page page--settings">
                 <PageHeader title={page.title} icon={page.icon || 'puzzle'} actions={headerActions} />
                 <CardBoard cards={cards}>
                     {modules.map((module) => (
@@ -255,7 +252,7 @@ export function ObjectConfigPage({
 
     if (!value || !schema) {
         return (
-            <div className="page">
+            <div className="page page--settings">
                 <PageHeader title={title} icon={icon} actions={headerActions} />
                 <section className="card card-loading"><div className="skeleton" /><div className="skeleton short" /></section>
             </div>
@@ -292,7 +289,7 @@ export function ObjectConfigPage({
     });
 
     return (
-        <div className="page">
+        <div className="page page--settings">
             <PageHeader title={title} icon={icon} actions={headerActions} />
             <CardBoard cards={cards}>
                 {warnings}
