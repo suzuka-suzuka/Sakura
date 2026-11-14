@@ -12,15 +12,36 @@ function formatSpeed(bytesPerSec) {
     return `${formatBytes(bytesPerSec)}/s`;
 }
 
-function formatUptime(seconds) {
-    if (!seconds) return '0秒';
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
+/** 时长只保留最大的两个单位，返回 [[数字, 单位], ...]，单位用小字显示 */
+function uptimeParts(seconds) {
+    const total = Math.max(0, Math.floor(seconds || 0));
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor((total % 86400) / 3600);
+    const mins = Math.floor((total % 3600) / 60);
+    if (days > 0) return [[days, '天'], [hours, '时']];
+    if (hours > 0) return [[hours, '时'], [mins, '分']];
+    if (mins > 0) return [[mins, '分'], [total % 60, '秒']];
+    return [[total, '秒']];
+}
 
-    if (days > 0) return `${days}天${hours}小时`;
-    if (hours > 0) return `${hours}小时${mins}分钟`;
-    return `${mins}分钟`;
+function Uptime({ seconds }) {
+    return uptimeParts(seconds).map(([number, unit]) => (
+        <span key={unit}>{number}<span className="stat-unit">{unit}</span></span>
+    ));
+}
+
+function avatarUrl(uin) {
+    return `https://q1.qlogo.cn/g?b=qq&nk=${uin}&s=100`;
+}
+
+const FALLBACK_AVATAR = avatarUrl(10000);
+
+/** 群和好友数，列表还没拉到时不显示 */
+function directoryText(account) {
+    const parts = [];
+    if (account.groupCount != null) parts.push(`群 ${account.groupCount}`);
+    if (account.friendCount != null) parts.push(`好友 ${account.friendCount}`);
+    return parts.join(' · ');
 }
 
 const RING_COLORS = { accent: 'var(--accent)', violet: 'var(--violet)', cyan: 'var(--cyan)' };
@@ -54,12 +75,14 @@ function CircleProgress({ value, label, subLabel, color = 'accent', size = 90, s
     );
 }
 
+function diskLevel(percent) {
+    if (percent >= 90) return 'bar-danger';
+    if (percent >= 70) return 'bar-warning';
+    return 'bar-normal';
+}
+
 function StorageBar({ mount, used, total }) {
     const percent = total > 0 ? (used / total) * 100 : 0;
-    let level = 'bar-normal';
-    if (percent >= 90) level = 'bar-danger';
-    else if (percent >= 70) level = 'bar-warning';
-
     return (
         <div className="storage-bar-item">
             <div className="storage-bar-head">
@@ -67,9 +90,54 @@ function StorageBar({ mount, used, total }) {
                 <span className="storage-size">{formatBytes(used)} / {formatBytes(total)} · {percent.toFixed(0)}%</span>
             </div>
             <div className="storage-bar-bg">
-                <div className={`storage-bar-fill ${level}`} style={{ width: `${Math.min(percent, 100)}%` }} />
+                <div className={`storage-bar-fill ${diskLevel(percent)}`} style={{ width: `${Math.min(percent, 100)}%` }} />
             </div>
         </div>
+    );
+}
+
+/** 只有一个分区时：大号百分比 + 进度条 + 已用 / 剩余 / 总共 */
+function DiskSummary({ disk }) {
+    const total = disk.size || 0;
+    const used = disk.used || 0;
+    const free = Number.isFinite(disk.available) ? disk.available : Math.max(0, total - used);
+    const percent = total > 0 ? (used / total) * 100 : 0;
+    return (
+        <div className="disk-summary">
+            <div className="disk-summary-head">
+                <span className="disk-summary-percent">{percent.toFixed(0)}<span className="stat-unit">%</span></span>
+                <span className="storage-mount" title={disk.mount}>{disk.mount}</span>
+            </div>
+            <div className="storage-bar-bg">
+                <div className={`storage-bar-fill ${diskLevel(percent)}`} style={{ width: `${Math.min(percent, 100)}%` }} />
+            </div>
+            <dl className="disk-summary-stats">
+                <div><dt>已用</dt><dd>{formatBytes(used)}</dd></div>
+                <div><dt>剩余</dt><dd>{formatBytes(free)}</dd></div>
+                <div><dt>总共</dt><dd>{formatBytes(total)}</dd></div>
+            </dl>
+        </div>
+    );
+}
+
+/** 只有一个账号时的名片：和右边的环形图卡片一样大 */
+function BotProfile({ account }) {
+    const meta = directoryText(account);
+    return (
+        <section className="card dash-bots dash-profile" title={`${account.nickname || ''}（${account.uin}）`}>
+            <img
+                className="dash-profile-avatar"
+                src={avatarUrl(account.uin)}
+                alt=""
+                onError={(event) => { event.target.src = FALLBACK_AVATAR; }}
+            />
+            <div className="dash-profile-name">{account.nickname || account.uin}</div>
+            <div className="dash-profile-id">{account.uin}</div>
+            <div className="dash-profile-meta">
+                <span className="connection-dot" />
+                在线{meta ? ` · ${meta}` : ''}
+            </div>
+        </section>
     );
 }
 
@@ -95,6 +163,8 @@ export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, loadin
     }
 
     const accounts = (botInfo?.accounts || []).filter((account) => account?.status !== 'offline');
+    // 账号卡按数量定宽：一个号是名片，和三个环形图并排四等分；两个号占半行；更多时独占一行
+    const botsLayout = accounts.length <= 1 ? 'one' : accounts.length === 2 ? 'two' : 'many';
     const os = staticInfo?.os || {};
     const cpu = staticInfo?.cpu || {};
     const graphics = staticInfo?.graphics || {};
@@ -116,38 +186,43 @@ export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, loadin
     const cpuFreq = cpuSpeed.avg?.toFixed(1) || cpu.speed || '-';
 
     return (
-        <div className="dash">
-            <DashCard
-                className="dash-bots"
-                title="机器人账号"
-                extra={accounts.length > 0 ? <span className="field-count">{accounts.length}</span> : null}
-            >
-                {accounts.length === 0 ? (
-                    <div className="dash-empty">
-                        <img src="https://q1.qlogo.cn/g?b=qq&nk=10000&s=100" alt="" />
-                        <span>还没有账号连接</span>
-                    </div>
-                ) : (
+        <div className={`dash dash--bots-${botsLayout}`}>
+            {accounts.length === 0 && (
+                <section className="card dash-bots dash-profile dash-profile--empty">
+                    <img className="dash-profile-avatar" src={FALLBACK_AVATAR} alt="" />
+                    <div className="dash-profile-name">还没有账号连接</div>
+                    <div className="dash-profile-meta">连接后会显示在这里</div>
+                </section>
+            )}
+            {accounts.length === 1 && <BotProfile account={accounts[0]} />}
+            {accounts.length > 1 && (
+                <DashCard
+                    className="dash-bots"
+                    title="机器人账号"
+                    extra={<span className="field-count">{accounts.length}</span>}
+                >
                     <div className="bot-cards-row">
-                        {accounts.map((account) => (
-                            <div key={account.self_id} className="bot-card" title={`${account.nickname || ''}（${account.uin}）`}>
-                                <img
-                                    className="bot-card-avatar"
-                                    src={`https://q1.qlogo.cn/g?b=qq&nk=${account.uin}&s=100`}
-                                    alt=""
-                                    onError={(event) => {
-                                        event.target.src = 'https://q1.qlogo.cn/g?b=qq&nk=10000&s=100';
-                                    }}
-                                />
-                                <span className="bot-card-text">
-                                    <span className="bot-card-nick">{account.nickname || account.uin}</span>
-                                    <span className="bot-card-id">{account.uin}</span>
-                                </span>
-                            </div>
-                        ))}
+                        {accounts.map((account) => {
+                            const meta = directoryText(account);
+                            return (
+                                <div key={account.self_id} className="bot-card" title={`${account.nickname || ''}（${account.uin}）`}>
+                                    <img
+                                        className="bot-card-avatar"
+                                        src={avatarUrl(account.uin)}
+                                        alt=""
+                                        onError={(event) => { event.target.src = FALLBACK_AVATAR; }}
+                                    />
+                                    <span className="bot-card-text">
+                                        <span className="bot-card-nick">{account.nickname || account.uin}</span>
+                                        <span className="bot-card-id">{account.uin}</span>
+                                        {meta && <span className="bot-card-meta">{meta}</span>}
+                                    </span>
+                                </div>
+                            );
+                        })}
                     </div>
-                )}
-            </DashCard>
+                </DashCard>
+            )}
 
             <section className="card dash-stat">
                 <CircleProgress value={cpuUsage} label="CPU" subLabel={`${cpuCores}C${cpuThreads}T · ${cpuFreq}GHz`} color="accent" />
@@ -185,12 +260,16 @@ export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, loadin
             </DashCard>
 
             <DashCard className="dash-storage" title="磁盘">
-                <div className="storage-bars">
-                    {fsSize.length === 0 && <span className="dash-empty">暂无数据</span>}
-                    {fsSize.slice(0, 4).map((fs, idx) => (
-                        <StorageBar key={idx} mount={fs.mount} used={fs.used} total={fs.size} />
-                    ))}
-                </div>
+                {fsSize.length === 1 ? (
+                    <DiskSummary disk={fsSize[0]} />
+                ) : (
+                    <div className="storage-bars">
+                        {fsSize.length === 0 && <span className="dash-empty">暂无数据</span>}
+                        {fsSize.slice(0, 4).map((fs, idx) => (
+                            <StorageBar key={idx} mount={fs.mount} used={fs.used} total={fs.size} />
+                        ))}
+                    </div>
+                )}
             </DashCard>
 
             <DashCard className="dash-net" title="网络与运行">
@@ -205,11 +284,11 @@ export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, loadin
                     </div>
                     <div className="stat">
                         <div className="stat-label">系统运行</div>
-                        <div className="stat-value">{formatUptime(time.uptime)}</div>
+                        <div className="stat-value"><Uptime seconds={time.uptime} /></div>
                     </div>
                     <div className="stat">
                         <div className="stat-label">Node 运行</div>
-                        <div className="stat-value">{formatUptime(nodeProcess.uptime)}</div>
+                        <div className="stat-value"><Uptime seconds={nodeProcess.uptime} /></div>
                     </div>
                 </div>
             </DashCard>

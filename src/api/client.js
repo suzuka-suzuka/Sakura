@@ -310,6 +310,9 @@ export function getBotSummaries() {
       uin: loginInfo.user_id || instance.self_id || null,
       nickname: loginInfo.nickname || state?.nickname || instance.nickname || null,
       status: "online",
+      // 群和好友列表在连接后异步拉取，还没拉到时为 null
+      groupCount: state?.groups ? state.groups.size : null,
+      friendCount: state?.friends ? state.friends.size : null,
     };
   });
 }

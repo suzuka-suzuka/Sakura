@@ -2382,12 +2382,29 @@ select.field-input {
   padding: 18px 20px 20px;
 }
 
-.dash-bots {
+/* 账号卡按账号数量定宽：一个号和三个环形图四等分，两个号占半行，更多时独占一行 */
+.dash--bots-one > .dash-bots,
+.dash--bots-one > .dash-stat {
+  grid-column: span 3 !important;
+}
+
+.dash--bots-two > .dash-bots {
   grid-column: span 6 !important;
 }
 
-.dash-stat {
+.dash--bots-two > .dash-stat {
   grid-column: span 2 !important;
+}
+
+.dash--bots-many > .dash-bots {
+  grid-column: span 12 !important;
+}
+
+.dash--bots-many > .dash-stat {
+  grid-column: span 4 !important;
+}
+
+.dash-stat {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2420,6 +2437,72 @@ select.field-input {
   border-radius: 50%;
   filter: grayscale(1);
   opacity: 0.6;
+}
+
+/* 只有一个账号时的名片 */
+.dash-profile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 18px 16px 16px;
+  text-align: center;
+}
+
+.dash-profile-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--success);
+}
+
+.dash-profile--empty .dash-profile-avatar {
+  filter: grayscale(1);
+  opacity: 0.6;
+  box-shadow: none;
+}
+
+.dash-profile-name {
+  max-width: 100%;
+  margin-top: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.dash-profile-id {
+  margin-top: 1px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-profile-meta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.dash-profile-meta .connection-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  background: var(--success);
+}
+
+.dash-profile--empty .dash-profile-meta {
+  margin-top: 4px;
+  color: var(--text-3);
 }
 
 .bot-cards-row {
@@ -2462,10 +2545,18 @@ select.field-input {
   white-space: nowrap;
 }
 
-.bot-card-id {
+.bot-card-id,
+.bot-card-meta {
   font-size: 12px;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-card-meta {
+  color: var(--text-2);
 }
 
 .circle-progress {
@@ -2612,6 +2703,74 @@ select.field-input {
   color: var(--text-3);
 }
 
+/* 数值后面的单位用小字，长时长也放得下 */
+.stat-unit {
+  margin: 0 3px 0 1px;
+  font-size: 0.72em;
+  font-weight: 560;
+  color: var(--text-2);
+}
+
+.stat-unit:last-child {
+  margin-right: 0;
+}
+
+/* 只有一个分区时的磁盘卡 */
+.disk-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.disk-summary-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.disk-summary-percent {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.disk-summary .storage-bar-bg {
+  height: 10px;
+}
+
+.disk-summary-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.disk-summary-stats > div {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.disk-summary-stats dt {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.disk-summary-stats dd {
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
 .stat-value {
   margin-top: 3px;
   font-size: 16px;
@@ -2624,11 +2783,11 @@ select.field-input {
 }
 
 @media (max-width: 1280px) {
-  .dash-bots {
+  .dash--bots-two > .dash-bots {
     grid-column: span 12 !important;
   }
 
-  .dash-stat {
+  .dash--bots-two > .dash-stat {
     grid-column: span 4 !important;
   }
 
@@ -2647,8 +2806,12 @@ select.field-input {
 }
 
 @media (max-width: 720px) {
-  .dash-stat {
+  .dash > .dash-bots,
+  .dash > .dash-stat {
     grid-column: span 12 !important;
+  }
+
+  .dash-stat {
     flex-direction: row;
     gap: 16px;
   }

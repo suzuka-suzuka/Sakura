@@ -159,6 +159,7 @@ async function getDynamicSystemInfo() {
                 mount: current.mount,
                 size: current.size,
                 used: current.used,
+                available: current.available,
             })),
             networkSummary,
             cpuCurrentSpeed: {
