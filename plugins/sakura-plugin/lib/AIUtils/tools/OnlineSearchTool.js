@@ -55,14 +55,11 @@ export function buildSearchPrompt(now = new Date()) {
   ].join('\n')
 }
 
-export function buildSearchQuery(query, context = '') {
-  const lines = [`问题：${query}`]
-  if (context) lines.push(`背景：${context}`)
-  return lines.join('\n')
-}
-
 // Gemini 的来源是这个域名下的跳转链接：很长、会过期、看不出原网站，不给用户。
 const GEMINI_REDIRECT_HOST = 'vertexaisearch.cloud.google.com'
+// 这些平台的链接第一段路径是账号名，用账号作来源名称比域名更有信息量。
+const ACCOUNT_PATH_HOSTS = new Set(['x.com', 'twitter.com', 'mobile.twitter.com'])
+const NON_ACCOUNT_PATHS = new Set(['i', 'search', 'hashtag', 'home', 'explore'])
 
 function parseSourceUrl(url) {
   try {
@@ -72,8 +69,24 @@ function parseSourceUrl(url) {
   }
 }
 
+/** 标题有时直接就是链接（例如 Grok 的来源），这种标题当作没有。 */
+function meaningfulTitle(title) {
+  const text = String(title || '').replace(/\s+/g, ' ').trim()
+  if (!text || /^(?:https?:\/\/|www\.)\S*$/i.test(text)) return ''
+  return text
+}
+
+function sourceNameFromUrl(parsed) {
+  const host = parsed.hostname.replace(/^www\./, '')
+  if (ACCOUNT_PATH_HOSTS.has(host)) {
+    const account = parsed.pathname.split('/').filter(Boolean)[0]
+    if (account && !NON_ACCOUNT_PATHS.has(account.toLowerCase())) return `@${account}`
+  }
+  return host
+}
+
 /**
- * 整理来源：名称优先用标题，没有标题用域名；按名称去重。
+ * 整理来源：名称优先用标题，标题缺失或本身是链接时，X/Twitter 用账号、其余用域名；按名称去重。
  * 跳转链接只保留名称，不保留 URL。
  */
 export function summarizeSources(citations = []) {
@@ -82,8 +95,8 @@ export function summarizeSources(citations = []) {
   for (const citation of Array.isArray(citations) ? citations : []) {
     const parsed = parseSourceUrl(citation?.url)
     const isRedirect = parsed?.hostname === GEMINI_REDIRECT_HOST
-    const host = parsed && !isRedirect ? parsed.hostname.replace(/^www\./, '') : ''
-    const name = String(citation?.title || '').trim() || host
+    const fallbackName = parsed && !isRedirect ? sourceNameFromUrl(parsed) : ''
+    const name = meaningfulTitle(citation?.title) || fallbackName
     if (!name || seen.has(name)) continue
     seen.add(name)
     sources.push({ name, url: parsed && !isRedirect ? citation.url : '' })
@@ -113,17 +126,13 @@ export function formatSearchResult(result, { includeLinks = false, now = new Dat
 export class OnlineSearchTool extends AbstractTool {
   name = 'OnlineSearch'
 
-  description = '联网搜索实时或最新信息时使用，例如新闻、正在发生的事件、社交平台上的讨论与动态、价格、版本号、近期发布的内容等。返回整理后的结论和来源链接。'
+  description = '联网搜索实时或最新信息时使用，例如新闻、正在发生的事件、社交平台上的讨论与动态、价格、版本号、近期发布的内容等。返回整理后的结论和来源。'
 
   parameters = {
     properties: {
       query: {
         type: 'string',
-        description: '要查什么，用一句完整的问题描述，不要只给关键词',
-      },
-      context: {
-        type: 'string',
-        description: '可选，有助于理解问题的背景，例如群里正在讨论的话题，用来区分同名事物',
+        description: '要查什么，用一句完整的问题描述，不要只给关键词；有同名事物时把能区分的信息写进问题里',
       },
       includeLinks: {
         type: 'boolean',
@@ -140,7 +149,6 @@ export class OnlineSearchTool extends AbstractTool {
 
   func = async function (opts, e) {
     const query = String(opts?.query || '').trim()
-    const context = String(opts?.context || '').trim()
     if (!query) return '需要提供要搜索的问题。'
 
     const models = resolveSearchModels(e)
@@ -152,7 +160,7 @@ export class OnlineSearchTool extends AbstractTool {
     const result = await getAI(
       models,
       e,
-      [{ text: buildSearchQuery(query, context) }],
+      [{ text: query }],
       buildSearchPrompt(),
       false,
       false,

@@ -144,14 +144,13 @@ test("工具把问题交给开启了自带搜索的模型，不带上下文、�
     ],
   };
 
-  const output = await new OnlineSearchTool().func({ query: "某游戏最新版本是多少", context: "群里在聊更新" }, event);
+  const output = await new OnlineSearchTool().func({ query: "某游戏最新版本是多少", context: "多余参数会被忽略" }, event);
 
   assert.equal(aiCalls.length, 1);
   const [models, e, queryParts, prompt, groupContext, tools, history] = aiCalls[0];
   assert.deepEqual(models, ["grok", "gem"]);
   assert.equal(e, event);
-  assert.match(queryParts[0].text, /问题：某游戏最新版本是多少/);
-  assert.match(queryParts[0].text, /背景：群里在聊更新/);
+  assert.deepEqual(queryParts, [{ text: "某游戏最新版本是多少" }]);
   assert.match(prompt, /当前时间：\d{4}/);
   assert.equal(groupContext, false);
   assert.equal(tools, false);
@@ -159,12 +158,27 @@ test("工具把问题交给开启了自带搜索的模型，不带上下文、�
 
   assert.match(output, /^检索时间：/);
   assert.match(output, /3\.2 版本/);
-  // 默认只列来源名称：有标题用标题，没有标题用域名，不带 URL。
-  assert.match(output, /来源：官方公告、x\.com$/);
+  // 默认只列来源名称：有标题用标题，没有标题时 X 用账号，不带 URL。
+  assert.match(output, /来源：官方公告、@dev$/);
   assert.equal(output.includes("https://"), false);
 
   const withLinks = await new OnlineSearchTool().func({ query: "出处", includeLinks: true }, event);
-  assert.match(withLinks, /来源：\n1\. 官方公告 — https:\/\/news\.example\/a\n2\. x\.com — https:\/\/x\.com\/dev\/status\/1$/);
+  assert.match(withLinks, /来源：\n1\. 官方公告 — https:\/\/news\.example\/a\n2\. @dev — https:\/\/x\.com\/dev\/status\/1$/);
+});
+
+test("Grok 的来源标题就是链接：X 帖子按账号命名并去重，其他网站用域名", () => {
+  const urls = [
+    "https://x.com/baumusyokunin/status/2121105591687111058",
+    "https://x.com/sakuramiko35/status/2110295825251467281",
+    "https://x.com/sakuramiko35/status/2116399317456236887",
+    "https://twitter.com/i/web/status/1",
+    "https://www.example.com/news/1",
+  ];
+  const result = { text: "结论", citations: urls.map((url) => ({ url, title: url })) };
+
+  const plain = formatSearchResult(result);
+  assert.match(plain, /来源：@baumusyokunin、@sakuramiko35、twitter\.com、example\.com$/);
+  assert.equal(plain.includes("https://"), false);
 });
 
 test("Gemini 的跳转链接只保留名称，要链接时也不给出", () => {
