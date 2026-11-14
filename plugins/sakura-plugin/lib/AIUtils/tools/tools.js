@@ -21,6 +21,7 @@ import { ImageSearchTool } from "./ImageSearchTool.js";
 import { UploadFileTool } from "./UploadFileTool.js";
 import { VoxCPMVoiceTool } from "./VoxCPMVoiceTool.js";
 import { SkillGuideTool } from "./SkillGuideTool.js";
+import { OnlineSearchTool } from "./OnlineSearchTool.js";
 import { mcpManager } from "../MCPManager.js";
 import Setting from "../../setting.js";
 import { plugindata } from "../../path.js";
@@ -53,6 +54,7 @@ const availableTools = [
   new UploadFileTool(),
   new VoxCPMVoiceTool(),
   new SkillGuideTool(),
+  new OnlineSearchTool(), // 委托搜索模型联网搜索
 ];
 
 const toolMap = new Map(availableTools.map((tool) => [tool.name, tool]));
@@ -77,6 +79,7 @@ const TOOL_CONFIG_KEYS = {
   "UploadFile": "UploadFile",
   "SendVoice": "VoxCPMVoice",
   "SkillGuide": "SkillGuide",
+  "OnlineSearch": "OnlineSearch",
 };
 
 const OWNER_ONLY_TOOLS = new Set(["RunCommand", "UploadFile"]);
@@ -202,6 +205,7 @@ const MCP_KEY_TO_SERVER = {
 
 // 所有可选工具（本地 + MCP）的 key 和中文 label，供前端和 API 使用
 export const AVAILABLE_TOOL_OPTIONS = [
+  { key: "OnlineSearch", label: "联网搜索" },
   { key: "McpTavily", label: "Tavily搜索(MCP)" },
   { key: "GroupAdmin", label: "群组管理" },
   { key: "MessageContentAnalyzer", label: "消息分析" },
@@ -255,8 +259,74 @@ function resolveLocalToolInstances(e, allowedTools) {
   return availableTools.filter(tool => {
     if (OWNER_ONLY_TOOLS.has(tool.name) && !isMaster) return false;
     const configKey = TOOL_CONFIG_KEYS[tool.name];
-    return configKey && allowedTools.has(configKey);
+    if (!configKey || !allowedTools.has(configKey)) return false;
+    // 工具可以声明自己当前不可用（例如缺少必要配置），这时不提供给模型。
+    return typeof tool.isAvailable !== "function" || tool.isAvailable(e) !== false;
   });
+}
+
+// ─── 搜索类工具 ───────────────────────────────────────────
+// 当前模型自带联网搜索时，只用自带搜索，不再提供这些工具。
+
+const SEARCH_LOCAL_TOOL_NAMES = new Set(["OnlineSearch"]);
+const SEARCH_MCP_SERVERS = {
+  tavily: (toolName) => /^tavily[_-]/i.test(String(toolName || "")),
+};
+
+/**
+ * 本轮（最后一条用户文字消息之后）已经调用过的工具名。
+ * 这一轮中途换到自带搜索的模型时，这些工具仍要声明，历史里的调用和结果才能对上。
+ */
+function toolNamesCalledInCurrentTurn(history = []) {
+  const names = new Set();
+  if (!Array.isArray(history)) return names;
+
+  let start = 0;
+  for (let index = history.length - 1; index >= 0; index--) {
+    const item = history[index];
+    if (
+      item?.role === "user" &&
+      Array.isArray(item.parts) &&
+      item.parts.some((part) => typeof part?.text === "string" && part.text.trim())
+    ) {
+      start = index + 1;
+      break;
+    }
+  }
+
+  for (const item of history.slice(start)) {
+    if (item?.role !== "model" || !Array.isArray(item.parts)) continue;
+    for (const part of item.parts) {
+      if (part?.functionCall?.name) names.add(String(part.functionCall.name));
+    }
+  }
+  return names;
+}
+
+export function filterSearchTools(
+  { localToolInstances = [], allowedMcpServerIds = [] },
+  { nativeWebSearch = false, history = [] } = {}
+) {
+  if (!nativeWebSearch) return { localToolInstances, allowedMcpServerIds };
+
+  const calledNames = toolNamesCalledInCurrentTurn(history);
+  const hidden = [];
+  const filteredLocal = localToolInstances.filter((tool) => {
+    if (!SEARCH_LOCAL_TOOL_NAMES.has(tool.name) || calledNames.has(tool.name)) return true;
+    hidden.push(tool.name);
+    return false;
+  });
+  const filteredServers = allowedMcpServerIds.filter((serverId) => {
+    const isServerTool = SEARCH_MCP_SERVERS[serverId];
+    if (!isServerTool || [...calledNames].some(isServerTool)) return true;
+    hidden.push(serverId);
+    return false;
+  });
+
+  if (hidden.length > 0) {
+    logger.debug?.(`[Tools] 模型自带联网搜索，已隐藏搜索类工具：${hidden.join(", ")}`);
+  }
+  return { localToolInstances: filteredLocal, allowedMcpServerIds: filteredServers };
 }
 
 function buildToolContext(toolGroupName, localToolInstances) {
@@ -282,7 +352,12 @@ function resolveToolContext(e, toolGroupName) {
   return buildToolContext(toolGroupName, localToolInstances);
 }
 
-export async function getToolsSchema(e, toolGroupName) {
+/**
+ * @param {object} [options]
+ * @param {boolean} [options.nativeWebSearch] 本次请求的模型是否开着自带联网搜索；是则隐藏搜索类工具
+ * @param {Array} [options.history] 本次请求的对话历史，用于保留本轮已调用过的工具
+ */
+export async function getToolsSchema(e, toolGroupName, options = {}) {
   // 后台群记忆任务只开放记忆读写工具，不依赖角色工具组，也不开放 MCP。
   if (toolGroupName?.memoryOnly === true) {
     return {
@@ -295,10 +370,16 @@ export async function getToolsSchema(e, toolGroupName) {
   }
   if (!toolGroupName) return { localTools: [], allowedMcpServerIds: [] };
 
-  const { allowedTools, allowedMcpServerIds } = resolveToolGroup(toolGroupName);
+  const { allowedTools, allowedMcpServerIds: groupMcpServerIds } = resolveToolGroup(toolGroupName);
   if (allowedTools.size === 0) return { localTools: [], allowedMcpServerIds: [] };
 
-  const localToolInstances = resolveLocalToolInstances(e, allowedTools);
+  const { localToolInstances, allowedMcpServerIds } = filterSearchTools(
+    {
+      localToolInstances: resolveLocalToolInstances(e, allowedTools),
+      allowedMcpServerIds: groupMcpServerIds,
+    },
+    options
+  );
   const toolContext = buildToolContext(toolGroupName, localToolInstances);
   const localTools = await Promise.all(
     localToolInstances.map(tool => tool.function(e, toolContext))
@@ -318,6 +399,11 @@ function shortenToolText(text, maxLength = 80) {
 function normalizeToolAlias(toolName) {
   return String(toolName || "").replace(/-/g, "_");
 }
+
+const ONLINE_SEARCH_TOOL_META = {
+  action: "联网搜索",
+  detail: (toolArgs = {}) => shortenToolText(toolArgs.query || "联网搜索"),
+};
 
 const TAVILY_TOOL_META = {
   tavily_search: {
@@ -347,6 +433,7 @@ const TAVILY_TOOL_META = {
 };
 
 function buildToolStartAction(toolName) {
+  if (toolName === "OnlineSearch") return ONLINE_SEARCH_TOOL_META.action;
   const tavilyTool = TAVILY_TOOL_META[normalizeToolAlias(toolName)];
   if (tavilyTool) {
     return tavilyTool.action;
@@ -379,6 +466,7 @@ function buildToolStartAction(toolName) {
 }
 
 function buildToolStartDetail(toolName, toolArgs = {}) {
+  if (toolName === "OnlineSearch") return ONLINE_SEARCH_TOOL_META.detail(toolArgs);
   const tavilyTool = TAVILY_TOOL_META[normalizeToolAlias(toolName)];
   if (tavilyTool) {
     return tavilyTool.detail(toolArgs);

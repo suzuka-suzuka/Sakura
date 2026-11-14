@@ -1358,10 +1358,13 @@ function ModelEntriesField(props) {
 
 /**
  * 使用处的模型列表：有序、可调整顺序，排在前面的优先，失败时换下一个。
- * uiType 形如 modelList:chat 或 modelList:chat:gemini（只显示 Gemini 协议的模型）。
+ * uiType 形如 modelList:chat 或 modelList:chat:gemini（只显示 Gemini 协议的模型），
+ * modelList:chat:search 只显示开启了自带联网搜索的模型。
  */
 function ModelListField({ displayName, help, value, onChange, uiType, scopeSelfId }) {
-    const [, kind = 'chat', protocolFilter = ''] = uiType.split(':');
+    const [, kind = 'chat', filter = ''] = uiType.split(':');
+    const searchOnly = filter === 'search';
+    const protocolFilter = searchOnly ? '' : filter;
     const items = Array.isArray(value) ? value : [];
     const { options, details, loading } = useDynamicOptions(scopeSelfId, 'modelEntrySelect');
     const { details: providerDetails } = useDynamicOptions(scopeSelfId, 'providerSelect');
@@ -1371,6 +1374,7 @@ function ModelListField({ displayName, help, value, onChange, uiType, scopeSelfI
         const info = details?.[name] || {};
         if ((info.type || 'chat') !== kind) return false;
         if (protocolFilter && providerDetails?.[info.provider]?.protocol !== protocolFilter) return false;
+        if (searchOnly && info.nativeWebSearch !== true) return false;
         return true;
     });
     const available = candidates.filter((name) => !items.includes(name));
@@ -1387,8 +1391,9 @@ function ModelListField({ displayName, help, value, onChange, uiType, scopeSelfI
                     const wrongKind = info && (info.type || 'chat') !== kind;
                     const wrongProtocol = info && protocolFilter && providerDetails?.[info.provider]
                         && providerDetails[info.provider].protocol !== protocolFilter;
+                    const noSearch = info && searchOnly && info.nativeWebSearch !== true;
                     return (
-                        <div key={name} className={`model-pill ${missing || wrongKind || wrongProtocol ? 'is-invalid' : ''}`} {...rowProps(index)}>
+                        <div key={name} className={`model-pill ${missing || wrongKind || wrongProtocol || noSearch ? 'is-invalid' : ''}`} {...rowProps(index)}>
                             {items.length > 1 && (
                                 <button type="button" className="drag-handle" {...handleProps(index)}>
                                     <Icon name="grip" size={15} />
@@ -1400,6 +1405,7 @@ function ModelListField({ displayName, help, value, onChange, uiType, scopeSelfI
                             {missing && <span className="chip chip-warn">模型不存在</span>}
                             {wrongKind && <span className="chip chip-warn">用途不符</span>}
                             {wrongProtocol && <span className="chip chip-warn">不是 {protocolFilter === 'gemini' ? 'Gemini' : protocolFilter} 供应商，会被跳过</span>}
+                            {noSearch && <span className="chip chip-warn">未开启联网搜索，会被跳过</span>}
                             <span className="model-pill-actions">
                                 <button type="button" className="icon-btn icon-btn-danger" aria-label="移除" title="移除" onClick={() => onChange(items.filter((item) => item !== name))}>
                                     <Icon name="x" size={14} />

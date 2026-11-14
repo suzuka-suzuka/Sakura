@@ -125,6 +125,7 @@ const AIObjectSchema = z.object({
     markdownSplitImageLimit: z.number().int().min(0).default(0).describe('拆图字数阈值|#group:Markdown 输出|#showIf:enableMarkdownProcess=true|超过这个字数时拆成两张图片；0 表示不拆'),
     utilityModels: modelList('后台辅助模型', 'chat', '用于欢迎词、记忆整理、提醒改写、表情识图等后台任务；可以选多个，排在前面的优先', '#group:后台任务'),
     geminiModels: modelList('Gemini 能力模型', 'chat:gemini', '用于向量检索和视频分析，只能选 Gemini / Vertex 供应商的模型；不选则这些功能不可用', '#group:后台任务'),
+    searchModels: modelList('搜索模型', 'chat:search', '“联网搜索”工具交给这些模型去查，只能选开启了“联网搜索”的模型；可以选多个，排在前面的优先，失败时换下一个；不选则不提供这个工具', '#group:联网搜索'),
     gcsBucket: z.string().default('').describe('GCS Bucket|#group:后台任务|#advanced|Vertex 视频分析上传文件用的 Cloud Storage bucket'),
     gcsPrefix: z.string().default('sakura-message-videos').describe('GCS 目录|#group:后台任务|#advanced|Vertex 视频分析的临时文件目录'),
     workspaces: z.array(RunCommandWorkspaceSchema)
@@ -710,7 +711,7 @@ export const dynamicOptionsConfig = {
                 module: 'Models',
                 path: 'models',
                 valueKey: ['name', 'model'],
-                detailKeys: ['type', 'provider', 'model'],
+                detailKeys: ['type', 'provider', 'model', 'nativeWebSearch'],
             },
         ],
     },

@@ -193,6 +193,59 @@ function openAIStreamReasoningDelta(delta = {}) {
     .join("");
 }
 
+/**
+ * 收集回答引用的网页来源，按 URL 去重并保持出现顺序。
+ * OpenAI 格式：message/delta 上的 annotations（url_citation），以及 xAI 等接口顶层的 citations。
+ * Gemini：candidate.groundingMetadata.groundingChunks[].web。
+ */
+function createCitationCollector() {
+  const byUrl = new Map();
+  const add = (url, title = "") => {
+    const normalizedUrl = String(url || "").trim();
+    if (!/^https?:\/\//i.test(normalizedUrl)) return;
+    const normalizedTitle = String(title || "").replace(/\s+/g, " ").trim();
+    const existing = byUrl.get(normalizedUrl);
+    if (!existing) {
+      byUrl.set(normalizedUrl, { url: normalizedUrl, title: normalizedTitle });
+    } else if (!existing.title && normalizedTitle) {
+      existing.title = normalizedTitle;
+    }
+  };
+
+  return {
+    addOpenAIAnnotations(annotations) {
+      if (!Array.isArray(annotations)) return;
+      for (const annotation of annotations) {
+        const citation = annotation?.url_citation || annotation;
+        if (annotation?.type && annotation.type !== "url_citation") continue;
+        add(citation?.url, citation?.title);
+      }
+    },
+    addOpenAICitations(citations) {
+      if (!Array.isArray(citations)) return;
+      for (const citation of citations) {
+        if (typeof citation === "string") add(citation);
+        else add(citation?.url, citation?.title);
+      }
+    },
+    addGeminiGrounding(groundingMetadata) {
+      const chunks = groundingMetadata?.groundingChunks;
+      if (!Array.isArray(chunks)) return;
+      for (const chunk of chunks) {
+        add(chunk?.web?.uri, chunk?.web?.title);
+      }
+    },
+    list() {
+      return [...byUrl.values()];
+    },
+  };
+}
+
+function withCitations(result, collector) {
+  const citations = collector.list();
+  return citations.length > 0 ? { ...result, citations } : result;
+}
+
 function streamUsageText(usage) {
   if (!usage || typeof usage !== "object") return "";
   const prompt = Number(usage.prompt_tokens ?? usage.promptTokenCount);
@@ -282,7 +335,7 @@ export function getCurrentAndPreviousUserText(queryParts = [], historyContents =
 const reasoningPassbackTargets = new Set();
 
 function reasoningPassbackKey(channel) {
-  return `${String(channel?.baseURL || "").trim()} ${channel?.model || ""}`;
+  return `${String(channel?.baseURL || "").trim()}\u0000${channel?.model || ""}`;
 }
 
 function isReasoningPassbackError(error) {
@@ -461,7 +514,10 @@ async function _getOpenAIResponse(
       allOpenAITools.push(buildOpenAICompatibleWebSearchTool(channel));
     }
     if (enableTools) {
-      const { localTools: toolsSchema, allowedMcpServerIds } = await getToolsSchema(e, enableTools);
+      const { localTools: toolsSchema, allowedMcpServerIds } = await getToolsSchema(e, enableTools, {
+        nativeWebSearch: channel.nativeWebSearch === true,
+        history: historyContents,
+      });
       if (toolsSchema && toolsSchema.length > 0) {
         const adjustedSchema = adjustSchemaCase(toolsSchema, false);
         allOpenAITools.push(...adjustedSchema.map((tool) => ({
@@ -519,6 +575,7 @@ async function _getOpenAIResponse(
         let extractedText = "";
         let reasoningText = "";
         const toolCalls = new Map();
+        const citations = createCitationCollector();
 
         try {
           for await (const rawChunk of rawStream) {
@@ -530,6 +587,7 @@ async function _getOpenAIResponse(
               streamDiagnostic(channel, "first_chunk", { elapsedMs });
             }
             if (chunk?.usage) usage = chunk.usage;
+            citations.addOpenAICitations(chunk?.citations);
 
             const choice = chunk?.choices?.[0];
             if (!choice) continue;
@@ -557,6 +615,7 @@ async function _getOpenAIResponse(
             }
 
             appendStreamToolCalls(toolCalls, delta.tool_calls || []);
+            citations.addOpenAIAnnotations(delta.annotations);
           }
         } catch (streamError) {
           streamDiagnostic(channel, "interrupted", {
@@ -592,11 +651,11 @@ async function _getOpenAIResponse(
           return requestFailure("API 未返回任何内容。");
         }
 
-        return {
+        return withCitations({
           text: extractedText,
           functionCalls: parseOpenAIToolCalls(toolCallsArr),
           ...(reasoningText && { reasoningContent: reasoningText }),
-        };
+        }, citations);
       } catch (streamBranchError) {
         throw deadlineExceeded
           ? normalizeRequestError(streamBranchError, { timedOut: true })
@@ -619,6 +678,9 @@ async function _getOpenAIResponse(
 
     const message = completion.choices[0]?.message;
     const reasoningContent = openAIStreamReasoningDelta(message || {});
+    const citations = createCitationCollector();
+    citations.addOpenAIAnnotations(message?.annotations);
+    citations.addOpenAICitations(completion.citations);
     const extractedText = normalizeOpenAIMessageContent(message?.content);
     const toolCallsArr = message?.tool_calls || [];
 
@@ -628,11 +690,11 @@ async function _getOpenAIResponse(
 
     const functionCalls = parseOpenAIToolCalls(toolCallsArr);
 
-    return {
+    return withCitations({
       text: extractedText,
       functionCalls,
       ...(reasoningContent && { reasoningContent }),
-    };
+    }, citations);
   } catch (error) {
     if (isReasoningPassbackError(error)) {
       if (!passReasoning) {
@@ -773,7 +835,10 @@ async function _getGeminiResponse(
     // 本地工具和 MCP 工具独立匹配，任一有结果就注入
     let allDeclarations = [];
     if (enableTools) {
-      const { localTools: toolsSchema, allowedMcpServerIds } = await getToolsSchema(e, enableTools);
+      const { localTools: toolsSchema, allowedMcpServerIds } = await getToolsSchema(e, enableTools, {
+        nativeWebSearch: channel.nativeWebSearch === true,
+        history: historyContents,
+      });
       if (toolsSchema && toolsSchema.length > 0) {
         const adjustedSchema = adjustSchemaCase(toolsSchema, true);
         allDeclarations.push(...adjustedSchema);
@@ -897,11 +962,13 @@ async function _getGeminiResponse(
           return requestFailure("返回内容为空。");
         }
 
-        return {
+        const citations = createCitationCollector();
+        citations.addGeminiGrounding(collected.groundingMetadata);
+        return withCitations({
           text: collected.extractedText,
           functionCalls: collected.functionCalls,
           rawParts: collected.rawParts,
-        };
+        }, citations);
       } finally {
         if (streamDeadline) clearTimeout(streamDeadline);
       }
@@ -963,11 +1030,13 @@ async function _getGeminiResponse(
       return requestFailure("返回内容为空。");
     }
 
-    return {
+    const citations = createCitationCollector();
+    citations.addGeminiGrounding(candidate.groundingMetadata);
+    return withCitations({
       text: extractedText,
       functionCalls: extractedFunctionCalls,
       rawParts: responseParts,
-    };
+    }, citations);
   } catch (error) {
     const errorMessage = `API 调用失败: ${error.message}`;
     logger.error(errorMessage);

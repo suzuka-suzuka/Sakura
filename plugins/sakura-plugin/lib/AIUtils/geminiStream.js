@@ -27,6 +27,8 @@ export async function collectGeminiStream(
   let finishMessage = "";
   let usage = null;
   let promptFeedback = null;
+  // 流式下引用来源分散在各个 chunk 里，合并成一份。
+  const groundingChunks = [];
   let sawCandidate = false;
   let extractedText = "";
   const rawParts = [];
@@ -58,6 +60,9 @@ export async function collectGeminiStream(
       sawCandidate = true;
       if (candidate.finishReason) finishReason = String(candidate.finishReason);
       if (candidate.finishMessage) finishMessage = String(candidate.finishMessage);
+      if (Array.isArray(candidate.groundingMetadata?.groundingChunks)) {
+        groundingChunks.push(...candidate.groundingMetadata.groundingChunks);
+      }
 
       const parts = Array.isArray(candidate.content?.parts)
         ? candidate.content.parts
@@ -95,6 +100,7 @@ export async function collectGeminiStream(
     finishMessage,
     usage,
     promptFeedback,
+    groundingMetadata: groundingChunks.length > 0 ? { groundingChunks } : null,
     sawCandidate,
     extractedText,
     functionCalls,

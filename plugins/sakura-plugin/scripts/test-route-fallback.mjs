@@ -55,6 +55,21 @@ mock.module("openai", {
   },
 });
 
+// 假 Gemini 客户端：返回值由 geminiReply 决定。
+let geminiReply = null;
+mock.module(url("../lib/AIUtils/vertexAuth.js"), {
+  namedExports: {
+    createGeminiClient: () => ({
+      models: {
+        generateContent: async () => geminiReply,
+        generateContentStream: async () => (async function* () {
+          for (const chunk of geminiReply) yield chunk;
+        })(),
+      },
+    }),
+  },
+});
+
 const router = await import("../lib/AIUtils/providerRouter.js");
 const { getAI, resetReasoningPassbackTargets } = await import("../lib/AIUtils/getAI.js");
 const { runAgentLoop } = await import("../lib/AIUtils/AgentRunner.js");
@@ -67,15 +82,15 @@ const timeoutError = () =>
 function useConfig(providers, models) {
   configs = {
     Providers: {
-      providers: providers.map(([name, apiKeys]) => ({
+      providers: providers.map(([name, apiKeys, protocol = "openai"]) => ({
         name,
-        protocol: "openai",
+        protocol,
         baseURL: `https://${name}.example/v1`,
         apiKeys,
       })),
     },
     Models: {
-      models: models.map(([model, provider]) => ({ provider, model, type: "chat" })),
+      models: models.map(([model, provider, extra = {}]) => ({ provider, model, type: "chat", ...extra })),
     },
   };
 }
@@ -331,4 +346,90 @@ test("不认识 reasoning_content 的接口不会被带上这个字段", async (
   const result = await getAI(["gpt"], { self_id: 1 }, [], "", false, false, history);
   assert.equal(result.text, "ok");
   assert.deepEqual(calls, ["gpt/o1"]);
+});
+
+// ---- 引用来源解析 ----
+
+test("OpenAI 格式：解析 annotations 里的 url_citation 和顶层 citations，按 URL 去重", async () => {
+  useConfig([["甲", ["a1"]]], [["m1", "甲"]]);
+  behave = () => ({
+    citations: ["https://x.com/someone/status/1", "https://news.example/a"],
+    choices: [{
+      message: {
+        content: "结论",
+        annotations: [
+          { type: "url_citation", url_citation: { url: "https://news.example/a", title: "新闻 A" } },
+          { type: "url_citation", url_citation: { url: "https://blog.example/b", title: "博客 B" } },
+          { type: "file_citation", file_citation: { file_id: "f1" } },
+        ],
+      },
+    }],
+  });
+
+  const result = await ask(["m1"]);
+  assert.deepEqual(result.citations, [
+    { url: "https://news.example/a", title: "新闻 A" },
+    { url: "https://blog.example/b", title: "博客 B" },
+    { url: "https://x.com/someone/status/1", title: "" },
+  ]);
+});
+
+test("OpenAI 流式：从各个 chunk 的 delta.annotations 和 citations 收集来源", async () => {
+  useConfig([["甲", ["a1"]]], [["m1", "甲", { stream: true }]]);
+  behave = () => (async function* () {
+    yield { choices: [{ delta: { content: "第一段" } }] };
+    yield {
+      choices: [{
+        delta: {
+          content: "第二段",
+          annotations: [{ type: "url_citation", url_citation: { url: "https://a.example", title: "A" } }],
+        },
+      }],
+    };
+    yield { citations: ["https://b.example"], choices: [{ delta: {}, finish_reason: "stop" }] };
+  })();
+
+  const result = await ask(["m1"]);
+  assert.equal(result.text, "第一段第二段");
+  assert.deepEqual(result.citations.map((item) => item.url), ["https://a.example", "https://b.example"]);
+});
+
+test("没有来源时不返回 citations 字段", async () => {
+  useConfig([["甲", ["a1"]]], [["m1", "甲"]]);
+  const result = await ask(["m1"]);
+  assert.equal(Object.hasOwn(result, "citations"), false);
+});
+
+test("Gemini：解析 groundingMetadata 的网页来源（普通和流式）", async () => {
+  useConfig([["谷歌", ["g1"], "gemini"]], [["gm", "谷歌"], ["gms", "谷歌", { stream: true }]]);
+  geminiReply = {
+    candidates: [{
+      finishReason: "STOP",
+      content: { parts: [{ text: "Gemini 结论" }] },
+      groundingMetadata: {
+        groundingChunks: [
+          { web: { uri: "https://g.example/1", title: "g.example" } },
+          { web: { uri: "https://g.example/1", title: "g.example" } },
+          { retrievedContext: { uri: "gs://bucket/doc" } },
+        ],
+      },
+    }],
+  };
+  const plain = await ask(["gm"]);
+  assert.equal(plain.text, "Gemini 结论");
+  assert.deepEqual(plain.citations, [{ url: "https://g.example/1", title: "g.example" }]);
+
+  geminiReply = [
+    { candidates: [{ content: { parts: [{ text: "流式" }] } }] },
+    {
+      candidates: [{
+        finishReason: "STOP",
+        content: { parts: [{ text: "结论" }] },
+        groundingMetadata: { groundingChunks: [{ web: { uri: "https://g.example/2", title: "二" } }] },
+      }],
+    },
+  ];
+  const streamed = await ask(["gms"]);
+  assert.equal(streamed.text, "流式结论");
+  assert.deepEqual(streamed.citations, [{ url: "https://g.example/2", title: "二" }]);
 });
