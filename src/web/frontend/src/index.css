@@ -49,7 +49,7 @@
   --page-width: 1320px;
   --control-h: 38px;
   --card-pad: 20px;
-  --settings-width: 760px;
+  --settings-width: 1080px;
 
   /* 旧组件（文件管理、选择弹窗）使用的变量名 */
   --bg-primary: var(--bg);
@@ -478,7 +478,7 @@ kbd {
   max-width: calc(var(--page-width) + 64px);
 }
 
-/* 设置页：限宽单栏，名称和控件离得近，读起来是一张清单 */
+/* 设置页：单栏，宽度随屏幕变化，最宽 1080；再宽名称和右边的控件就离得太远了 */
 .page--settings {
   max-width: calc(var(--settings-width) + 64px);
 }
@@ -671,7 +671,19 @@ kbd {
   justify-content: space-between;
   gap: 8px 24px;
   min-height: 56px;
-  padding: 9px 0;
+  /* 左右各伸出 10px，悬停高亮时底色比文字宽一圈，文字仍和卡片标题对齐 */
+  margin: 0 -10px;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  transition: background 0.12s;
+}
+
+/* 行很宽时，悬停把整行连成一条，名称和右边的控件不会对错行 */
+@media (hover: hover) {
+  .setting-row--switch:hover,
+  .setting-row--inline:hover {
+    background: var(--surface-2);
+  }
 }
 
 .setting-label {
@@ -715,7 +727,7 @@ kbd {
   flex-direction: column;
   align-items: stretch;
   gap: 10px;
-  padding: 14px 0 16px;
+  padding-block: 14px 16px;
 }
 
 /* 窄的时候（手机、抽屉里）文本类控件换到名称下面 */
@@ -725,7 +737,7 @@ kbd {
     flex-direction: column;
     align-items: stretch;
     gap: 8px;
-    padding: 12px 0 14px;
+    padding-block: 12px 14px;
   }
 
   .setting-row--md .setting-control,
