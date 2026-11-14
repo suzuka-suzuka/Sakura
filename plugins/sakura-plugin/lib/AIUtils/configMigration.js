@@ -101,7 +101,6 @@ function modelEntryFromTarget(target, kind, route) {
     provider: String(target.provider || "").trim(),
     model: String(target.model || "").trim(),
     type: kind,
-    enabled: true,
   };
   if (kind === "chat") {
     for (const field of CHAT_SETTING_FIELDS) {
@@ -116,7 +115,7 @@ function modelEntryFromTarget(target, kind, route) {
 }
 
 function fingerprint(entry) {
-  const { name: _name, enabled: _enabled, ...rest } = entry;
+  const { name: _name, enabled: _enabled, ...rest } = entry; // 旧配置里可能还带着 enabled，不参与比对
   return JSON.stringify(rest, Object.keys(rest).sort());
 }
 
@@ -150,7 +149,8 @@ export function buildModelsFromRoutes(routeFilesByKind, existingModels = []) {
       if (!routeId) continue;
       const names = [];
       for (const target of byPriority(route.targets)) {
-        if (!target?.provider || !target?.model) continue;
+        // 旧路由里停用的目标不再迁移：模型没有启用开关，留着也没人引用
+        if (!target?.provider || !target?.model || target.enabled === false) continue;
         const candidate = modelEntryFromTarget(target, kind, route);
         let entry = byFingerprint.get(fingerprint(candidate));
         if (!entry) {
@@ -164,14 +164,11 @@ export function buildModelsFromRoutes(routeFilesByKind, existingModels = []) {
             }
             entry = { name: alias, ...candidate };
           }
-          if (target.enabled === false) entry.enabled = false;
           models.push(entry);
           usedKeys.add(keyOf(entry));
           byFingerprint.set(fingerprint(entry), entry);
-        } else if (target.enabled !== false) {
-          entry.enabled = true;
         }
-        if (target.enabled !== false && !names.includes(keyOf(entry))) names.push(keyOf(entry));
+        if (!names.includes(keyOf(entry))) names.push(keyOf(entry));
       }
       routeMaps[kind].set(routeId, names);
     }
@@ -185,7 +182,6 @@ function orderModelFields(entry) {
     provider: entry.provider,
     model: entry.model,
     type: entry.type || "chat",
-    enabled: entry.enabled !== false,
   };
   if (entry.name) ordered.name = entry.name;
   for (const [key, value] of Object.entries(entry)) {

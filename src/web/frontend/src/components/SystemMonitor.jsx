@@ -23,39 +23,28 @@ function formatUptime(seconds) {
     return `${mins}分钟`;
 }
 
-function CircleProgress({ value, label, subLabel, color = '#d87093', size = 90, strokeWidth = 8 }) {
+const RING_COLORS = { accent: 'var(--accent)', violet: 'var(--violet)', cyan: 'var(--cyan)' };
+
+function CircleProgress({ value, label, subLabel, color = 'accent', size = 90, strokeWidth = 9 }) {
     const radius = (size - strokeWidth) / 2;
     const circumference = radius * 2 * Math.PI;
     const percent = Math.min(Math.max(value || 0, 0), 100);
     const offset = circumference - (percent / 100) * circumference;
-
-    const getColor = () => {
-        if (percent >= 90) return '#e53935';
-        if (percent >= 70) return '#f57c00';
-        return color;
-    };
+    let stroke = RING_COLORS[color] || color;
+    if (percent >= 90) stroke = 'var(--danger)';
+    else if (percent >= 70) stroke = 'var(--warn)';
 
     return (
-        <div className="circle-progress" style={{ width: size, height: size + 36 }}>
+        <div className="circle-progress" style={{ width: size }}>
             <svg width={size} height={size}>
-                <circle
-                    className="circle-bg"
-                    cx={size / 2}
-                    cy={size / 2}
-                    r={radius}
-                    strokeWidth={strokeWidth}
-                />
+                <circle className="circle-bg" cx={size / 2} cy={size / 2} r={radius} strokeWidth={strokeWidth} />
                 <circle
                     className="circle-fill"
                     cx={size / 2}
                     cy={size / 2}
                     r={radius}
                     strokeWidth={strokeWidth}
-                    style={{
-                        strokeDasharray: circumference,
-                        strokeDashoffset: offset,
-                        stroke: getColor(),
-                    }}
+                    style={{ strokeDasharray: circumference, strokeDashoffset: offset, stroke }}
                 />
             </svg>
             <div className="circle-value">{percent.toFixed(0)}%</div>
@@ -67,29 +56,32 @@ function CircleProgress({ value, label, subLabel, color = '#d87093', size = 90, 
 
 function StorageBar({ mount, used, total }) {
     const percent = total > 0 ? (used / total) * 100 : 0;
-
-    const getBarColor = () => {
-        if (percent >= 90) return 'bar-danger';
-        if (percent >= 70) return 'bar-warning';
-        return 'bar-normal';
-    };
+    let level = 'bar-normal';
+    if (percent >= 90) level = 'bar-danger';
+    else if (percent >= 70) level = 'bar-warning';
 
     return (
         <div className="storage-bar-item">
-            <div className="storage-bar-wrapper">
-                <div className="storage-bar-bg">
-                    <div
-                        className={`storage-bar-fill ${getBarColor()}`}
-                        style={{ width: `${Math.min(percent, 100)}%` }}
-                    />
-                    <div className="storage-bar-text">
-                        <span className="storage-mount">{mount}</span>
-                        <span className="storage-size">{formatBytes(used)} / {formatBytes(total)}</span>
-                    </div>
-                </div>
-                <span className="storage-percent">{percent.toFixed(0)}%</span>
+            <div className="storage-bar-head">
+                <span className="storage-mount" title={mount}>{mount}</span>
+                <span className="storage-size">{formatBytes(used)} / {formatBytes(total)} · {percent.toFixed(0)}%</span>
+            </div>
+            <div className="storage-bar-bg">
+                <div className={`storage-bar-fill ${level}`} style={{ width: `${Math.min(percent, 100)}%` }} />
             </div>
         </div>
+    );
+}
+
+function DashCard({ className, title, extra = null, children }) {
+    return (
+        <section className={`card ${className}`}>
+            <header className="card-header">
+                <h3 className="card-title">{title}</h3>
+                {extra}
+            </header>
+            <div className="dash-card-body">{children}</div>
+        </section>
     );
 }
 
@@ -124,131 +116,103 @@ export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, loadin
     const cpuFreq = cpuSpeed.avg?.toFixed(1) || cpu.speed || '-';
 
     return (
-        <div className="system-monitor-compact">
-            <div className="monitor-row-1">
-                <div className="bot-section bot-section-multi">
-                    {accounts.length === 0 ? (
-                        <div className="bot-summary-block">
-                            <img
-                                className="bot-avatar-sm"
-                                src="https://q1.qlogo.cn/g?b=qq&nk=10000&s=640"
-                                alt="Avatar"
-                            />
-                            <div className="bot-info-sm">
-                                <div className="bot-name-sm">未连接</div>
-                                <div className="bot-status-sm offline">
-                                    <span className="dot"></span>离线
-                                </div>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="bot-cards-row">
-                            {accounts.map((account) => (
-                                <div key={account.self_id} className="bot-card">
-                                    <img
-                                        className="bot-card-avatar"
-                                        src={`https://q1.qlogo.cn/g?b=qq&nk=${account.uin}&s=640`}
-                                        alt="Avatar"
-                                        onError={(event) => {
-                                            event.target.src = 'https://q1.qlogo.cn/g?b=qq&nk=10000&s=640';
-                                        }}
-                                    />
-                                    <div className="bot-card-nick">{account.nickname || account.uin}</div>
-                                    <div className="bot-card-id">{account.uin}</div>
-                                    <div className={`bot-card-status ${account.status === 'offline' ? 'offline' : ''}`}>
-                                        <span className="dot"></span>{account.status === 'offline' ? '离线' : '在线'}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-
-                <div className="row-divider"></div>
-
-                <div className="circles-section">
-                    <CircleProgress
-                        value={cpuUsage}
-                        label="CPU"
-                        subLabel={`${cpuCores}C${cpuThreads}T ${cpuFreq}GHz`}
-                        color="#d87093"
-                    />
-                    <CircleProgress
-                        value={memUsage}
-                        label="内存"
-                        subLabel={`${formatBytes(actualMemUsed)} / ${formatBytes(mem.total)}`}
-                        color="#7c4dff"
-                    />
-                    <CircleProgress
-                        value={mem.swaptotal > 0 ? swapUsage : 0}
-                        label="Swap"
-                        subLabel={mem.swaptotal > 0 ? `${formatBytes(mem.swapused)} / ${formatBytes(mem.swaptotal)}` : '- / -'}
-                        color="#00bcd4"
-                    />
-                </div>
-            </div>
-
-            <div className="monitor-row-2">
-                <div className="sys-info-compact">
-                    <div className="sys-info-grid">
-                        <div className="sys-item">
-                            <span className="sys-label">系统</span>
-                            <span className="sys-text">{os.distro} {os.release}</span>
-                        </div>
-                        <div className="sys-item">
-                            <span className="sys-label">CPU</span>
-                            <span className="sys-text">{cpu.brand || cpu.manufacturer}</span>
-                        </div>
-                        <div className="sys-item">
-                            <span className="sys-label">GPU</span>
-                            <span className="sys-text">{mainGpu?.model || '-'}</span>
-                        </div>
-                        <div className="sys-item">
-                            <span className="sys-label">内存</span>
-                            <span className="sys-text">{formatBytes(mem.total)}</span>
-                        </div>
-                        <div className="sys-item">
-                            <span className="sys-label">Node</span>
-                            <span className="sys-text">{nodeProcess.version} (PID: {nodeProcess.pid})</span>
-                        </div>
+        <div className="dash">
+            <DashCard
+                className="dash-bots"
+                title="机器人账号"
+                extra={accounts.length > 0 ? <span className="field-count">{accounts.length}</span> : null}
+            >
+                {accounts.length === 0 ? (
+                    <div className="dash-empty">
+                        <img src="https://q1.qlogo.cn/g?b=qq&nk=10000&s=100" alt="" />
+                        <span>还没有账号连接</span>
                     </div>
-                </div>
-
-                <div className="storage-network-compact">
-                    <div className="storage-bars">
-                        {fsSize.slice(0, 4).map((fs, idx) => (
-                            <StorageBar
-                                key={idx}
-                                mount={fs.mount}
-                                used={fs.used}
-                                total={fs.size}
-                            />
+                ) : (
+                    <div className="bot-cards-row">
+                        {accounts.map((account) => (
+                            <div key={account.self_id} className="bot-card" title={`${account.nickname || ''}（${account.uin}）`}>
+                                <img
+                                    className="bot-card-avatar"
+                                    src={`https://q1.qlogo.cn/g?b=qq&nk=${account.uin}&s=100`}
+                                    alt=""
+                                    onError={(event) => {
+                                        event.target.src = 'https://q1.qlogo.cn/g?b=qq&nk=10000&s=100';
+                                    }}
+                                />
+                                <span className="bot-card-text">
+                                    <span className="bot-card-nick">{account.nickname || account.uin}</span>
+                                    <span className="bot-card-id">{account.uin}</span>
+                                </span>
+                            </div>
                         ))}
                     </div>
+                )}
+            </DashCard>
 
-                    <div className="network-row">
-                        <div className="speed-item">
-                            <span className="speed-label">下载</span>
-                            <span className="speed-val">{formatSpeed(networkSummary.rx_sec)}</span>
-                        </div>
-                        <div className="speed-item">
-                            <span className="speed-label">上传</span>
-                            <span className="speed-val">{formatSpeed(networkSummary.tx_sec)}</span>
-                        </div>
+            <section className="card dash-stat">
+                <CircleProgress value={cpuUsage} label="CPU" subLabel={`${cpuCores}C${cpuThreads}T · ${cpuFreq}GHz`} color="accent" />
+            </section>
+            <section className="card dash-stat">
+                <CircleProgress
+                    value={memUsage}
+                    label="内存"
+                    subLabel={`${formatBytes(actualMemUsed)} / ${formatBytes(mem.total)}`}
+                    color="violet"
+                />
+            </section>
+            <section className="card dash-stat">
+                <CircleProgress
+                    value={mem.swaptotal > 0 ? swapUsage : 0}
+                    label="Swap"
+                    subLabel={mem.swaptotal > 0 ? `${formatBytes(mem.swapused)} / ${formatBytes(mem.swaptotal)}` : '未启用'}
+                    color="cyan"
+                />
+            </section>
+
+            <DashCard className="dash-sys" title="系统信息">
+                <dl className="kv-list">
+                    <dt>系统</dt>
+                    <dd title={`${os.distro || ''} ${os.release || ''}`}>{os.distro} {os.release}</dd>
+                    <dt>CPU</dt>
+                    <dd title={cpu.brand || cpu.manufacturer}>{cpu.brand || cpu.manufacturer || '-'}</dd>
+                    <dt>GPU</dt>
+                    <dd title={mainGpu?.model}>{mainGpu?.model || '-'}</dd>
+                    <dt>内存</dt>
+                    <dd>{formatBytes(mem.total)}</dd>
+                    <dt>Node</dt>
+                    <dd>{nodeProcess.version || '-'}{nodeProcess.pid ? ` · PID ${nodeProcess.pid}` : ''}</dd>
+                </dl>
+            </DashCard>
+
+            <DashCard className="dash-storage" title="磁盘">
+                <div className="storage-bars">
+                    {fsSize.length === 0 && <span className="dash-empty">暂无数据</span>}
+                    {fsSize.slice(0, 4).map((fs, idx) => (
+                        <StorageBar key={idx} mount={fs.mount} used={fs.used} total={fs.size} />
+                    ))}
+                </div>
+            </DashCard>
+
+            <DashCard className="dash-net" title="网络与运行">
+                <div className="stat-list">
+                    <div className="stat">
+                        <div className="stat-label">↓ 下载</div>
+                        <div className="stat-value">{formatSpeed(networkSummary.rx_sec)}</div>
                     </div>
-
-                    <div className="uptime-row">
-                        <div className="uptime-item">
-                            <span className="uptime-label">系统运行</span>
-                            <span className="uptime-val">{formatUptime(time.uptime)}</span>
-                        </div>
-                        <div className="uptime-item">
-                            <span className="uptime-label">Node运行</span>
-                            <span className="uptime-val">{formatUptime(nodeProcess.uptime)}</span>
-                        </div>
+                    <div className="stat">
+                        <div className="stat-label">↑ 上传</div>
+                        <div className="stat-value">{formatSpeed(networkSummary.tx_sec)}</div>
+                    </div>
+                    <div className="stat">
+                        <div className="stat-label">系统运行</div>
+                        <div className="stat-value">{formatUptime(time.uptime)}</div>
+                    </div>
+                    <div className="stat">
+                        <div className="stat-label">Node 运行</div>
+                        <div className="stat-value">{formatUptime(nodeProcess.uptime)}</div>
                     </div>
                 </div>
-            </div>
+            </DashCard>
         </div>
     );
 }

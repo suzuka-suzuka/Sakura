@@ -41,12 +41,11 @@ const providers = {
 
 const models = {
   models: [
-    { provider: "中转", model: "gpt-x", type: "chat", enabled: true, openaiReasoningEffort: "high" },
-    { provider: "中转", model: "gpt-x", name: "gpt-x-快", type: "chat", enabled: true },
-    { provider: "谷歌", model: "gemini-pro", type: "chat", enabled: true, geminiThinkingLevel: "low", timeoutSeconds: 45 },
-    { provider: "中转", model: "old-model", type: "chat", enabled: false },
-    { provider: "中转", model: "grok-imagine-image", type: "image", enabled: true },
-    { provider: "中转", model: "gpt-image-2", type: "image", enabled: true },
+    { provider: "中转", model: "gpt-x", type: "chat", openaiReasoningEffort: "high" },
+    { provider: "中转", model: "gpt-x", name: "gpt-x-快", type: "chat" },
+    { provider: "谷歌", model: "gemini-pro", type: "chat", geminiThinkingLevel: "low", timeoutSeconds: 45 },
+    { provider: "中转", model: "grok-imagine-image", type: "image" },
+    { provider: "中转", model: "gpt-image-2", type: "image" },
   ],
 };
 
@@ -87,16 +86,16 @@ test("供应商和模型 schema：Key 必填、模型名重复时提示填写别
   assert.deepEqual(EditImageSchema.parse({}).videoModels, []);
 });
 
-test("执行计划按列表顺序尝试模型，同一模型内轮流使用 Key，跳过停用和不存在的模型", async () => {
+test("执行计划按列表顺序尝试模型，同一模型内轮流使用 Key，跳过不存在的模型", async () => {
   const setting = mockSetting({ Providers: providers, Models: models });
   try {
     const router = await importFresh("../lib/AIUtils/providerRouter.js");
-    const plan = router.createRouteExecutionPlan(["gpt-x-快", "missing", "old-model", "gemini-pro"], { selfId: 123 });
+    const plan = router.createRouteExecutionPlan(["gpt-x-快", "missing", "gemini-pro"], { selfId: 123 });
     assert.deepEqual(
       plan.attempts.map((attempt) => `${attempt.target.id}/${attempt.credential.apiKey}`),
       ["gpt-x-快/key-a", "gpt-x-快/key-b", "gemini-pro/gkey"]
     );
-    assert.equal(plan.route.id, "gpt-x-快 → missing → old-model → gemini-pro");
+    assert.equal(plan.route.id, "gpt-x-快 → missing → gemini-pro");
     assert.ok(setting.reads.every((read) => read.scope.selfId === 123));
 
     const gemini = plan.attempts[2].requestConfig;
@@ -170,7 +169,7 @@ test("路由迁移：按优先级展开，参数不同的同名模型自动起�
   assert.equal(byKey.gpt.timeoutSeconds, 600);
   assert.equal(byKey["gpt-xhigh"].openaiReasoningEffort, "xhigh");
   assert.equal(byKey["gpt-xhigh"].timeoutSeconds, 0);
-  assert.equal(byKey["disabled-model"].enabled, false);
+  assert.equal(byKey["disabled-model"], undefined);
   assert.equal(byKey["gpt-image-2"].type, "image");
   assert.equal(ModelsSchema.safeParse({ models: migrated }).success, true);
 });

@@ -17,8 +17,11 @@ export default function Sidebar({
             <div className={`sidebar-backdrop ${open ? 'show' : ''}`} onClick={onClose} />
             <aside className={`sidebar ${open ? 'open' : ''}`} aria-label="导航">
                 <div className="sidebar-brand">
-                    <SakuraLogo size={26} />
-                    <span className="sidebar-brand-text">Sakura</span>
+                    <span className="sidebar-brand-mark"><SakuraLogo size={22} /></span>
+                    <span className="sidebar-brand-text">
+                        <span className="sidebar-brand-name">Sakura</span>
+                        <span className="sidebar-brand-sub">配置面板</span>
+                    </span>
                     <a
                         className="icon-btn sidebar-brand-link"
                         href="https://github.com/suzuka-suzuka/Sakura"

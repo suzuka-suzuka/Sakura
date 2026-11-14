@@ -106,8 +106,12 @@ export function FieldShell({ label, help, extra = null, layout = 'inline', child
 /** 字段在网格里占多宽：full 占满整行，wide 占两格，其余占一格。 */
 function fieldSpan(meta) {
     if (meta.type === 'object' && meta.children) return 'full';
-    if (meta.type === 'array') return 'full';
-    if (['textarea', 'cron', 'commandCost', 'serverDirectory'].includes(meta.uiType)) return 'full';
+    if (meta.type === 'array') {
+        // 对象列表是一格格的卡片，需要整行；标签、模型顺序这类列表占两格就够
+        if (meta.items?.type === 'object' || meta.uiType === 'vertexCredentialList') return 'full';
+        return 'wide';
+    }
+    if (['textarea', 'cron', 'commandCost'].includes(meta.uiType)) return 'full';
     if (meta.type === 'boolean') return 'switch';
     if (meta.type === 'number' || meta.type === 'enum') return 'normal';
     return 'wide';
@@ -127,7 +131,6 @@ export function FieldList({
     variant = 'page',
     anchorScope = '',
     groupByCard = true,
-    header = null,
 }) {
     const groups = useMemo(
         () => (groupByCard ? groupFields(children) : [{ title: '', fields: Object.entries(children || {}) }]),
@@ -147,20 +150,19 @@ export function FieldList({
                     context={context}
                     variant={variant}
                     anchorScope={anchorScope}
-                    header={index === 0 ? header : null}
                 />
             ))}
         </>
     );
 }
 
-function FieldGroup({ title, fields, value, onFieldChange, scopeSelfId, context, variant, anchorScope, header }) {
+export function FieldGroup({ title, help = '', cardId, fields, value, onFieldChange, scopeSelfId, context, variant, anchorScope }) {
     const [showAdvanced, setShowAdvanced] = useState(false);
     const visible = fields.filter(([, meta]) => isFieldVisible(meta, value, context));
     const basic = visible.filter(([, meta]) => !meta.advanced);
     const advanced = visible.filter(([, meta]) => meta.advanced);
 
-    if (visible.length === 0 && !header) return null;
+    if (visible.length === 0) return null;
 
     const renderField = ([key, meta]) => {
         if (meta.type === 'object' && meta.children) {
@@ -216,19 +218,19 @@ function FieldGroup({ title, fields, value, onFieldChange, scopeSelfId, context,
     );
 
     // 只有一个列表字段时，把字段标签提升为卡片标题，避免标题重复
-    const sole = variant === 'page' && fields.length === 1 && !header && visible.length === 1
+    const sole = variant === 'page' && fields.length === 1 && visible.length === 1
         && visible[0][1].type === 'array' ? visible[0] : null;
     if (sole) {
         const [, soleMeta] = sole;
         const count = Array.isArray(value?.[sole[0]]) ? value[sole[0]].length : 0;
         return (
-            <section className="card">
+            <section className="card" id={cardId}>
                 <header className="card-header">
                     <h3 className="card-title">
                         {title || soleMeta.label || soleMeta.description}
-                        {soleMeta.items?.type === 'object' && <span className="field-count">{count}</span>}
-                        <HelpTip text={soleMeta.help} />
+                        <HelpTip text={soleMeta.help || help} />
                     </h3>
+                    {count > 0 && <span className="field-count">{count}</span>}
                 </header>
                 <div className="card-body card-body--bare">
                     <BareFieldContext.Provider value>
@@ -249,11 +251,10 @@ function FieldGroup({ title, fields, value, onFieldChange, scopeSelfId, context,
     }
 
     return (
-        <section className="card">
-            {header}
+        <section className="card" id={cardId}>
             {title && (
                 <header className="card-header">
-                    <h3 className="card-title">{title}</h3>
+                    <h3 className="card-title">{title}<HelpTip text={help} /></h3>
                 </header>
             )}
             <div className="card-body">{body}</div>
@@ -1048,7 +1049,7 @@ function buildEmptyObjectItem(itemMeta) {
 }
 
 /**
- * 对象数组：列表行（标题 + 摘要）+ 右侧抽屉编辑。
+ * 对象数组：一格一张小卡片（标题 + 摘要），点开在右侧抽屉里编辑。
  * getContext(item) 为抽屉里的字段提供额外上下文（例如所选供应商的协议）。
  * renderBadges(item) 在行尾附加状态标签。
  */
@@ -1068,7 +1069,9 @@ function ObjectArrayField({
     const itemMeta = meta.items;
     const [editing, setEditing] = useState(null); // { index, draft } index=-1 表示新增
     const [confirmIndex, setConfirmIndex] = useState(-1);
-    const summaryFields = meta.summary || [];
+    // 没配摘要字段时，用地址/端口这类最能区分各项的字段当摘要
+    const summaryFields = meta.summary
+        || ['url', 'baseURL', 'host', 'port'].filter((key) => itemMeta.children?.[key]).slice(0, 1);
     const fixed = meta.fixed === true;
 
     const openEditor = (index) => {
@@ -1102,74 +1105,95 @@ function ObjectArrayField({
         setConfirmIndex(-1);
     };
 
-    const duplicate = (index) => {
-        const copy = structuredClone(items[index]);
-        onChange([...items.slice(0, index + 1), copy, ...items.slice(index + 1)]);
+    // 每项自带的启用开关（enabled / enable），直接在列表行上切换，不用点进去看
+    const toggleKey = ['enabled', 'enable'].find((key) => itemMeta.children?.[key]?.type === 'boolean') || null;
+    const toggleDefault = toggleKey ? itemMeta.children[toggleKey].default !== false : true;
+    const isOn = (item) => (toggleKey ? (item?.[toggleKey] ?? toggleDefault) !== false : true);
+    const setOn = (index, on) => {
+        const next = [...items];
+        next[index] = { ...items[index], [toggleKey]: on };
+        onChange(next);
+    };
+
+    // 复制不常用，放在编辑抽屉里：把当前草稿作为新项插到原项后面
+    const duplicate = (draft) => {
+        const context = getContext?.(draft) || {};
+        const cleaned = resetHiddenFields(itemMeta.children, draft, context);
+        const at = editing.index + 1;
+        onChange([...items.slice(0, at), cleaned, ...items.slice(at)]);
+        setEditing(null);
     };
 
     return (
         <FieldShell label={displayName} help={help} layout="stack" extra={<span className="field-count">{items.length}</span>}>
-            <div ref={listRef} className={`item-list ${dragging ? 'is-sorting' : ''}`}>
-                {items.length === 0 && (
-                    <div className="item-list-empty">{emptyText || '还没有添加任何项'}</div>
-                )}
+            <div ref={listRef} className={`tile-grid ${dragging ? 'is-sorting' : ''}`}>
                 {items.map((item, index) => {
                     const summaries = summaryFields
                         .map((field) => formatSummaryValue(itemMeta.children?.[field], item?.[field]))
                         .filter(Boolean);
-                    const disabled = item?.enabled === false;
+                    const badges = renderBadges?.(item);
+                    const disabled = !isOn(item);
+                    const confirming = confirmIndex === index;
                     return (
-                        <div key={index} className={`item-row ${disabled ? 'is-disabled' : ''}`} {...rowProps(index)}>
-                            {!fixed && items.length > 1 && (
-                                <button type="button" className="drag-handle" {...handleProps(index)}>
-                                    <Icon name="grip" size={16} />
-                                </button>
-                            )}
-                            <button type="button" className="item-main" onClick={() => openEditor(index)}>
-                                <span className="item-title">{itemTitle(item, index, meta.nameField)}</span>
-                                {summaries.length > 0 && (
-                                    <span className="item-summary">
-                                        {summaries.map((text, i) => <span key={i} className="chip">{text}</span>)}
-                                    </span>
-                                )}
-                                {renderBadges?.(item)}
-                                {disabled && <span className="chip chip-muted">已停用</span>}
+                        <div
+                            key={index}
+                            className={`tile ${disabled ? 'is-disabled' : ''} ${confirming ? 'is-confirming' : ''}`}
+                            onClick={() => { if (!confirming) openEditor(index); }}
+                            {...rowProps(index)}
+                        >
+                            <button type="button" className="tile-title" title={itemTitle(item, index, meta.nameField)}>
+                                {itemTitle(item, index, meta.nameField)}
                             </button>
-                            {confirmIndex === index ? (
-                                <div className="item-confirm">
-                                    <span>确定删除？</span>
+                            <div className="tile-tools" onClick={(event) => event.stopPropagation()}>
+                                {!fixed && items.length > 1 && (
+                                    <button type="button" className="drag-handle" {...handleProps(index)}>
+                                        <Icon name="grip" size={15} />
+                                    </button>
+                                )}
+                                {!fixed && !confirming && (
+                                    <button type="button" className="icon-btn icon-btn-danger tile-delete" title="删除" aria-label="删除" onClick={() => setConfirmIndex(index)}>
+                                        <Icon name="trash" size={14} />
+                                    </button>
+                                )}
+                                {toggleKey && (
+                                    <button
+                                        type="button"
+                                        role="switch"
+                                        aria-checked={!disabled}
+                                        aria-label={disabled ? '已停用，点击启用' : '已启用，点击停用'}
+                                        title={disabled ? '已停用' : '已启用'}
+                                        className={`toggle toggle-sm ${disabled ? '' : 'active'}`}
+                                        onClick={() => setOn(index, disabled)}
+                                    >
+                                        <span className="toggle-knob" />
+                                    </button>
+                                )}
+                            </div>
+                            {confirming ? (
+                                <div className="tile-confirm" onClick={(event) => event.stopPropagation()}>
+                                    <span>删除这一项？</span>
                                     <button type="button" className="btn btn-danger btn-xs" onClick={() => remove(index)}>删除</button>
                                     <button type="button" className="btn btn-ghost btn-xs" onClick={() => setConfirmIndex(-1)}>取消</button>
                                 </div>
-                            ) : (
-                                <div className="item-actions">
-                                    {!fixed && (
-                                        <>
-                                            <button type="button" className="icon-btn" title="复制" aria-label="复制" onClick={() => duplicate(index)}>
-                                                <Icon name="copy" size={15} />
-                                            </button>
-                                        </>
-                                    )}
-                                    <button type="button" className="icon-btn" title="编辑" aria-label="编辑" onClick={() => openEditor(index)}>
-                                        <Icon name="pencil" size={15} />
-                                    </button>
-                                    {!fixed && (
-                                        <button type="button" className="icon-btn icon-btn-danger" title="删除" aria-label="删除" onClick={() => setConfirmIndex(index)}>
-                                            <Icon name="trash" size={15} />
-                                        </button>
-                                    )}
+                            ) : (summaries.length > 0 || badges) && (
+                                <div className="tile-meta">
+                                    {summaries.map((text, i) => <span key={i} className="chip">{text}</span>)}
+                                    {badges}
                                 </div>
                             )}
                         </div>
                     );
                 })}
                 {!fixed && (
-                    <button type="button" className="item-add" onClick={() => openEditor(-1)}>
+                    <button type="button" className="tile tile-add" onClick={() => openEditor(-1)}>
                         <Icon name="plus" size={16} />
                         {addLabel}
                     </button>
                 )}
             </div>
+            {items.length === 0 && (
+                <div className="tile-empty">{emptyText || '还没有添加任何项'}</div>
+            )}
 
             {editing && (
                 <ItemDrawer
@@ -1182,6 +1206,7 @@ function ObjectArrayField({
                     submitLabel={editing.index >= 0 ? '完成' : '添加'}
                     onCancel={() => setEditing(null)}
                     onConfirm={commit}
+                    onDuplicate={editing.index >= 0 && !fixed ? duplicate : null}
                     scopeSelfId={scopeSelfId}
                 />
             )}
@@ -1189,7 +1214,7 @@ function ObjectArrayField({
     );
 }
 
-function ItemDrawer({ title, itemMeta, initialDraft, getContext, submitLabel, onCancel, onConfirm, scopeSelfId }) {
+function ItemDrawer({ title, itemMeta, initialDraft, getContext, submitLabel, onCancel, onConfirm, onDuplicate, scopeSelfId }) {
     const [draft, setDraft] = useState(initialDraft);
     const context = getContext?.(draft) || {};
     const formRef = useRef(null);
@@ -1236,6 +1261,12 @@ function ItemDrawer({ title, itemMeta, initialDraft, getContext, submitLabel, on
                     </BareFieldContext.Provider>
                 </div>
                 <footer className="drawer-footer">
+                    {onDuplicate && (
+                        <button type="button" className="btn btn-ghost drawer-footer-start" title="按当前填写的内容另存一份新的" onClick={() => onDuplicate(draft)}>
+                            <Icon name="copy" size={15} />
+                            另存为副本
+                        </button>
+                    )}
                     <button type="button" className="btn btn-ghost" onClick={onCancel}>取消</button>
                     <button type="submit" className="btn btn-primary">{submitLabel}</button>
                 </footer>
@@ -1339,7 +1370,7 @@ function ModelListField({ displayName, help, value, onChange, uiType, scopeSelfI
                     const wrongProtocol = info && protocolFilter && providerDetails?.[info.provider]
                         && providerDetails[info.provider].protocol !== protocolFilter;
                     return (
-                        <div key={name} className={`model-pill ${missing || wrongKind || wrongProtocol ? 'is-invalid' : ''} ${info?.enabled === false ? 'is-disabled' : ''}`} {...rowProps(index)}>
+                        <div key={name} className={`model-pill ${missing || wrongKind || wrongProtocol ? 'is-invalid' : ''}`} {...rowProps(index)}>
                             {items.length > 1 && (
                                 <button type="button" className="drag-handle" {...handleProps(index)}>
                                     <Icon name="grip" size={15} />
@@ -1351,7 +1382,6 @@ function ModelListField({ displayName, help, value, onChange, uiType, scopeSelfI
                             {missing && <span className="chip chip-warn">模型不存在</span>}
                             {wrongKind && <span className="chip chip-warn">用途不符</span>}
                             {wrongProtocol && <span className="chip chip-warn">不是 {protocolFilter === 'gemini' ? 'Gemini' : protocolFilter} 供应商，会被跳过</span>}
-                            {info?.enabled === false && <span className="chip chip-muted">已停用</span>}
                             <span className="model-pill-actions">
                                 <button type="button" className="icon-btn icon-btn-danger" aria-label="移除" title="移除" onClick={() => onChange(items.filter((item) => item !== name))}>
                                     <Icon name="x" size={14} />
@@ -1374,7 +1404,7 @@ function ModelListField({ displayName, help, value, onChange, uiType, scopeSelfI
                         <option value="">{available.length > 0 ? '选择要添加的模型…' : '没有更多可选的模型'}</option>
                         {available.map((name) => (
                             <option key={name} value={name}>
-                                {name}{details?.[name]?.provider ? ` · ${details[name].provider}` : ''}{details?.[name]?.enabled === false ? '（已停用）' : ''}
+                                {name}{details?.[name]?.provider ? ` · ${details[name].provider}` : ''}
                             </option>
                         ))}
                     </select>

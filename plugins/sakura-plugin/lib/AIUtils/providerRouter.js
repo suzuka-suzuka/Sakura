@@ -274,8 +274,6 @@ export function createRouteExecutionPlan(reference, options = {}) {
       missing.push(name);
       continue;
     }
-    if (entry.enabled === false) continue;
-
     const provider = providerMap.get(entry.provider);
     if (!provider) {
       logger.warn(`[AI Router] 模型 ${name} 引用了不存在的供应商 ${entry.provider}`);
@@ -336,7 +334,6 @@ export function resolveRouteReference(routeReference, options = {}) {
   if (typeof options.targetMatches !== "function") return [reference];
 
   const matched = sameKind.filter((entry) => {
-    if (entry.enabled === false) return false;
     const provider = providerMap.get(entry.provider);
     if (!provider) return false;
     return options.targetMatches({

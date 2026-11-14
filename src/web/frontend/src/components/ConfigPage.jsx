@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
-import { FieldList, HelpTip } from './ConfigField';
+import { buildFieldCards } from '../utils/fieldCards';
+import CardBoard from './CardBoard';
 import Icon from './Icon';
 import { DraftContext } from '../hooks/draftContext';
 
@@ -28,10 +29,10 @@ function describeIssue(issue, meta) {
 export function PageHeader({ title, icon = null, actions }) {
     return (
         <header className="page-header">
-            <h1 className="page-title">
-                {icon && <span className="page-title-icon"><Icon name={icon} size={18} /></span>}
-                {title}
-            </h1>
+            <div className="page-heading">
+                {icon && <span className="page-title-icon"><Icon name={icon} size={20} /></span>}
+                <h1 className="page-title">{title}</h1>
+            </div>
             {actions && <div className="page-actions">{actions}</div>}
         </header>
     );
@@ -59,13 +60,13 @@ export function SaveBar({ dirtyCount, saving, onSave, onDiscard, label }) {
     );
 }
 
-function IssueList({ issues, meta }) {
+function IssueList({ issues, meta, title = '' }) {
     if (!issues || issues.length === 0) return null;
     return (
         <div className="callout callout-error" role="alert">
             <Icon name="alert" size={16} />
             <div>
-                <div className="callout-title">保存失败，请修改以下内容</div>
+                <div className="callout-title">{title ? `${title}：` : ''}保存失败，请修改以下内容</div>
                 <ul>
                     {issues.slice(0, 8).map((issue, index) => <li key={index}>{describeIssue(issue, meta)}</li>)}
                 </ul>
@@ -132,59 +133,77 @@ export function PluginConfigPage({
         setIssues({});
     };
 
-    const showModuleHeadings = modules.length > 1;
+    const cards = [];
+    for (const module of modules) {
+        const schema = schemas?.[module];
+        const value = moduleValues[module];
+        if (!schema || !value) {
+            cards.push({
+                key: `${module}:loading`,
+                weight: 3,
+                node: (
+                    <section className="card card-loading">
+                        <div className="skeleton" />
+                        <div className="skeleton short" />
+                    </section>
+                ),
+            });
+            continue;
+        }
+        const moduleTitle = schema.label || schema.description || module;
+        // 模块名和页面标题一样时不再重复显示
+        const title = moduleTitle !== page.title ? moduleTitle : '';
+        if (!schema.children) {
+            cards.push({
+                key: module,
+                wide: true,
+                weight: 6,
+                node: (
+                    <section className="card">
+                        {title && <header className="card-header"><h3 className="card-title">{title}</h3></header>}
+                        <div className="card-body">
+                            <textarea
+                                className="field-input field-textarea code"
+                                value={JSON.stringify(value, null, 2)}
+                                onChange={(event) => {
+                                    try {
+                                        updateModule(module, JSON.parse(event.target.value));
+                                    } catch { /* 输入中途的 JSON 无效时忽略 */ }
+                                }}
+                            />
+                        </div>
+                    </section>
+                ),
+            });
+            continue;
+        }
+        cards.push(...buildFieldCards({
+            keyPrefix: module,
+            children: schema.children,
+            value,
+            onFieldChange: (key, next) => updateModule(module, { ...value, [key]: next }),
+            scopeSelfId,
+            anchorScope: module,
+            title,
+            help: schema.help,
+            cardId: `module-${module}`,
+        }));
+    }
 
     return (
         <DraftContext.Provider value={moduleValues}>
             <div className="page">
                 <PageHeader title={page.title} icon={page.icon || 'puzzle'} actions={headerActions} />
-                {modules.map((module) => {
-                    const schema = schemas?.[module];
-                    const value = moduleValues[module];
-                    if (!schema || !value) {
-                        return (
-                            <section key={module} className="card card-loading">
-                                <div className="skeleton" />
-                                <div className="skeleton short" />
-                            </section>
-                        );
-                    }
-                    const title = schema.label || schema.description || module;
-                    return (
-                        <div key={module} className="module" id={`module-${module}`}>
-                            {showModuleHeadings && Object.keys(schema.children || {}).length > 1 && (
-                                <h2 className="module-title">
-                                    {title}
-                                    <HelpTip text={schema.help} />
-                                </h2>
-                            )}
-                            <IssueList issues={issues[module]} meta={schema} />
-                            {schema.children ? (
-                                <FieldList
-                                    children={schema.children}
-                                    value={value}
-                                    onFieldChange={(key, next) => updateModule(module, { ...value, [key]: next })}
-                                    scopeSelfId={scopeSelfId}
-                                    anchorScope={module}
-                                />
-                            ) : (
-                                <section className="card">
-                                    <div className="card-body">
-                                        <textarea
-                                            className="field-input field-textarea code"
-                                            value={JSON.stringify(value, null, 2)}
-                                            onChange={(event) => {
-                                                try {
-                                                    updateModule(module, JSON.parse(event.target.value));
-                                                } catch { /* 输入中途的 JSON 无效时忽略 */ }
-                                            }}
-                                        />
-                                    </div>
-                                </section>
-                            )}
-                        </div>
-                    );
-                })}
+                <CardBoard cards={cards}>
+                    {modules.map((module) => (
+                        <IssueList
+                            key={module}
+                            issues={issues[module]}
+                            meta={schemas?.[module]}
+                            title={modules.length > 1 ? (schemas?.[module]?.label || module) : ''}
+                        />
+                    ))}
+                </CardBoard>
                 <SaveBar
                     dirtyCount={changed.length}
                     saving={saving}
@@ -243,48 +262,42 @@ export function ObjectConfigPage({
         );
     }
 
+    const cards = sections.flatMap((section) => {
+        if (section.key == null) {
+            return buildFieldCards({
+                keyPrefix: '__root__',
+                children: section.meta.children,
+                value,
+                onFieldChange: (key, next) => setDraft({ ...value, [key]: next }),
+                scopeSelfId,
+                anchorScope: 'root',
+                groupByCard: false,
+                title: section.title,
+                help: section.help,
+            });
+        }
+        const sectionValue = value?.[section.key] || {};
+        return buildFieldCards({
+            keyPrefix: section.key,
+            children: section.meta.children,
+            value: sectionValue,
+            onFieldChange: (key, next) => setDraft({ ...value, [section.key]: { ...sectionValue, [key]: next } }),
+            scopeSelfId,
+            anchorScope: section.key,
+            groupByCard: false,
+            title: section.title,
+            help: section.help,
+            cardId: `section-${section.key}`,
+        });
+    });
+
     return (
         <div className="page">
             <PageHeader title={title} icon={icon} actions={headerActions} />
-            {warnings}
-            <IssueList issues={issues} meta={schema} />
-            {sections.map((section) => {
-                if (section.key == null) {
-                    return (
-                        <FieldList
-                            key="__root__"
-                            children={section.meta.children}
-                            value={value}
-                            onFieldChange={(key, next) => setDraft({ ...value, [key]: next })}
-                            scopeSelfId={scopeSelfId}
-                            anchorScope="root"
-                            groupByCard={false}
-                            header={section.title ? (
-                                <header className="card-header">
-                                    <h3 className="card-title">{section.title}<HelpTip text={section.help} /></h3>
-                                </header>
-                            ) : null}
-                        />
-                    );
-                }
-                const sectionValue = value?.[section.key] || {};
-                return (
-                    <FieldList
-                        key={section.key}
-                        children={section.meta.children}
-                        value={sectionValue}
-                        onFieldChange={(key, next) => setDraft({ ...value, [section.key]: { ...sectionValue, [key]: next } })}
-                        scopeSelfId={scopeSelfId}
-                        anchorScope={section.key}
-                        groupByCard={false}
-                        header={(
-                            <header className="card-header" id={`section-${section.key}`}>
-                                <h3 className="card-title">{section.title}<HelpTip text={section.help} /></h3>
-                            </header>
-                        )}
-                    />
-                );
-            })}
+            <CardBoard cards={cards}>
+                {warnings}
+                <IssueList issues={issues} meta={schema} />
+            </CardBoard>
             <SaveBar dirtyCount={dirty ? 1 : 0} saving={saving} onSave={save} onDiscard={() => { setDraft(null); setIssues(null); }} label="有未保存的修改" />
         </div>
     );
