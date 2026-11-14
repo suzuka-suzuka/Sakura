@@ -5,6 +5,7 @@ import Icon from './Icon';
 import { readAuthToken } from '../utils/authStorage';
 import { useDynamicOptions } from '../hooks/useDynamicOptions';
 import { moveItem, useDragReorder } from '../hooks/useDragReorder';
+import { TracksContext, packRows, trackColumn, useMeasuredTracks } from '../utils/tracks';
 import {
     fieldAnchorId,
     formatSummaryValue,
@@ -103,18 +104,46 @@ export function FieldShell({ label, help, extra = null, layout = 'inline', child
     );
 }
 
-/** 字段在网格里占多宽：full 占满整行，wide 占两格，其余占一格。 */
-function fieldSpan(meta) {
+/** 选项少且短的枚举用分段选择 */
+function isSegmented(meta) {
+    return meta.type === 'enum' && Array.isArray(meta.options)
+        && meta.options.length <= 4
+        && meta.options.every((opt) => (meta.optionLabels?.[opt] || opt).length <= 8);
+}
+
+/** 字段占几轨：full 占整行，wide 占两轨，short 占一轨。 */
+function fieldSize(meta) {
     if (meta.type === 'object' && meta.children) return 'full';
     if (meta.type === 'array') {
-        // 对象列表是一格格的卡片，需要整行；标签、模型顺序这类列表占两格就够
+        // 对象列表是一格格的卡片，需要整行；标签、模型顺序这类列表占两轨就够
         if (meta.items?.type === 'object' || meta.uiType === 'vertexCredentialList') return 'full';
         return 'wide';
     }
     if (['textarea', 'cron', 'commandCost'].includes(meta.uiType)) return 'full';
-    if (meta.type === 'boolean') return 'switch';
-    if (meta.type === 'number' || meta.type === 'enum') return 'normal';
+    if (meta.type === 'boolean' || meta.type === 'number') return 'short';
+    if (meta.type === 'enum') {
+        if (!isSegmented(meta)) return 'short';
+        // 分段选择的文字加起来太长时，一轨放不下
+        const length = meta.options.reduce((sum, opt) => sum + String(meta.optionLabels?.[opt] || opt).length, 0);
+        return length > 10 ? 'wide' : 'short';
+    }
     return 'wide';
+}
+
+const MASTER_SWITCH_KEYS = ['enable', 'enabled'];
+
+/** 按竖轨摆放一组字段：每行占满，框的左右边缘都落在轨线上。 */
+function TrackGrid({ fields, renderField, className = '' }) {
+    const tracks = useContext(TracksContext) || 2;
+    const cells = packRows(fields.map(([key, meta]) => ({ key, meta, size: fieldSize(meta) })), tracks);
+    return (
+        <div className={`track-grid tracks-${tracks} ${className}`}>
+            {cells.map((cell) => renderField(
+                [cell.key, cell.meta],
+                { gridRow: cell.row + 1, gridColumn: trackColumn(cell.start, cell.span) }
+            ))}
+        </div>
+    );
 }
 
 /**
@@ -159,15 +188,19 @@ export function FieldList({
 export function FieldGroup({ title, help = '', cardId, fields, value, onFieldChange, scopeSelfId, context, variant, anchorScope }) {
     const [showAdvanced, setShowAdvanced] = useState(false);
     const visible = fields.filter(([, meta]) => isFieldVisible(meta, value, context));
-    const basic = visible.filter(([, meta]) => !meta.advanced);
     const advanced = visible.filter(([, meta]) => meta.advanced);
+    // 模块的总开关放到卡片标题右边，卡片里不再单独占一格
+    const master = variant === 'page' && title
+        ? visible.find(([key, meta]) => !meta.advanced && meta.type === 'boolean' && MASTER_SWITCH_KEYS.includes(key)) || null
+        : null;
+    const basic = visible.filter((field) => !field[1].advanced && field !== master);
 
     if (visible.length === 0) return null;
 
-    const renderField = ([key, meta]) => {
+    const renderField = ([key, meta], style) => {
         if (meta.type === 'object' && meta.children) {
             return (
-                <div key={key} className="nested-card field-span--full" id={anchorScope ? fieldAnchorId(anchorScope, key) : undefined}>
+                <div key={key} className="nested-card" style={style} id={anchorScope ? fieldAnchorId(anchorScope, key) : undefined}>
                     <div className="nested-card-title">
                         {meta.label || meta.description || key}
                         <HelpTip text={meta.help} />
@@ -185,7 +218,12 @@ export function FieldGroup({ title, help = '', cardId, fields, value, onFieldCha
             );
         }
         return (
-            <div key={key} className={`field-anchor field-span--${fieldSpan(meta)}`} id={anchorScope ? fieldAnchorId(anchorScope, key) : undefined}>
+            <div
+                key={key}
+                className={`field-anchor ${meta.type === 'boolean' ? 'field-anchor--switch' : ''}`}
+                style={style}
+                id={anchorScope ? fieldAnchorId(anchorScope, key) : undefined}
+            >
                 <ConfigField
                     name={key}
                     meta={meta}
@@ -200,7 +238,7 @@ export function FieldGroup({ title, help = '', cardId, fields, value, onFieldCha
 
     const body = (
         <>
-            {basic.length > 0 && <div className="field-grid">{basic.map(renderField)}</div>}
+            {basic.length > 0 && <TrackGrid fields={basic} renderField={renderField} />}
             {advanced.length > 0 && (
                 <>
                     <button
@@ -211,7 +249,7 @@ export function FieldGroup({ title, help = '', cardId, fields, value, onFieldCha
                         <Icon name="chevronDown" size={15} />
                         {showAdvanced ? '收起高级选项' : `高级选项（${advanced.length}）`}
                     </button>
-                    {showAdvanced && <div className="field-grid advanced-fields">{advanced.map(renderField)}</div>}
+                    {showAdvanced && <TrackGrid fields={advanced} renderField={renderField} className="advanced-fields" />}
                 </>
             )}
         </>
@@ -255,9 +293,25 @@ export function FieldGroup({ title, help = '', cardId, fields, value, onFieldCha
             {title && (
                 <header className="card-header">
                     <h3 className="card-title">{title}<HelpTip text={help} /></h3>
+                    {master && (
+                        <div className="card-switch field-anchor" id={anchorScope ? fieldAnchorId(anchorScope, master[0]) : undefined}>
+                            <HelpTip text={master[1].help} />
+                            <button
+                                type="button"
+                                role="switch"
+                                aria-checked={Boolean(value?.[master[0]])}
+                                aria-label={master[1].label || master[1].description || '启用'}
+                                title={master[1].label || master[1].description || '启用'}
+                                className={`toggle ${value?.[master[0]] ? 'active' : ''}`}
+                                onClick={() => onFieldChange(master[0], !value?.[master[0]])}
+                            >
+                                <span className="toggle-knob" />
+                            </button>
+                        </div>
+                    )}
                 </header>
             )}
-            <div className="card-body">{body}</div>
+            {(basic.length > 0 || advanced.length > 0) && <div className="card-body">{body}</div>}
         </section>
     );
 }
@@ -291,7 +345,7 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
     }
 
     if (type === 'enum' && options) {
-        if (options.length <= 4 && options.every((opt) => (meta.optionLabels?.[opt] || opt).length <= 8)) {
+        if (isSegmented(meta)) {
             return (
                 <FieldShell label={displayName} help={help}>
                     <div className="segmented" role="radiogroup" aria-label={displayName}>
@@ -485,7 +539,7 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
     return (
         <FieldShell label={displayName} help={help}>
             {isSecret ? (
-                <PasswordField value={value} onChange={onChange} placeholder={meta.placeholder} />
+                <SecretInput value={value} onChange={onChange} placeholder={meta.placeholder || undefined} />
             ) : (
                 <DraftInput
                     type="text"
@@ -506,29 +560,27 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
     );
 }
 
-function PasswordField({ value, onChange, placeholder }) {
-    const [show, setShow] = useState(false);
+// 用样式遮挡而不是 password 类型：浏览器不会往里自动填登录密码，也不会弹“保存密码”
+const MASK_BY_STYLE = typeof CSS !== 'undefined' && Boolean(CSS.supports?.('-webkit-text-security', 'disc'));
 
+/** 密钥输入框：平时显示成圆点，点进去才是明文，方便核对粘贴的内容。 */
+function SecretInput({ value, onChange, onBlur, className = 'field-input', ...rest }) {
+    const [focused, setFocused] = useState(false);
     return (
-        <div className="input-with-action">
-            <input
-                type={show ? 'text' : 'password'}
-                className="field-input"
-                value={value ?? ''}
-                placeholder={placeholder || undefined}
-                autoComplete="off"
-                onChange={(e) => onChange(e.target.value)}
-            />
-            <button
-                type="button"
-                className="icon-btn"
-                onClick={() => setShow(!show)}
-                title={show ? '隐藏' : '显示'}
-                aria-label={show ? '隐藏' : '显示'}
-            >
-                <Icon name={show ? 'eyeOff' : 'eye'} size={16} />
-            </button>
-        </div>
+        <input
+            {...rest}
+            type={MASK_BY_STYLE || focused ? 'text' : 'password'}
+            className={`${className} input-secret ${focused ? '' : 'is-masked'}`}
+            value={value ?? ''}
+            autoComplete="off"
+            spellCheck={false}
+            onFocus={() => setFocused(true)}
+            onBlur={(event) => {
+                setFocused(false);
+                onBlur?.(event);
+            }}
+            onChange={(event) => onChange(event.target.value)}
+        />
     );
 }
 
@@ -567,20 +619,21 @@ function ServerDirectoryField({ displayName, help, value, onChange }) {
 
     return (
         <FieldShell label={displayName} help={help}>
-            <div className="server-directory-input">
+            <div className="input-box">
                 <input
                     type="text"
-                    className="field-input"
                     value={value ?? ''}
                     placeholder="例如 D:\\code\\Sakura"
                     onChange={(event) => onChange(event.target.value)}
                 />
                 <button
                     type="button"
-                    className="btn btn-secondary"
+                    className="input-box-btn"
+                    title="浏览服务器目录"
+                    aria-label="浏览服务器目录"
                     onClick={() => setShowBrowser(true)}
                 >
-                    浏览
+                    <Icon name="folder" size={16} />
                 </button>
             </div>
             {showBrowser && (
@@ -1124,9 +1177,13 @@ function ObjectArrayField({
         setEditing(null);
     };
 
+    // 格子和字段共用同一组竖轨，一轨一个
+    const tracks = useContext(TracksContext) || 2;
+    const slot = (index) => ({ gridColumn: trackColumn(index % tracks) });
+
     return (
         <FieldShell label={displayName} help={help} layout="stack" extra={<span className="field-count">{items.length}</span>}>
-            <div ref={listRef} className={`tile-grid ${dragging ? 'is-sorting' : ''}`}>
+            <div ref={listRef} className={`tile-grid tracks-${tracks} ${dragging ? 'is-sorting' : ''}`}>
                 {items.map((item, index) => {
                     const summaries = summaryFields
                         .map((field) => formatSummaryValue(itemMeta.children?.[field], item?.[field]))
@@ -1138,6 +1195,7 @@ function ObjectArrayField({
                         <div
                             key={index}
                             className={`tile ${disabled ? 'is-disabled' : ''} ${confirming ? 'is-confirming' : ''}`}
+                            style={slot(index)}
                             onClick={() => { if (!confirming) openEditor(index); }}
                             {...rowProps(index)}
                         >
@@ -1185,7 +1243,7 @@ function ObjectArrayField({
                     );
                 })}
                 {!fixed && (
-                    <button type="button" className="tile tile-add" onClick={() => openEditor(-1)}>
+                    <button type="button" className="tile tile-add" style={slot(items.length)} onClick={() => openEditor(-1)}>
                         <Icon name="plus" size={16} />
                         {addLabel}
                     </button>
@@ -1218,6 +1276,8 @@ function ItemDrawer({ title, itemMeta, initialDraft, getContext, submitLabel, on
     const [draft, setDraft] = useState(initialDraft);
     const context = getContext?.(draft) || {};
     const formRef = useRef(null);
+    const bodyRef = useRef(null);
+    const tracks = useMeasuredTracks(bodyRef);
 
     useEffect(() => {
         const handleKeyDown = (event) => {
@@ -1248,17 +1308,19 @@ function ItemDrawer({ title, itemMeta, initialDraft, getContext, submitLabel, on
                         <Icon name="x" size={18} />
                     </button>
                 </header>
-                <div className="drawer-body">
-                    <BareFieldContext.Provider value={false}>
-                    <FieldList
-                        children={itemMeta.children}
-                        value={draft}
-                        onFieldChange={(key, next) => setDraft((prev) => ({ ...prev, [key]: next }))}
-                        scopeSelfId={scopeSelfId}
-                        context={context}
-                        variant="drawer"
-                    />
-                    </BareFieldContext.Provider>
+                <div ref={bodyRef} className="drawer-body">
+                    <TracksContext.Provider value={tracks}>
+                        <BareFieldContext.Provider value={false}>
+                            <FieldList
+                                children={itemMeta.children}
+                                value={draft}
+                                onFieldChange={(key, next) => setDraft((prev) => ({ ...prev, [key]: next }))}
+                                scopeSelfId={scopeSelfId}
+                                context={context}
+                                variant="drawer"
+                            />
+                        </BareFieldContext.Provider>
+                    </TracksContext.Provider>
                 </div>
                 <footer className="drawer-footer">
                     {onDuplicate && (
@@ -1422,15 +1484,7 @@ function ModelListField({ displayName, help, value, onChange, uiType, scopeSelfI
 /** API Key 列表：每个 Key 一行，默认隐藏。 */
 function SecretListField({ displayName, help, value, onChange }) {
     const items = Array.isArray(value) ? value : [];
-    const [visible, setVisible] = useState(() => new Set());
     const [draft, setDraft] = useState('');
-
-    const toggle = (index) => setVisible((prev) => {
-        const next = new Set(prev);
-        if (next.has(index)) next.delete(index);
-        else next.add(index);
-        return next;
-    });
 
     const add = () => {
         const text = draft.trim();
@@ -1443,36 +1497,35 @@ function SecretListField({ displayName, help, value, onChange }) {
         <FieldShell label={displayName} help={help} layout="stack" extra={<span className="field-count">{items.length}</span>}>
             <div className="secret-list">
                 {items.map((secret, index) => (
-                    <div key={index} className="input-with-action">
-                        <span className="secret-index">{index + 1}</span>
-                        <input
-                            type={visible.has(index) ? 'text' : 'password'}
-                            className="field-input"
+                    <div key={index} className="input-box">
+                        <span className="input-box-prefix">{index + 1}</span>
+                        <SecretInput
+                            className=""
                             value={secret}
-                            autoComplete="off"
-                            onChange={(event) => {
+                            onChange={(text) => {
                                 const next = [...items];
-                                next[index] = event.target.value;
+                                next[index] = text;
                                 onChange(next);
                             }}
                         />
-                        <button type="button" className="icon-btn" aria-label={visible.has(index) ? '隐藏' : '显示'} onClick={() => toggle(index)}>
-                            <Icon name={visible.has(index) ? 'eyeOff' : 'eye'} size={16} />
-                        </button>
-                        <button type="button" className="icon-btn icon-btn-danger" aria-label="删除" onClick={() => onChange(items.filter((_, i) => i !== index))}>
-                            <Icon name="trash" size={16} />
+                        <button
+                            type="button"
+                            className="input-box-btn input-box-btn--danger"
+                            title="删除"
+                            aria-label="删除"
+                            onClick={() => onChange(items.filter((_, i) => i !== index))}
+                        >
+                            <Icon name="trash" size={15} />
                         </button>
                     </div>
                 ))}
-                <div className="input-with-action">
-                    <span className="secret-index"><Icon name="key" size={14} /></span>
-                    <input
-                        type="password"
-                        className="field-input"
+                <div className="input-box">
+                    <span className="input-box-prefix"><Icon name="key" size={14} /></span>
+                    <SecretInput
+                        className=""
                         value={draft}
-                        autoComplete="off"
                         placeholder="粘贴新的 Key，按回车添加"
-                        onChange={(event) => setDraft(event.target.value)}
+                        onChange={setDraft}
                         onKeyDown={(event) => {
                             if (event.key === 'Enter') {
                                 event.preventDefault();
@@ -1614,7 +1667,7 @@ function VertexCredentialListField({ displayName, help, value, onChange }) {
  * 可输入的下拉框：点开时列出全部选项，输入后按关键字筛选，也允许填列表外的值。
  * 不用原生 datalist——它会按输入框里已有的值过滤，已经填了模型名时下拉几乎是空的。
  */
-function Combobox({ value, options, onChange, disabled = false, loading = false, placeholder, emptyText = '没有匹配的选项' }) {
+function Combobox({ value, options, onChange, disabled = false, loading = false, placeholder, emptyText = '没有匹配的选项', action = null }) {
     const inputRef = useRef(null);
     const listRef = useRef(null);
     const listId = useId();
@@ -1705,7 +1758,7 @@ function Combobox({ value, options, onChange, disabled = false, loading = false,
     }
 
     return (
-        <div className="combobox">
+        <div className={`combobox ${action ? 'has-action' : ''}`}>
             <input
                 ref={inputRef}
                 className="field-input"
@@ -1730,6 +1783,7 @@ function Combobox({ value, options, onChange, disabled = false, loading = false,
                     }
                 }}
             />
+            {action}
             <button
                 type="button"
                 className="combobox-toggle"
@@ -1825,27 +1879,29 @@ function ModelSelectField({ displayName, help, value, onChange, providerId, scop
             label={displayName}
             help={help}
         >
-            <div className="input-with-action">
-                <Combobox
-                    value={value ?? ''}
-                    options={models}
-                    loading={loading}
-                    disabled={!providerId}
-                    placeholder={!providerId ? '请先选择供应商' : loading ? '正在加载模型列表…' : '输入或选择模型名'}
-                    emptyText="没有匹配的模型，将直接使用输入的名字"
-                    onChange={(next) => onChange(next.trim())}
-                />
-                <button
-                    type="button"
-                    className="icon-btn"
-                    disabled={!providerId || loading}
-                    onClick={() => loadModels(true)}
-                    title={models.length > 0 ? `重新拉取模型列表（当前 ${models.length} 个${cached ? '，来自缓存' : ''}）` : '重新拉取模型列表'}
-                    aria-label="重新拉取模型列表"
-                >
-                    <Icon name="refresh" size={16} className={loading ? 'spin' : ''} />
-                </button>
-            </div>
+            <Combobox
+                value={value ?? ''}
+                options={models}
+                loading={loading}
+                disabled={!providerId}
+                placeholder={!providerId ? '请先选择供应商' : loading ? '正在加载模型列表…' : '输入或选择模型名'}
+                emptyText="没有匹配的模型，将直接使用输入的名字"
+                onChange={(next) => onChange(next.trim())}
+                action={(
+                    <button
+                        type="button"
+                        className="combobox-toggle combobox-action"
+                        tabIndex={-1}
+                        disabled={!providerId || loading}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => loadModels(true)}
+                        title={models.length > 0 ? `重新拉取模型列表（当前 ${models.length} 个${cached ? '，来自缓存' : ''}）` : '重新拉取模型列表'}
+                        aria-label="重新拉取模型列表"
+                    >
+                        <Icon name="refresh" size={15} className={loading ? 'spin' : ''} />
+                    </button>
+                )}
+            />
             {error && <div className="field-note field-note--warn">{error}</div>}
             {value && models.length > 0 && !models.includes(value) && (
                 <div className="field-note field-note--warn">供应商的模型列表里没有“{value}”，请确认名字是否正确</div>
