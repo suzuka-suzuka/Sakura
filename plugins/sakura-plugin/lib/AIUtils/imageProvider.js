@@ -6,7 +6,7 @@ import { VALID_IMAGE_QUALITIES } from "./imageCommandParser.js";
 import { tagMediaError } from "./mediaErrorMessages.js";
 import {
   createRouteExecutionPlan,
-  formatRouteAttemptFailure,
+  executeRoutePlan,
   resolveRouteReference,
 } from "./providerRouter.js";
 import { formatModelList, normalizeModelList } from "./aiModels.js";
@@ -922,39 +922,23 @@ export async function generateImagesWithProvider(
   );
   const sourceImages = await normalizeImageInputs(sourceInputs);
 
-  let lastError = null;
   const { plan, routeId } = selection;
-  for (let index = 0; index < plan.attempts.length; index++) {
-    const attempt = plan.attempts[index];
-    const nextAttempt = plan.attempts[index + 1] || null;
-    try {
-      const result = await generateImagesOnce(
-        imageConfigFromRouteAttempt(attempt),
-        promptText,
-        sourceImages,
-        options
-      );
-      await notifyParameterWarnings(hooks.onParameterWarnings, result.warnings);
-      return result.buffers;
-    } catch (error) {
-      lastError = error;
-      logger.warn(formatRouteAttemptFailure({
-        routeId,
-        attempt,
-        error,
-        attemptNumber: index + 1,
-        totalAttempts: plan.attempts.length,
-        nextAttempt,
-        retryDelayMs: plan.route.retryDelayMs,
-      }));
-    }
-
-    if (nextAttempt && plan.route.retryDelayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, plan.route.retryDelayMs));
-    }
+  const outcome = await executeRoutePlan({
+    plan,
+    routeId,
+    run: (attempt) => generateImagesOnce(
+      imageConfigFromRouteAttempt(attempt),
+      promptText,
+      sourceImages,
+      options
+    ),
+  });
+  if (outcome.ok) {
+    await notifyParameterWarnings(hooks.onParameterWarnings, outcome.value.warnings);
+    return outcome.value.buffers;
   }
 
-  throw lastError || new Error(`图片模型 ${routeId} 没有可用的供应商。`);
+  throw outcome.error || new Error(`图片模型 ${routeId} 没有可用的供应商。`);
 }
 
 function validateResolvedImageConfig(imageConfig, provider) {

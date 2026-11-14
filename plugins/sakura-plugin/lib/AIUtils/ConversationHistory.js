@@ -119,7 +119,11 @@ function withoutFunctionCalls(item) {
     ? item.parts.filter((part) => !part.functionCall)
     : [];
 
-  const { toolCallIds: _toolCallIds, ...itemWithoutCallIds } = item || {};
+  const {
+    toolCallIds: _toolCallIds,
+    reasoningContent: _reasoningContent,
+    ...itemWithoutCallIds
+  } = item || {};
 
   return parts.length > 0
     ? { ...itemWithoutCallIds, parts }

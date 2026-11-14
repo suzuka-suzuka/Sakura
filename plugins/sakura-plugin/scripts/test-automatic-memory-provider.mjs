@@ -36,7 +36,19 @@ mock.module(url("../lib/AIUtils/providerRouter.js"), { namedExports: {
   }] }),
   isRequestConfigComplete: () => true,
   prioritizeRouteAttempt: (plan) => plan,
-  formatRouteAttemptFailure: () => "测试请求失败",
+  createRouteFailure: (message, routeAction) => Object.assign(new Error(message), { routeAction }),
+  ROUTE_FAILURE_ACTIONS: { NEXT: "next", NEXT_MODEL: "next_model", NEXT_PROVIDER: "next_provider", ABORT: "abort" },
+  executeRoutePlan: async ({ plan, run }) => {
+    let error = null;
+    for (const attempt of plan.attempts) {
+      try {
+        return { ok: true, value: await run(attempt), attempt };
+      } catch (caught) {
+        error = caught;
+      }
+    }
+    return { ok: false, error };
+  },
 } });
 mock.module("openai", { defaultExport: class {
   chat = { completions: { create: async (payload) => {

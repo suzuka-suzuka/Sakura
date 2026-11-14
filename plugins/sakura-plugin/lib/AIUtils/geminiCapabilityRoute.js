@@ -2,7 +2,7 @@ import Setting from "../setting.js";
 import { logger } from "../../../../src/utils/logger.js";
 import {
   createRouteExecutionPlan,
-  formatRouteAttemptFailure,
+  executeRoutePlan,
 } from "./providerRouter.js";
 import { formatModelList, normalizeModelList } from "./aiModels.js";
 import { createGeminiClient } from "./vertexAuth.js";
@@ -59,39 +59,24 @@ export async function executeGeminiCapability({
 
   const resolved = context || resolveGeminiCapabilityPlan(selfId, purpose);
   const { routeId, plan } = resolved;
-  let lastError = null;
 
-  for (let index = 0; index < plan.attempts.length; index++) {
-    const attempt = plan.attempts[index];
-    const nextAttempt = plan.attempts[index + 1] || null;
-
-    try {
+  const outcome = await executeRoutePlan({
+    plan,
+    routeId,
+    log: (message) => logger.warn(message),
+    run: (attempt) => {
       const client = clientFactory(attempt.requestConfig);
-      return await operation({
+      return operation({
         client,
         config: attempt.requestConfig,
         attempt,
         aiConfig: resolved.aiConfig,
       });
-    } catch (error) {
-      lastError = error;
-      logger.warn(formatRouteAttemptFailure({
-        routeId,
-        attempt,
-        error,
-        attemptNumber: index + 1,
-        totalAttempts: plan.attempts.length,
-        nextAttempt,
-        retryDelayMs: plan.route.retryDelayMs,
-      }));
-    }
-
-    if (nextAttempt && plan.route.retryDelayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, plan.route.retryDelayMs));
-    }
-  }
+    },
+  });
+  if (outcome.ok) return outcome.value;
 
   throw new Error(
-    `${purpose}通过 Gemini 能力模型「${routeId}」请求失败：${lastError?.message || "未知错误"}`
+    `${purpose}通过 Gemini 能力模型「${routeId}」请求失败：${outcome.error?.message || "未知错误"}`
   );
 }

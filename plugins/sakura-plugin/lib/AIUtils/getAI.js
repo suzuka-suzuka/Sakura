@@ -5,9 +5,11 @@ import { getToolsSchema } from "./tools/tools.js";
 import { mcpManager } from "./MCPManager.js";
 import {
   createRouteExecutionPlan,
-  formatRouteAttemptFailure,
+  createRouteFailure,
+  executeRoutePlan,
   isRequestConfigComplete,
   prioritizeRouteAttempt,
+  ROUTE_FAILURE_ACTIONS,
 } from "./providerRouter.js";
 import { formatModelList, modelListKey } from "./aiModels.js";
 import { createGeminiClient } from "./vertexAuth.js";
@@ -35,12 +37,48 @@ const GEMINI_THINKING_LEVELS = {
   medium: ThinkingLevel.MEDIUM,
   high: ThinkingLevel.HIGH,
 };
-function normalizeRequestError(error) {
-  if (error?.isAIRequestError) return error;
+// Gemini 因这些原因中止时，同一模型换 Key 也会被拦，直接换下一个模型。
+const GEMINI_CONTENT_FINISH_REASONS = new Set([
+  "SAFETY",
+  "PROHIBITED_CONTENT",
+  "BLOCKLIST",
+  "SPII",
+  "RECITATION",
+  "IMAGE_SAFETY",
+]);
+
+/**
+ * 协议实现内的失败：记日志后以 Error 对象返回（不抛出），由路由按动作决定怎么回退。
+ */
+function requestFailure(
+  message,
+  action = ROUTE_FAILURE_ACTIONS.NEXT,
+  { level = "warn", detail } = {}
+) {
+  if (detail === undefined) logger[level](message);
+  else logger[level](message, detail);
+  return createRouteFailure(message, action, { isAIRequestError: true, status: null });
+}
+
+function geminiFinishReasonAction(finishReason) {
+  return GEMINI_CONTENT_FINISH_REASONS.has(String(finishReason))
+    ? ROUTE_FAILURE_ACTIONS.NEXT_MODEL
+    : ROUTE_FAILURE_ACTIONS.NEXT;
+}
+
+function normalizeRequestError(error, { timedOut = false } = {}) {
+  if (error?.isAIRequestError) {
+    if (timedOut) error.timedOut = true;
+    return error;
+  }
   const status = Number(error?.status || error?.response?.status) || null;
   const wrapped = new Error(error?.message || String(error));
   wrapped.status = status;
   wrapped.isAIRequestError = true;
+  // 保留路由判断超时/网络错误需要的信息。
+  wrapped.originalName = error?.name;
+  wrapped.code = error?.code ?? error?.cause?.code;
+  wrapped.timedOut = timedOut || error?.timedOut === true;
   return wrapped;
 }
 
@@ -238,6 +276,26 @@ export function getCurrentAndPreviousUserText(queryParts = [], historyContents =
   return { currentInput, previousInput };
 }
 
+// DeepSeek、Kimi 等 OpenAI 兼容接口在思考模式下，要求把工具调用轮的 reasoning_content 原样回传；
+// 官方 OpenAI 等接口则不认识这个字段。所以按目标在运行时学习：收到“必须回传”的 400 后记住该目标，
+// 补齐后立即重试；之后发往它的请求都会带上。重启后重新学习。
+const reasoningPassbackTargets = new Set();
+
+function reasoningPassbackKey(channel) {
+  return `${String(channel?.baseURL || "").trim()} ${channel?.model || ""}`;
+}
+
+function isReasoningPassbackError(error) {
+  return (
+    Number(error?.status) === 400 &&
+    /reasoning_content/i.test(String(error?.message || ""))
+  );
+}
+
+export function resetReasoningPassbackTargets() {
+  reasoningPassbackTargets.clear();
+}
+
 async function _getOpenAIResponse(
   channel,
   e,
@@ -248,10 +306,11 @@ async function _getOpenAIResponse(
   historyContents = []
 ) {
   if (!isRequestConfigComplete(channel, "openai")) {
-    const errorMessage = "无效或不完整的渠道配置";
-    logger.error(errorMessage);
-    return errorMessage;
+    return requestFailure("无效或不完整的渠道配置", ROUTE_FAILURE_ACTIONS.NEXT, { level: "error" });
   }
+
+  const passbackKey = reasoningPassbackKey(channel);
+  const passReasoning = reasoningPassbackTargets.has(passbackKey);
 
   const timeoutMs = Number(channel.timeoutMs);
   const openai = new OpenAI({
@@ -327,6 +386,11 @@ async function _getOpenAIResponse(
             message.content = content;
           }
           if (tool_calls.length > 0) message.tool_calls = tool_calls;
+          if (role === "assistant" && passReasoning) {
+            // 其他模型产生的工具调用没有推理内容，回传空串满足字段要求。
+            message.reasoning_content =
+              typeof item.reasoningContent === "string" ? item.reasoningContent : "";
+          }
           if (
             message.content ||
             (message.tool_calls && message.tool_calls.length > 0)
@@ -359,9 +423,12 @@ async function _getOpenAIResponse(
       (messages[messages.length - 1].role !== "user" &&
         messages[messages.length - 1].role !== "tool")
     ) {
-      const errorMessage = "无有效查询或历史内容，无法发起请求。";
-      logger.warn(errorMessage);
-      return errorMessage;
+      // 完全没有可发送的内容时换谁都一样，直接终止；只是结尾不是用户消息时，Gemini 协议的模型仍可能接受。
+      const nothingToSend = !(queryParts?.length > 0) && historyContents.length === 0;
+      return requestFailure(
+        "无有效查询或历史内容，无法发起请求。",
+        nothingToSend ? ROUTE_FAILURE_ACTIONS.ABORT : ROUTE_FAILURE_ACTIONS.NEXT_MODEL
+      );
     }
 
     const requestPayload = {
@@ -450,6 +517,7 @@ async function _getOpenAIResponse(
         let finishReason = "";
         let usage = null;
         let extractedText = "";
+        let reasoningText = "";
         const toolCalls = new Map();
 
         try {
@@ -470,6 +538,7 @@ async function _getOpenAIResponse(
 
             const reasoning = openAIStreamReasoningDelta(delta);
             if (reasoning) {
+              reasoningText += reasoning;
               reasoningChars += reasoning.length;
               if (firstReasoningMs == null) {
                 firstReasoningMs = elapsedMs;
@@ -520,12 +589,18 @@ async function _getOpenAIResponse(
         });
 
         if (!extractedText && toolCallsArr.length === 0) {
-          const errorMessage = "API 未返回任何内容。";
-          logger.warn(errorMessage);
-          return errorMessage;
+          return requestFailure("API 未返回任何内容。");
         }
 
-        return { text: extractedText, functionCalls: parseOpenAIToolCalls(toolCallsArr) };
+        return {
+          text: extractedText,
+          functionCalls: parseOpenAIToolCalls(toolCallsArr),
+          ...(reasoningText && { reasoningContent: reasoningText }),
+        };
+      } catch (streamBranchError) {
+        throw deadlineExceeded
+          ? normalizeRequestError(streamBranchError, { timedOut: true })
+          : streamBranchError;
       } finally {
         if (streamDeadline) clearTimeout(streamDeadline);
       }
@@ -535,25 +610,49 @@ async function _getOpenAIResponse(
     const completion = parseOpenAICompletionIfNeeded(rawCompletion);
     
     if (!completion || !completion.choices || !Array.isArray(completion.choices)) {
-      const debugMsg = `API 节点返回了异常格式(${typeof completion}): ${JSON.stringify(completion)}`;
-      logger.error(debugMsg);
-      return debugMsg; 
+      return requestFailure(
+        `API 节点返回了异常格式(${typeof completion}): ${JSON.stringify(completion)}`,
+        ROUTE_FAILURE_ACTIONS.NEXT,
+        { level: "error" }
+      );
     }
 
     const message = completion.choices[0]?.message;
+    const reasoningContent = openAIStreamReasoningDelta(message || {});
     const extractedText = normalizeOpenAIMessageContent(message?.content);
     const toolCallsArr = message?.tool_calls || [];
 
     if (!extractedText && toolCallsArr.length === 0) {
-      const errorMessage = "API 未返回任何内容。";
-      logger.warn(errorMessage);
-      return errorMessage;
+      return requestFailure("API 未返回任何内容。");
     }
 
     const functionCalls = parseOpenAIToolCalls(toolCallsArr);
 
-    return { text: extractedText, functionCalls: functionCalls };
+    return {
+      text: extractedText,
+      functionCalls,
+      ...(reasoningContent && { reasoningContent }),
+    };
   } catch (error) {
+    if (isReasoningPassbackError(error)) {
+      if (!passReasoning) {
+        reasoningPassbackTargets.add(passbackKey);
+        logger.info(
+          `[AI Router] 模型 ${channel.name || channel.model} 要求回传 reasoning_content，已补齐后重试`
+        );
+        return _getOpenAIResponse(
+          channel,
+          e,
+          queryParts,
+          presetPrompt,
+          enableGroupContext,
+          enableTools,
+          historyContents
+        );
+      }
+      // 带上之后反而因为这个字段被拒，说明判断错了，撤销学习结果。
+      reasoningPassbackTargets.delete(passbackKey);
+    }
     const errorMessage = `API 调用失败: ${error.message}`;
     logger.error(errorMessage, error);
     throw normalizeRequestError(error);
@@ -570,15 +669,15 @@ async function _getGeminiResponse(
   historyContents = []
 ) {
   if (!isRequestConfigComplete(channel, "gemini")) {
-    const errorMessage = "无效或不完整的渠道配置。";
-    logger.error(errorMessage);
-    return errorMessage;
+    return requestFailure("无效或不完整的渠道配置。", ROUTE_FAILURE_ACTIONS.NEXT, { level: "error" });
   }
 
   const { model: GEMINI_MODEL } = channel;
 
   let finalContentsForGemini = [];
   let fullSystemInstructionText = "";
+  // 本次请求使用的超时信号；请求失败时据此判断是不是超时。
+  let timeoutSignal = null;
 
   try {
     const ai = createGeminiClient(channel);
@@ -625,9 +724,7 @@ async function _getGeminiResponse(
         parts: processedParts,
       });
     } else if (finalContentsForGemini.length === 0) {
-      const errorMessage = "无查询或历史内容，无法请求。";
-      logger.warn(errorMessage);
-      return errorMessage;
+      return requestFailure("无查询或历史内容，无法请求。", ROUTE_FAILURE_ACTIONS.ABORT);
     }
 
     const requestOptions = {
@@ -641,7 +738,8 @@ async function _getGeminiResponse(
       Number.isFinite(timeoutMs) &&
       timeoutMs > 0
     ) {
-      requestConfig.abortSignal = AbortSignal.timeout(Math.trunc(timeoutMs));
+      timeoutSignal = AbortSignal.timeout(Math.trunc(timeoutMs));
+      requestConfig.abortSignal = timeoutSignal;
     }
 
     if (Number.isFinite(channel.temperature)) {
@@ -720,6 +818,7 @@ async function _getGeminiResponse(
       const streamController = new AbortController();
       let deadlineExceeded = false;
       requestConfig.abortSignal = streamController.signal;
+      timeoutSignal = streamController.signal;
       const streamDeadline =
         Number.isFinite(timeoutMs) && timeoutMs > 0
           ? setTimeout(() => {
@@ -771,14 +870,13 @@ async function _getGeminiResponse(
         });
 
         if (collected.promptFeedback?.blockReason) {
-          const errorMessage = `响应被拦截，原因: ${collected.promptFeedback.blockReason}`;
-          logger.warn(errorMessage);
-          return errorMessage;
+          return requestFailure(
+            `响应被拦截，原因: ${collected.promptFeedback.blockReason}`,
+            ROUTE_FAILURE_ACTIONS.NEXT_MODEL
+          );
         }
         if (!collected.sawCandidate) {
-          const errorMessage = "响应中未包含候选内容。";
-          logger.warn(errorMessage);
-          return errorMessage;
+          return requestFailure("响应中未包含候选内容。");
         }
         if (
           collected.finishReason &&
@@ -787,17 +885,16 @@ async function _getGeminiResponse(
           const suffix = collected.finishMessage
             ? `：${collected.finishMessage}`
             : "";
-          const errorMessage = `生成因 ${collected.finishReason} 而中止${suffix}。`;
-          logger.warn(errorMessage);
-          return errorMessage;
+          return requestFailure(
+            `生成因 ${collected.finishReason} 而中止${suffix}。`,
+            geminiFinishReasonAction(collected.finishReason)
+          );
         }
         if (
           !collected.extractedText &&
           collected.functionCalls.length === 0
         ) {
-          const errorMessage = "返回内容为空。";
-          logger.warn(errorMessage);
-          return errorMessage;
+          return requestFailure("返回内容为空。");
         }
 
         return {
@@ -813,21 +910,20 @@ async function _getGeminiResponse(
     const response = await ai.models.generateContent(geminiRequestBody);
 
     if (!response) {
-      const errorMessage = "API 未返回有效的响应。";
-      logger.warn(errorMessage);
-      return errorMessage;
+      return requestFailure("API 未返回有效的响应。");
     }
 
     if (response.promptFeedback?.blockReason) {
-      const errorMessage = `响应被拦截，原因: ${response.promptFeedback.blockReason}`;
-      logger.warn(errorMessage);
-      return errorMessage;
+      return requestFailure(
+        `响应被拦截，原因: ${response.promptFeedback.blockReason}`,
+        ROUTE_FAILURE_ACTIONS.NEXT_MODEL
+      );
     }
 
     if (!response.candidates || response.candidates.length === 0) {
-      const errorMessage = "响应中未包含候选内容。";
-      logger.warn(errorMessage, JSON.stringify(response, null, 2));
-      return errorMessage;
+      return requestFailure("响应中未包含候选内容。", ROUTE_FAILURE_ACTIONS.NEXT, {
+        detail: JSON.stringify(response, null, 2),
+      });
     }
 
     const candidate = response.candidates[0];
@@ -836,15 +932,17 @@ async function _getGeminiResponse(
       candidate.finishReason &&
       !["STOP", "MAX_TOKENS"].includes(candidate.finishReason)
     ) {
-      const errorMessage = `生成因 ${candidate.finishReason} 而中止。`;
-      logger.warn(errorMessage, JSON.stringify(candidate, null, 2));
-      return errorMessage;
+      return requestFailure(
+        `生成因 ${candidate.finishReason} 而中止。`,
+        geminiFinishReasonAction(candidate.finishReason),
+        { detail: JSON.stringify(candidate, null, 2) }
+      );
     }
 
     if (!candidate.content || !candidate.content.parts) {
-      const errorMessage = "候选内容为空。";
-      logger.warn(errorMessage, JSON.stringify(candidate, null, 2));
-      return errorMessage;
+      return requestFailure("候选内容为空。", ROUTE_FAILURE_ACTIONS.NEXT, {
+        detail: JSON.stringify(candidate, null, 2),
+      });
     }
 
     const responseParts = candidate.content.parts;
@@ -862,9 +960,7 @@ async function _getGeminiResponse(
       .map((part) => part.functionCall);
 
     if (!extractedText && extractedFunctionCalls.length === 0) {
-      const errorMessage = "返回内容为空。";
-      logger.warn(errorMessage);
-      return errorMessage;
+      return requestFailure("返回内容为空。");
     }
 
     return {
@@ -875,7 +971,7 @@ async function _getGeminiResponse(
   } catch (error) {
     const errorMessage = `API 调用失败: ${error.message}`;
     logger.error(errorMessage);
-    throw normalizeRequestError(error);
+    throw normalizeRequestError(error, { timedOut: timeoutSignal?.aborted === true });
   }
 }
 
@@ -907,17 +1003,17 @@ export async function getAI(
     return `模型“${routeId}”没有可用的供应商或 Key。`;
   }
 
-  let lastError = null;
-  for (let index = 0; index < plan.attempts.length; index++) {
-    const attempt = plan.attempts[index];
-    const config = routingContext?.disableNativeWebSearch === true
-      ? { ...attempt.requestConfig, nativeWebSearch: false }
-      : attempt.requestConfig;
-    logger.info(
-      `[AI Router] models=${routeId} model=${attempt.target.id} provider=${attempt.provider.id} key=${attempt.credential.id} timeoutMs=${config.timeoutMs}`
-    );
+  const outcome = await executeRoutePlan({
+    plan,
+    routeId,
+    run: async (attempt) => {
+      const config = routingContext?.disableNativeWebSearch === true
+        ? { ...attempt.requestConfig, nativeWebSearch: false }
+        : attempt.requestConfig;
+      logger.info(
+        `[AI Router] models=${routeId} model=${attempt.target.id} provider=${attempt.provider.id} key=${attempt.credential.id} timeoutMs=${config.timeoutMs}`
+      );
 
-    try {
       const args = [
         config,
         e,
@@ -927,41 +1023,27 @@ export async function getAI(
         enableTools,
         historyContents,
       ];
-      const result = config.channelType === "gemini"
-        ? await _getGeminiResponse(...args)
-        : await _getOpenAIResponse(...args);
-
-      if (typeof result !== "string") {
-        if (routingContext && typeof routingContext === "object") {
-          routingContext.plan = prioritizeRouteAttempt(plan, attempt);
-        }
-        return {
-          ...result,
-          sourceProtocol: config.channelType,
-        };
+      let result;
+      try {
+        result = config.channelType === "gemini"
+          ? await _getGeminiResponse(...args)
+          : await _getOpenAIResponse(...args);
+      } catch (error) {
+        throw normalizeRequestError(error);
       }
-      lastError = normalizeRequestError(new Error(result));
-    } catch (error) {
-      lastError = normalizeRequestError(error);
-    }
+      if (result instanceof Error) throw result;
+      return { ...result, sourceProtocol: config.channelType };
+    },
+  });
 
-    const nextAttempt = plan.attempts[index + 1] || null;
-    logger.warn(formatRouteAttemptFailure({
-      routeId,
-      attempt,
-      error: lastError,
-      attemptNumber: index + 1,
-      totalAttempts: plan.attempts.length,
-      nextAttempt,
-      retryDelayMs: plan.route.retryDelayMs,
-    }));
-
-    if (nextAttempt && plan.route.retryDelayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, plan.route.retryDelayMs));
+  if (outcome.ok) {
+    if (routingContext && typeof routingContext === "object") {
+      routingContext.plan = prioritizeRouteAttempt(plan, outcome.attempt);
     }
+    return outcome.value;
   }
 
-  const errorMessage = `模型“${routeId}”请求失败：${lastError?.message || "未知错误"}`;
+  const errorMessage = `模型“${routeId}”请求失败：${outcome.error?.message || "未知错误"}`;
   logger.error(errorMessage);
   return errorMessage;
 }

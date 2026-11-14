@@ -138,6 +138,10 @@ async function runScopedAgentLoop({
         };
         if (functionCalls.length > 0) {
           modelHistoryItem.toolCallIds = functionCalls.map((call) => call.id);
+          // 思考模式的 OpenAI 兼容接口（DeepSeek 等）后续请求要回传这一轮的推理内容。
+          if (currentResponse.reasoningContent) {
+            modelHistoryItem.reasoningContent = currentResponse.reasoningContent;
+          }
         }
         currentFullHistory.push(modelHistoryItem);
       }

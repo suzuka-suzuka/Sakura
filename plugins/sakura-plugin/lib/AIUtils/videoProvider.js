@@ -10,7 +10,7 @@ import {
 import { tagMediaError } from "./mediaErrorMessages.js";
 import {
   createRouteExecutionPlan,
-  formatRouteAttemptFailure,
+  executeRoutePlan,
   resolveRouteReference,
 } from "./providerRouter.js";
 import { formatModelList, normalizeModelList } from "./aiModels.js";
@@ -472,37 +472,21 @@ export async function generateVideoWithProvider({
 }) {
   const selection = resolveVideoSelection(requestedChannel, selfId);
 
-  let lastError = null;
   const { plan, routeId } = selection;
-  for (let index = 0; index < plan.attempts.length; index++) {
-    const attempt = plan.attempts[index];
-    const nextAttempt = plan.attempts[index + 1] || null;
-    try {
-      const generated = await generateVideoOnce(
-        videoConfigFromRouteAttempt(attempt),
-        prompt,
-        images,
-        options
-      );
-      await notifyParameterWarnings(onParameterWarnings, generated.warnings);
-      return generated.result;
-    } catch (error) {
-      lastError = error;
-      logger.warn(formatRouteAttemptFailure({
-        routeId,
-        attempt,
-        error,
-        attemptNumber: index + 1,
-        totalAttempts: plan.attempts.length,
-        nextAttempt,
-        retryDelayMs: plan.route.retryDelayMs,
-      }));
-    }
-
-    if (nextAttempt && plan.route.retryDelayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, plan.route.retryDelayMs));
-    }
+  const outcome = await executeRoutePlan({
+    plan,
+    routeId,
+    run: (attempt) => generateVideoOnce(
+      videoConfigFromRouteAttempt(attempt),
+      prompt,
+      images,
+      options
+    ),
+  });
+  if (outcome.ok) {
+    await notifyParameterWarnings(onParameterWarnings, outcome.value.warnings);
+    return outcome.value.result;
   }
 
-  throw lastError || new Error(`视频模型 ${routeId} 没有可用的供应商。`);
+  throw outcome.error || new Error(`视频模型 ${routeId} 没有可用的供应商。`);
 }

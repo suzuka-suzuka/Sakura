@@ -411,7 +411,8 @@ async function collectMimicGroupMemories(e, messages, { aiRequest = getAI, tool 
     if (round === 0) history.push({ role: "user", parts: input });
     history.push({ role: "model", parts: response.rawParts?.length ? response.rawParts : [
       ...(response.text ? [{ text: response.text }] : []), ...calls.map((call) => ({ functionCall: call })),
-    ], sourceProtocol: response.sourceProtocol, toolCallIds: calls.map((call) => call.id) });
+    ], sourceProtocol: response.sourceProtocol, toolCallIds: calls.map((call) => call.id),
+    ...(response.reasoningContent && { reasoningContent: response.reasoningContent }) });
     const parts = [];
     for (const call of calls) {
       if (!await hasLease()) throw new Error("群记忆任务锁已失效");
