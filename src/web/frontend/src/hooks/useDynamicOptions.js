@@ -9,9 +9,10 @@ const DEFAULT_SCOPE_KEY = '__default__';
  *
  * 所有 #xxxSelect 字段共用一份 /api/dynamic-options 结果：
  * - 同一账号作用域只发一次请求（并发去重）
- * - 配置保存 / WS 推送变更时整体失效，所有订阅字段一起重新拉取
+ * - 配置保存 / WS 推送变更时，只刷新对应账号的选项来源模块
+ * - 后台刷新保留已有选项，避免字段切回加载占位或丢失协议上下文
  *
- * scopeKey -> { data, error, promise }
+ * scopeKey -> { data, error, promise, stale }
  */
 const cache = new Map();
 const listeners = new Set();
@@ -52,23 +53,26 @@ async function requestOptions(selfId) {
     return payload.data;
 }
 
-/** 确保该作用域的数据已加载（已有缓存或请求在途时直接返回） */
+/** 确保该作用域的数据有效；请求在途时复用，期间发生的新变更留到下一轮。 */
 function ensureLoaded(selfId) {
     const key = scopeKeyOf(selfId);
     let entry = cache.get(key);
     if (!entry) {
-        entry = { data: null, error: null, promise: null };
+        entry = { data: null, error: null, promise: null, stale: true };
         cache.set(key, entry);
     }
-    if (entry.data || entry.error || entry.promise) {
+    if (!entry.stale || entry.promise) {
         return;
     }
 
+    entry.stale = false;
+    entry.error = null;
     entry.promise = requestOptions(selfId)
-        .then((data) => { entry.data = data; })
-        .catch((e) => { entry.error = e; })
+        .then((data) => { if (!entry.stale) entry.data = data; })
+        .catch((e) => { if (!entry.stale) entry.error = e; })
         .finally(() => {
             entry.promise = null;
+            // 通知订阅者；若请求期间又收到变更，sync 会串行发起下一轮刷新。
             notify();
         });
 }
@@ -85,8 +89,8 @@ function readState(selfId, uiType) {
             label: '',
         };
     }
-    // 请求失败或该 uiType 未在 dynamicOptionsConfig 中声明 → 回退成普通文本输入
-    if (entry.error) {
+    // 首次加载失败才回退为文本输入；后台刷新失败仍使用最后一次成功的数据。
+    if (entry.error && !entry.data) {
         return {
             loading: false,
             isDynamic: false,
@@ -161,11 +165,23 @@ function sameState(a, b) {
 }
 
 /**
- * 让所有动态选项失效并触发重新拉取
- * 配置保存成功、收到 WS 变更推送、或用户手动点刷新时调用
+ * 配置保存成功或收到 WS 推送时，按账号与来源模块刷新；不传变更则刷新所有缓存。
+ * 保留旧数据和在途请求，避免保存响应与 WS 回声连续清空界面。
  */
-export function invalidateDynamicOptions() {
-    cache.clear();
+export function invalidateDynamicOptions(change = null) {
+    // /api/dynamic-options 目前只读取 sakura-plugin 的来源声明。
+    if (change && change.pluginName !== 'sakura-plugin') return;
+
+    for (const [key, entry] of cache) {
+        if (change) {
+            if (key !== scopeKeyOf(normalizeSelfId(change.selfId))) continue;
+            if (entry.data && !Object.values(entry.data.config || {}).some((config) =>
+                config.sources?.some((source) => source.module === change.moduleName)
+            )) continue;
+        }
+        entry.stale = true;
+        entry.error = null;
+    }
     notify();
 }
 

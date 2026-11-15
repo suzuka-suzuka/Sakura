@@ -396,8 +396,8 @@ export function useConfig() {
                         },
                     },
                 }));
-                // 保存的模块可能是别的字段的动态选项来源，让下拉选项重新拉取
-                invalidateDynamicOptions();
+                // 只在保存的模块提供动态选项时刷新对应账号，刷新期间保留已有字段。
+                invalidateDynamicOptions({ pluginName, moduleName, selfId: normalizedSelfId });
                 return { success: true };
             }
             return { success: false, errors: data.errors };
@@ -478,8 +478,8 @@ export function useConfig() {
 
     const updatePluginFromWs = useCallback((pluginName, moduleName, data, selfId = null) => {
         const scopeKey = scopeKeyOf(normalizeSelfId(selfId));
-        // 配置在后端被改动（面板外保存 / YAML 文件热重载），动态选项一并失效
-        invalidateDynamicOptions();
+        // 面板保存也会收到文件热重载的回声；按来源刷新，不清空已有选项。
+        invalidateDynamicOptions({ pluginName, moduleName, selfId });
         setPluginConfigs((prev) => ({
             ...prev,
             [pluginName]: {
