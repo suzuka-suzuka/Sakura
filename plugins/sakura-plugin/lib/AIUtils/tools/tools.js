@@ -1,7 +1,6 @@
 import { fileURLToPath, pathToFileURL } from "url";
 import { dirname, join } from "path";
 import chalk from "chalk";
-import fs from "fs";
 import { watch } from "chokidar";
 import { GroupAdminTool } from "./GroupAdminTool.js";
 import { MessageContentAnalyzerTool } from "./MessageContentAnalyzerTool.js";
@@ -14,22 +13,19 @@ import { BlackListTool } from "./BlackListTool.js";
 import { EconomyTool } from "./EconomyTool.js";
 import { EmojiTool } from "./EmojiTool.js";
 import { NaiTool } from "./NaiTool.js";
-import { RunCommandTool } from "./RunCommandTool.js";
 import { MemoryTool } from "./MemoryTool.js";
 import { ImageSearchTool } from "./ImageSearchTool.js";
-import { UploadFileTool } from "./UploadFileTool.js";
 import { VoxCPMVoiceTool } from "./VoxCPMVoiceTool.js";
 import { SkillGuideTool } from "./SkillGuideTool.js";
 import { OnlineSearchTool } from "./OnlineSearchTool.js";
 import { mcpManager } from "../MCPManager.js";
 import Setting from "../../setting.js";
-import { plugindata } from "../../path.js";
 import {
   buildToolCallbackPayload,
   splitToolFollowUpResult,
 } from "../toolResultProtocol.js";
 import { buildToolResultLogPart } from "../toolResultLog.js";
-import { buildSpecialToolStartVisualPayloads } from "./toolStartVisual.js";
+import { formatProgressText } from "../toolProgress.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -46,10 +42,8 @@ const availableTools = [
   new EconomyTool(),
   new EmojiTool(),
   new NaiTool(),
-  new RunCommandTool(),  // 通用命令执行（包含文件搜索、Python 执行等）
   new MemoryTool(),      // 添加用户或群公共记忆
   new ImageSearchTool(), // 统一搜图工具
-  new UploadFileTool(),
   new VoxCPMVoiceTool(),
   new SkillGuideTool(),
   new OnlineSearchTool(), // 委托搜索模型联网搜索
@@ -70,128 +64,12 @@ const TOOL_CONFIG_KEYS = {
   "Economy": "Economy",
   "SendEmoji": "Emoji",
   "NaiPainting": "Nai",
-  "RunCommand": "RunCommand",
   "Memory": "Memory",
   "ImageSearch": "ImageSearch",
-  "UploadFile": "UploadFile",
   "SendVoice": "VoxCPMVoice",
   "SkillGuide": "SkillGuide",
   "OnlineSearch": "OnlineSearch",
 };
-
-const OWNER_ONLY_TOOLS = new Set(["RunCommand", "UploadFile"]);
-
-// ─── 工具执行确认机制 ──────────────────────────────────────
-
-// 需要用户确认才能执行的工具
-const CONFIRM_REQUIRED_TOOLS = new Set(["RunCommand"]);
-
-// 命令前缀白名单（持久化到 JSON）
-const WHITELIST_PATH = join(plugindata, "commandWhitelist.json");
-let commandWhitelist = new Set();
-
-function loadWhitelist() {
-  try {
-    const raw = fs.readFileSync(WHITELIST_PATH, "utf-8");
-    const list = JSON.parse(raw);
-    commandWhitelist = new Set(Array.isArray(list) ? list : []);
-  } catch {
-    commandWhitelist = new Set();
-  }
-}
-
-function saveWhitelist() {
-  try {
-    fs.mkdirSync(dirname(WHITELIST_PATH), { recursive: true });
-    fs.writeFileSync(WHITELIST_PATH, JSON.stringify([...commandWhitelist], null, 2), "utf-8");
-  } catch (err) {
-    logger.warn(`[Tools] 保存命令白名单失败: ${err.message}`);
-  }
-}
-
-function getCommandPrefix(command) {
-  return String(command || "").trim().split(/\s+/)[0].toLowerCase();
-}
-
-function isCommandWhitelisted(command) {
-  const prefix = getCommandPrefix(command);
-  return prefix && commandWhitelist.has(prefix);
-}
-
-// 启动时加载
-loadWhitelist();
-
-const TOOL_CONFIRM_REACTION_ID = 128076;
-
-// 等待确认中的 Promise：key -> { resolve }
-const pendingConfirmations = new Map();
-
-function getConfirmKey(e) {
-  return e.group_id ? `${e.group_id}:${e.user_id}` : `private:${e.user_id}`;
-}
-
-async function reactToConfirmationMessage(e) {
-  const messageId = e?.message_id || e?.message_seq;
-  if (typeof e?.react !== "function" || !messageId) return;
-
-  try {
-    await e.react(TOOL_CONFIRM_REACTION_ID, messageId);
-  } catch (err) {
-    logger.warn(`[Tools] 命令工具审批回应失败: ${err.message}`);
-  }
-}
-
-/**
- * 供插件的 handleToolConfirmCallback 回调调用
- * @param {object} pluginInstance - 插件实例（this）
- */
-export async function resolveToolConfirmation(pluginInstance) {
-  const e = pluginInstance.e;
-  const key = getConfirmKey(e);
-  const pending = pendingConfirmations.get(key);
-  if (!pending) return;
-
-  const input = e.raw_message?.trim();
-  const decisionMap = {
-    1: "confirm",
-    2: "always",
-    3: "cancel",
-  };
-  const decision = decisionMap[input];
-  // 其他输入不处理，保持上下文等待
-  if (!decision) return;
-
-  pendingConfirmations.delete(key);
-  await reactToConfirmationMessage(e);
-  pluginInstance.finish("handleToolConfirmCallback", !!e.group_id);
-  pending.resolve(decision);
-}
-
-/**
- * 发送确认消息并等待用户回复
- */
-async function waitForConfirmation(e, pluginInstance, command) {
-  const key = getConfirmKey(e);
-
-  await e.reply(
-    `⚠️ 请求执行命令：\n> ${shortenToolText(command, 200)}\n\n` +
-    `1️⃣ 确认执行\n2️⃣ 确认且以后不再提示同类命令（${getCommandPrefix(command)}）\n3️⃣ 取消\n\n` +
-    `60秒内未回复自动取消`
-  );
-
-  return new Promise((resolve) => {
-    pendingConfirmations.set(key, { resolve });
-    pluginInstance.setContext("handleToolConfirmCallback", !!e.group_id, 60, true);
-
-    // 兜底：setContext 超时自动 finish 后 Promise 可能悬挂
-    setTimeout(() => {
-      if (pendingConfirmations.has(key)) {
-        pendingConfirmations.delete(key);
-        resolve("cancel");
-      }
-    }, 62000);
-  });
-}
 
 // MCP config key → server ID 映射
 const MCP_KEY_TO_SERVER = {
@@ -215,12 +93,10 @@ export const AVAILABLE_TOOL_OPTIONS = [
   { key: "Economy", label: "经济系统" },
   { key: "Emoji", label: "表情包" },
   { key: "Nai", label: "NAI绘画" },
-  { key: "RunCommand", label: "命令执行" },
   { key: "Memory", label: "记忆工具" },
   { key: "ImageSearch", label: "图片搜索" },
   { key: "McpFetch", label: "网络请求(MCP)" },
   { key: "McpMemory", label: "知识图谱(MCP)" },
-  { key: "UploadFile", label: "发送文件" },
   { key: "VoxCPMVoice", label: "语音发送" },
   { key: "SkillGuide", label: "Skill指导" },
 ];
@@ -252,9 +128,7 @@ export function toolGroupHasTool(toolGroupName, toolKey) {
 }
 
 function resolveLocalToolInstances(e, allowedTools) {
-  const isMaster = Boolean(e?.isMaster);
   return availableTools.filter(tool => {
-    if (OWNER_ONLY_TOOLS.has(tool.name) && !isMaster) return false;
     const configKey = TOOL_CONFIG_KEYS[tool.name];
     if (!configKey || !allowedTools.has(configKey)) return false;
     // 工具可以声明自己当前不可用（例如缺少必要配置），这时不提供给模型。
@@ -375,220 +249,53 @@ export async function getToolsSchema(e, toolGroupName, options = {}) {
   return { localTools, allowedMcpServerIds };
 }
 
-function shortenToolText(text, maxLength = 80) {
-  const normalized = String(text || "").replace(/\s+/g, " ").trim();
-  if (!normalized) {
-    return "";
-  }
-  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
-}
-
 function normalizeToolAlias(toolName) {
   return String(toolName || "").replace(/-/g, "_");
 }
 
-const ONLINE_SEARCH_TOOL_META = {
-  action: "联网搜索",
-  detail: (toolArgs = {}) => shortenToolText(toolArgs.query || "联网搜索"),
-};
+// MCP 工具没有工具类，按名字给阶段名；知识图谱类 MCP 瞬间完成，不显示进度。
+const MCP_SILENT_TOOL_NAMES = new Set([
+  "create_entities",
+  "create_relations",
+  "add_observations",
+  "delete_entities",
+  "delete_relations",
+  "delete_observations",
+  "read_graph",
+  "search_nodes",
+  "open_nodes",
+]);
 
-const TAVILY_TOOL_META = {
-  tavily_search: {
-    action: "网页搜索",
-    detail: (toolArgs = {}) => shortenToolText(toolArgs.query || toolArgs.topic || "网页搜索"),
-  },
-  tavily_extract: {
-    action: "网页提取",
-    detail: (toolArgs = {}) => shortenToolText(toolArgs.url || toolArgs.urls?.[0] || toolArgs.website || "网页"),
-  },
-  tavily_map: {
-    action: "网站结构发现",
-    detail: (toolArgs = {}) => shortenToolText(toolArgs.url || toolArgs.urls?.[0] || toolArgs.website || "网站"),
-  },
-  tavily_crawl: {
-    action: "网站抓取",
-    detail: (toolArgs = {}) => shortenToolText(toolArgs.url || toolArgs.urls?.[0] || toolArgs.website || "网站"),
-  },
-  tavily_research: {
-    action: "深度研究",
-    detail: (toolArgs = {}) => shortenToolText(toolArgs.query || toolArgs.topic || "深度研究"),
-  },
-  tavily_skill: {
-    action: "技能搜索",
-    detail: (toolArgs = {}) => shortenToolText(toolArgs.query || toolArgs.topic || "技能搜索"),
-  },
-};
-
-function buildToolStartAction(toolName) {
-  if (toolName === "OnlineSearch") return ONLINE_SEARCH_TOOL_META.action;
-  const tavilyTool = TAVILY_TOOL_META[normalizeToolAlias(toolName)];
-  if (tavilyTool) {
-    return tavilyTool.action;
-  }
-
-  switch (toolName) {
-    case "RunCommand":
-      return "命令运行";
-    case "fetch":
-      return "网络访问";
-    case "create_entities":
-      return "记忆写入";
-    case "create_relations":
-      return "记忆关联";
-    case "add_observations":
-      return "记忆补充";
-    case "delete_entities":
-    case "delete_relations":
-    case "delete_observations":
-      return "记忆清理";
-    case "read_graph":
-      return "记忆读取";
-    case "search_nodes":
-      return "记忆检索";
-    case "open_nodes":
-      return "记忆查看";
-    default:
-      return null;
-  }
+function getMcpProgressText(toolName) {
+  const name = normalizeToolAlias(toolName);
+  if (/^tavily_/i.test(name)) return "搜索";
+  if (name === "fetch") return "浏览网页";
+  if (MCP_SILENT_TOOL_NAMES.has(name)) return null;
+  return "处理";
 }
 
-function buildToolStartDetail(toolName, toolArgs = {}) {
-  if (toolName === "OnlineSearch") return ONLINE_SEARCH_TOOL_META.detail(toolArgs);
-  const tavilyTool = TAVILY_TOOL_META[normalizeToolAlias(toolName)];
-  if (tavilyTool) {
-    return tavilyTool.detail(toolArgs);
+function getToolProgressLabel({ name, args } = {}) {
+  const tool = toolMap.get(name);
+  if (tool) {
+    return typeof tool.getProgressText === "function" ? tool.getProgressText(args || {}) : null;
   }
-
-  switch (toolName) {
-    case "RunCommand":
-      return shortenToolText(toolArgs.command || "命令");
-    case "fetch":
-      return shortenToolText(toolArgs.url || "网络请求");
-    case "create_entities": {
-      const names = Array.isArray(toolArgs.entities) ? toolArgs.entities.map(item => item?.name).filter(Boolean) : [];
-      return shortenToolText(names[0] || "实体");
-    }
-    case "create_relations": {
-      const relation = Array.isArray(toolArgs.relations) ? toolArgs.relations[0] : null;
-      const label = relation ? `${relation.from || "节点"} -> ${relation.to || "节点"}` : "关系";
-      return shortenToolText(label);
-    }
-    case "add_observations":
-      return shortenToolText(toolArgs.observations?.[0]?.content || toolArgs.observations?.[0] || "观察记录");
-    case "delete_entities":
-      return shortenToolText(toolArgs.entityNames?.[0] || "实体");
-    case "delete_relations":
-      return shortenToolText("关系");
-    case "delete_observations":
-      return shortenToolText("观察记录");
-    case "read_graph":
-      return "知识图谱";
-    case "search_nodes":
-      return shortenToolText(toolArgs.query || "节点");
-    case "open_nodes":
-      return shortenToolText(toolArgs.names?.[0] || "节点");
-    default:
-      return "";
-  }
+  return getMcpProgressText(name);
 }
 
-function buildToolStartVisualItem(toolName, toolArgs = {}) {
-  const action = buildToolStartAction(toolName);
-  if (!action) {
-    return null;
-  }
-
-  return {
-    action,
-    detail: buildToolStartDetail(toolName, toolArgs) || action,
-  };
-}
-
-async function sendToolStartVisual(e, functionCalls = [], toolContext = {}) {
-  try {
-    if (!e?.sendForwardMsg) {
-      return;
-    }
-
-    const specialPayloads = await buildSpecialToolStartVisualPayloads(
-      e,
-      functionCalls,
-      toolContext,
-    );
-    for (const payload of specialPayloads) {
-      await e.sendForwardMsg(payload.nodes, payload.info);
-    }
-
-    const items = functionCalls
-      .filter(({ name }) => name !== "NaiPainting" && name !== "SkillGuide")
-      .map(({ name, args }) => buildToolStartVisualItem(name, args))
-      .filter(Boolean);
-
-    if (items.length === 0) {
-      return;
-    }
-
-    const sourceActions = [...new Set(items.map((item) => item.action))];
-
-    await e.sendForwardMsg(
-      items.map((item) => ({
-          user_id: e.self_id,
-          nickname: "忙碌中",
-          content: [{ type: "text", data: { text: item.detail } }],
-        })),
-      {
-        source: sourceActions.join("|"),
-        prompt: items.map((item) => item.detail).join(" | "),
-        news: items.map((item) => ({ text: item.detail })),
-      }
-    );
-  } catch (err) {
-    logger.warn(`[Tools] 发送开始态可视化消息失败: ${err.message}`);
-  }
+/** 一批工具调用对应的状态文字，如 “正在搜索、绘画…”；都不需要显示时返回空串 */
+export function resolveToolProgressText(functionCalls = []) {
+  return formatProgressText(functionCalls.map(getToolProgressLabel));
 }
 
 /**
  * 执行单个工具调用
  */
-async function executeSingleTool(functionCall, e, pluginInstance, toolContext) {
+async function executeSingleTool(functionCall, e, toolContext) {
   const { name: toolName, args: toolArgs, id: toolCallId } = functionCall;
 
   let toolResultData = null;
   let functionResponseFollowUpParts = [];
   const toolToExecute = toolMap.get(toolName);
-
-  // ── 确认拦截 ──
-  if (
-    CONFIRM_REQUIRED_TOOLS.has(toolName) &&
-    pluginInstance
-  ) {
-    const aiConfig = Setting.getConfig('AI') || {};
-    const isTrustAICommand = aiConfig.trustAICommand === true;
-
-    const commandText = toolArgs?.command || JSON.stringify(toolArgs);
-
-    // 检查是否开启完全信任AI，或命令前缀是否已在白名单中
-    if (!isTrustAICommand && !isCommandWhitelisted(commandText)) {
-      const decision = await waitForConfirmation(e, pluginInstance, commandText);
-
-      if (decision === "always") {
-        const prefix = getCommandPrefix(commandText);
-        commandWhitelist.add(prefix);
-        saveWhitelist();
-        logger.info(`[Tools] 命令前缀 "${prefix}" 已加入白名单`);
-      } else if (decision === "cancel") {
-        logger.info(`[Tools] 用户取消了工具 "${toolName}" 的执行`);
-        toolResultData = { message: "用户取消了命令执行。" };
-
-        const part = {
-          functionResponse: { name: String(toolName), response: toolResultData },
-        };
-        if (toolCallId) part.functionResponse.id = toolCallId;
-        return { functionResponsePart: part, followUpParts: [] };
-      }
-      // confirm / always → 继续执行
-    }
-  }
 
   if (toolToExecute) {
     logger.info(`正在执行工具："${toolName}" ${JSON.stringify(toolArgs)}`);
@@ -647,38 +354,30 @@ async function executeSingleTool(functionCall, e, pluginInstance, toolContext) {
   };
 }
 
+/**
+ * @param {object} [options]
+ * @param {import("../toolProgress.js").ToolProgress|null} [options.progress] 本次 Agent 运行的进度消息
+ */
 export async function executeToolCalls(
   e,
   initialFunctionCalls,
-  pluginInstance = null,
-  toolGroupName = ""
+  toolGroupName = "",
+  { progress = null } = {}
 ) {
   if (!initialFunctionCalls || initialFunctionCalls.length === 0) {
     return { historyContents: [], queryParts: [] };
   }
 
-  const toolContext = resolveToolContext(e, toolGroupName);
-  await sendToolStartVisual(e, initialFunctionCalls, toolContext);
+  const toolContext = { ...resolveToolContext(e, toolGroupName), progress };
 
-  // 如果有需要确认的工具（且命令不在白名单），改为顺序执行
-  const needsConfirm = pluginInstance && initialFunctionCalls.some(
-    fc => CONFIRM_REQUIRED_TOOLS.has(fc.name) && toolMap.has(fc.name) && !isCommandWhitelisted(fc.args?.command)
-  );
-
+  progress?.enter(resolveToolProgressText(initialFunctionCalls));
   let toolExecutionResults;
-  if (needsConfirm) {
-    toolExecutionResults = [];
-    for (const fc of initialFunctionCalls) {
-      toolExecutionResults.push(
-        await executeSingleTool(fc, e, pluginInstance, toolContext)
-      );
-    }
-  } else {
+  try {
     toolExecutionResults = await Promise.all(
-      initialFunctionCalls.map((fc) =>
-        executeSingleTool(fc, e, pluginInstance, toolContext)
-      )
+      initialFunctionCalls.map((fc) => executeSingleTool(fc, e, toolContext))
     );
+  } finally {
+    progress?.leave();
   }
 
   return buildToolCallbackPayload(toolExecutionResults);
@@ -686,7 +385,7 @@ export async function executeToolCalls(
 
 // ─── 热重载 ──────────────────────────────────────────────
 
-const IGNORED_FILES = new Set(["tools.js", "AbstractTool.js", "toolStartVisual.js"]);
+const IGNORED_FILES = new Set(["tools.js", "AbstractTool.js"]);
 
 /**
  * 动态重载单个工具文件

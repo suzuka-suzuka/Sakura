@@ -4,7 +4,6 @@ import {
   loadConversationHistory,
   saveConversationHistory,
 } from "../lib/AIUtils/ConversationHistory.js";
-import { resolveToolConfirmation } from "../lib/AIUtils/tools/tools.js";
 import { getQuoteContent } from "../lib/AIUtils/messaging.js";
 import { checkForNaiTags } from "../lib/AIUtils/naiChatDraw.js";
 import { buildMultimodalQueryParts } from "../lib/AIUtils/messageParts.js";
@@ -260,7 +259,6 @@ export class AIChat extends plugin {
         groupContext,
         toolGroup,
         history: currentFullHistory,
-        pluginInstance: this,
         onIntermediateText: async (text) => {
           const cleanedTextContent = await checkForNaiTags(
             text,
@@ -319,9 +317,5 @@ export class AIChat extends plugin {
         logger.warn(`[Memory] 保存个人记忆待处理对话失败：${error.message}`);
       }
     }
-  }
-
-  async handleToolConfirmCallback() {
-    await resolveToolConfirmation(this);
   }
 }

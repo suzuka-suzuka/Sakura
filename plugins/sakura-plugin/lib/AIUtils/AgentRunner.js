@@ -3,6 +3,7 @@ import { getAI } from "./getAI.js";
 import { ensureToolCallIds } from "./toolCallProtocol.js";
 import { executeToolCalls, toolGroupHasTool } from "./tools/tools.js";
 import { buildMemoryContext } from "./memoryContext.js";
+import { createToolProgress } from "./toolProgress.js";
 import { withMemoryScope, MIMIC_MEMORY_SOURCE } from "./memoryScope.js";
 import { finalizeStoppedConversationTurn } from "./ConversationHistory.js";
 import {
@@ -59,7 +60,6 @@ async function runScopedAgentLoop({
   groupContext,
   toolGroup,
   history = [],
-  pluginInstance = null,
   maxToolCalls = getAgentMaxToolCalls(e),
   onIntermediateText = null,
   includeUserHistoryPart = (part) => !part.inlineData,
@@ -67,6 +67,7 @@ async function runScopedAgentLoop({
   const currentFullHistory = history;
   const turnStartIndex = currentFullHistory.length;
   const taskId = startAiTask(e);
+  const progress = createToolProgress(e);
   const routingContext = {};
   let toolCallCount = 0;
   let finalText = "";
@@ -169,8 +170,8 @@ async function runScopedAgentLoop({
         const toolCallback = await executeToolCalls(
           e,
           functionCalls,
-          pluginInstance,
-          toolGroup
+          toolGroup,
+          { progress }
         );
         currentFullHistory.push(...toolCallback.historyContents);
         const newToolQueryParts = filterNewInlineDataParts(
@@ -225,6 +226,8 @@ async function runScopedAgentLoop({
       };
     }
   } finally {
+    // 在调用方发最终回复之前撤回状态消息，“撤回了一条消息”就不会落在回答下面。
+    await progress?.dispose();
     stripEphemeralUserParts(currentFullHistory, includeUserHistoryPart);
     finishAiTask(e, taskId);
   }

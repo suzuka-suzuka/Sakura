@@ -460,10 +460,6 @@ export default function ConfigField({ name, meta, value, onChange, scopeSelfId =
         return <ServerDirectoryField name={name} displayName={displayName} help={help} value={value} onChange={onChange} />;
     }
 
-    if (isString && uiType === 'workspaceSelect') {
-        return <WorkspaceSelectField name={name} displayName={displayName} help={help} value={value} onChange={onChange} workspaces={formValue?.workspaces} />;
-    }
-
     if (isString && uiType === 'textarea') {
         return (
             <FieldShell label={displayName} help={help} layout="stack">
@@ -545,36 +541,6 @@ function SecretInput({ value, onChange, onBlur, className = 'field-input', ...re
             }}
             onChange={(event) => onChange(event.target.value)}
         />
-    );
-}
-
-function WorkspaceSelectField({ displayName, help, value, onChange, workspaces }) {
-    const options = [];
-    const seen = new Set();
-
-    for (const workspace of Array.isArray(workspaces) ? workspaces : []) {
-        const workspaceName = String(workspace?.name || '').trim();
-        if (!workspaceName || seen.has(workspaceName)) continue;
-        seen.add(workspaceName);
-        options.push(workspaceName);
-    }
-
-    return (
-        <FieldShell label={displayName} help={help}>
-            <select
-                className="field-input"
-                value={options.includes(value) ? value : ''}
-                onChange={(event) => onChange(event.target.value)}
-                disabled={options.length === 0}
-            >
-                <option value="" disabled>
-                    {options.length === 0 ? '请先添加工作区' : '请选择默认工作区'}
-                </option>
-                {options.map((workspaceName) => (
-                    <option key={workspaceName} value={workspaceName}>{workspaceName}</option>
-                ))}
-            </select>
-        </FieldShell>
     );
 }
 

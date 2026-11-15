@@ -64,7 +64,6 @@ mock.module(moduleUrl("../lib/AIUtils/AgentRunner.js"), { namedExports: { runAge
   return { status: agentStatus, history, finalText: "正常回复" };
 } } });
 mock.module(moduleUrl("../lib/AIUtils/tools/tools.js"), { namedExports: {
-  resolveToolConfirmation() {},
   toolGroupHasTool: (name, key) => Boolean(toolGroups.find((group) => group.name === name)?.tools.includes(key)),
 } });
 mock.module(moduleUrl("../lib/AIUtils/messaging.js"), { namedExports: {

@@ -98,6 +98,7 @@ export function buildNaiToolRequest(opts = {}) {
 
 export class NaiTool extends AbstractTool {
     name = "NaiPainting";
+    progressText = "绘画";
     description = "使用 NovelAI 生成二次元/动漫风格图片。简单单人图可直接调用；多人站位、角色交互、复杂构图、画面文字、透明背景或指定画风时，先用 SkillGuide 加载 nai5-image-generation，再按父 Skill 返回的目录只加载相关子 Skill。";
 
     parameters = {

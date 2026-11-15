@@ -124,6 +124,7 @@ export function formatSearchResult(result, { includeLinks = false, now = new Dat
 
 export class OnlineSearchTool extends AbstractTool {
   name = 'OnlineSearch'
+  progressText = '搜索'
 
   description = '联网搜索实时或最新信息时使用'
 

@@ -4,6 +4,7 @@ import setting from "../../setting.js";
 
 export class IllustrationTool extends AbstractTool {
   name = "Illustration";
+  progressText = "找图";
 
   parameters = {
     properties: {

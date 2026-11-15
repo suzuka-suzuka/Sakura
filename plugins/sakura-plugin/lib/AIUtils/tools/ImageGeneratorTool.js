@@ -5,6 +5,7 @@ import Setting from "../../setting.js";
 
 export class ImageGeneratorTool extends AbstractTool {
   name = "ImageGenerator";
+  progressText = "绘画";
 
   parameters = {
     properties: {

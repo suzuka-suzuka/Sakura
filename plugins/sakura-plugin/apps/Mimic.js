@@ -1,7 +1,6 @@
 import { runAgentLoop } from "../lib/AIUtils/AgentRunner.js";
 import { loadMimicHistory, saveMimicHistory, touchMimicHistory } from "../lib/AIUtils/mimicHistory.js";
 import { beginPersonalMemory, finishPersonalMemory, getMemoryConversationText } from "../lib/AIUtils/automaticMemory.js";
-import { resolveToolConfirmation } from "../lib/AIUtils/tools/tools.js";
 import {
   splitAndReplyMessages,
   parseAtMessage,
@@ -302,7 +301,6 @@ export class Mimic extends plugin {
         groupContext: true,
         toolGroup,
         history: currentFullHistory,
-        pluginInstance: this,
         onIntermediateText: async (text) => {
           await smartReplyMsg(e, text, { quote: true });
         },
@@ -350,9 +348,5 @@ export class Mimic extends plugin {
       }
     }
     return true;
-  }
-
-  async handleToolConfirmCallback() {
-    await resolveToolConfirmation(this);
   }
 }

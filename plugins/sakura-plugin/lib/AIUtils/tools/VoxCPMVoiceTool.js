@@ -140,6 +140,7 @@ async function loadAudioSource(source, timeoutMs) {
 
 export class VoxCPMVoiceTool extends AbstractTool {
   name = "SendVoice";
+  progressText = "录语音";
 
   parameters = {
     properties: {

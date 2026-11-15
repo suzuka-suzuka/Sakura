@@ -100,19 +100,6 @@ const ToolGroupSchema = z.object({
     tools: z.array(z.string()).default([]).describe('工具|#toolMultiSelect|这个组里允许 AI 调用的工具'),
 });
 
-const RunCommandWorkspaceSchema = z.object({
-    name: z.string()
-        .trim()
-        .min(1, '工作区名称不能为空')
-        .max(64, '工作区名称不能超过 64 个字符')
-        .refine((value) => !/[\p{Cc}]/u.test(value), '工作区名称不能包含换行等控制字符')
-        .default('workspace')
-        .describe('工作区名称|作为 RunCommand 的 root 参数，例如 Sakura 11 或 工作区A'),
-    path: nonEmptyString('工作区路径')
-        .default('.')
-        .describe('工作区路径|#serverDirectory|命令进程的默认起点目录；不限制命令访问其他路径'),
-});
-
 const AIObjectSchema = z.object({
     profiles: z.array(ProfileSchema).default([]).describe('触发设定|#group:触发设定|#nameField:prefixes|#summary:name,models|用什么前缀触发、用哪个人设、调用哪些模型'),
     toolGroups: z.array(ToolGroupSchema).default([]).describe('工具组|#group:工具组|#nameField:name|#summary:tools|把常用的工具组合起来，在触发设定和伪人里选择'),
@@ -129,24 +116,7 @@ const AIObjectSchema = z.object({
     searchModels: modelList('搜索模型', 'chat:search', '“联网搜索”工具交给这些模型去查，只能选开启了“联网搜索”的模型；可以选多个，排在前面的优先，失败时换下一个；不选则不提供这个工具', '#group:联网搜索'),
     gcsBucket: z.string().default('').describe('GCS Bucket|#group:后台任务|#advanced|Vertex 视频分析上传文件用的 Cloud Storage bucket'),
     gcsPrefix: z.string().default('sakura-message-videos').describe('GCS 目录|#group:后台任务|#advanced|Vertex 视频分析的临时文件目录'),
-    workspaces: z.array(RunCommandWorkspaceSchema)
-        .min(1, '至少配置一个命令工作区')
-        .default([{ name: 'sakura', path: '.' }])
-        .describe('命令工作区|#group:命令执行|#nameField:name|#summary:path|RunCommand 工具可以选择的起点目录，所有工作区均可读写'),
-    defaultWorkspace: z.string()
-        .default('sakura')
-        .describe('默认工作区|#group:命令执行|#workspaceSelect|AI 没指定工作区时使用；AI 指定后会同步更新此项'),
-    trustAICommand: z.boolean().default(false).describe('完全信任 AI|#group:命令执行|开启后 AI 调用的命令全部直接执行，不再询问确认，也不受白名单限制'),
 }).superRefine((config, ctx) => {
-    addUniqueFieldIssues(config.workspaces, 'name', ctx, ['workspaces']);
-    if (!config.workspaces.some((workspace) => workspace.name === config.defaultWorkspace)) {
-        ctx.addIssue({
-            code: 'custom',
-            path: ['defaultWorkspace'],
-            message: `默认工作区“${config.defaultWorkspace}”不在工作区列表中`,
-        });
-    }
-
     const seen = new Set();
     config.profiles.forEach((profile, profileIndex) => {
         profile.prefixes.forEach((prefix, prefixIndex) => {
