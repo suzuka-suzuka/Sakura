@@ -25,7 +25,7 @@ mock.module(url("../lib/AIUtils/getAI.js"), { namedExports: { getAI: async (...a
 mock.module(url("../lib/AIUtils/MCPManager.js"), { namedExports: { mcpManager: {} } });
 const toolSource = fs.readFileSync(new URL("../lib/AIUtils/tools/tools.js", import.meta.url), "utf8");
 for (const [, name, file] of toolSource.matchAll(/import \{ (\w+) \} from "\.\/([^"/]+Tool\.js)";/g)) {
-  if (["MemoryTool", "ReadUserMemoryTool"].includes(name)) continue;
+  if (name === "MemoryTool") continue;
   mock.module(url(`../lib/AIUtils/tools/${file}`), { namedExports: { [name]: class {
     name = name;
     function() { return { name, parameters: { type: "object", properties: {} } }; }
@@ -50,45 +50,47 @@ const { runAgentLoop } = await import("../lib/AIUtils/AgentRunner.js");
 const { activeAiTasks } = await import("../lib/AIUtils/stopFlag.js");
 const { withMemoryScope } = await import("../lib/AIUtils/memoryScope.js");
 const { MemoryTool } = await import("../lib/AIUtils/tools/MemoryTool.js");
-const { ReadUserMemoryTool } = await import("../lib/AIUtils/tools/ReadUserMemoryTool.js");
 const event = (userId, groupId = 962001) => ({ self_id: 960001, user_id: userId, group_id: groupId });
 
+// 摘要视为覆盖到当前 revision，避免注入时触发后台整理；空摘要模拟整理没产出摘要。
 function seed(e, contents, summary = "已有成员摘要", scope = "user") {
   const location = memory.getMemoryLocation({ groupId: e.group_id, userId: e.user_id, scope });
   let document = memory.createEmptyMemoryDocument();
   for (const [index, content] of contents.entries()) {
     document = memory.appendMemory(document, { content, now: index + 1 }).document;
   }
-  // 本组测试不触发摘要整理，只检查注入和按需查询。
+  // 本组测试不触发摘要整理，只检查注入。
   document.summary = { text: summary, updatedAt: 1, sourceRevision: document.revision };
   memory.writeMemoryDocument(location.memoryFile, document);
   return { location, document };
 }
 
-function call(qq, id = "查询") {
-  return { name: "ReadUserMemory", id, args: { qq: String(qq) } };
+function append(e, contents, scope = "user") {
+  const location = memory.getMemoryLocation({ groupId: e.group_id, userId: e.user_id, scope });
+  let document = memory.readMemoryDocument(location.memoryFile, { throwOnError: true });
+  for (const content of contents) {
+    document = memory.appendMemory(document, { content, now: 1000 + document.revision }).document;
+  }
+  memory.writeMemoryDocument(location.memoryFile, document);
 }
 
-function response(history) {
-  assert.equal(history.at(-1).role, "function");
-  return history.at(-1).parts[0].functionResponse.response;
-}
+const occurrences = (text, part) => text.split(part).length - 1;
 
-async function runScenario(e, query, steps, options = {}) {
-  let step = 0;
+async function injectedPrompt(e, query, options = {}) {
+  let prompt;
   aiHandler = async (...args) => {
-    assert.ok(step < steps.length, "模型调用次数超过测试步骤");
-    return steps[step++](...args);
+    prompt = args[3];
+    return { text: "已完成" };
   };
   try {
     const result = await runAgentLoop({ e, route: "测试", queryParts: [{ text: query }],
       prompt: "角色提示词", toolGroup: "记忆", history: [], ...options });
     assert.equal(result.status, "completed");
-    assert.equal(step, steps.length);
     assert.equal(activeAiTasks.size, 0);
   } finally {
     aiHandler = undefined;
   }
+  return prompt;
 }
 
 after(() => {
@@ -96,171 +98,87 @@ after(() => {
   fs.rmSync(fixture, { recursive: true, force: true });
 });
 
-test("未开启记忆工具时不注入个人摘要、原文或群记忆", async () => {
+test("未开启记忆工具时不注入个人或群记忆，也不请求向量", async () => {
   const e = event(961008, 962008);
   seed(e, Array.from({ length: 12 }, (_, i) => `群咖啡记忆${i}`), "群摘要", "group");
+  seed(e, Array.from({ length: 12 }, (_, i) => `个人咖啡喜好${i}`), "个人摘要");
   const count = vectorCalls.length;
-  for (const summary of ["个人摘要", ""]) {
-    seed(e, ["个人咖啡喜好"], summary);
-    await runScenario(e, "饮食", [async (...args) => {
-      assert.equal(args[3], "角色提示词");
-      assert.equal(vectorCalls.length, count);
-      return { text: "已完成" };
-    }], { toolGroup: "关闭记忆" });
-  }
+  assert.equal(await injectedPrompt(e, "饮食", { toolGroup: "关闭记忆" }), "角色提示词");
+  assert.equal(vectorCalls.length, count);
 });
 
-test("群聊个人记忆只注入摘要，工具按QQ读取全部记录，少量群公共记忆仍直接注入", async () => {
+test("不超过10条时个人和群记忆都只注入全部原文，不注入摘要，不请求向量", async () => {
   const e = event(961001);
   seed(e, ["不喝咖啡", "习惯早起"], "重视生活习惯");
   seed(e, ["本群每周五组织活动"], "群活动摘要", "group");
   const count = vectorCalls.length;
-  await runScenario(e, "饮食", [
-    async (...args) => {
-      assert.match(args[3], /重视生活习惯/);
-      assert.match(args[3], /所属 QQ：961001/);
-      assert.match(args[3], /群活动摘要/);
-      assert.match(args[3], /本群每周五组织活动/);
-      assert.doesNotMatch(args[3], /不喝咖啡|习惯早起/);
-      assert.equal(vectorCalls.length, count);
-      return { functionCalls: [call(e.user_id)] };
-    },
-    async (...args) => {
-      const result = response(args[6]);
-      assert.deepEqual(result, ["不喝咖啡", "习惯早起"]);
-      assert.equal(vectorCalls.length, count);
-      return { text: "已完成" };
-    },
-  ]);
+  const prompt = await injectedPrompt(e, "饮食");
+  assert.match(prompt, /^角色提示词\n\n【长期记忆背景】/);
+  assert.match(prompt, /【当前用户记忆】\n所属 QQ：961001（省略主语指此人）\n- 不喝咖啡\n- 习惯早起/);
+  assert.match(prompt, /【当前群公共记忆】\n- 本群每周五组织活动/);
+  assert.doesNotMatch(prompt, /重视生活习惯|群活动摘要|摘要：/);
+  assert.equal(vectorCalls.length, count);
 });
 
-test("大量个人记忆也不自动检索，同一轮重复查询仍返回全部记录", async () => {
-  const e = event(961002, 962002);
-  seed(e, ["个人细节：不喝咖啡", ...Array.from({ length: 24 }, (_, i) => `个人细节${i}`)]);
-  const count = vectorCalls.length;
-  await runScenario(e, "饮食", [
-    async (...args) => {
-      assert.match(args[3], /已有成员摘要/);
-      assert.doesNotMatch(args[3], /个人细节/);
-      assert.equal(vectorCalls.length, count);
-      return { functionCalls: [call(e.user_id, "首次")] };
-    },
-    async (...args) => {
-      assert.equal(response(args[6]).length, 25);
-      return { functionCalls: [call(e.user_id, "再次")] };
-    },
-    async (...args) => {
-      const result = response(args[6]);
-      assert.deepEqual(result, ["个人细节：不喝咖啡", ...Array.from({ length: 24 }, (_, i) => `个人细节${i}`)]);
-      assert.equal(vectorCalls.length, count);
-      return { text: "已完成" };
-    },
-  ]);
-});
-
-test("私聊同样仅注入摘要，工具读取全部记录而不请求向量", async () => {
-  const e = event(961003, null);
-  const contents = ["私聊细节：不喝咖啡", ...Array.from({ length: 24 }, (_, i) => `私聊细节${i}`)];
-  seed(e, contents, "私聊用户摘要");
-  const count = vectorCalls.length;
-  await runScenario(e, "饮食", [
-    async (...args) => {
-      assert.match(args[3], /私聊用户摘要/);
-      assert.doesNotMatch(args[3], /私聊细节/);
-      return { functionCalls: [call(e.user_id)] };
-    },
-    async (...args) => {
-      assert.deepEqual(response(args[6]), contents);
-      assert.equal(vectorCalls.length, count);
-      return { text: "已完成" };
-    },
-  ]);
-});
-
-test("个人无摘要时群聊和私聊注入全部记录，空白摘要也回退且不请求向量", async () => {
-  const contents = ["老家在河南", ...Array.from({ length: 24 }, (_, i) => `个人细节${i}结束`)];
-  for (const [groupId, summary] of [[null, ""], [962004, "   "]]) {
-    const e = event(961004, groupId);
-    seed(e, contents, summary);
-    const count = vectorCalls.length;
-    await runScenario(e, "饮食", [
-      async (...args) => {
-        assert.match(args[3], /所属 QQ：961004/);
-        assert.doesNotMatch(args[3], /当前用户记忆摘要/);
-        for (const content of contents) assert.ok(args[3].includes(content));
-        assert.equal(vectorCalls.length, count);
-        return { functionCalls: [call(e.user_id)] };
-      },
-      async (...args) => {
-        assert.deepEqual(response(args[6]), contents);
-        assert.equal(vectorCalls.length, count);
-        return { text: "已完成" };
-      },
-    ]);
-  }
-});
-
-test("个人摘要和记录都为空时不注入空背景", async () => {
-  const e = event(961009, null);
-  seed(e, [], "");
-  await runScenario(e, "饮食", [async (...args) => {
-    assert.equal(args[3], "角色提示词");
-    return { text: "已完成" };
-  }]);
-});
-
-test("大量群公共记忆仍自动召回，向量目标仅包含群公共记忆", async () => {
+test("超过10条时个人和群记忆都注入摘要和召回条目，一次向量请求覆盖两份记忆", async () => {
   const e = event(961005, 962005);
-  seed(e, Array.from({ length: 25 }, (_, i) => `个人细节咖啡${i}`));
-  seed(e, Array.from({ length: 12 }, (_, i) => `本群咖啡活动${i}`), "群活动摘要", "group");
+  const { location: userLocation } = seed(e, ["个人细节：喜欢咖啡", ...Array.from({ length: 24 }, (_, i) => `个人细节${i}`)]);
+  const { location: groupLocation } = seed(e, Array.from({ length: 12 }, (_, i) => i === 3 ? "本群咖啡活动" : `本群活动${i}`), "群活动摘要", "group");
   const count = vectorCalls.length;
-  await runScenario(e, "饮食", [async (...args) => {
-    assert.match(args[3], /已有成员摘要/);
-    assert.match(args[3], /群活动摘要/);
-    assert.match(args[3], /本群咖啡活动/);
-    assert.doesNotMatch(args[3], /个人细节/);
-    assert.equal(vectorCalls.length, count + 1);
-    assert.deepEqual(vectorCalls.at(-1).scopes, ["mimic:group:962005"]);
-    return { text: "已完成" };
-  }]);
+  const prompt = await injectedPrompt(e, "饮食");
+  assert.match(prompt, /【当前用户记忆】\n所属 QQ：961005（省略主语指此人）\n摘要：\n已有成员摘要\n与当前消息相关：\n- 个人细节：喜欢咖啡/);
+  assert.match(prompt, /【当前群公共记忆】\n摘要：\n群活动摘要\n与当前消息相关：\n- 本群咖啡活动/);
+  assert.doesNotMatch(prompt, /摘要之后新增|最近记录/);
+  assert.equal(vectorCalls.length, count + 1);
+  assert.deepEqual(vectorCalls.at(-1).scopes, [userLocation.scopeKey, groupLocation.scopeKey]);
+  assert.equal(vectorCalls.at(-1).query, "饮食");
 });
 
-test("群召回失败或无查询文字时只回退最新10条群记录，个人仍仅摘要", async () => {
+test("摘要之后新增的条目总会注入，且不与召回条目重复", async () => {
+  const e = event(961002, 962002);
+  seed(e, Array.from({ length: 25 }, (_, i) => `个人细节${i}结束`));
+  append(e, ["以后叫我小夜", "最近开始喝咖啡"]);
+  const prompt = await injectedPrompt(e, "饮食");
+  assert.match(prompt, /摘要：\n已有成员摘要\n摘要之后新增：\n- 以后叫我小夜\n- 最近开始喝咖啡\n与当前消息相关：/);
+  assert.equal(occurrences(prompt, "最近开始喝咖啡"), 1);
+});
+
+test("整理前的大量记忆没有摘要时注入最近10条和召回条目", async () => {
+  const e = event(961004, null);
+  seed(e, ["老家在河南", ...Array.from({ length: 24 }, (_, i) => `个人细节${i}结束`)], "");
+  const prompt = await injectedPrompt(e, "饮食");
+  assert.doesNotMatch(prompt, /摘要：/);
+  assert.match(prompt, /最近记录：\n/);
+  for (let i = 14; i < 24; i++) assert.equal(occurrences(prompt, `个人细节${i}结束`), 1);
+});
+
+test("召回失败或无查询文字时回退到最新10条，个人和群一致", async () => {
   const e = event(961006, 962006);
-  seed(e, Array.from({ length: 25 }, (_, i) => `个人细节${i}`));
+  seed(e, Array.from({ length: 25 }, (_, i) => `个人细节${i}结束`));
   seed(e, Array.from({ length: 12 }, (_, i) => `群记录${i}结束`), "群摘要", "group");
   for (const query of ["饮食", ""]) {
     const count = vectorCalls.length;
     failNextSearch = Boolean(query);
-    await runScenario(e, query, [async (...args) => {
-      assert.match(args[3], /已有成员摘要/);
-      assert.doesNotMatch(args[3], /个人细节|群记录[01]结束/);
-      for (let i = 2; i < 12; i++) assert.ok(args[3].includes(`群记录${i}结束`));
-      assert.equal(vectorCalls.length, count + (query ? 1 : 0));
-      return { text: "已完成" };
-    }]);
+    const prompt = await injectedPrompt(e, query);
+    assert.match(prompt, /已有成员摘要/);
+    assert.match(prompt, /群摘要/);
+    for (let i = 0; i < 15; i++) assert.ok(!prompt.includes(`个人细节${i}结束`));
+    for (let i = 15; i < 25; i++) assert.ok(prompt.includes(`个人细节${i}结束`));
+    assert.doesNotMatch(prompt, /群记录[01]结束/);
+    for (let i = 2; i < 12; i++) assert.ok(prompt.includes(`群记录${i}结束`));
+    assert.equal(vectorCalls.length, count + (query ? 1 : 0));
   }
 });
 
-test("只有个人摘要且无详细记录时仍注入摘要，查询返回空数组", async () => {
-  const e = event(961007, null);
-  seed(e, [], "保留的个人摘要");
-  const count = vectorCalls.length;
-  await runScenario(e, "饮食", [
-    async (...args) => {
-      assert.match(args[3], /保留的个人摘要/);
-      return { functionCalls: [call(e.user_id)] };
-    },
-    async (...args) => {
-      const result = response(args[6]);
-      assert.deepEqual(result, []);
-      assert.equal(vectorCalls.length, count);
-      return { text: "已完成" };
-    },
-  ]);
+test("没有记忆条目时不注入空背景，残留摘要也不注入", async () => {
+  for (const summary of ["", "保留的个人摘要"]) {
+    const e = event(961009, null);
+    seed(e, [], summary);
+    assert.equal(await injectedPrompt(e, "饮食"), "角色提示词");
+  }
 });
 
-test("前缀角色仅注入和查询自己的个人记忆，开关群上下文都不读取Mimic记忆", async () => {
+test("前缀角色仅注入自己的个人记忆，开关群上下文都不读取Mimic记忆", async () => {
   const e = event(961010, 962010);
   seed(e, ["拟态用户事实"], "拟态用户摘要");
   seed(e, Array.from({ length: 12 }, (_, i) => `拟态群事实${i}`), "拟态群摘要", "group");
@@ -270,19 +188,10 @@ test("前缀角色仅注入和查询自己的个人记忆，开关群上下文�
   const count = vectorCalls.length;
   for (const source of ["chat:甲", "chat:乙"]) {
     for (const groupContext of [false, true]) {
-      await runScenario(e, "群活动", [
-        async (...args) => {
-          assert.ok(args[3].includes(`${source}个人摘要`));
-          assert.doesNotMatch(args[3], /拟态|群事实|群摘要/);
-          assert.ok(!args[3].includes(`${source === "chat:甲" ? "chat:乙" : "chat:甲"}个人摘要`));
-          assert.equal(args[4], groupContext);
-          return { functionCalls: [call(e.user_id)] };
-        },
-        async (...args) => {
-          assert.deepEqual(response(args[6]), [`${source}个人事实`]);
-          return { text: "已完成" };
-        },
-      ], { memorySource: source, groupContext });
+      const prompt = await injectedPrompt(e, "群活动", { memorySource: source, groupContext });
+      assert.ok(prompt.includes(`- ${source}个人事实`));
+      assert.doesNotMatch(prompt, /拟态|群事实|群摘要/);
+      assert.ok(!prompt.includes(`${source === "chat:甲" ? "chat:乙" : "chat:甲"}个人事实`));
     }
   }
   assert.equal(vectorCalls.length, count);
@@ -291,7 +200,6 @@ test("前缀角色仅注入和查询自己的个人记忆，开关群上下文�
 test("并发工具调用按角色隔离，模型不能指定来源，前缀群记忆写入被后端拒绝", async () => {
   const e = event(961011, 962011);
   const tool = new MemoryTool();
-  const reader = new ReadUserMemoryTool();
   await Promise.all(["chat:甲", "chat:乙", "Mimic"].map((source) => withMemoryScope(source, async () => {
     await new Promise((resolve) => setImmediate(resolve));
     const schema = tool.function(e);
@@ -300,7 +208,8 @@ test("并发工具调用按角色隔离，模型不能指定来源，前缀群�
     const text = `${source}独立约定`;
     assert.match(await tool.func({ scope: "user", content: text, source: "Mimic", userId: "999999" }, e), /已写入/);
     await new Promise((resolve) => setImmediate(resolve));
-    assert.deepEqual(await reader.func({ qq: String(e.user_id), source: "Mimic" }, e), [text]);
+    const location = memory.getMemoryLocation({ groupId: e.group_id, userId: e.user_id, scope: "user" });
+    assert.deepEqual(memory.readMemoryDocument(location.memoryFile, { throwOnError: true }).memories.map((item) => item.content), [text]);
     if (source !== "Mimic") {
       assert.match(await tool.func({ scope: "group", content: "禁止的群约定", source: "Mimic" }, e), /不能保存群记忆/);
       assert.throws(() => memory.getMemoryLocation({ groupId: e.group_id, userId: e.user_id, scope: "group" }), /不能读写群记忆/);
@@ -309,4 +218,15 @@ test("并发工具调用按角色隔离，模型不能指定来源，前缀群�
   const group = memory.getMemoryLocation({ groupId: e.group_id, scope: "group" });
   assert.equal(fs.existsSync(group.memoryFile), false);
   assert.deepEqual(tool.function(e).parameters.properties.scope.enum, ["user", "group"]);
+});
+
+test("摘要之后新增条目按 revision 差取末尾，整理期间新增的条目也算未整理", () => {
+  let document = memory.createEmptyMemoryDocument();
+  for (let i = 0; i < 12; i++) document = memory.appendMemory(document, { content: `事实${i}`, now: i + 1 }).document;
+  assert.deepEqual(memory.getUnsummarizedMemories(document).length, 12);
+  document.summary = { text: "摘要", updatedAt: 1, sourceRevision: 10 };
+  assert.deepEqual(memory.getUnsummarizedMemories(document).map((item) => item.content), ["事实10", "事实11"]);
+  document.summary.sourceRevision = 12;
+  assert.deepEqual(memory.getUnsummarizedMemories(document), []);
+  assert.equal(memory.MEMORY_MAINTENANCE_INTERVAL, 10);
 });

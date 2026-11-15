@@ -16,7 +16,6 @@ import { EmojiTool } from "./EmojiTool.js";
 import { NaiTool } from "./NaiTool.js";
 import { RunCommandTool } from "./RunCommandTool.js";
 import { MemoryTool } from "./MemoryTool.js";
-import { ReadUserMemoryTool } from "./ReadUserMemoryTool.js";
 import { ImageSearchTool } from "./ImageSearchTool.js";
 import { UploadFileTool } from "./UploadFileTool.js";
 import { VoxCPMVoiceTool } from "./VoxCPMVoiceTool.js";
@@ -49,7 +48,6 @@ const availableTools = [
   new NaiTool(),
   new RunCommandTool(),  // 通用命令执行（包含文件搜索、Python 执行等）
   new MemoryTool(),      // 添加用户或群公共记忆
-  new ReadUserMemoryTool(), // 查询当前群成员或私聊本人的个人记忆
   new ImageSearchTool(), // 统一搜图工具
   new UploadFileTool(),
   new VoxCPMVoiceTool(),
@@ -74,7 +72,6 @@ const TOOL_CONFIG_KEYS = {
   "NaiPainting": "Nai",
   "RunCommand": "RunCommand",
   "Memory": "Memory",
-  "ReadUserMemory": "Memory",
   "ImageSearch": "ImageSearch",
   "UploadFile": "UploadFile",
   "SendVoice": "VoxCPMVoice",
@@ -358,16 +355,6 @@ function resolveToolContext(e, toolGroupName) {
  * @param {Array} [options.history] 本次请求的对话历史，用于保留本轮已调用过的工具
  */
 export async function getToolsSchema(e, toolGroupName, options = {}) {
-  // 后台群记忆任务只开放记忆读写工具，不依赖角色工具组，也不开放 MCP。
-  if (toolGroupName?.memoryOnly === true) {
-    return {
-      localTools: [
-        toolMap.get("Memory").function(e, { memoryTargets: toolGroupName.memoryTargets || [] }),
-        toolMap.get("ReadUserMemory").function(e),
-      ],
-      allowedMcpServerIds: [],
-    };
-  }
   if (!toolGroupName) return { localTools: [], allowedMcpServerIds: [] };
 
   const { allowedTools, allowedMcpServerIds: groupMcpServerIds } = resolveToolGroup(toolGroupName);

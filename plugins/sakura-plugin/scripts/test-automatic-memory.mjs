@@ -15,16 +15,14 @@ const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "sakura-automatic-memory-"
 let redis;
 let server;
 let currentSelfId = 910001;
-let memoryConfig = {};
 let toolGroups = [{ name: "记忆", tools: ["Memory"] }, { name: "关闭记忆", tools: [] }];
 let aiHandler;
+let aiConfigExtra = {};
 let agentStatus = "completed";
 const agentHistoryLengths = [];
 const agentToolGroups = [];
 const agentMemorySources = [];
 const aiCalls = [];
-const forwardCalls = [];
-let forwardError;
 global.logger = { info() {}, warn() {}, error() {} };
 global.plugin = class { constructor(options) { Object.assign(this, options); } };
 global.Cron = (_, handler) => handler;
@@ -33,23 +31,14 @@ const moduleUrl = (relative) => new URL(relative, import.meta.url).href;
 mock.module(moduleUrl("../lib/path.js"), { namedExports: { plugindata: path.join(fixture, "data") } });
 mock.module(moduleUrl("../lib/setting.js"), { defaultExport: {
   getConfig(name) {
-    if (name === "Memory") return memoryConfig;
     if (name === "mimic") return { toolGroup: "记忆" };
-    return { utilityModels: ["test-utility"], toolGroups };
+    return { utilityModels: ["test-utility"], toolGroups, ...aiConfigExtra };
   },
 } });
 mock.module(moduleUrl("../../../src/utils/redis.js"), { namedExports: { getRedis: () => redis } });
 mock.module(moduleUrl("../../../src/api/client.js"), { namedExports: {
   getCurrentBotSelfId: () => currentSelfId,
-  getBot: (selfId) => selfId ? {
-    self_id: selfId,
-    sendForwardMsg: async (payload) => {
-      forwardCalls.push({ selfId, groupId: payload.group_id, nodes: structuredClone(payload.messages),
-        source: payload.source, news: structuredClone(payload.news) });
-      if (forwardError) throw forwardError;
-      return { message_id: "测试转发消息" };
-    },
-  } : null,
+  getBot: (selfId) => selfId ? { self_id: selfId } : null,
 } });
 mock.module(moduleUrl("../lib/AIUtils/getAI.js"), { namedExports: { getAI: async (...args) => {
   aiCalls.push(args);
@@ -90,17 +79,12 @@ mock.module(moduleUrl("../lib/utils.js"), { namedExports: {
 const memory = await import("../lib/AIUtils/memoryStore.js");
 const { storeMemories } = await import("../lib/AIUtils/memoryWriter.js");
 const { MemoryTool } = await import("../lib/AIUtils/tools/MemoryTool.js");
-const { ReadUserMemoryTool } = await import("../lib/AIUtils/tools/ReadUserMemoryTool.js");
 const automatic = await import("../lib/AIUtils/automaticMemory.js");
-const { withMemoryScope } = await import("../lib/AIUtils/memoryScope.js");
 const mimic = await import("../lib/AIUtils/mimicHistory.js");
 const historyStore = await import("../lib/AIUtils/ConversationHistory.js");
-const messages = await import("../lib/AIUtils/groupMessageStore.js");
-const { AutomaticMemory } = await import("../apps/AutomaticMemory.js");
 const { AIChat } = await import("../apps/chat.js");
 const { Mimic } = await import("../apps/Mimic.js");
 const tool = new MemoryTool();
-const readTool = new ReadUserMemoryTool();
 const e = (userId, groupId = 920001) => ({ self_id: 910001, group_id: groupId, user_id: userId, sender: { nickname: `成员${userId}` } });
 const conversation = (text = "我希望被称为小夜") => [
   { role: "user", parts: [{ text }] }, { role: "model", parts: [{ text: "好的" }] },
@@ -135,20 +119,20 @@ after(async () => {
   fs.rmSync(fixture, { recursive: true, force: true });
 });
 
-test("工具与 JSON 共用新增计数，第5条才整理，重复和空列表不计数", async () => {
+test("工具与 JSON 共用新增计数，第10条才整理，重复和空列表不计数", async () => {
   const event = e(930001);
-  const first = await storeMemories({ e: event, scope: "user", contents: Array.from({ length: 4 }, (_, index) => `稳定事实${index}`) });
+  const first = await storeMemories({ e: event, scope: "user", contents: Array.from({ length: 9 }, (_, index) => `稳定事实${index}`) });
   assert.equal(first.maintenanceScheduled, false);
-  assert.equal(document(event).revision, 4);
-  const result = await tool.func({ scope: "user", content: "第五条稳定事实" }, event);
+  assert.equal(document(event).revision, 9);
+  const result = await tool.func({ scope: "user", content: "第十条稳定事实" }, event);
   assert.match(result, /后台整理/);
-  await waitUntil(() => document(event).summary.sourceRevision >= 5);
-  assert.equal(document(event).summary.sourceRevision, 5);
+  await waitUntil(() => document(event).summary.sourceRevision >= 10);
+  assert.equal(document(event).summary.sourceRevision, 10);
   assert.equal(document(event).summary.text, "测试摘要");
   const count = aiCalls.length;
-  assert.match(await tool.func({ scope: "user", content: "第五条稳定事实" }, event), /已存在/);
+  assert.match(await tool.func({ scope: "user", content: "第十条稳定事实" }, event), /已存在/);
   await storeMemories({ e: event, scope: "user", contents: [] });
-  assert.equal(document(event).revision, 5);
+  assert.equal(document(event).revision, 10);
   assert.equal(aiCalls.length, count);
 });
 
@@ -211,22 +195,6 @@ test("不同设定的延迟提取、旧记忆读取和摘要整理分别落入�
   }
 });
 
-test("小时群采集固定使用Mimic范围，生成的个人及群记忆不进入前缀设定", async () => {
-  const event = e(910001, 920031);
-  const records = Array.from({ length: 100 }, (_, index) => ({ messageId: String(index), userId: "930031",
-    senderName: "小花", content: "我喜欢绘画", time: index, isBot: false }));
-  let round = 0;
-  await withMemoryScope("chat:甲", () => automatic.collectGroupMemories(event, records, {
-    aiRequest: async () => round++ === 0 ? { functionCalls: [
-      { name: "Memory", args: { scope: "group", content: "本群周五活动", source: "chat:甲" } },
-      { name: "Memory", args: { scope: "user", userId: "930031", content: "喜欢绘画", source: "chat:甲" } },
-    ] } : { text: "完成" },
-  }));
-  assert.equal(document(event, "group").memories[0].content, "本群周五活动");
-  assert.equal(document(e(930031, event.group_id)).memories[0].content, "喜欢绘画");
-  assert.equal(document(e(930031, event.group_id), "user", "chat:甲").memories.length, 0);
-});
-
 test("记忆整理按实际存储位置区分本人，群任务发起者不是个人记忆本人", async () => {
   const ownerId = 930027;
   for (const [scope, groupId] of [["user", 920027], ["user", null], ["group", 920027]]) {
@@ -247,154 +215,6 @@ test("记忆整理按实际存储位置区分本人，群任务发起者不是�
       assert.doesNotMatch(request[3], /本次整理的是 QQ：/);
     }
   }
-});
-
-test("查询其他成员只读取当前群个人记忆，参数不能指定其他群或作用域", async () => {
-  const caller = e(940101, 924101);
-  const target = e(940102, 924101);
-  for (const [event, scope, content] of [
-    [target, "user", "当前群成员的喜好"],
-    [caller, "user", "调用者的个人信息"],
-    [e(target.user_id, 920101), "user", "另一个群的个人信息"],
-    [e(target.user_id, null), "user", "成员的私聊信息"],
-    [target, "group", "本群公共规则"],
-  ]) await storeMemories({ e: event, scope, contents: [content] });
-  const result = await readTool.func({ qq: String(target.user_id), groupId: "920101", scope: "group", userId: String(caller.user_id) }, caller);
-  assert.deepEqual(result, ["当前群成员的喜好"]);
-});
-
-test("按QQ只返回全部记忆文字数组，不附元数据、不写文件、不计数、不整理", async () => {
-  const event = e(940103);
-  const location = memory.getMemoryLocation({ groupId: event.group_id, userId: event.user_id });
-  let data = memory.createEmptyMemoryDocument();
-  for (let index = 0; index < 25; index++) {
-    data = memory.appendMemory(data, { content: `事实${index}`, now: index + 1 }).document;
-  }
-  data.memories[0].updatedAt = 999;
-  data.summary = { text: "已整理的成员摘要", updatedAt: 10, sourceRevision: 5 };
-  memory.writeMemoryDocument(location.memoryFile, data);
-  const before = fs.readFileSync(location.memoryFile, "utf8");
-  const count = aiCalls.length;
-  const result = await readTool.func({ qq: String(event.user_id) }, e(940101));
-  assert.deepEqual(result, data.memories.map((item) => item.content));
-  assert.equal(fs.readFileSync(location.memoryFile, "utf8"), before);
-  assert.equal(aiCalls.length, count);
-  assert.equal(document(event).revision, 25);
-  assert.equal(document(event).summary.sourceRevision, 5);
-});
-
-test("暂无记忆返回空数组且不创建文件，拒绝非法QQ与缺少对话信息", async () => {
-  const event = e(940104);
-  const location = memory.getMemoryLocation({ groupId: event.group_id, userId: event.user_id });
-  const result = await readTool.func({ qq: String(event.user_id) }, e(940101));
-  assert.deepEqual(result, []);
-  assert.equal(fs.existsSync(location.memoryFile), false);
-  for (const qq of [undefined, null, 940104, "../940104", "", " 940104", "940104 "]) {
-    assert.match((await readTool.func({ qq }, event)).error, /QQ号/);
-  }
-  assert.match((await readTool.func({ qq: "940104" }, null)).error, /对话信息/);
-});
-
-test("私聊可查本人记忆，不能读取其他人的私聊记忆", async () => {
-  const event = e(940105, null);
-  await storeMemories({ e: event, scope: "user", contents: ["本人的私聊信息"] });
-  await storeMemories({ e: e(940106, null), scope: "user", contents: ["其他人的私聊信息"] });
-  const result = await readTool.func({ qq: String(event.user_id) }, event);
-  assert.deepEqual(result, ["本人的私聊信息"]);
-  assert.match((await readTool.func({ qq: "940106", groupId: "920001" }, event)).error, /只能查询当前用户/);
-  assert.deepEqual(await readTool.func({ qq: "940107" }, e(940107, null)), []);
-});
-
-test("损坏的记忆文件报告查询失败，不当作空记忆或覆盖原文件", async () => {
-  const event = e(940108);
-  const location = memory.getMemoryLocation({ groupId: event.group_id, userId: event.user_id });
-  fs.mkdirSync(path.dirname(location.memoryFile), { recursive: true });
-  const broken = "{损坏的记忆";
-  fs.writeFileSync(location.memoryFile, broken, "utf8");
-  const result = await readTool.func({ qq: String(event.user_id) }, e(940101));
-  assert.match(result.error, /记忆查询失败/);
-  assert.equal(result.totalCount, undefined);
-  assert.equal(fs.readFileSync(location.memoryFile, "utf8"), broken);
-});
-
-async function append(groupId, count, endTime, offset = 0, { userId = 930003, senderName = "小夜" } = {}) {
-  for (let index = 0; index < count; index++) {
-    await messages.appendGroupMessage({ post_type: "message", message_type: "group", self_id: currentSelfId, group_id: groupId,
-      user_id: userId, message_id: `${groupId}-${offset + index}`, time: endTime - count + index,
-      sender: { user_id: userId, nickname: senderName }, message: [{ type: ["image", "face", "record", "text"][index % 4], data: { text: `消息${offset + index}`, id: 1 } }],
-    }, { redis });
-  }
-}
-
-test("一小时内文字、图片、表情与语音合计满100条，取最新100条且不补旧记录", async () => {
-  const endTime = Math.floor(Date.now() / 1000);
-  await append(920003, 99, endTime);
-  await append(920003, 5, endTime - 3601, 1000);
-  let records = await messages.getGroupMemoryMessages({ selfId: currentSelfId, groupId: 920003, startTime: endTime - 3600, endTime, redis });
-  assert.equal(records.length, 99);
-  assert.ok(records.some((record) => record.content === "[图片]"));
-  assert.ok(records.some((record) => record.content === "[表情:1]"));
-  assert.ok(records.some((record) => record.content === "[语音]"));
-  let requested = false;
-  assert.equal(await automatic.collectGroupMemories(e(930003, 920003), records, { aiRequest: () => { requested = true; } }), false);
-  assert.equal(requested, false);
-  await append(920003, 8, endTime + 8, 2000);
-  records = await messages.getGroupMemoryMessages({ selfId: currentSelfId, groupId: 920003, startTime: endTime - 3600, endTime: endTime + 8, redis });
-  assert.equal(records.length, 100);
-  assert.equal(records.at(-1).messageId, "920003-2007");
-  assert.ok(records.every((record) => record.time >= endTime - 3600));
-});
-
-test("群任务输入不标记机器人，个人记忆目标仍排除机器人，先查询再按发送者QQ写入", async () => {
-  const event = e(910001, 920004);
-  const records = Array.from({ length: 100 }, (_, index) => ({ messageId: String(index), userId: "930004", senderName: "小夜", content: "聊天", time: index, isBot: false }));
-  records[99] = { messageId: "99", userId: "910001", senderName: "樱", content: "以后叫我樱", time: 99, isBot: true,
-    repliedMessage: { userId: "930004", content: "你希望怎么称呼？", isBot: false } };
-  let round = 0;
-  const original = structuredClone(records);
-  const addedMemories = [];
-  const success = await automatic.collectGroupMemories(event, records, { addedMemories, aiRequest: async (...args) => {
-    assert.equal(args[4], false);
-    assert.deepEqual(args[5], { memoryOnly: true, memoryTargets: ["930004"] });
-    assert.equal(args[7].disableNativeWebSearch, true);
-    assert.match(args[3], /先调用 ReadUserMemory，qq 填该成员的 QQ/);
-    assert.doesNotMatch(args[3], /query/);
-    assert.doesNotMatch(args[3], /机器人|isBot/);
-    if (round++ === 0) {
-      const input = JSON.parse(args[2][0].text);
-      assert.equal(input.length, 100);
-      assert.doesNotMatch(args[2][0].text, /isBot/);
-      assert.deepEqual(input[99], { id: "99", time: 99, userId: "910001", name: "樱", content: "以后叫我樱",
-        reply: { userId: "930004", content: "你希望怎么称呼？" } });
-      return { text: "", functionCalls: [
-        { id: "read-user", name: "ReadUserMemory", args: { qq: "930004" } },
-      ] };
-    }
-    assert.equal(args[6].at(-1).role, "function");
-    if (round === 2) {
-      const { functionResponse } = args[6].at(-1).parts[0];
-      assert.equal(functionResponse.name, "ReadUserMemory");
-      assert.equal(functionResponse.id, "read-user");
-      assert.deepEqual(functionResponse.response, []);
-      assert.equal(addedMemories.length, 0);
-      return { text: "", functionCalls: [
-        { name: "Memory", args: { scope: "group", content: "本群每周六活动" } },
-        { name: "Memory", args: { scope: "user", userId: "930004", content: "用户希望被称为小夜" } },
-        { name: "Memory", args: { scope: "user", userId: "910001", content: "希望被称为樱" } },
-      ] };
-    }
-    assert.deepEqual(args[6].at(-1).parts.map((part) => part.functionResponse.name), ["Memory", "Memory", "Memory"]);
-    assert.match(args[6].at(-1).parts[2].functionResponse.response.message, /发送者 QQ/);
-    return { text: "已完成" };
-  } });
-  assert.equal(success, true);
-  assert.equal(document(event, "group").memories[0].content, "本群每周六活动");
-  assert.equal(document(e(930004, 920004)).memories[0].content, "用户希望被称为小夜");
-  assert.equal(document(event).memories.length, 0);
-  assert.equal(addedMemories.length, 2);
-  assert.deepEqual(records, original);
-  assert.match(await tool.func({ scope: "user", content: "错误目标", userId: "999999" }, event, { memoryTargets: ["930004"] }), /发送者 QQ/);
-  await assert.rejects(automatic.collectGroupMemories(event, records, { aiRequest: async () => ({ functionCalls: [{ name: "RunCommand", args: {} }] }) }), /只允许/);
 });
 
 test("个人20分钟空闲触发，新对话重新计时，旧完成回调不能覆盖新任务", async () => {
@@ -701,121 +521,6 @@ test("清空对话同时清理 Redis 拟态历史和延迟任务", async () => {
   assert.equal(await redis.hget(automatic.getPersonalMemoryKeys(event.self_id).jobs, normal.id), null);
 });
 
-test("小时任务不足100条不请求 AI，多账号同群同小时只采集一次", async () => {
-  const now = new Date();
-  const seconds = Math.floor(now.getTime() / 1000);
-  memoryConfig = { Groups: [920012] };
-  await append(920012, 99, seconds);
-  const task = new AutomaticMemory();
-  let count = 0;
-  aiHandler = async (...args) => { count++; assert.equal(JSON.parse(args[2][0].text).length, 100); return { text: "没有值得保存的新信息" }; };
-  await task.groupMemoryTask(now);
-  assert.equal(count, 0);
-  await append(920012, 1, seconds + 1, 1000);
-  await task.groupMemoryTask(new Date(now.getTime() + 1000));
-  assert.equal(count, 1);
-  currentSelfId = 910002;
-  await append(920012, 100, seconds);
-  await task.groupMemoryTask(now);
-  assert.equal(count, 1);
-  assert.equal(forwardCalls.length, 0);
-  currentSelfId = 910001;
-  memoryConfig = {};
-  aiHandler = null;
-});
-
-test("小时任务转发按类别标题与内容分节点，每人一个内容节点，重复记忆不展示", async () => {
-  const now = new Date();
-  const seconds = Math.floor(now.getTime() / 1000);
-  memoryConfig = { Groups: [920016] };
-  const start = forwardCalls.length;
-  try {
-    await append(920016, 99, seconds);
-    await append(920016, 1, seconds, 1000, { userId: 930016, senderName: "小花" });
-    let round = 0;
-    aiHandler = async () => round++ === 0 ? { functionCalls: [
-      { name: "Memory", args: { scope: "user", userId: "930016", content: "小花喜欢绘画" } },
-      { name: "Memory", args: { scope: "group", content: "本群周六举行活动" } },
-      { name: "Memory", args: { scope: "user", userId: "930003", content: "小夜喜欢猫" } },
-      { name: "Memory", args: { scope: "user", userId: "930016", content: "小花希望使用小花这个称呼" } },
-      { name: "Memory", args: { scope: "group", content: "本群周六举行活动" } },
-    ] } : { text: "已完成，另一个并未保存的说法" };
-    const task = new AutomaticMemory();
-    await task.groupMemoryTask(now);
-    assert.equal(forwardCalls.length, start + 1);
-    const sent = forwardCalls.at(-1);
-    assert.equal(sent.selfId, currentSelfId);
-    assert.equal(sent.groupId, 920016);
-    assert.equal(sent.source, "新增记忆");
-    assert.deepEqual(sent.news, [{ text: "群记忆1条" }, { text: "个人记忆3条" }]);
-    assert.deepEqual(sent.nodes.map((node) => node.data.nickname), ["群记忆", "群记忆内容", "个人记忆", "小花", "小夜"]);
-    assert.ok(sent.nodes.every((node) => node.type === "node" && node.data.user_id === currentSelfId));
-    assert.deepEqual(sent.nodes.map((node) => node.data.content[0].data.text), [
-      "群记忆",
-      "1. 本群周六举行活动",
-      "个人记忆",
-      "小花（QQ：930016）\n\n1. 小花喜欢绘画\n2. 小花希望使用小花这个称呼",
-      "小夜（QQ：930003）\n\n1. 小夜喜欢猫",
-    ]);
-    await task.groupMemoryTask(now);
-    assert.equal(forwardCalls.length, start + 1);
-    assert.equal(round, 2);
-
-    const nextHour = new Date(now.getTime() + 3600000);
-    await append(920016, 100, seconds + 3600, 2000);
-    round = 0;
-    aiHandler = async () => round++ === 0 ? { functionCalls: [
-      { name: "Memory", args: { scope: "group", content: "本群周六举行活动" } },
-    ] } : { text: "已完成" };
-    await task.groupMemoryTask(nextHour);
-    assert.equal(forwardCalls.length, start + 1, "只有重复记忆时不发送空转发");
-  } finally {
-    memoryConfig = {};
-    aiHandler = null;
-  }
-});
-
-test("转发省略没有新增内容的类别标题与内容节点，空结果不生成节点", () => {
-  const event = e(910001);
-  const records = [{ userId: "930017", senderName: "小明" }];
-  const userOnly = automatic.buildGroupMemoryForwardNodes(event, records, [
-    { scope: "group", content: " " },
-    { scope: "user", userId: "930017", content: "小明喜欢音乐" },
-  ]);
-  assert.deepEqual(userOnly.map((node) => node.data.nickname), ["个人记忆", "小明"]);
-  assert.deepEqual(userOnly.map((node) => node.data.content[0].data.text), ["个人记忆", "小明（QQ：930017）\n\n1. 小明喜欢音乐"]);
-  const groupOnly = automatic.buildGroupMemoryForwardNodes(event, records, [{ scope: "group", content: "本群的约定" }]);
-  assert.deepEqual(groupOnly.map((node) => node.data.nickname), ["群记忆", "群记忆内容"]);
-  assert.deepEqual(groupOnly.map((node) => node.data.content[0].data.text), ["群记忆", "1. 本群的约定"]);
-  assert.deepEqual(automatic.buildGroupMemoryForwardNodes(event, records, []), []);
-});
-
-test("结果转发失败仍保留已写入记忆，同小时不重复采集或发送", async () => {
-  const now = new Date();
-  const seconds = Math.floor(now.getTime() / 1000);
-  memoryConfig = { Groups: [920018] };
-  const start = forwardCalls.length;
-  try {
-    await append(920018, 100, seconds);
-    let round = 0;
-    aiHandler = async () => round++ === 0 ? { functionCalls: [
-      { name: "Memory", args: { scope: "group", content: "本群周日读书" } },
-    ] } : { text: "已完成" };
-    forwardError = new Error("测试发送失败");
-    const task = new AutomaticMemory();
-    await task.groupMemoryTask(now);
-    assert.equal(document(e(910001, 920018), "group").memories[0].content, "本群周日读书");
-    await task.groupMemoryTask(now);
-    assert.equal(round, 2);
-    assert.equal(forwardCalls.length, start + 1);
-    assert.deepEqual(forwardCalls.at(-1).news, [{ text: "群记忆1条" }, { text: "个人记忆0条" }]);
-  } finally {
-    forwardError = null;
-    memoryConfig = {};
-    aiHandler = null;
-  }
-});
-
 test("chat 按角色工具组登记个人记忆，独立遵循各前缀的历史保存配置", async () => {
   const event = { ...e(930013), self_id: 910013, reply: async () => {} };
   const chat = new AIChat();
@@ -947,4 +652,32 @@ test("拟态入口承接完整 Redis 连续历史，随机插话保持独立且�
   assert.ok(await redis.ttl(mimic.getMimicHistoryKey(event)) <= 5);
   assert.equal(await redis.hget(keys.jobs, id), beforeJob);
   await historyStore.clearAllPrefixesForUser(event);
+});
+
+test("记忆提取等待时间按账号配置，前缀和拟态任务、拟态上下文过期都使用同一时长", async () => {
+  aiConfigExtra = { memoryIdleMinutes: 5 };
+  try {
+    const delay = 5 * 60 * 1000;
+    assert.equal(automatic.getPersonalMemoryDelayMs(910001), delay);
+    const keys = automatic.getPersonalMemoryKeys(910001);
+    const now = Date.now();
+    for (const [event, source] of [[e(930041), "chat:甲"], [e(930042), "Mimic"]]) {
+      const handle = await automatic.beginPersonalMemory(event, source, { redis, now, toolGroup: "记忆" });
+      let job = JSON.parse(await redis.hget(keys.jobs, handle.id));
+      assert.equal(job.idleTimeoutMs, delay);
+      assert.equal(job.dueAt, now + delay);
+      await automatic.finishPersonalMemory(handle, conversation(), { redis, now: now + 1000 });
+      job = JSON.parse(await redis.hget(keys.jobs, handle.id));
+      assert.equal(job.dueAt, now + 1000 + delay);
+      await automatic.cancelPersonalMemory(event, source, { redis });
+    }
+    const event = e(930043);
+    await mimic.saveMimicHistory(event, conversation(), { redis });
+    const ttl = await redis.ttl(mimic.getMimicHistoryKey(event));
+    assert.ok(ttl > 290 && ttl <= 300, `TTL ${ttl}`);
+    aiConfigExtra = { memoryIdleMinutes: "无效" };
+    assert.equal(automatic.getPersonalMemoryDelayMs(910001), automatic.PERSONAL_MEMORY_DELAY_MS);
+  } finally {
+    aiConfigExtra = {};
+  }
 });

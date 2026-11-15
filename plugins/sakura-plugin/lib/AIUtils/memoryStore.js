@@ -5,7 +5,7 @@ import { plugindata } from "../path.js";
 import { getMemorySource, normalizeMemorySource, MIMIC_MEMORY_SOURCE } from "./memoryScope.js";
 
 export const MEMORY_SCHEMA_VERSION = 2;
-export const MEMORY_MAINTENANCE_INTERVAL = 5;
+export const MEMORY_MAINTENANCE_INTERVAL = 10;
 export const memoryRoot = path.join(plugindata, "memory");
 
 const documentLocks = new Map();
@@ -196,6 +196,15 @@ export async function withMemoryDocumentLock(memoryFile, action) {
 export function needsMemoryMaintenance(document) {
   validateMemoryDocument(document);
   return document.revision - document.summary.sourceRevision >= MEMORY_MAINTENANCE_INTERVAL;
+}
+
+// 摘要之后写入、尚未被摘要覆盖的条目。只有追加会让 revision +1 且新条目排在末尾，
+// 整理时把期间新增的条目原样接在整理结果之后，所以末尾 revision - sourceRevision 条就是未整理部分。
+export function getUnsummarizedMemories(document) {
+  const memories = document?.memories || [];
+  if (!document?.summary?.text?.trim()) return [...memories];
+  const count = Math.max(0, document.revision - document.summary.sourceRevision);
+  return count === 0 ? [] : memories.slice(-count);
 }
 
 export function appendMemory(document, options = {}) {

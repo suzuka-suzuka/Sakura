@@ -124,6 +124,7 @@ const AIObjectSchema = z.object({
     markdownPlainTextLimit: z.number().int().min(0).default(300).describe('转图片字数阈值|#group:Markdown 输出|#showIf:enableMarkdownProcess=true|少于这个字数时按纯文本发送'),
     markdownSplitImageLimit: z.number().int().min(0).default(0).describe('拆图字数阈值|#group:Markdown 输出|#showIf:enableMarkdownProcess=true|超过这个字数时拆成两张图片；0 表示不拆'),
     utilityModels: modelList('后台辅助模型', 'chat', '用于欢迎词、记忆整理、提醒改写、表情识图等后台任务；可以选多个，排在前面的优先', '#group:后台任务'),
+    memoryIdleMinutes: z.number().int().min(1).max(1440).default(20).describe('记忆提取等待时间（分钟）|#group:后台任务|用户停止对话这么久后自动提取个人记忆（前缀角色和伪人都适用）；伪人的连续对话上下文也在这时清除'),
     geminiModels: modelList('Gemini 能力模型', 'chat:gemini', '用于向量检索和视频分析，只能选 Gemini / Vertex 供应商的模型；不选则这些功能不可用', '#group:后台任务'),
     searchModels: modelList('搜索模型', 'chat:search', '“联网搜索”工具交给这些模型去查，只能选开启了“联网搜索”的模型；可以选多个，排在前面的优先，失败时换下一个；不选则不提供这个工具', '#group:联网搜索'),
     gcsBucket: z.string().default('').describe('GCS Bucket|#group:后台任务|#advanced|Vertex 视频分析上传文件用的 Cloud Storage bucket'),
@@ -172,11 +173,6 @@ export const TavilyMCPSchema = z.object({
     searchDepth: z.enum(TAVILY_SEARCH_DEPTH_OPTIONS).default(DEFAULT_TAVILY_SEARCH_DEPTH).describe('默认搜索深度|basic/advanced/fast/ultra-fast'),
     maxResults: z.number().int().min(1).max(MAX_TAVILY_SEARCH_RESULTS).default(DEFAULT_TAVILY_MAX_RESULTS).describe('默认结果数量|当前 Tavily 搜索结果上限为 20'),
 }).describe('Tavily MCP');
-
-export const MemorySchema = z.object({
-    groupEnabled: z.boolean().default(true).describe('启用群记忆采集|每小时检查最近一小时的消息，满100条才提取记忆'),
-    Groups: z.array(z.number()).default([]).describe('群记忆采集群|#groupSelect|留空时检查当前账号所有有记录的群'),
-}).describe('自动记忆');
 
 export const ActiveChatSchema = z.object({
     Groups: z.array(z.number()).default([]).describe('主动聊天群号|#groupSelect|在这些群中启用主动聊天功能'),
@@ -595,7 +591,6 @@ export const configSchema = {
     'AI': AISchema,
     'roles': RolesSchema,
     'mimic': MimicSchema,
-    'Memory': MemorySchema,
     'ActiveChat': ActiveChatSchema,
     'TavilyMCP': TavilyMCPSchema,
     'EditImage': EditImageSchema,
@@ -640,7 +635,7 @@ export const schemaNavigation = [
             { key: 'ai-chat', title: 'AI 对话', icon: 'message', description: '触发前缀、工具组、对话参数和后台任务模型。', modules: ['AI'] },
             { key: 'roles', title: '人设', icon: 'users', description: '角色的系统提示词，在触发设定、伪人和戳一戳里按名字引用。', modules: ['roles'] },
             { key: 'mimic', title: '伪人', icon: 'ghost', modules: ['mimic'] },
-            { key: 'ai-extra', title: '记忆与联网', icon: 'brain', modules: ['Memory', 'ActiveChat', 'TavilyMCP'] },
+            { key: 'ai-extra', title: '主动聊天与联网', icon: 'brain', modules: ['ActiveChat', 'TavilyMCP'] },
         ],
     },
     {

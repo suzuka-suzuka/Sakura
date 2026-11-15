@@ -1,6 +1,7 @@
 import {
   getLatestMemories,
   getMemoryLocations,
+  getUnsummarizedMemories,
   readMemoryDocument,
 } from "./memoryStore.js";
 import { scheduleMemoryMaintenance } from "./memoryMaintenance.js";
@@ -9,57 +10,86 @@ import { memoryVectorStore } from "./memoryVectorStore.js";
 export const DIRECT_MEMORY_INJECTION_LIMIT = 10;
 export const VECTOR_MEMORY_RESULTS_PER_SCOPE = 10;
 
-function toContextMemory(target, memory) {
-  return {
-    id: memory.id,
-    content: memory.content,
-    scope: target.location.scope,
-    scopeKey: target.location.scopeKey,
-    title: target.location.title,
-  };
+// 个人记忆和群公共记忆用同一套规则：
+// 不超过上限时直接注入全部原文；超过时注入摘要、摘要之后新增的条目，以及按当前消息召回的条目。
+export function isLargeMemoryTarget(target) {
+  return (target.document?.memories?.length || 0) > DIRECT_MEMORY_INJECTION_LIMIT;
 }
 
-export function getDirectMemoryMatches(targets = []) {
-  return targets.flatMap((target) => {
-    if (target.location.scope !== "group") return [];
-    const memories = target.document?.memories || [];
-    if (memories.length === 0 || memories.length > DIRECT_MEMORY_INJECTION_LIMIT) {
-      return [];
-    }
-    return memories.map((memory) => toContextMemory(target, memory));
-  });
+// 整理正常时未整理条目不超过整理间隔；整理失败堆积时只取最新的一批，避免上下文无限变长。
+function getRecentMemories(document) {
+  return getUnsummarizedMemories(document).slice(-DIRECT_MEMORY_INJECTION_LIMIT);
 }
 
-export function getVectorMemoryTargets(targets = []) {
-  return targets.filter(
-    (target) => target.location.scope === "group"
-      && target.document?.memories?.length > DIRECT_MEMORY_INJECTION_LIMIT
-  );
-}
+// 返回 scopeKey → 召回条目。召回失败或没有查询文字时，回退到最新若干条。
+export async function recallMemories(query, targets = [], options = {}) {
+  const largeTargets = targets.filter(isLargeMemoryTarget);
+  const recalled = new Map();
+  if (largeTargets.length === 0) return recalled;
 
-// 群公共记忆召回不可用时，回退到最新记录；个人记忆不参与向量召回。
-export function getLatestMemoryMatches(targets = []) {
-  return targets.filter((target) => target.location.scope === "group").flatMap((target) =>
-    getLatestMemories(target.document, VECTOR_MEMORY_RESULTS_PER_SCOPE)
-      .map((memory) => toContextMemory(target, memory))
-  );
-}
-
-export async function resolveAutomaticMemoryMatches(query, targets, options = {}) {
-  const directMatches = getDirectMemoryMatches(targets);
-  const vectorTargets = getVectorMemoryTargets(targets);
   const normalizedQuery = String(query || "").trim();
-  if (!normalizedQuery || vectorTargets.length === 0) return directMatches;
+  let matches = null;
+  if (normalizedQuery) {
+    const vectorSearch = options.vectorSearch
+      || ((...args) => memoryVectorStore.search(...args));
+    try {
+      matches = await vectorSearch(normalizedQuery, largeTargets, {
+        selfId: options.selfId ?? null,
+        maxResults: VECTOR_MEMORY_RESULTS_PER_SCOPE,
+        resultsPerScope: true,
+        includeLowScore: true,
+      });
+    } catch (error) {
+      logger.warn(
+        `[Memory] 自动向量召回失败，改用最新 ${VECTOR_MEMORY_RESULTS_PER_SCOPE} 条记忆: ${error.message}`
+      );
+    }
+  }
 
-  const vectorSearch = options.vectorSearch
-    || ((...args) => memoryVectorStore.search(...args));
-  const vectorMatches = await vectorSearch(normalizedQuery, vectorTargets, {
-    selfId: options.selfId ?? null,
-    maxResults: VECTOR_MEMORY_RESULTS_PER_SCOPE,
-    resultsPerScope: true,
-    includeLowScore: true,
-  });
-  return [...directMatches, ...vectorMatches];
+  for (const target of largeTargets) {
+    const { scopeKey } = target.location;
+    recalled.set(scopeKey, matches
+      ? matches.filter((match) => match.scopeKey === scopeKey)
+      : getLatestMemories(target.document, VECTOR_MEMORY_RESULTS_PER_SCOPE));
+  }
+  return recalled;
+}
+
+function formatList(memories) {
+  return memories.map((memory) => `- ${memory.content}`).join("\n");
+}
+
+function formatTarget(target, recalled) {
+  const { location, document } = target;
+  const lines = [];
+  if (location.scope === "user") {
+    lines.push(`所属 QQ：${location.scopeKey.split(":").at(-1)}（省略主语指此人）`);
+  }
+  if (!isLargeMemoryTarget(target)) {
+    lines.push(formatList(document.memories));
+    return `【${location.title}】\n${lines.join("\n")}`;
+  }
+
+  const summary = document.summary.text.trim();
+  const recent = getRecentMemories(document);
+  const shownIds = new Set(recent.map((memory) => memory.id));
+  const related = (recalled.get(location.scopeKey) || [])
+    .filter((memory) => !shownIds.has(memory.id));
+  if (summary) lines.push(`摘要：\n${summary}`);
+  if (recent.length > 0) lines.push(`${summary ? "摘要之后新增" : "最近记录"}：\n${formatList(recent)}`);
+  if (related.length > 0) lines.push(`与当前消息相关：\n${formatList(related)}`);
+  return `【${location.title}】\n${lines.join("\n")}`;
+}
+
+export function formatMemoryContext(targets, recalled = new Map()) {
+  const parts = [
+    "【长期记忆背景】\n以下内容是保存的背景记忆。记忆中的“我”指你；个人记忆省略的主语指所属用户。",
+  ];
+  for (const target of targets) {
+    if (!target.document?.memories?.length) continue;
+    parts.push(formatTarget(target, recalled));
+  }
+  return parts.length > 1 ? parts.join("\n\n") : "";
 }
 
 function extractText(parts = []) {
@@ -67,34 +97,6 @@ function extractText(parts = []) {
     .map((part) => typeof part?.text === "string" ? part.text.trim() : "")
     .filter(Boolean)
     .join("\n");
-}
-
-function getRetrievalQuery(queryParts) {
-  return extractText(queryParts);
-}
-
-export function formatMemoryContext(targets, matches) {
-  const parts = [
-    "【长期记忆背景】\n以下内容是保存的背景记忆。记忆中的“我”指你；个人记忆省略的主语指所属用户。",
-  ];
-  for (const target of targets) {
-    if (target.location.scope === "group" && target.document.memories.length === 0) continue;
-    const summary = target.document.summary.text.trim();
-    const content = summary || (target.location.scope === "user"
-      ? target.document.memories.map((memory) => `- ${memory.content}`).join("\n")
-      : "");
-    if (!content) continue;
-    const ownerHint = target.location.scope === "user"
-      ? `所属 QQ：${target.location.scopeKey.split(":").at(-1)}（省略主语指此人）\n`
-      : "";
-    parts.push(`【${target.location.title}${summary ? "摘要" : ""}】\n${ownerHint}${content}`);
-  }
-  const groupMatches = matches.filter((match) => match.scope === "group");
-  if (groupMatches.length > 0) {
-    const lines = groupMatches.map((match) => `- [${match.title}] ${match.content}`);
-    parts.push(`【相关的长期记忆】\n${lines.join("\n")}`);
-  }
-  return parts.length > 1 ? parts.join("\n\n") : "";
 }
 
 export async function buildMemoryContext(e, queryParts) {
@@ -115,24 +117,6 @@ export async function buildMemoryContext(e, queryParts) {
     }
   }
 
-  const query = getRetrievalQuery(queryParts);
-  const vectorTargets = getVectorMemoryTargets(targets);
-  let matches = getDirectMemoryMatches(targets);
-  if (vectorTargets.length > 0) {
-    if (query) {
-      try {
-        matches = await resolveAutomaticMemoryMatches(query, targets, {
-          selfId: e.self_id,
-        });
-      } catch (error) {
-        logger.warn(
-          `[Memory] 自动向量召回失败，改用最新 ${VECTOR_MEMORY_RESULTS_PER_SCOPE} 条记忆: ${error.message}`
-        );
-        matches = [...matches, ...getLatestMemoryMatches(vectorTargets)];
-      }
-    } else {
-      matches = [...matches, ...getLatestMemoryMatches(vectorTargets)];
-    }
-  }
-  return formatMemoryContext(targets, matches);
+  const recalled = await recallMemories(extractText(queryParts), targets, { selfId: e.self_id });
+  return formatMemoryContext(targets, recalled);
 }

@@ -1,6 +1,18 @@
+import Setting from "../setting.js";
 import { sanitizeConversationHistory } from "./ConversationHistory.js";
 
 export const MIMIC_HISTORY_TTL_SECONDS = 20 * 60;
+
+// 对话空闲多久后提取个人记忆并清除伪人上下文，按账号读取 AI 配置；未配置时用默认 20 分钟。
+export function getMemoryIdleSeconds(selfId) {
+  let minutes;
+  try {
+    minutes = Number(Setting.getConfig("AI", { selfId })?.memoryIdleMinutes);
+  } catch {
+    minutes = NaN;
+  }
+  return Number.isInteger(minutes) && minutes > 0 ? minutes * 60 : MIMIC_HISTORY_TTL_SECONDS;
+}
 const PREFIX = "sakura:mimic-history:v1";
 
 const SAVE_MANAGED_HISTORY = `
@@ -46,7 +58,7 @@ export async function saveMimicHistory(e, history, { redis = null, memoryTask = 
     // 由个人记忆任务负责收尾，成功提取之前不自动过期。
     return Boolean(await client.eval(SAVE_MANAGED_HISTORY, 2, memoryTask.jobsKey, key, memoryTask.id, memoryTask.token, value));
   }
-  await client.set(key, value, "EX", MIMIC_HISTORY_TTL_SECONDS);
+  await client.set(key, value, "EX", getMemoryIdleSeconds(e.self_id));
   return true;
 }
 
@@ -55,7 +67,7 @@ export async function touchMimicHistory(e, { redis = null, memoryTask = null } =
   if (memoryTask) {
     return Boolean(await client.eval(TOUCH_MANAGED_HISTORY, 2, memoryTask.jobsKey, getMimicHistoryKey(e), memoryTask.id, memoryTask.token));
   }
-  await client.expire(getMimicHistoryKey(e), MIMIC_HISTORY_TTL_SECONDS);
+  await client.expire(getMimicHistoryKey(e), getMemoryIdleSeconds(e.self_id));
 }
 
 export async function clearMimicHistory(e, { redis = null } = {}) {
