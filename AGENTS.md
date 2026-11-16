@@ -79,7 +79,7 @@ export class MyPlugin extends plugin {
 
 Handlers run in priority order (lower = earlier). **Returning `false` passes through to the next handler; any other return stops the chain.** Permission levels: `"master"`, `"white"`.
 
-"Got it" reactions are automatic: the loader (`scheduleAck`) reacts 124 to a group `Command` that is still running after 400ms without having replied (`e.reply` / `sendForwardMsg` / `e.react` on the trigger message mark it responded). Don't hand-write `e.react(124)` in commands. Opt out with `ack: false` on the Command options or the plugin constructor; a number swaps the emoji. `OnEvent` handlers are not covered.
+"Got it" reactions are automatic: the loader (`scheduleAck`) reacts 124 to a group `Command` that is still running after 400ms without having replied (`e.reply` / `sendForwardMsg` / `e.react` on the trigger message mark it responded — counted per handler run via `ackScope` in `event.js`, so a reply from an earlier pass-through handler such as the random sticker does not suppress a later command's ack). Don't hand-write `e.react(124)` in commands. Opt out with `ack: false` on the Command options or the plugin constructor; a number swaps the emoji. `OnEvent` handlers are not covered.
 
 Globals injected onto `global`: `logger`, `Command`, `OnEvent`, `Cron`, `plugin`, `Event`, `segment`, `bot`, `redis`. Plugin code uses these without importing.
 

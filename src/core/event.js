@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Segment, Group, Friend } from "../api/client.js";
 import Config from "./config.js";
 import { isMasterUser, normalizeMasters } from "../utils/common.js";
@@ -10,10 +11,19 @@ import { isMasterUser, normalizeMasters } from "../utils/common.js";
 const NEVER_FORWARD_TO_BOT = new Set(["then", "toJSON"]);
 
 /**
- * 标记"已经对这条消息有过回应"（回复、转发、贴表情）。
- * loader 的延迟确认据此判断还要不要自动贴表情。用 Symbol 是为了不进 JSON 日志。
+ * 指令执行期间的"回应记录"：{ event, responded }。
+ * loader 给每次指令执行单独开一个作用域，reply / sendForwardMsg / react 只标记自己所在的作用域，
+ * loader 的延迟确认据此判断还要不要自动贴表情。
+ * 不挂在事件对象上，是因为同一条消息会依次经过多个处理器：前面放行(return false)的处理器
+ * 回复过（比如随机发表情包），不代表后面的指令回应过。作用域随异步调用链传播，
+ * 前一个处理器留下的后台任务晚些再回复，也记不到当前指令头上。
  */
-export const RESPONDED = Symbol.for("sakura.event.responded");
+export const ackScope = new AsyncLocalStorage();
+
+function markResponded(event) {
+  const scope = ackScope.getStore();
+  if (scope && scope.event === event) scope.responded = true;
+}
 
 /**
  * 判断某个属性名该不该转发给 bot 当接口方法调用。
@@ -154,7 +164,7 @@ export class Event {
     }
 
     if (!this.group_id && !this.user_id) return;
-    this[RESPONDED] = true;
+    markResponded(this);
 
     let message;
     if (Array.isArray(msg)) {
@@ -344,7 +354,7 @@ export class Event {
   async react(emojiId, messageId = null) {
     const msgId = messageId || this.message_id;
     if (!this.group_id || !msgId) return false;
-    if (String(msgId) === String(this.message_id)) this[RESPONDED] = true;
+    if (String(msgId) === String(this.message_id)) markResponded(this);
     return this.bot.setMsgEmojiLike({ message_id: msgId, emoji_id: String(emojiId) });
   }
 
@@ -463,7 +473,7 @@ export class Event {
    */
   async sendForwardMsg(msg, info = {}) {
     const { prompt, summary, source, news } = info;
-    this[RESPONDED] = true;
+    markResponded(this);
 
     // 递归处理节点，支持嵌套转发
     const processNodes = (msgs) => {
