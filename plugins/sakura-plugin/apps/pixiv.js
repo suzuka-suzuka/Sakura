@@ -2,6 +2,7 @@ import Setting from "../lib/setting.js"
 import { getPixivClient } from "../lib/pixiv/api.js"
 import { searchPixivImage } from "../lib/pixiv/search.js"
 import { sendPixivImages } from "../lib/pixiv/sendImages.js"
+import { isUgoira } from "../lib/pixiv/ugoira.js"
 import {
   getRankingItemFromRedis,
   getRankingOverview,
@@ -162,6 +163,7 @@ export class pixivSearch extends plugin {
       proxy: config.proxy,
       fallbackLinkProxy: config.fallbackLinkProxy,
       pid: illust.id,
+      ugoira: isUgoira(illust),
       initialRecallTime: isR18 ? (config.recallTime ?? 10) : 0,
       fallbackRecallTime: config.recallTime ?? 10,
     })
@@ -299,6 +301,8 @@ export class pixivSearch extends plugin {
       // 构造 illust 对象（复用缓存数据）
       const illust = {
         id: item.id,
+        type: item.type,
+        illust_type: item.illust_type,
         title: item.title,
         user: { name: item.user_name },
         total_bookmarks: item.total_bookmarks,
@@ -339,6 +343,7 @@ export class pixivSearch extends plugin {
       proxy: config.proxy,
       fallbackLinkProxy: config.fallbackLinkProxy,
       pid: illust.id,
+      ugoira: isUgoira(illust),
       initialRecallTime: isR18 ? (config.recallTime ?? 10) : 0,
       fallbackRecallTime: config.recallTime ?? 10,
     })

@@ -1,5 +1,6 @@
 import { downloadImage, FlipImageBuffer } from "../ImageUtils/ImageUtils.js"
 import { resolvePixivImageUrl } from "./imageUrls.js"
+import { buildUgoiraGif } from "./ugoira.js"
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -61,8 +62,8 @@ export async function verifyImageMessage(e, result, expectedCount, {
 }
 
 export async function sendPixivImages(e, {
-  imageUrls, proxy = "", fallbackLinkProxy = "", pid, initialRecallTime = 0, fallbackRecallTime = 10,
-}, { download = downloadImage, flipImage = FlipImageBuffer, verify = verifyImageMessage } = {}) {
+  imageUrls, proxy = "", fallbackLinkProxy = "", pid, ugoira = false, initialRecallTime = 0, fallbackRecallTime = 10,
+}, { download = downloadImage, flipImage = FlipImageBuffer, verify = verifyImageMessage, buildGif = buildUgoiraGif } = {}) {
   const prefix = `[P站发图][PID:${pid}][目标:${e.group_id || e.user_id}]`
   const downloadUrls = imageUrls.map(url => resolvePixivImageUrl(url, proxy))
   const send = async (images, recallTime, stage) => {
@@ -80,7 +81,16 @@ export async function sendPixivImages(e, {
 
   // 每张图片只下载一次；OneBot 只接收图片数据，翻转时复用同一份数据。
   const buffers = []
-  for (const [index, url] of downloadUrls.entries()) {
+  // 动图的原图地址只是首帧静图，需要另取帧包合成 GIF；合成失败时退回首帧。
+  if (ugoira) {
+    try {
+      buffers.push(await buildGif(pid, { proxy, download }))
+    } catch (error) {
+      logger.warn(`${prefix} 动图合成失败，改发首帧静图：${error.message || error}`)
+    }
+  }
+  const urlsToDownload = buffers.length ? [] : downloadUrls
+  for (const [index, url] of urlsToDownload.entries()) {
     try {
       const buffer = await download(url)
       if (Buffer.isBuffer(buffer) && buffer.length > 0) buffers.push(buffer)

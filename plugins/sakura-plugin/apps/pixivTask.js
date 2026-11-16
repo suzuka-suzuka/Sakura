@@ -10,6 +10,7 @@ import {
   buildIllustInfoText
 } from "../lib/pixiv/subscription.js"
 import { sendPixivImages } from "../lib/pixiv/sendImages.js"
+import { isUgoira } from "../lib/pixiv/ugoira.js"
 
 function getTaskBot() {
   const selfId = getCurrentBotSelfId()
@@ -422,6 +423,7 @@ export class PixivTask extends plugin {
       proxy: config.proxy,
       fallbackLinkProxy: config.fallbackLinkProxy,
       pid: illust.id,
+      ugoira: isUgoira(illust),
       initialRecallTime: isR18 ? (config.recallTime ?? 10) : 0,
       fallbackRecallTime: config.recallTime ?? 10,
     })

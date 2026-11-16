@@ -140,6 +140,7 @@ async function fetchWebRanking(mode, page, config) {
           rank: item.rank,
           rating_count: item.rating_count || 0,  // 点赞数
           view_count: item.view_count || 0,      // 浏览数
+          illust_type: item.illust_type,
           illust_content_type: item.illust_content_type,
           width: item.width,
           height: item.height,
@@ -226,6 +227,7 @@ async function fetchIllustDetails(illusts, concurrency = 5) {
             total_bookmarks: detail.total_bookmarks || 0,
             total_view: detail.total_view || 0,
             x_restrict: detail.x_restrict || 0,
+            type: detail.type,
             meta_single_page: detail.meta_single_page,
             meta_pages: detail.meta_pages,
             image_urls: detail.image_urls,
@@ -526,6 +528,8 @@ async function saveRankingToRedis(mode, illusts, rankDate = '') {
     height: illust.height,
     url: illust.url,
     x_restrict: illust.x_restrict || 0,
+    type: illust.type,
+    illust_type: illust.illust_type,
     tags: illust.tags,
     meta_single_page: illust.meta_single_page,
     meta_pages: illust.meta_pages,

@@ -123,10 +123,10 @@ export async function FlipImageBuffer(imageBuffer) {
     return false
   }
   try {
-    return await sharp(imageBuffer)
-      .autoOrient()
-      .flip()
-      .toBuffer()
+    const image = sharp(imageBuffer, { animated: true })
+    const { pages = 1 } = await image.metadata()
+    // 动图在 sharp 里是帧竖排的长条，上下翻转会连帧序一起倒过来，所以改左右镜像。
+    return await (pages > 1 ? image.flop() : image.autoOrient().flip()).toBuffer()
   } catch (error) {
     logger.error(`使用 sharp 翻转图片失败: ${error}`)
     return false
