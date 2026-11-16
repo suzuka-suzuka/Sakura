@@ -34,7 +34,7 @@ There is no linter for backend code and no build step for the bot. Only the fron
 
 ### Testing caveats
 
-- **The test suite is deliberately small.** Only tests guarding costly invariants are kept: BA battle (`plugins/sakura-plugin/scripts/target-test.mjs`, `stress-test.mjs`, plus `audit-cover.mjs` / `render-smoke.mjs`), fishing encounter generation (`test-fishing-encounters.mjs`), group data cleanup (`test-group-data-cleanup.mjs`, it deletes player data), and fishing balance (`test/fishing-balance.test.js`). Don't add a test for every small fix; verify one-off changes directly instead.
+- **The test suite is deliberately small.** Only tests guarding costly invariants are kept: fishing encounter generation (`plugins/sakura-plugin/scripts/test-fishing-encounters.mjs`), group data cleanup (`test-group-data-cleanup.mjs`, it deletes player data), and fishing balance (`test/fishing-balance.test.js`). Don't add a test for every small fix; verify one-off changes directly instead.
 - **`test/` is gitignored on purpose** (so is `CLAUDE.md`). Tests that must survive a clone belong in `plugins/sakura-plugin/scripts/` (tracked).
 - **Puppeteer uses the system Chrome**, not a bundled download: `.puppeteerrc.cjs` probes the usual install paths and sets `executablePath`. If rendering fails on a new machine, install Chrome/Chromium rather than re-running the Puppeteer download.
 
@@ -79,13 +79,15 @@ export class MyPlugin extends plugin {
 
 Handlers run in priority order (lower = earlier). **Returning `false` passes through to the next handler; any other return stops the chain.** Permission levels: `"master"`, `"white"`.
 
+"Got it" reactions are automatic: the loader (`scheduleAck`) reacts 124 to a group `Command` that is still running after 400ms without having replied (`e.reply` / `sendForwardMsg` / `e.react` on the trigger message mark it responded). Don't hand-write `e.react(124)` in commands. Opt out with `ack: false` on the Command options or the plugin constructor; a number swaps the emoji. `OnEvent` handlers are not covered.
+
 Globals injected onto `global`: `logger`, `Command`, `OnEvent`, `Cron`, `plugin`, `Event`, `segment`, `bot`, `redis`. Plugin code uses these without importing.
 
 ### Repo layout note
 
 `plugins/sakura-plugin` is **part of this repository**, not a separate clone. `.gitignore` ignores `plugins/*` but explicitly re-includes `plugins/system/` and `plugins/sakura-plugin/**`. Ignore rules for plugin files therefore belong in the root `.gitignore` and do take effect.
 
-Design notes and balance write-ups live in `docs/` (fishing balance, monopoly layout, BA battle, a system map).
+Design notes and balance write-ups live in `docs/` (fishing balance, a system map).
 
 ### State storage
 
@@ -100,9 +102,7 @@ The main plugin is large; each subsystem in `lib/` is self-contained with its co
 | `lib/` | What it is |
 |---|---|
 | `AIUtils/` | AI chat with tool-calling, provider routing, memory (vector store), group context. Tools in `AIUtils/tools/`; AI skills (see below) |
-| `monopoly/` | Full board game — engine, map validator, renderers, session store |
 | `economy/`, `fishing/` | Currency, shop, inventory, red packets, fishing game (managers in `economy/`, settlement/encounters in `fishing/`) |
-| `ba/` | Blue Archive 4v4 turn-based PvP (see below) |
 | `flychess/`, `favorability/`, `sign/`, `sleep/` | Smaller game/social systems |
 | `pixiv/`, `imageSearch/`, `nai/` | Pixiv, reverse image search (SauceNAO / ascii2d / Google Lens), NovelAI |
 | `douyin/`, `voice/`, `ImageUtils/` | Douyin parsing + comment rendering, VoxCPM TTS, shared image helpers |
@@ -119,22 +119,7 @@ Notice/request semantics also differ: decide "left voluntarily" from `sub_type =
 
 ### Image rendering
 
-Two approaches coexist. Newer code renders **HTML in a persistent headless Chromium** and screenshots an element (see `lib/ba/browser.js` for the singleton pattern); older code draws with `@napi-rs/canvas`. Prefer HTML for anything new — layout in CSS beats hand-computed coordinates. Note `page.setContent`'s base URL is `about:blank`, so images and fonts must be inlined as base64 data URIs.
-
-### Blue Archive battle (`lib/ba/`)
-
-Stats, skills and combat formulas are **copied from the original game**, generated from SchaleDB data — never hand-tuned. `roster.js` is a generated artifact; edit `scripts/emit-roster.mjs` and regenerate. A dedicated skill at `.agents/skills/ba-battle/SKILL.md` documents the conversion rules, official formulas, targeting rules and rendering conventions — **read it before touching this subsystem**.
-
-```bash
-cd plugins/sakura-plugin
-node scripts/emit-roster.mjs    # regenerate roster.js after editing the IDS array
-node scripts/fetch-art.mjs      # download official art (gitignored, must be fetched per-machine)
-node scripts/stress-test.mjs    # invariant fuzz over random battles
-node scripts/target-test.mjs    # targeting-rule regression
-node scripts/audit-cover.mjs    # cover placement audit
-```
-
-Official art under `resources/ba/*/*/` and `resources/ba/status/` is gitignored on purpose (DMCA); a fresh checkout renders placeholder shapes until `fetch-art.mjs` runs. A few files `fetch-art.mjs` can't obtain (`summons/99999/chibi.png`, `characters/KOTAMA/chibi.png`) and the original field-cover images are explicitly re-included — keep those `.gitignore` exceptions intact.
+Two approaches coexist. Newer code renders **HTML in a persistent headless Chromium** and screenshots an element (shared singleton in `lib/ImageUtils/browser.js`); older code draws with `@napi-rs/canvas`. Prefer HTML for anything new — layout in CSS beats hand-computed coordinates. Note `page.setContent`'s base URL is `about:blank`, so images and fonts must be inlined as base64 data URIs.
 
 ## Debugging
 

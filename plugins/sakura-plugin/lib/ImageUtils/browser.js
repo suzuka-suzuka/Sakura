@@ -1,7 +1,7 @@
 /**
- * 战斗图渲染用的 Chromium 单例。
+ * HTML 渲染截图用的 Chromium 单例。
  *
- * 回合制每个回合都要出一张图，每次 launch/close 要 1~2 秒冷启动，体感很差；
+ * 每次 launch/close 要 1~2 秒冷启动，体感很差；
  * 这里复用同一个浏览器实例，只按需开关页面。进程退出时自动收尾。
  */
 import puppeteer from "puppeteer"
@@ -18,7 +18,7 @@ export async function getBrowser() {
     })
   }
   const browser = await browserPromise
-  // 实例被外部杀掉时重开一个，避免整局对战卡死
+  // 实例被外部杀掉时重开一个，避免后续渲染全部失败
   if (!browser.connected) {
     browserPromise = null
     return getBrowser()

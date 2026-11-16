@@ -121,11 +121,11 @@
       "id": "domainServices",
       "type": "backend",
       "label": "游戏、经济与社交域",
-      "sublabel": "BA / 大富翁 / 钓鱼 / 签到等",
+      "sublabel": "钓鱼 / 飞行棋 / 签到等",
       "tag": "独立 lib 子系统",
       "sources": [
-        { "path": "plugins/sakura-plugin/lib/ba/engine.js", "label": "BA 战斗引擎" },
-        { "path": "plugins/sakura-plugin/lib/monopoly/GameService.js", "label": "大富翁服务" },
+        { "path": "plugins/sakura-plugin/lib/fishing/SettlementService.js", "label": "钓鱼结算" },
+        { "path": "plugins/sakura-plugin/lib/flychess/Chess.js", "label": "飞行棋" },
         { "path": "plugins/sakura-plugin/lib/economy/EconomyManager.js", "label": "经济系统" }
       ],
       "pos": [1100, 420],
@@ -138,8 +138,8 @@
       "sublabel": "HTML 截图 + Canvas",
       "tag": "Chrome / Puppeteer",
       "sources": [
-        { "path": "plugins/sakura-plugin/lib/ba/browser.js", "label": "持久浏览器" },
-        { "path": "plugins/sakura-plugin/lib/monopoly/presentation/BoardRenderer.js", "label": "棋盘渲染" },
+        { "path": "plugins/sakura-plugin/lib/ImageUtils/browser.js", "label": "持久浏览器" },
+        { "path": "plugins/sakura-plugin/lib/douyin/commentRenderer.js", "label": "HTML 截图渲染" },
         { "path": "plugins/sakura-plugin/lib/sign/ImageGenerator.js", "label": "Canvas 图片" }
       ],
       "pos": [1100, 680],
@@ -153,7 +153,6 @@
       "tag": "Redis 6+",
       "sources": [
         { "path": "src/utils/redis.js", "label": "Redis 启动与连接" },
-        { "path": "plugins/sakura-plugin/lib/monopoly/SessionStore.js", "label": "游戏会话" },
         { "path": "plugins/sakura-plugin/lib/economy/redisAtomic.js", "label": "原子经济操作" }
       ],
       "pos": [860, 680],

@@ -1,4 +1,4 @@
-import { getBrowser } from "../ba/browser.js";
+import { getBrowser } from "../ImageUtils/browser.js";
 
 const CARD_WIDTH = 860;
 const MAX_CARDS = 10;
