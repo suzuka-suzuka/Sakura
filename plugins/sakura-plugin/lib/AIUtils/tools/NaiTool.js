@@ -2,6 +2,7 @@ import { AbstractTool } from "./AbstractTool.js";
 import { generateImage } from "../../nai/naiApi.js";
 import { getVibe, listVibes } from "../../nai/vibeStore.js";
 import Setting from "../../setting.js";
+import { buildSentImageToolResult } from "../toolImagePreview.js";
 
 const ASPECT_RATIO_SIZES = Object.freeze({
     portrait: { width: 832, height: 1216 },
@@ -176,7 +177,10 @@ export class NaiTool extends AbstractTool {
             const base64Image = imageBuffer.toString("base64");
             await e.reply(segment.image(`base64://${base64Image}`));
 
-            return "已成功生成并发送图片，禁止回复[图片]";
+            return buildSentImageToolResult(
+                "已成功生成并发送图片，禁止回复[图片]",
+                imageBuffer,
+            );
         } catch (error) {
             logger.error(`[NaiTool] Error: ${error.message}`);
             return `图片生成失败：${error.message}`;

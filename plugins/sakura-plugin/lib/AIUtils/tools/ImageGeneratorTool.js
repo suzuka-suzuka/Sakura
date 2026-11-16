@@ -1,6 +1,7 @@
 import { generateImagesWithProvider } from "../imageProvider.js";
 import { AbstractTool } from "./AbstractTool.js";
 import { fetchMessageByIdentifier } from "../messageLookup.js";
+import { buildSentImageToolResult } from "../toolImagePreview.js";
 import Setting from "../../setting.js";
 
 export class ImageGeneratorTool extends AbstractTool {
@@ -39,7 +40,7 @@ export class ImageGeneratorTool extends AbstractTool {
       },
       aspectRatio: {
         type: "string",
-        description: "Target aspect ratio.",
+        description: "目标比例。编辑/图生图时省略即沿用第一张原图比例，只有用户明确要求改比例时才填；纯文生图按需填写。",
         enum: [
           "1:1",
           "2:3",
@@ -116,10 +117,16 @@ export class ImageGeneratorTool extends AbstractTool {
       );
 
       if (imageBuffers.length > 0) {
-        await e.reply(segment.image(imageBuffers[0]));
-        return outputFormat === "gif"
-          ? "已成功生成并发送 GIF 动图，禁止回复[图片]"
-          : "已成功生成并发送图片，禁止回复[图片]";
+        const sendResult = await e.reply(segment.image(imageBuffers[0]));
+        // 模型看不了完整动图，GIF 不附预览图也不给消息 ID。
+        if (outputFormat === "gif") {
+          return "已成功生成并发送 GIF 动图，禁止回复[图片]";
+        }
+        return buildSentImageToolResult(
+          "已成功生成并发送图片，禁止回复[图片]",
+          imageBuffers[0],
+          sendResult
+        );
       }
 
       return "未能生成图片，可能被安全策略拦截。";

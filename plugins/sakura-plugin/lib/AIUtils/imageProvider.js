@@ -19,8 +19,7 @@ import {
   DEFAULT_VERTEX_LOCATION,
 } from "./vertexAuth.js";
 
-const PORTRAIT_RATIOS = new Set(["2:3", "3:4", "4:5", "9:16"]);
-const LANDSCAPE_RATIOS = new Set(["3:2", "4:3", "5:4", "16:9", "21:9"]);
+const GPT_IMAGE_MAX_RATIO = 3;
 const GPT_IMAGE_2_MAX_PIXELS = 8294400;
 const GPT_IMAGE_2_2K_MAX_PIXELS = 4194304;
 
@@ -61,13 +60,6 @@ function imageProviderName(provider, modelName = "") {
   return "Gemini";
 }
 
-function normalizeLegacyOpenAIAspectRatio(aspectRatio) {
-  if (!aspectRatio || aspectRatio === "1:1") return aspectRatio;
-  if (PORTRAIT_RATIOS.has(aspectRatio)) return "2:3";
-  if (LANDSCAPE_RATIOS.has(aspectRatio)) return "3:2";
-  return "1:1";
-}
-
 function geminiImageReferenceLimit(model) {
   if (model.includes("gemini-2.5-flash-image")) return 3;
   if (model.includes("gemini-3") && model.includes("image")) return 14;
@@ -84,7 +76,8 @@ export function normalizeImageGenerationOptions(
   const warnings = [];
   const model = `${modelName || ""}`.toLowerCase();
   const usesGrokImage = provider === "grok" || isGrokImageModel(model);
-  const usesGptImage = provider === "openai" && model.includes("gpt-image");
+  // OpenAI 协议下除 Grok 外一律按 gpt-image 处理：只用新一代 image 模型，不再兼容 DALL·E。
+  const usesGptImage = provider === "openai" && !isGrokImageModel(model);
   const providerName = imageProviderName(provider, model);
   let sourceImageLimit = sourceImageCount;
 
@@ -167,73 +160,6 @@ export function normalizeImageGenerationOptions(
     }
   }
 
-  const legacyGptImage =
-    provider === "openai" &&
-    model.includes("gpt-image") &&
-    !model.includes("gpt-image-2");
-  if (legacyGptImage) {
-    if (normalized.aspectRatio) {
-      const supportedRatio = normalizeLegacyOpenAIAspectRatio(
-        normalized.aspectRatio
-      );
-      if (supportedRatio !== normalized.aspectRatio) {
-        warnings.push(
-          `${modelName} 不支持 ${normalized.aspectRatio}，已调整为 ${supportedRatio}`
-        );
-        normalized.aspectRatio = supportedRatio;
-      }
-    }
-
-    if (["2K", "4K"].includes(normalized.imageSize)) {
-      warnings.push(
-        `${modelName} 最高支持 1K，已将 ${normalized.imageSize} 降为 1K`
-      );
-      normalized.imageSize = "1K";
-    }
-  }
-
-  if (provider === "openai" && model.includes("dall-e-3")) {
-    if (normalized.aspectRatio) {
-      const supportedRatio = normalizeLegacyOpenAIAspectRatio(
-        normalized.aspectRatio
-      );
-      if (supportedRatio !== normalized.aspectRatio) {
-        warnings.push(
-          `DALL·E 3 不支持 ${normalized.aspectRatio}，已调整为 ${supportedRatio}`
-        );
-        normalized.aspectRatio = supportedRatio;
-      }
-    }
-
-    if (["2K", "4K"].includes(normalized.imageSize)) {
-      warnings.push(
-        `DALL·E 3 最高支持 1K，已将 ${normalized.imageSize} 降为 1K`
-      );
-      normalized.imageSize = "1K";
-    }
-
-    if (Number.isInteger(normalized.count) && normalized.count > 1) {
-      normalized.count = 1;
-      warnings.push(`DALL·E 3 单次最多生成 1 张，已将 n=${options.count} 降为 1`);
-    }
-  }
-
-  if (provider === "openai" && model.includes("dall-e-2")) {
-    if (normalized.aspectRatio && normalized.aspectRatio !== "1:1") {
-      warnings.push(
-        `DALL·E 2 不支持 ${normalized.aspectRatio}，已调整为 1:1`
-      );
-      normalized.aspectRatio = "1:1";
-    }
-
-    if (["2K", "4K"].includes(normalized.imageSize)) {
-      warnings.push(
-        `DALL·E 2 最高支持 1K，已将 ${normalized.imageSize} 降为 1K`
-      );
-      normalized.imageSize = "1K";
-    }
-  }
-
   return { options: normalized, sourceImageLimit, warnings };
 }
 
@@ -270,7 +196,7 @@ function resolveImageSelection(
     grok: ({ target, provider }) =>
       provider.protocol === "openai" && isGrokImageModel(target.model),
     gpt: ({ target, provider }) =>
-      provider.protocol === "openai" && /(?:gpt-image|dall-e)/i.test(target.model),
+      provider.protocol === "openai" && !isGrokImageModel(target.model),
     gemini: ({ provider }) =>
       provider.protocol === "gemini" && provider.vertex !== true,
     vertex: ({ provider }) =>
@@ -390,8 +316,12 @@ function floorToMultiple(value, multiple = 16) {
   return Math.max(multiple, Math.floor(value / multiple) * multiple);
 }
 
-function pickGptImage2Size(aspectRatio, imageSize) {
-  const ratio = parseAspectRatio(aspectRatio || "1:1");
+function pickGptImageSize(aspectRatio, imageSize) {
+  // 原图比例可能很极端，夹到接口允许的 1:3～3:1 之间。
+  const ratio = Math.min(
+    GPT_IMAGE_MAX_RATIO,
+    Math.max(1 / GPT_IMAGE_MAX_RATIO, parseAspectRatio(aspectRatio || "1:1"))
+  );
   const normalizedSize = `${imageSize || "1K"}`.toUpperCase();
   const isSquare = Math.abs(ratio - 1) < 0.001;
 
@@ -628,95 +558,28 @@ async function callGeminiModel(
   return extractGeminiImageBuffers(response);
 }
 
-function pickOpenAISize(modelName, aspectRatio, imageSize) {
-  const normalizedModel = `${modelName || ""}`.toLowerCase();
-
-  if (isGrokImageModel(normalizedModel)) {
+/** 读原图宽高（按 EXIF 方向换算）作为比例；读不出时返回 null。 */
+async function readSourceAspectRatio(image) {
+  if (!image?.buffer) return null;
+  try {
+    const { width, height, orientation } = await sharp(image.buffer).metadata();
+    if (!width || !height) return null;
+    return orientation >= 5 ? `${height}:${width}` : `${width}:${height}`;
+  } catch {
     return null;
   }
-
-  if (!aspectRatio && !imageSize) {
-    return null;
-  }
-
-  if (normalizedModel.includes("gpt-image-2")) {
-    return pickGptImage2Size(aspectRatio, imageSize);
-  }
-
-  if (!aspectRatio) {
-    return null;
-  }
-
-  if (aspectRatio === "1:1") {
-    return "1024x1024";
-  }
-
-  const isPortrait = PORTRAIT_RATIOS.has(aspectRatio);
-  const isLandscape = LANDSCAPE_RATIOS.has(aspectRatio);
-
-  if (normalizedModel.includes("dall-e-3")) {
-    if (isPortrait) {
-      return "1024x1536";
-    }
-
-    if (isLandscape) {
-      return "1536x1024";
-    }
-
-    return "1024x1024";
-  }
-
-  if (normalizedModel.includes("dall-e-2")) {
-    return "1024x1024";
-  }
-
-  if (isPortrait) {
-    return "1024x1536";
-  }
-
-  if (isLandscape) {
-    return "1536x1024";
-  }
-
-  return "1024x1024";
 }
 
-function pickOpenAIQuality(modelName, imageSize, quality) {
-  const normalizedModel = `${modelName || ""}`.toLowerCase();
-
-  if (normalizedModel.includes("gpt-image")) {
-    return quality || null;
-  }
-
-  if (isGrokImageModel(normalizedModel)) {
+/**
+ * gpt-image 的 size：没指定比例时，图生图沿用第一张原图比例，文生图按 1:1；
+ * 比例和清晰度都没指定的文生图不传，交给接口自动决定。
+ */
+async function pickGptImageRequestSize(options, sourceImages) {
+  const aspectRatio = options.aspectRatio || await readSourceAspectRatio(sourceImages[0]);
+  if (!aspectRatio && !options.imageSize) {
     return null;
   }
-
-  if (!imageSize) {
-    return null;
-  }
-
-  if (normalizedModel.includes("dall-e-2")) {
-    return null;
-  }
-
-  if (normalizedModel.includes("dall-e-3")) {
-    return imageSize === "4K" ? "hd" : "standard";
-  }
-
-  if (imageSize === "4K") {
-    return "high";
-  }
-
-  if (imageSize === "2K") {
-    return "medium";
-  }
-
-  if (imageSize === "1K") {
-    return "low";
-  }
-
-  return null;
+  return pickGptImageSize(aspectRatio, options.imageSize);
 }
 
 function pickGrokImageResolution(imageSize) {
@@ -772,12 +635,9 @@ async function callOpenAIImage(
     model: imageConfig.model,
     prompt: promptText,
   };
-  const size = pickOpenAISize(
-    imageConfig.model,
-    options.aspectRatio,
-    options.imageSize
-  );
-  const quality = pickOpenAIQuality(imageConfig.model, options.imageSize, options.quality);
+  const usesGrokImage = isGrokImageModel(imageConfig.model);
+  const size = usesGrokImage ? null : await pickGptImageRequestSize(options, sourceImages);
+  const quality = usesGrokImage ? null : options.quality || null;
 
   if (options.outputFormat === "gif") {
     request.output_format = "gif";
@@ -797,7 +657,7 @@ async function callOpenAIImage(
     request.n = options.count;
   }
 
-  if (isGrokImageModel(imageConfig.model)) {
+  if (usesGrokImage) {
     request.response_format = "b64_json";
 
     if (options.aspectRatio && options.aspectRatio !== "auto") {
