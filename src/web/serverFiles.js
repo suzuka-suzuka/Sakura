@@ -260,11 +260,25 @@ export function renameServerEntry(requestedPath, rawName, fallbackRoot = process
     return { path: targetPath, name };
 }
 
+function isSameOrInside(childPath, parentPath) {
+    const relative = path.relative(parentPath, childPath);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
 export function deleteServerEntry(requestedPath, fallbackRoot = process.cwd()) {
     const targetPath = resolveRequestedPath(requestedPath, fallbackRoot);
     const stats = fs.lstatSync(targetPath);
     if (stats.isDirectory() && !stats.isSymbolicLink()) {
-        fs.rmdirSync(targetPath);
+        // 允许删除非空文件夹，但不能删磁盘根目录，也不能删 Bot 自身所在的目录（或它的上级）
+        const realTarget = fs.realpathSync(targetPath);
+        if (path.dirname(realTarget) === realTarget) {
+            throw createServerFileError('不能删除磁盘根目录', 403, 'PROTECTED_PATH');
+        }
+        const projectRoot = fs.realpathSync(path.resolve(fallbackRoot));
+        if (isSameOrInside(projectRoot, realTarget)) {
+            throw createServerFileError('不能删除 Bot 程序所在的目录或它的上级目录', 403, 'PROTECTED_PATH');
+        }
+        fs.rmSync(targetPath, { recursive: true, maxRetries: 3 });
     } else {
         fs.unlinkSync(targetPath);
     }
@@ -272,11 +286,33 @@ export function deleteServerEntry(requestedPath, fallbackRoot = process.cwd()) {
 }
 
 export function getServerDownload(requestedPath, fallbackRoot = process.cwd()) {
-    const { filePath, stats } = ensureRegularFile(requestedPath, fallbackRoot);
-    const extension = path.extname(filePath).toLowerCase();
+    const candidate = resolveRequestedPath(requestedPath, fallbackRoot);
+    const realPath = fs.realpathSync(candidate);
+    const stats = fs.statSync(realPath);
+
+    if (stats.isDirectory()) {
+        // 磁盘根目录没有 basename，退回用盘符或 root 命名
+        const rootName = path.basename(realPath)
+            || realPath.replace(/[:\\/]+/g, '').trim()
+            || 'root';
+        return {
+            type: 'directory',
+            path: realPath,
+            rootName,
+            name: `${rootName}.zip`,
+            size: null,
+            contentType: 'application/zip',
+        };
+    }
+    if (!stats.isFile()) {
+        throw createServerFileError(`不是文件或文件夹：${realPath}`);
+    }
+
+    const extension = path.extname(realPath).toLowerCase();
     return {
-        path: filePath,
-        name: path.basename(filePath),
+        type: 'file',
+        path: realPath,
+        name: path.basename(realPath),
         size: stats.size,
         contentType: MIME_TYPES[extension] || 'application/octet-stream',
     };

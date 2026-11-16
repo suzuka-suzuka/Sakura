@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import { pipeline as streamPipeline } from 'stream';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import si from 'systeminformation';
@@ -36,6 +37,7 @@ import {
     writeServerTextFile,
     writeServerUpload,
 } from './serverFiles.js';
+import { createDirectoryZipStream } from './zipStream.js';
 let cachedStaticInfo = null;
 let staticInfoTime = 0;
 const STATIC_INFO_CACHE_TIME = 60000;
@@ -952,6 +954,28 @@ async function handleApi(req, res) {
             }
 
             const download = getServerDownload(requestedPath, PROJECT_ROOT);
+            if (download.type === 'directory') {
+                let skipped = 0;
+                const zipStream = createDirectoryZipStream(download.path, download.rootName, {
+                    onSkip: (name, error) => {
+                        skipped += 1;
+                        logger.warn(`[ConfigServer] 打包时跳过 ${name}: ${error.message}`);
+                    },
+                });
+                res.writeHead(200, buildResponseHeaders(req, {
+                    'Content-Type': download.contentType,
+                    'Content-Disposition': encodeContentDispositionFileName(download.name),
+                }));
+                streamPipeline(zipStream, res, (error) => {
+                    if (error && error.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+                        logger.warn(`[ConfigServer] 打包下载中断: ${error.message}`);
+                    } else if (!error && skipped > 0) {
+                        logger.warn(`[ConfigServer] ${download.name} 打包完成，跳过了 ${skipped} 个无法读取的项目`);
+                    }
+                });
+                return true;
+            }
+
             const stream = fs.createReadStream(download.path);
             stream.on('error', (error) => {
                 logger.warn(`[ConfigServer] 下载文件流中断: ${error.message}`);

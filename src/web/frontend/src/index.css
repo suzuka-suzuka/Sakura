@@ -3299,11 +3299,13 @@ select.field-input {
 
 .file-manager-table {
   min-height: 280px;
+  overflow-x: auto;
 }
 
 .file-manager-row {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) 100px 170px minmax(230px, auto);
+  min-width: 780px;
   align-items: center;
   min-height: 52px;
   padding: 0 16px;
@@ -3477,16 +3479,6 @@ select.field-input {
 .file-editor-footer > div {
   display: flex;
   gap: 8px;
-}
-
-@media (max-width: 900px) {
-  .file-manager-table {
-    overflow-x: auto;
-  }
-
-  .file-manager-row {
-    min-width: 780px;
-  }
 }
 
 @media (max-width: 640px) {

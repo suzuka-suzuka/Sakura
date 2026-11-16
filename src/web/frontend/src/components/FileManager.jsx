@@ -197,6 +197,9 @@ export default function FileManager({ token, onUnauthorized, onToast }) {
             document.body.appendChild(anchor);
             anchor.click();
             anchor.remove();
+            if (entry.type === 'directory') {
+                notify(`正在打包 ${data.name || entry.name}，边打包边下载，大文件夹需要等一会`, 'info');
+            }
         } catch (downloadError) {
             notify(downloadError.message || '下载失败', 'error');
         }
@@ -257,8 +260,10 @@ export default function FileManager({ token, onUnauthorized, onToast }) {
     };
 
     const deleteEntry = async (entry) => {
-        const extra = entry.type === 'directory' ? '（只能删除空文件夹）' : '';
-        if (!window.confirm(`确定删除“${entry.name}”吗？${extra}`)) return;
+        const message = entry.type === 'directory' && !entry.symbolicLink
+            ? `确定删除文件夹“${entry.name}”及其中的所有内容吗？删除后无法恢复。`
+            : `确定删除“${entry.name}”吗？`;
+        if (!window.confirm(message)) return;
         try {
             await requestJson(token, onUnauthorized, '/api/files', {
                 method: 'DELETE',
@@ -429,6 +434,9 @@ export default function FileManager({ token, onUnauthorized, onToast }) {
                                 )}
                                 {entry.type === 'file' && (
                                     <button type="button" onClick={() => void downloadEntry(entry)}>下载</button>
+                                )}
+                                {entry.type === 'directory' && (
+                                    <button type="button" title="打包成 zip 下载" onClick={() => void downloadEntry(entry)}>打包下载</button>
                                 )}
                                 <button type="button" onClick={() => openRenameDialog(entry)}>重命名</button>
                                 <button type="button" className="danger" onClick={() => void deleteEntry(entry)}>删除</button>
