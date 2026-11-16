@@ -6,10 +6,7 @@ import { buildMemoryContext } from "./memoryContext.js";
 import { createToolProgress } from "./toolProgress.js";
 import { withMemoryScope, MIMIC_MEMORY_SOURCE } from "./memoryScope.js";
 import { finalizeStoppedConversationTurn } from "./ConversationHistory.js";
-import {
-  filterNewInlineDataParts,
-  stripEphemeralUserParts,
-} from "./toolResultProtocol.js";
+import { stripEphemeralParts } from "./toolResultProtocol.js";
 import {
   checkAndClearStopFlag,
   finishAiTask,
@@ -174,15 +171,12 @@ async function runScopedAgentLoop({
           { progress }
         );
         currentFullHistory.push(...toolCallback.historyContents);
-        const newToolQueryParts = filterNewInlineDataParts(
-          toolCallback.queryParts,
-          currentFullHistory
-        );
 
+        // 工具返回的图片已经挂在 functionResponse 上，不再额外补一条用户消息。
         currentResponse = await getAI(
           route,
           e,
-          newToolQueryParts,
+          [],
           effectivePrompt,
           groupContext,
           toolGroup,
@@ -198,12 +192,6 @@ async function runScopedAgentLoop({
             finalText,
             toolCallCount,
           };
-        }
-        if (newToolQueryParts.length > 0) {
-          currentFullHistory.push({
-            role: "user",
-            parts: newToolQueryParts,
-          });
         }
         continue;
       }
@@ -228,7 +216,7 @@ async function runScopedAgentLoop({
   } finally {
     // 在调用方发最终回复之前撤回状态消息，“撤回了一条消息”就不会落在回答下面。
     await progress?.dispose();
-    stripEphemeralUserParts(currentFullHistory, includeUserHistoryPart);
+    stripEphemeralParts(currentFullHistory, includeUserHistoryPart);
     finishAiTask(e, taskId);
   }
 }

@@ -16,6 +16,7 @@ import { createGeminiClient } from "./vertexAuth.js";
 import { prepareHistoryForGemini } from "./toolCallProtocol.js";
 import { buildGeminiToolConfig } from "./geminiToolConfig.js";
 import {
+  buildOpenAIToolContent,
   buildOpenAIUserContent,
   processQueryParts,
 } from "./messageParts.js";
@@ -457,7 +458,7 @@ async function _getOpenAIResponse(
                 role: "tool",
                 tool_call_id: part.functionResponse.id,
                 name: part.functionResponse.name,
-                content: JSON.stringify(part.functionResponse.response),
+                content: buildOpenAIToolContent(part.functionResponse),
               });
             }
           }

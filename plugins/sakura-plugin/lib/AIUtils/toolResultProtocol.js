@@ -1,27 +1,31 @@
-const TOOL_FOLLOW_UP_RESULT = "sakura.tool-follow-up-result.v1";
+// 工具结果可以附带图片。图片挂在对应工具调用的 functionResponse.parts 上：
+// Gemini 原样作为 FunctionResponsePart 发送，OpenAI 兼容协议转成 tool 消息里的 image_url。
+const TOOL_MEDIA_RESULT = "sakura.tool-media-result.v1";
 
-export function createToolFollowUpResult(response, followUpParts = []) {
+export function createToolMediaResult(response, mediaParts = []) {
   return {
-    kind: TOOL_FOLLOW_UP_RESULT,
+    kind: TOOL_MEDIA_RESULT,
     response,
-    followUpParts,
+    mediaParts,
   };
 }
 
-export function splitToolFollowUpResult(rawResult) {
+export function splitToolMediaResult(rawResult) {
   if (
     !rawResult ||
-    rawResult.kind !== TOOL_FOLLOW_UP_RESULT ||
-    !Array.isArray(rawResult.followUpParts)
+    rawResult.kind !== TOOL_MEDIA_RESULT ||
+    !Array.isArray(rawResult.mediaParts)
   ) {
-    return { response: rawResult, followUpParts: [] };
+    return { response: rawResult, mediaParts: [] };
   }
 
   return {
     response: rawResult.response,
-    followUpParts: rawResult.followUpParts.filter(
-      (part) => part && typeof part === "object"
-    ),
+    mediaParts: rawResult.mediaParts
+      .filter((part) => part?.inlineData?.data && part.inlineData.mimeType)
+      .map(({ inlineData }) => ({
+        inlineData: { mimeType: inlineData.mimeType, data: inlineData.data },
+      })),
   };
 }
 
@@ -29,63 +33,25 @@ export function buildToolCallbackPayload(executedResults = []) {
   const functionResponseParts = executedResults
     .map((result) => result?.functionResponsePart)
     .filter(Boolean);
-  const queryParts = executedResults.flatMap(
-    (result) => result?.followUpParts || []
-  );
-  const historyContents = [];
 
-  if (functionResponseParts.length > 0) {
-    historyContents.push({
-      role: "function",
-      parts: functionResponseParts,
-    });
-  }
-
-  return { historyContents, queryParts };
+  return {
+    historyContents: functionResponseParts.length > 0
+      ? [{ role: "function", parts: functionResponseParts }]
+      : [],
+  };
 }
 
-function inlineDataKey(part) {
-  const data = part?.inlineData?.data;
-  return typeof data === "string" && data ? data : null;
+function withoutResponseMedia(part) {
+  if (!Array.isArray(part?.functionResponse?.parts)) return part;
+  const { parts: _media, ...functionResponse } = part.functionResponse;
+  return { ...part, functionResponse };
 }
 
-export function collectUniqueInlineDataParts(...partCollections) {
-  const seen = new Set();
-  const uniqueParts = [];
-
-  for (const parts of partCollections) {
-    if (!Array.isArray(parts)) continue;
-    for (const part of parts) {
-      const key = inlineDataKey(part);
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      uniqueParts.push(part);
-    }
-  }
-
-  return uniqueParts;
-}
-
-export function filterNewInlineDataParts(parts = [], history = []) {
-  if (!Array.isArray(parts)) return [];
-
-  const historicalParts = Array.isArray(history)
-    ? history.flatMap((item) => Array.isArray(item?.parts) ? item.parts : [])
-    : [];
-  const seen = new Set(
-    collectUniqueInlineDataParts(historicalParts).map(inlineDataKey)
-  );
-
-  return parts.filter((part) => {
-    const key = inlineDataKey(part);
-    if (!key) return true;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-export function stripEphemeralUserParts(
+/**
+ * 本轮结束后去掉只在本轮有效的图片，避免写进对话历史、在后续每轮重复发送：
+ * 用户消息里不该保留的部分（由 shouldKeepPart 决定），以及工具结果附带的图片。
+ */
+export function stripEphemeralParts(
   history = [],
   shouldKeepPart = (part) => !part?.inlineData
 ) {
@@ -93,8 +59,16 @@ export function stripEphemeralUserParts(
 
   for (let index = history.length - 1; index >= 0; index--) {
     const item = history[index];
-    if (item?.role !== "user" || !Array.isArray(item.parts)) continue;
+    if (!Array.isArray(item?.parts)) continue;
 
+    if (item.role === "function") {
+      if (item.parts.some((part) => Array.isArray(part?.functionResponse?.parts))) {
+        history[index] = { ...item, parts: item.parts.map(withoutResponseMedia) };
+      }
+      continue;
+    }
+
+    if (item.role !== "user") continue;
     const persistentParts = item.parts.filter(shouldKeepPart);
     if (persistentParts.length === 0) {
       history.splice(index, 1);

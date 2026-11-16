@@ -316,18 +316,45 @@ export function migrateScopeDirectory(directory, { fallbackRouteMaps = null, log
   return result;
 }
 
+// 已删除的工具 key，从工具组里移除。
+const REMOVED_TOOL_KEYS = new Set(["SkillGuide"]);
+
+/** 从 AI.yaml 的工具组里去掉已删除的工具 key。 */
+export function dropRemovedToolKeys(directory, { logger = null } = {}) {
+  const aiPath = path.join(directory, "AI.yaml");
+  const ai = readYaml(aiPath);
+  if (!Array.isArray(ai?.toolGroups)) return false;
+
+  let changed = false;
+  const toolGroups = ai.toolGroups.map((group) => {
+    if (!Array.isArray(group?.tools) || !group.tools.some((key) => REMOVED_TOOL_KEYS.has(key))) {
+      return group;
+    }
+    changed = true;
+    return { ...group, tools: group.tools.filter((key) => !REMOVED_TOOL_KEYS.has(key)) };
+  });
+  if (!changed) return false;
+
+  writeYaml(aiPath, { ...ai, toolGroups });
+  logger?.info?.(`[配置迁移] 已从工具组移除失效工具：${aiPath}`);
+  return true;
+}
+
 /** 迁移插件配置目录：先默认目录，再每个账号目录。 */
 export function migrateConfigDirectory(pluginDir, { logger = null } = {}) {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const base = migrateScopeDirectory(pluginDir, { logger, stamp });
+  dropRemovedToolKeys(pluginDir, { logger });
   const accountsDir = path.join(pluginDir, ACCOUNT_SCOPE_DIR);
   if (!fs.existsSync(accountsDir)) return;
   for (const entry of fs.readdirSync(accountsDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    migrateScopeDirectory(path.join(accountsDir, entry.name), {
+    const directory = path.join(accountsDir, entry.name);
+    migrateScopeDirectory(directory, {
       fallbackRouteMaps: base.routeMaps,
       logger,
       stamp,
     });
+    dropRemovedToolKeys(directory, { logger });
   }
 }

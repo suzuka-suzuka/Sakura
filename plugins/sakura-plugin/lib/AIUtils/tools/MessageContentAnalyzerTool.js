@@ -1,7 +1,7 @@
 import { AbstractTool } from "./AbstractTool.js";
 import { fetchMessageByIdentifier } from "../messageLookup.js";
 import { urlToBase64 } from "../../utils.js";
-import { createToolFollowUpResult } from "../toolResultProtocol.js";
+import { createToolMediaResult } from "../toolResultProtocol.js";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -223,7 +223,7 @@ export class MessageContentAnalyzerTool extends AbstractTool {
 
   description =
     "提取或分析图片、分析视频，或通过seq下载文件/撤回/加精/取消加精消息。"
-      + "调用image时提供seq或url即可，query可选；图片会作为临时多模态输入放入下一次AI请求";
+      + "调用image时提供seq或url即可，query可选；图片会直接附在本工具结果里返回";
 
   func = async function (opts, e) {
     let { seq, url, type, query } = opts;
@@ -495,11 +495,11 @@ export class MessageContentAnalyzerTool extends AbstractTool {
         return "获取图片失败。";
       }
 
-      return createToolFollowUpResult(
+      return createToolMediaResult(
         {
           message:
-            `已提取 ${imageParts.length} 张图片，并作为临时多模态输入放入下一次AI请求。`
-            + "本工具未分析图片内容，请在下一次请求中直接查看图片后继续回答。",
+            `已提取 ${imageParts.length} 张图片，附在本工具结果中。`
+            + "本工具未分析图片内容，请直接查看图片后继续回答。",
         },
         imageParts
       );

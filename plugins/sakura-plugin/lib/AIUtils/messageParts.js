@@ -44,6 +44,18 @@ export function buildOpenAIUserContent(parts = []) {
     .filter((part) => part?.type === "text" || part?.type === "image_url");
 }
 
+/**
+ * OpenAI 兼容协议的 tool 消息内容。没有附带图片时仍是 JSON 字符串；
+ * 有图片时是 [text, image_url...] 数组（DeepSeek 直连、CPA 的 Codex 渠道已验证可用）。
+ */
+export function buildOpenAIToolContent(functionResponse = {}) {
+  const text = JSON.stringify(functionResponse.response);
+  const images = buildOpenAIUserContent(functionResponse.parts)
+    .filter((part) => part.type === "image_url");
+  if (images.length === 0) return text;
+  return [{ type: "text", text }, ...images];
+}
+
 export function buildMultimodalQueryParts(text, images = []) {
   return [
     { text: String(text || "") },

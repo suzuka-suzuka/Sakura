@@ -16,13 +16,13 @@ import { NaiTool } from "./NaiTool.js";
 import { MemoryTool } from "./MemoryTool.js";
 import { ImageSearchTool } from "./ImageSearchTool.js";
 import { VoxCPMVoiceTool } from "./VoxCPMVoiceTool.js";
-import { SkillGuideTool } from "./SkillGuideTool.js";
+import { NaiGuideTool } from "./NaiGuideTool.js";
 import { OnlineSearchTool } from "./OnlineSearchTool.js";
 import { mcpManager } from "../MCPManager.js";
 import Setting from "../../setting.js";
 import {
   buildToolCallbackPayload,
-  splitToolFollowUpResult,
+  splitToolMediaResult,
 } from "../toolResultProtocol.js";
 import { buildToolResultLogPart } from "../toolResultLog.js";
 import { formatProgressText } from "../toolProgress.js";
@@ -42,10 +42,10 @@ const availableTools = [
   new EconomyTool(),
   new EmojiTool(),
   new NaiTool(),
+  new NaiGuideTool(),    // 随 Nai 一起开放
   new MemoryTool(),      // 添加用户或群公共记忆
   new ImageSearchTool(), // 统一搜图工具
   new VoxCPMVoiceTool(),
-  new SkillGuideTool(),
   new OnlineSearchTool(), // 委托搜索模型联网搜索
 ];
 
@@ -64,10 +64,10 @@ const TOOL_CONFIG_KEYS = {
   "Economy": "Economy",
   "SendEmoji": "Emoji",
   "NaiPainting": "Nai",
+  "NaiGuide": "Nai",
   "Memory": "Memory",
   "ImageSearch": "ImageSearch",
   "SendVoice": "VoxCPMVoice",
-  "SkillGuide": "SkillGuide",
   "OnlineSearch": "OnlineSearch",
 };
 
@@ -98,7 +98,6 @@ export const AVAILABLE_TOOL_OPTIONS = [
   { key: "McpFetch", label: "网络请求(MCP)" },
   { key: "McpMemory", label: "知识图谱(MCP)" },
   { key: "VoxCPMVoice", label: "语音发送" },
-  { key: "SkillGuide", label: "Skill指导" },
 ];
 
 /**
@@ -294,14 +293,14 @@ async function executeSingleTool(functionCall, e, toolContext) {
   const { name: toolName, args: toolArgs, id: toolCallId } = functionCall;
 
   let toolResultData = null;
-  let functionResponseFollowUpParts = [];
+  let mediaParts = [];
   const toolToExecute = toolMap.get(toolName);
 
   if (toolToExecute) {
     logger.info(`正在执行工具："${toolName}" ${JSON.stringify(toolArgs)}`);
     try {
       const rawResult = await toolToExecute.func(toolArgs, e, toolContext);
-      const splitResult = splitToolFollowUpResult(rawResult);
+      const splitResult = splitToolMediaResult(rawResult);
       const resultForResponse = splitResult.response;
 
       if (typeof resultForResponse === "string") {
@@ -309,7 +308,7 @@ async function executeSingleTool(functionCall, e, toolContext) {
       } else {
         toolResultData = JSON.parse(JSON.stringify(resultForResponse || {}));
       }
-      functionResponseFollowUpParts = splitResult.followUpParts;
+      mediaParts = splitResult.mediaParts;
     } catch (toolError) {
       logger.error(`工具 "${toolName}" 执行失败:`, toolError);
       toolResultData = {
@@ -338,6 +337,10 @@ async function executeSingleTool(functionCall, e, toolContext) {
   if (toolCallId) {
     functionResponsePart.functionResponse.id = toolCallId;
   }
+  // 工具返回的图片直接挂在这次工具结果上，模型在同一次请求里就能看到。
+  if (mediaParts.length > 0) {
+    functionResponsePart.functionResponse.parts = mediaParts;
+  }
 
   const functionResponsePartForLog = buildToolResultLogPart(functionResponsePart);
   logger.info(
@@ -348,10 +351,7 @@ async function executeSingleTool(functionCall, e, toolContext) {
     )}`
   );
 
-  return {
-    functionResponsePart,
-    followUpParts: functionResponseFollowUpParts,
-  };
+  return { functionResponsePart };
 }
 
 /**
@@ -365,7 +365,7 @@ export async function executeToolCalls(
   { progress = null } = {}
 ) {
   if (!initialFunctionCalls || initialFunctionCalls.length === 0) {
-    return { historyContents: [], queryParts: [] };
+    return { historyContents: [] };
   }
 
   const toolContext = { ...resolveToolContext(e, toolGroupName), progress };
