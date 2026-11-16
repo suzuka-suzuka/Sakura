@@ -136,7 +136,6 @@
 node plugins/sakura-plugin/scripts/fishing-boss-balance.mjs 10000
 node plugins/sakura-plugin/scripts/fishing-boss-balance.mjs 10000 --json
 node plugins/sakura-plugin/scripts/fishing-boss-balance.mjs 10000 --verify-baseline
-node --experimental-vm-modules --test plugins/sakura-plugin/scripts/test-fishing-mechanics.mjs
 ```
 
 --verify-baseline在任意目标或边界案例失败时以非零状态退出。

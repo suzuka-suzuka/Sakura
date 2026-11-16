@@ -34,9 +34,8 @@ There is no linter for backend code and no build step for the bot. Only the fron
 
 ### Testing caveats
 
-- **`test/` is gitignored on purpose** (so is `CLAUDE.md`; this file is tracked). A fresh clone has no test suite — don't conclude the project is untested, and don't expect test edits to reach the remote. Tests that must survive a clone belong in `plugins/sakura-plugin/scripts/` (tracked, e.g. `test-*.mjs`), with a thin `test/*.test.mjs` shelling out to them.
-- **Tests need Redis running.** Without it a large block of tests (monopoly session store and friends) fails on connection refused — check `redis-cli ping` before assuming you broke something.
-- **The full suite rewrites local `config/`.** Some tests (e.g. `test/nai-tools-schema-smoke.mjs`) call `pluginConfigManager.register()` against the real config dir, which normalizes YAML to the current schema and drops unregistered modules. Back up `config/sakura-plugin/` before running the whole suite after a schema change.
+- **The test suite is deliberately small.** Only tests guarding costly invariants are kept: BA battle (`plugins/sakura-plugin/scripts/target-test.mjs`, `stress-test.mjs`, plus `audit-cover.mjs` / `render-smoke.mjs`), fishing encounter generation (`test-fishing-encounters.mjs`), group data cleanup (`test-group-data-cleanup.mjs`, it deletes player data), and fishing balance (`test/fishing-balance.test.js`). Don't add a test for every small fix; verify one-off changes directly instead.
+- **`test/` is gitignored on purpose** (so is `CLAUDE.md`). Tests that must survive a clone belong in `plugins/sakura-plugin/scripts/` (tracked).
 - **Puppeteer uses the system Chrome**, not a bundled download: `.puppeteerrc.cjs` probes the usual install paths and sets `executablePath`. If rendering fails on a new machine, install Chrome/Chromium rather than re-running the Puppeteer download.
 
 ## Architecture

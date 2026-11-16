@@ -87,3 +87,7 @@ plugins/sakura-plugin/resources/ba/summons/field/*
 !plugins/sakura-plugin/resources/ba/summons/field/chibi.png
 !plugins/sakura-plugin/resources/ba/summons/field/damaged.png
 !plugins/sakura-plugin/resources/ba/summons/field/destroyed.png
+
+# Python 缓存
+__pycache__/
+*.pyc

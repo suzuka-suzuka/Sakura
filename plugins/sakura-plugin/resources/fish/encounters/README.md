@@ -84,9 +84,3 @@ node plugins/sakura-plugin/scripts/generate-fishing-encounters.mjs --check encou
 ```
 
 `--elapsed` 为从发图成功到收到首次操作的毫秒数；省略时按 0 毫秒校验。输出正确性、失败原因、总行动数、移动次数、A/B 使用次数和奖励倍率。每次命令是独立验证；机器人通过 `createEncounterAttempt()` / `submitEncounterAttempt()` 保存一次提交状态。
-
-真实指令隔离集成测试，不连接数据库或 QQ：
-
-```powershell
-node --experimental-vm-modules --test plugins/sakura-plugin/scripts/test-fishing-encounter-integration.mjs
-```
