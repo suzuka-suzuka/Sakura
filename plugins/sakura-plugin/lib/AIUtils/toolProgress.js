@@ -1,121 +1,100 @@
-// 工具调用进度：一次 Agent 运行只保留一条“正在 xxx…”状态消息。
-// QQ 消息不能编辑，阶段切换时先发新状态再撤回旧状态；运行结束时撤回最后一条。
-// 工具执行很快时不发任何消息，只有超过 delayMs 还没跑完才显示。
+// 工具调用提示：AI 调用工具时，用一条合并转发告诉用户它在做什么（搜索词、绘画提示词等）。
+//
+// 模型同一轮并行调用的多个工具合成一条转发，工具开始执行时立刻发出。
+// 发送按顺序排队；模型输出中间文字、整次运行结束前会等排队的转发发完，保证转发排在后续文字之前。
+//
+// 总开关：AI 配置的 toolCallForward。
 
-const DEFAULT_DELAY_MS = 1500;
-const MAX_LABELS = 2;
+import Setting from "../setting.js";
+
+const BUSY_NICKNAME = "忙碌中";
+const MAX_PREVIEW_LINES = 4;
+const PREVIEW_MAX_LENGTH = 80;
+
+export function shortenProgressText(text, maxLength = PREVIEW_MAX_LENGTH) {
+  const normalized = String(text || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
+}
 
 /**
- * 把一批并行工具的阶段名合成一句状态文字。
- * @param {Array<string|null|undefined>} labels 例如 ["搜索", "绘画"]
- * @returns {string} 例如 "正在搜索、绘画…"；没有可显示的阶段时返回空串
+ * 一次工具调用要展示的内容。
+ * @typedef {object} ToolCallNotice
+ * @property {string} action 动作名，如 "搜索"，合并后用作转发来源
+ * @property {Array<{ nickname?: string, text: string }>} lines 转发里的节点，nickname 缺省为“忙碌中”
  */
-export function formatProgressText(labels = []) {
-  const unique = [...new Set(labels.map((label) => String(label || "").trim()).filter(Boolean))];
-  if (unique.length === 0) return "";
-  return `正在${unique.slice(0, MAX_LABELS).join("、")}…`;
-}
 
-function defaultSend(e) {
-  return async (text) => {
-    const res = await e.reply(text);
-    return res?.message_id ?? null;
+/** 把一批调用拼成一条转发的节点和外显信息 */
+export function buildForwardPayload(notices = [], selfId) {
+  const lines = notices.flatMap((notice) => notice.lines);
+  const actions = [...new Set(notices.map((notice) => notice.action).filter(Boolean))];
+  const previews = lines.map((line) => shortenProgressText(line.text)).filter(Boolean);
+  return {
+    nodes: lines.map((line) => ({
+      user_id: selfId,
+      nickname: line.nickname || BUSY_NICKNAME,
+      content: [{ type: "text", data: { text: line.text } }],
+    })),
+    info: {
+      source: actions.join("|") || BUSY_NICKNAME,
+      prompt: previews.join(" | "),
+      news: previews.slice(0, MAX_PREVIEW_LINES).map((text) => ({ text })),
+    },
   };
 }
 
-function defaultRecall(e) {
-  return async (messageId) => {
-    await e.recall(messageId);
-  };
-}
-
-export class ToolProgress {
-  #delayMs;
+export class ToolCallForward {
   #send;
-  #recall;
-  #timer = null;
-  #shown = null; // { text, messageId }
   #queue = Promise.resolve();
-  #disposed = false;
+  disposed = false;
 
   /**
-   * @param {object} e 事件对象，需要 reply / recall
+   * @param {object} e 事件对象，需要 sendForwardMsg
    * @param {object} [options]
-   * @param {number} [options.delayMs] 阶段开始后多久仍未结束才发状态
-   * @param {(text: string) => Promise<any>} [options.send] 发送状态消息，返回 message_id
-   * @param {(messageId: any) => Promise<void>} [options.recall] 撤回状态消息
+   * @param {(notices: ToolCallNotice[]) => Promise<any>} [options.send] 发送一批调用
    */
-  constructor(e, { delayMs = DEFAULT_DELAY_MS, send = null, recall = null } = {}) {
-    this.#delayMs = delayMs;
-    this.#send = send || defaultSend(e);
-    this.#recall = recall || defaultRecall(e);
-  }
-
-  /** 进入一个阶段。text 为空表示这批工具不需要显示状态，保持现状。 */
-  enter(text) {
-    if (this.#disposed) return;
-    this.#clearTimer();
-    if (!text || this.#shown?.text === text) return;
-
-    this.#timer = setTimeout(() => {
-      this.#timer = null;
-      this.#enqueue(() => this.#show(text));
-    }, this.#delayMs);
-    this.#timer.unref?.();
-  }
-
-  /** 当前阶段结束。还没显示出来的状态不再显示；已显示的留着，等下一阶段替换或运行结束撤回。 */
-  leave() {
-    this.#clearTimer();
-  }
-
-  /** 运行结束：撤回状态，之后的 enter 全部忽略。 */
-  dispose() {
-    this.#disposed = true;
-    this.#clearTimer();
-    return this.#enqueue(() => this.#recallShown());
-  }
-
-  #clearTimer() {
-    if (this.#timer) {
-      clearTimeout(this.#timer);
-      this.#timer = null;
-    }
-  }
-
-  #enqueue(action) {
-    this.#queue = this.#queue.then(action).catch((err) => {
-      logger.warn(`[ToolProgress] 更新进度消息失败: ${err.message}`);
+  constructor(e, { send = null } = {}) {
+    const selfId = e?.self_id;
+    this.#send = send || ((notices) => {
+      const { nodes, info } = buildForwardPayload(notices, selfId);
+      return e.sendForwardMsg(nodes, info);
     });
+  }
+
+  /** 一批并行调用合成一条转发，排队发出（不等它发完，工具照常执行） */
+  add(notices = []) {
+    if (this.disposed) return;
+    const valid = notices.filter((notice) => notice?.lines?.length);
+    if (valid.length === 0) return;
+    this.#queue = this.#queue
+      .then(() => this.#send(valid))
+      .catch((err) => {
+        logger.warn(`[ToolCallForward] 发送工具调用转发失败: ${err?.message || err}`);
+      });
+  }
+
+  /** 等排队中的转发发完 */
+  flush() {
     return this.#queue;
   }
 
-  async #show(text) {
-    if (this.#disposed || this.#shown?.text === text) return;
-    const previous = this.#shown;
-    this.#shown = null;
-    try {
-      const messageId = await this.#send(text);
-      if (messageId !== null && messageId !== undefined) {
-        this.#shown = { text, messageId };
-      }
-    } finally {
-      // 先发新再撤旧，中间不会出现空档。
-      if (previous) await this.#recall(previous.messageId);
-    }
+  /** 运行结束：等排队的发完，之后的 add 全部忽略 */
+  dispose() {
+    this.disposed = true;
+    return this.#queue;
   }
+}
 
-  async #recallShown() {
-    const shown = this.#shown;
-    if (!shown) return;
-    this.#shown = null;
-    await this.#recall(shown.messageId);
+export function isToolCallForwardEnabled(e) {
+  try {
+    return Setting.getConfig("AI", { selfId: e?.self_id })?.toolCallForward !== false;
+  } catch {
+    return true;
   }
 }
 
 export function createToolProgress(e, options) {
-  if (typeof e?.reply !== "function" || typeof e?.recall !== "function") {
-    return null;
-  }
-  return new ToolProgress(e, options);
+  if (typeof e?.sendForwardMsg !== "function") return null;
+  if (!isToolCallForwardEnabled(e)) return null;
+  return new ToolCallForward(e, options);
 }

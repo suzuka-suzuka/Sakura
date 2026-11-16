@@ -107,6 +107,7 @@ const AIObjectSchema = z.object({
     chatHistoryLength: z.number().int().min(0).default(20).describe('对话历史条数|#group:对话参数|每个用户保留的历史消息数'),
     maxToolCalls: z.number().int().min(1).default(20).describe('单次最多调用工具次数|#group:对话参数|超过后强制结束本次回复'),
     enableUserLock: z.boolean().default(false).describe('单人锁|#group:对话参数|同一用户在同一群里一次只处理一条消息（AI 对话和伪人共用）'),
+    toolCallForward: z.boolean().default(true).describe('工具调用转发|#group:对话参数|AI 调用工具时用一条合并转发说明在做什么（搜索词、绘画提示词等），同时调用的多个工具并成一条；关闭后不发'),
     enableMarkdownProcess: z.boolean().default(true).describe('处理 Markdown|#group:Markdown 输出|短文本去掉格式，长文本渲染成图片；关闭则原样发送'),
     markdownPlainTextLimit: z.number().int().min(0).default(300).describe('转图片字数阈值|#group:Markdown 输出|#showIf:enableMarkdownProcess=true|少于这个字数时按纯文本发送'),
     markdownSplitImageLimit: z.number().int().min(0).default(0).describe('拆图字数阈值|#group:Markdown 输出|#showIf:enableMarkdownProcess=true|超过这个字数时拆成两张图片；0 表示不拆'),

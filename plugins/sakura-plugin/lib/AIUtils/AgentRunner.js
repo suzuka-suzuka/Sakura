@@ -161,6 +161,8 @@ async function runScopedAgentLoop({
         }
 
         if (textContent && onIntermediateText) {
+          // 等前几轮的工具调用转发发完，免得排到这段文字后面
+          await progress?.flush();
           await onIntermediateText(textContent.replace(/\n+$/, ""));
         }
 
@@ -214,7 +216,7 @@ async function runScopedAgentLoop({
       };
     }
   } finally {
-    // 在调用方发最终回复之前撤回状态消息，“撤回了一条消息”就不会落在回答下面。
+    // 在调用方发最终回复之前等工具调用转发发完，转发就不会落在回答下面。
     await progress?.dispose();
     stripEphemeralParts(currentFullHistory, includeUserHistoryPart);
     finishAiTask(e, taskId);

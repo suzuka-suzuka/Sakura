@@ -25,7 +25,7 @@ import {
   splitToolMediaResult,
 } from "../toolResultProtocol.js";
 import { buildToolResultLogPart } from "../toolResultLog.js";
-import { formatProgressText } from "../toolProgress.js";
+import { shortenProgressText } from "../toolProgress.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -252,38 +252,76 @@ function normalizeToolAlias(toolName) {
   return String(toolName || "").replace(/-/g, "_");
 }
 
-// MCP 工具没有工具类，按名字给阶段名；知识图谱类 MCP 瞬间完成，不显示进度。
-const MCP_SILENT_TOOL_NAMES = new Set([
-  "create_entities",
-  "create_relations",
-  "add_observations",
-  "delete_entities",
-  "delete_relations",
-  "delete_observations",
-  "read_graph",
-  "search_nodes",
-  "open_nodes",
-]);
+// MCP 工具没有工具类，按名字给动作名和要展示的参数。
+const firstUrl = (args = {}) => args.url || args.urls?.[0] || args.website;
+const MCP_TOOL_NOTICE = {
+  tavily_search: ["网页搜索", (args) => args.query || args.topic],
+  tavily_extract: ["网页提取", firstUrl],
+  tavily_map: ["网站结构发现", firstUrl],
+  tavily_crawl: ["网站抓取", firstUrl],
+  tavily_research: ["深度研究", (args) => args.query || args.topic],
+  tavily_skill: ["技能搜索", (args) => args.query || args.topic],
+  fetch: ["网络访问", (args) => args.url],
+  create_entities: ["记忆写入", (args) => args.entities?.[0]?.name],
+  create_relations: ["记忆关联", (args) => {
+    const relation = args.relations?.[0];
+    return relation ? `${relation.from || "节点"} -> ${relation.to || "节点"}` : "";
+  }],
+  add_observations: ["记忆补充", (args) => args.observations?.[0]?.content || args.observations?.[0]],
+  delete_entities: ["记忆清理", (args) => args.entityNames?.[0]],
+  delete_relations: ["记忆清理", () => "关系"],
+  delete_observations: ["记忆清理", () => "观察记录"],
+  read_graph: ["记忆读取", () => "知识图谱"],
+  search_nodes: ["记忆检索", (args) => args.query],
+  open_nodes: ["记忆查看", (args) => args.names?.[0]],
+};
 
-function getMcpProgressText(toolName) {
-  const name = normalizeToolAlias(toolName);
-  if (/^tavily_/i.test(name)) return "搜索";
-  if (name === "fetch") return "浏览网页";
-  if (MCP_SILENT_TOOL_NAMES.has(name)) return null;
-  return "处理";
+function buildNotice(action, detail) {
+  if (!action) return null;
+  const text = shortenProgressText(typeof detail === "string" ? detail : "");
+  return { action, lines: [{ text: text ? `${action}：${text}` : action }] };
 }
 
-function getToolProgressLabel({ name, args } = {}) {
+/**
+ * 一次工具调用在工具调用转发里展示什么；返回 null 表示不展示。
+ * @returns {import("../toolProgress.js").ToolCallNotice|null}
+ */
+function describeToolCall({ name, args } = {}) {
+  const toolArgs = args || {};
   const tool = toolMap.get(name);
   if (tool) {
-    return typeof tool.getProgressText === "function" ? tool.getProgressText(args || {}) : null;
+    const action = typeof tool.getProgressText === "function" ? tool.getProgressText(toolArgs) : null;
+    if (!action) return null;
+    // NAI 把主提示词和每个角色的提示词分开列出来，不截断
+    if (name === "NaiPainting") {
+      const mainPrompt = String(toolArgs.prompt || "").trim() || "（未提供 Prompt）";
+      const characters = (Array.isArray(toolArgs.characters) ? toolArgs.characters : [])
+        .map((character) => String(character?.prompt || "").trim())
+        .filter(Boolean);
+      return {
+        action: "NAI 绘画",
+        lines: [
+          { nickname: "主 Prompt", text: mainPrompt },
+          ...characters.map((text, index) => ({ nickname: `角色 ${index + 1} Prompt`, text })),
+        ],
+      };
+    }
+    const detail = typeof tool.getProgressDetail === "function" ? tool.getProgressDetail(toolArgs) : "";
+    return buildNotice(action, detail);
   }
-  return getMcpProgressText(name);
+
+  const alias = normalizeToolAlias(name);
+  const mcpNotice = MCP_TOOL_NOTICE[alias];
+  if (mcpNotice) {
+    const [action, getDetail] = mcpNotice;
+    return buildNotice(action, getDetail(toolArgs));
+  }
+  return buildNotice(`调用 ${alias}`, "");
 }
 
-/** 一批工具调用对应的状态文字，如 “正在搜索、绘画…”；都不需要显示时返回空串 */
-export function resolveToolProgressText(functionCalls = []) {
-  return formatProgressText(functionCalls.map(getToolProgressLabel));
+/** 一批工具调用要展示的内容；不需要展示的工具不在其中 */
+export function describeToolCalls(functionCalls = []) {
+  return functionCalls.map(describeToolCall).filter(Boolean);
 }
 
 /**
@@ -356,7 +394,7 @@ async function executeSingleTool(functionCall, e, toolContext) {
 
 /**
  * @param {object} [options]
- * @param {import("../toolProgress.js").ToolProgress|null} [options.progress] 本次 Agent 运行的进度消息
+ * @param {import("../toolProgress.js").ToolCallForward|null} [options.progress] 本次 Agent 运行的工具调用转发
  */
 export async function executeToolCalls(
   e,
@@ -368,17 +406,12 @@ export async function executeToolCalls(
     return { historyContents: [] };
   }
 
-  const toolContext = { ...resolveToolContext(e, toolGroupName), progress };
+  const toolContext = resolveToolContext(e, toolGroupName);
 
-  progress?.enter(resolveToolProgressText(initialFunctionCalls));
-  let toolExecutionResults;
-  try {
-    toolExecutionResults = await Promise.all(
-      initialFunctionCalls.map((fc) => executeSingleTool(fc, e, toolContext))
-    );
-  } finally {
-    progress?.leave();
-  }
+  progress?.add(describeToolCalls(initialFunctionCalls));
+  const toolExecutionResults = await Promise.all(
+    initialFunctionCalls.map((fc) => executeSingleTool(fc, e, toolContext))
+  );
 
   return buildToolCallbackPayload(toolExecutionResults);
 }

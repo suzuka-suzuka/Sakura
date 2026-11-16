@@ -3,6 +3,7 @@ import { AbstractTool } from './AbstractTool.js'
 export class SearchMusicTool extends AbstractTool {
   name = 'searchMusic'
   progressText = '找歌'
+  progressDetail = 'keyword'
 
   parameters = {
     properties: {
