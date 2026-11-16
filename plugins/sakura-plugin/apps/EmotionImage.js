@@ -69,7 +69,6 @@ export class EmotionImage extends plugin {
       return false;
     }
 
-    await e.react(124);
     try {
       const checkResult = await imageEmbeddingManager.checkImage(imgUrls[0]);
 

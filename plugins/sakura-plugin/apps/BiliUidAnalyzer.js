@@ -33,8 +33,6 @@ export class BiliUidAnalyzer extends plugin {
       const uid = e.match?.[1];
       if (!uid) return false;
 
-      await e.react?.(124).catch(() => {});
-
       try {
         const report = await this.fetchUidReport(uid);
         const aiReport = await this.buildAiReport(e, report);

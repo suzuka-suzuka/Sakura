@@ -33,8 +33,6 @@ export class GetImagePlugin extends plugin {
   async fetchAndSendImage(e, sourceKey) {
     const sourceConfig = IMAGE_SOURCES[sourceKey];
 
-    await e.react(124);
-
     let jsonData;
 
     try {

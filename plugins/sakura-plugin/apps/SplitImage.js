@@ -32,7 +32,6 @@ export class SplitImage extends plugin {
     if (!imgUrls || imgUrls.length === 0) {
       return false;
     }
-    e.react(124);
     const targetUrl = imgUrls[0];
 
     try {

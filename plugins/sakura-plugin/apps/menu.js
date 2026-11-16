@@ -81,8 +81,6 @@ export class SakuraMenu extends plugin {
         });
     const menuPages = wantsFullMenu ? buildFullMenuCategoryPages(menuConfig) : [menuConfig];
 
-    await e.react(124);
-
     const htmlPath = path.join(pluginresources, "menu", "menu.html");
     let templateHtml;
 

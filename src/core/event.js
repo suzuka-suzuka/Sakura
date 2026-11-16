@@ -10,6 +10,12 @@ import { isMasterUser, normalizeMasters } from "../utils/common.js";
 const NEVER_FORWARD_TO_BOT = new Set(["then", "toJSON"]);
 
 /**
+ * 标记"已经对这条消息有过回应"（回复、转发、贴表情）。
+ * loader 的延迟确认据此判断还要不要自动贴表情。用 Symbol 是为了不进 JSON 日志。
+ */
+export const RESPONDED = Symbol.for("sakura.event.responded");
+
+/**
  * 判断某个属性名该不该转发给 bot 当接口方法调用。
  *
  * 只放行驼峰命名。理由是 ws 层会把任意蛇形名当作 OneBot 动作名并返回一个函数
@@ -148,6 +154,7 @@ export class Event {
     }
 
     if (!this.group_id && !this.user_id) return;
+    this[RESPONDED] = true;
 
     let message;
     if (Array.isArray(msg)) {
@@ -337,6 +344,7 @@ export class Event {
   async react(emojiId, messageId = null) {
     const msgId = messageId || this.message_id;
     if (!this.group_id || !msgId) return false;
+    if (String(msgId) === String(this.message_id)) this[RESPONDED] = true;
     return this.bot.setMsgEmojiLike({ message_id: msgId, emoji_id: String(emojiId) });
   }
 
@@ -455,6 +463,7 @@ export class Event {
    */
   async sendForwardMsg(msg, info = {}) {
     const { prompt, summary, source, news } = info;
+    this[RESPONDED] = true;
 
     // 递归处理节点，支持嵌套转发
     const processNodes = (msgs) => {

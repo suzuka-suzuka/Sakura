@@ -30,7 +30,6 @@ export class setuPlugin extends plugin {
     if (isR18 && !this.r18Config.Groups.includes(e.group_id)) {
       return e.reply("本群未开启r18功能哦~", 10, false);
     }
-    await e.react(124);
     try {
       const imageInfo = await this.fetchLolicon(tag, isR18);
 

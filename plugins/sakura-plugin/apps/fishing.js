@@ -365,6 +365,8 @@ export default class Fishing extends plugin {
       name: "钓鱼系统",
       event: "message.group",
       priority: 1135,
+      // 钓鱼流程里频繁发图，不贴"收到"表情；攻略和各类查询单独打开
+      ack: false,
     });
     this.dataCleanupGuard = (groupId, userId) => !fishingSessions.entries().some(([, state]) =>
       String(state.fortuneBagManager?.groupId) === groupId &&
@@ -2328,7 +2330,7 @@ export default class Fishing extends plugin {
     return 1;
   }
 
-  fishingGuide = Command(/^#?钓鱼攻略$/, async (e) => {
+  fishingGuide = Command(/^#?钓鱼攻略$/, { ack: true }, async (e) => {
     if (!this.checkWhitelist(e)) return false;
 
     const lockKey = `sakura:fishing:guide:send:${e.group_id}`;
@@ -2350,10 +2352,6 @@ export default class Fishing extends plugin {
         logger.info(`[钓鱼攻略] 群 ${e.group_id} 正在发送攻略，本次重复指令已忽略`);
         return true;
       }
-
-      await e.react(124).catch((err) => {
-        logger.warn(`[钓鱼攻略] 指令表情回应失败: ${err.message}`);
-      });
 
       const missing = guideEntries.filter((entry) => !fs.existsSync(entry.imagePath));
       if (missing.length > 0) {
@@ -2396,7 +2394,7 @@ export default class Fishing extends plugin {
   });
 
 
-  pondWeatherForecast = Command(/^#?(鱼塘|钓鱼)天气$/, async (e) => {
+  pondWeatherForecast = Command(/^#?(鱼塘|钓鱼)天气$/, { ack: true }, async (e) => {
     if (!this.checkWhitelist(e)) return false;
     const now = Date.now();
     const current = getWeatherByTime(now);
@@ -2414,7 +2412,7 @@ export default class Fishing extends plugin {
     return true;
   });
 
-  locationList = Command(/^#?钓点(列表)?$/, async (e) => {
+  locationList = Command(/^#?钓点(列表)?$/, { ack: true }, async (e) => {
     if (!this.checkWhitelist(e)) return false;
     const fishingManager = new FishingManager(e.group_id);
     const currentId = fishingManager.getFishingLocation(e.user_id);
@@ -2551,7 +2549,7 @@ export default class Fishing extends plugin {
     return true;
   });
 
-  fishingStatus = Command(/^#?钓鱼(状态|信息)$/, async (e) => {
+  fishingStatus = Command(/^#?钓鱼(状态|信息)$/, { ack: true }, async (e) => {
     if (!this.checkWhitelist(e)) return false;
     const groupId = e.group_id;
     const userId = e.user_id;
@@ -2830,7 +2828,7 @@ export default class Fishing extends plugin {
     return true;
   });
 
-  fishingDex = Command(/^#?钓鱼(图鉴|记录)\s*(.*)$/, async (e) => {
+  fishingDex = Command(/^#?钓鱼(图鉴|记录)\s*(.*)$/, { ack: true }, async (e) => {
     if (!this.checkWhitelist(e)) return false;
 
     if (fishData.length === 0) {
@@ -2991,7 +2989,7 @@ export default class Fishing extends plugin {
     return true;
   });
 
-  myFortuneBags = Command(/^#?(?:我的福袋|查询(?:我的)?福袋)$/, async (e) => {
+  myFortuneBags = Command(/^#?(?:我的福袋|查询(?:我的)?福袋)$/, { ack: true }, async (e) => {
     if (!this.checkWhitelist(e)) return false;
     const bags = new FortuneBagManager(e).listOwn();
     if (!bags.length) {
@@ -3140,7 +3138,7 @@ export default class Fishing extends plugin {
     return true;
   });
 
-  fishingRanking = Command(/^#?钓鱼(排行|榜)$/, async (e) => {
+  fishingRanking = Command(/^#?钓鱼(排行|榜)$/, { ack: true }, async (e) => {
     if (!this.checkWhitelist(e)) return false;
     const fishingManager = new FishingManager(e.group_id);
     const rankingList = fishingManager.getFishingRanking(10);
@@ -3187,7 +3185,7 @@ export default class Fishing extends plugin {
   });
 
 
-  viewProfession = Command(/^#?(钓鱼)?职业(列表|一览)?$/, async (e) => {
+  viewProfession = Command(/^#?(钓鱼)?职业(列表|一览)?$/, { ack: true }, async (e) => {
     if (!this.checkWhitelist(e)) return false;
     const fishingManager = new FishingManager(e.group_id);
     const professionInfo = fishingManager.getUserProfession(e.user_id);

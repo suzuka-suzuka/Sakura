@@ -306,7 +306,6 @@ export class GroupInsight extends plugin {
         return true;
       }
 
-      await e.react?.(124).catch(() => {});
       activeReports.add(reportKey);
 
       try {

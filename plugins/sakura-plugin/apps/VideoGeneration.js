@@ -46,7 +46,6 @@ export class VideoGeneration extends plugin {
       })) || [];
       if (!prompt && imageRefs.length === 0) return false;
 
-      await e.react(124);
       const result = await generateVideoWithProvider({
         channel,
         prompt,

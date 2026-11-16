@@ -38,8 +38,6 @@ export class SearchImage extends plugin {
       return true
     }
 
-    await e.react(124)
-
     try {
       const result = await searchImageByUrl(imgs[0], {
         channel,

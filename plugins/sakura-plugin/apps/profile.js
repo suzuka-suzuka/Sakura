@@ -21,10 +21,6 @@ export class UserProfilePlugin extends plugin {
   }
 
   generateUserProfile = Command(/^#画像$/, async (e) => {
-    await e.react(124).catch((err) => {
-      logger.warn("画像指令表情回应失败:", err);
-    });
-
     const targetUserId = e.user_id;
     const messageCount = 100;
     const senderNickname = e.sender.card || e.sender.nickname || targetUserId;

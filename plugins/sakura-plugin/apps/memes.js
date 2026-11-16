@@ -682,7 +682,6 @@ export class memesPlugin extends plugin {
     }
 
     const economyManager = new EconomyManager(e);
-    await e.react(124);
     let [text, args = ""] = text1.split("#");
     const info = infos[targetCode];
 

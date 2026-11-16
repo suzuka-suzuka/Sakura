@@ -14,6 +14,8 @@ export class Ludo extends plugin {
       name: "飞行棋",
       event: "message.group",
       priority: 1135,
+      // 对局中频繁发图，不贴"收到"表情；局外的存档管理单独打开
+      ack: false,
     })
   }
 
@@ -246,7 +248,7 @@ export class Ludo extends plugin {
     return true
   });
 
-  listLudoSaves = Command(/^#?飞行棋存档列表$/, async (e) => {
+  listLudoSaves = Command(/^#?飞行棋存档列表$/, { ack: true }, async (e) => {
     const saves = await this.listSaves(e)
     if (saves.length === 0) {
       await e.reply("本群还没有飞行棋存档。")
@@ -264,7 +266,7 @@ export class Ludo extends plugin {
     return true
   });
 
-  deleteLudoSave = Command(/^#?(?:删除|移除)飞行棋存档(?:\s+(.+))?$/, async (e) => {
+  deleteLudoSave = Command(/^#?(?:删除|移除)飞行棋存档(?:\s+(.+))?$/, { ack: true }, async (e) => {
     if (!(e.isWhite || e.isAdmin)) {
       return false
     }

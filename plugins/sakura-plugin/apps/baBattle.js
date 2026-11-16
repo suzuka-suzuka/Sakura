@@ -115,7 +115,8 @@ function renderGuideFallback() {
 export class BaBattle extends plugin {
   constructor() {
     // 1130：早于 AI 聊天（1135），否则「过」「ex 1」这种短指令会被聊天先吃掉
-    super({ name: "档案对战", priority: 1130 })
+    // 对局中频繁发图，不贴"收到"表情；图鉴和帮助单独打开
+    super({ name: "档案对战", priority: 1130, ack: false })
     this.store = null
   }
 
@@ -599,7 +600,7 @@ export class BaBattle extends plugin {
   })
 
   // 点名某人才发角色卡图（那是唯一需要完整数值面板的场合），否则只发文字
-  guide = Command(/^#?档案图鉴\s*(.*)$/, { event: "message.group" }, async function (e) {
+  guide = Command(/^#?档案图鉴\s*(.*)$/, { event: "message.group", ack: true }, async function (e) {
     const key = (e.match?.[1] || "").trim()
     if (!key) {
       await this.sendForward(e, await this.rosterNodes(), {
@@ -617,7 +618,7 @@ export class BaBattle extends plugin {
     return true
   })
 
-  help = Command(/^#?档案(?:对战)?(?:帮助|攻略)$/, async function (e) {
+  help = Command(/^#?档案(?:对战)?(?:帮助|攻略)$/, { ack: true }, async function (e) {
     const pages = await this.guidePageSegments()
     await this.sendForward(e, pages || [renderGuideFallback()], {
       source: "档案对战 · 攻略",

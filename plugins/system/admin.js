@@ -81,7 +81,6 @@ export class SystemPlugin extends plugin {
   });
 
   getLogs = Command(/^#(全部)?(错误)?日志$/, async (e) => {
-    await e.react(124);
     const logFile = getLatestBotLogPath();
     if (!logFile) {
       return e.reply("暂无日志文件");

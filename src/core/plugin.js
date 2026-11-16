@@ -19,6 +19,9 @@ export const HANDLER_METADATA = Symbol.for("HANDLER_METADATA");
  * @param {string|number|object} [eventOrPriorityOrOptions] 事件类型 (string) 或 优先级 (number) 或 配置对象
  * @param {number} [priority] 优先级 (仅当第二个参数为事件类型时有效)
  * @param {Function} handler 处理函数
+ *
+ * 配置对象里的 ack 控制"收到指令"的表情回应（见 loader 的 scheduleAck）：
+ * 不写 = 处理超过一小段时间还没回复就自动贴 124；false = 不贴；数字 = 换成该表情 ID。
  */
 export function Command(reg, ...args) {
   const handler = args.pop();
@@ -30,6 +33,7 @@ export function Command(reg, ...args) {
   let permission;
   let economy;
   let preflight;
+  let ack;
 
   if (typeof eventOrPriorityOrOptions === "number") {
     p = eventOrPriorityOrOptions;
@@ -49,6 +53,7 @@ export function Command(reg, ...args) {
     permission = eventOrPriorityOrOptions.permission;
     economy = eventOrPriorityOrOptions.economy;
     preflight = eventOrPriorityOrOptions.preflight;
+    ack = eventOrPriorityOrOptions.ack;
   }
 
   if (typeof handler === "function") {
@@ -60,6 +65,7 @@ export function Command(reg, ...args) {
       permission,
       economy,
       preflight,
+      ack,
     };
   }
   return handler;
@@ -166,6 +172,7 @@ export class plugin {
       priority = 5000,
       log = false,
       permission,
+      ack,  // 插件级默认的指令表情回应，单个 Command 的 ack 优先
       configWatch,  // 声明依赖的配置文件名，配置变更时自动重载插件
     } = config;
 
@@ -174,6 +181,7 @@ export class plugin {
     this.priority = priority;
     this.log = log;
     this.permission = permission;
+    this.ack = ack;
     this.configWatch = configWatch;  // 如 "teatime" 或 ["teatime", "AI"]
     this.jobs = [];
     this._eventFallback = null;

@@ -39,7 +39,6 @@ export class pixivSearch extends plugin {
     const lockKey = `pid:${e.user_id}`
     if (processingUsers.has(lockKey)) return false
     processingUsers.add(lockKey)
-    await e.react(124)
     const pid = match[1]
     const pageNum = parseInt(match[2]) || 1
 
@@ -109,8 +108,6 @@ export class pixivSearch extends plugin {
     const lockKey = `search:${e.user_id}`
     if (processingUsers.has(lockKey)) return false
     processingUsers.add(lockKey)
-
-    await e.react(124)
 
     try {
       const result = await searchPixivImage(tag, isR18Search)
@@ -208,8 +205,6 @@ export class pixivSearch extends plugin {
     if (processingUsers.has(lockKey)) return false
     processingUsers.add(lockKey)
 
-    await e.react(124)
-
     try {
       const result = await getRankingOverview(modeKey)
 
@@ -269,7 +264,6 @@ export class pixivSearch extends plugin {
     const lockKey = `ranking:item:${e.user_id}`
     if (processingUsers.has(lockKey)) return false
     processingUsers.add(lockKey)
-    await e.react(124)
     try {
       const modeMap = {
         "日榜": "daily",

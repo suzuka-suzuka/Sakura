@@ -58,7 +58,6 @@ export class SaveToAlbum extends plugin {
       return false;
     }
 
-    e.react(124);
     let data = {};
     if (fs.existsSync(dataFile)) {
       try {

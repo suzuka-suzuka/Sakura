@@ -262,7 +262,6 @@ export class Conversationmanagement extends plugin {
     const groupedRounds = groupConversationRounds(history);
     const totalRounds = groupedRounds.length;
     const visibleHistory = groupedRounds.flat();
-    await e.react(124);
 
 
     const getItemText = (item) => (item.parts || [])

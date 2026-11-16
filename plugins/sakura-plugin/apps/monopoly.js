@@ -31,6 +31,8 @@ export class Monopoly extends plugin {
       name: "QQ群大富翁",
       event: "message.group",
       priority: 1128,
+      // 对局中频繁发图，不贴"收到"表情；局外指令(帮助)单独打开
+      ack: false,
     })
     this.ready = false
     this.initError = null
@@ -404,10 +406,8 @@ export class Monopoly extends plugin {
   )
 
   // 规则图不碰会话，群里没开局、甚至私聊都能查
-  help = Command(COMMAND_PATTERNS.help, "message", async (e) => {
+  help = Command(COMMAND_PATTERNS.help, { event: "message", ack: true }, async (e) => {
     if (!(await this.ensureReady(e))) return true
-    // 图较大，先贴个表情告诉用户指令已经收到
-    await e.react(124).catch(() => {})
     try {
       this.rulesPages ||= await renderRulesPages(this.map)
       const count = this.rulesPages.length

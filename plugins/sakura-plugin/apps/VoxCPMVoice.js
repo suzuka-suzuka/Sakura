@@ -328,8 +328,6 @@ export class VoxCPMVoice extends plugin {
       return true;
     }
 
-    await e.react(124);
-
     try {
       let referenceAudio = null;
       if (request.hasReferenceAudio) {

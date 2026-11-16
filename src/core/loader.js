@@ -28,6 +28,30 @@ import {
   clearEconomyCommandNamesCache,
 } from "./economyHook.js";
 import { canRunBotScopedTask } from "./botLifecycle.js";
+import { RESPONDED } from "./event.js";
+
+/** 指令处理超过这个时长仍没回复，就先贴个表情表示"收到了" */
+const ACK_DELAY_MS = 400;
+const DEFAULT_ACK_EMOJI = 124;
+
+/**
+ * 群聊指令的统一"收到"回应：处理慢于 ACK_DELAY_MS 且期间没回复过才贴表情。
+ * 很快放行(return false)或直接回复的指令不会被打扰。返回取消函数。
+ */
+function scheduleAck(eventObj, instance, handler) {
+  if (handler.type !== "regex") return null;
+  const ack = handler.ack ?? instance.ack;
+  if (ack === false || !eventObj.group_id || !eventObj.message_id) return null;
+  const emojiId = typeof ack === "number" ? ack : DEFAULT_ACK_EMOJI;
+
+  const timer = setTimeout(() => {
+    if (eventObj[RESPONDED]) return;
+    eventObj.react(emojiId).catch((err) => {
+      logger.debug(`[${instance.name}] 指令表情回应失败: ${err?.message || err}`);
+    });
+  }, ACK_DELAY_MS);
+  return () => clearTimeout(timer);
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_RUNTIME_BASE_DIR = path.join(__dirname, "../../temp/plugin-runtime");
@@ -773,6 +797,7 @@ export class PluginLoader {
         const { instance, handler } = item;
         instance.e = eventObj;
         let economy = null;
+        let cancelAck = null;
         try {
           const permission = handler.permission || instance.permission;
           if (permission) {
@@ -808,6 +833,7 @@ export class PluginLoader {
             logger.info(`[${instance.name}] 触发: ${handler.methodName}`);
           }
 
+          cancelAck = scheduleAck(eventObj, instance, handler);
           const result = await instance[handler.methodName](eventObj);
 
           afterEconomyExecute(economy.ticket, result);
@@ -818,6 +844,8 @@ export class PluginLoader {
         } catch (err) {
           onEconomyError(economy?.ticket, err);
           logger.error(`插件 ${instance.name} 执行出错: ${err}`);
+        } finally {
+          cancelAck?.();
         }
       }
     })));
