@@ -77,16 +77,38 @@ async function request(config, endpoint, { method = "GET", json = null, form = n
 
   const payload = await readResponseBody(response);
   if (!response.ok) {
-    const message = typeof payload === "string"
-      ? payload
-      : payload?.error?.message || JSON.stringify(payload || {});
+    const message = typeof payload === "string" ? payload : JSON.stringify(payload || {});
     const error = new Error(
-      `${API_DISPLAY_NAME}请求失败：${method} ${endpoint} 返回 ${response.status}，${`${message}`.slice(0, 500)}`
+      `${API_DISPLAY_NAME}请求失败：${method} ${endpoint} 返回 ${response.status}，${message.slice(0, 500)}`
     );
     error.status = response.status;
+    error.upstreamMessage = innermostErrorMessage(payload);
     throw error;
   }
   return payload;
+}
+
+/**
+ * 中转站常把上游错误整段 JSON 塞进 message（如 "price preview returned status 400: {...}"），
+ * 逐层取出最里面的 message，才是给用户看的具体原因。
+ */
+function innermostErrorMessage(payload) {
+  let message = typeof payload === "string"
+    ? payload
+    : payload?.error?.message || payload?.message || "";
+  for (let depth = 0; depth < 4; depth++) {
+    const nested = `${message}`.match(/\{.*\}/s)?.[0];
+    if (!nested) break;
+    try {
+      const parsed = JSON.parse(nested);
+      const next = parsed?.error?.message || parsed?.message;
+      if (!next) break;
+      message = next;
+    } catch {
+      break;
+    }
+  }
+  return `${message || ""}`.trim();
 }
 
 function dataUrlParts(value) {

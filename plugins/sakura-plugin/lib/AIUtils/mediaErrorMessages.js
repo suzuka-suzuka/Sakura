@@ -141,6 +141,15 @@ export function formatMediaUserError(error, options = {}) {
     return `提示词或参考内容触发了 ${name} 的安全审核，请修改后重试。`;
   }
 
+  // 参数不合法时上游会说清楚哪里不对（例如只支持哪些比例/分辨率），直接转给用户。
+  if (
+    (error?.status === 400 || error?.status === 422) &&
+    typeof error?.upstreamMessage === "string" &&
+    error.upstreamMessage
+  ) {
+    return `${name} 不接受当前参数：${redactMediaErrorMessage(error.upstreamMessage).slice(0, 200)}`;
+  }
+
   if (
     /aiplatform\.interactions\.create/i.test(message) ||
     ((error?.status === 403 || error?.statusCode === 403) &&

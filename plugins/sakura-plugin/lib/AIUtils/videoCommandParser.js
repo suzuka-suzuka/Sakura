@@ -7,6 +7,7 @@ export const VALID_VIDEO_ASPECT_RATIOS = [
   "3:4",
   "3:2",
   "2:3",
+  "21:9",
 ];
 
 const ASPECT_RATIO_ALIASES = {
@@ -53,6 +54,8 @@ function extractChannel(text) {
 function applySizeOption(options, size) {
   if (!VIDEO_SIZES.has(size)) return false;
   options.size = size;
+  options.explicit.aspectRatio = true;
+  options.explicit.resolution = true;
 
   if (["854x480", "1280x720"].includes(size)) {
     options.aspectRatio = "16:9";
@@ -78,6 +81,8 @@ export function parseVideoCommandArgs(rawText) {
     duration: 6,
     resolution: "720p",
     size: null,
+    // 用户实际写了哪些参数；OpenAI Videos 渠道只传这些，其余交给模型自己的默认值。
+    explicit: {},
   };
   const promptParts = [];
 
@@ -93,10 +98,12 @@ export function parseVideoCommandArgs(rawText) {
 
     if (durationMatch) {
       options.duration = clampDuration(durationMatch[1]);
+      options.explicit.duration = true;
       continue;
     }
-    if (["480p", "720p", "1080p"].includes(lower)) {
+    if (/^(?:\d{3,4}p|[24]k)$/.test(lower)) {
       options.resolution = lower;
+      options.explicit.resolution = true;
       continue;
     }
     if (/^\d{3,4}x\d{3,4}$/.test(sizeToken)) {
@@ -106,6 +113,7 @@ export function parseVideoCommandArgs(rawText) {
     const normalizedRatio = ASPECT_RATIO_ALIASES[lower] || lower;
     if (VALID_VIDEO_ASPECT_RATIOS.includes(normalizedRatio)) {
       options.aspectRatio = normalizedRatio;
+      options.explicit.aspectRatio = normalizedRatio !== "auto";
       continue;
     }
 

@@ -30,14 +30,12 @@ import { VIDEO_GENERATION_TIMEOUT_MS } from "./videoGenerationConstants.js";
 
 const GEMINI_OMNI_MODEL = "gemini-omni-flash-preview";
 const GEMINI_ASPECT_RATIOS = new Set(["16:9", "9:16"]);
-const OPENAI_VIDEO_ASPECT_RATIOS = new Set(["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"]);
-const OPENAI_VIDEO_MIN_SECONDS = 4;
 const VIDEO_REFERENCE_LIMITS = {
   grok: 7,
   gemini: 10,
 };
-// OpenAI Videos 中转站按模型名后缀区分任务：i2v 只收首帧 + 尾帧，multi 最多 9 张；
-// 没有后缀的模型按标准 OpenAI 只带一张 input_reference。
+// OpenAI Videos 中转站按模型名后缀区分任务：i2v 只收首帧 + 尾帧，multi 最多 9 张。
+// 没有后缀的模型（如 minimax-h3-comfyui-*）各有规则，不在本地限制，交给上游校验。
 const OPENAI_VIDEO_REFERENCE_LIMITS = { t2v: 0, i2v: 2, multi: 9 };
 
 function resolveVideoSelection(requestedRoute = null, selfId = null) {
@@ -169,7 +167,20 @@ function videoTaskSuffix(model) {
 }
 
 function normalizeOpenAIVideoOptions(options, imageCount, modelName) {
-  const normalized = { ...options };
+  // 同一站点下各模型的比例、分辨率、时长范围差别很大（Seedance 默认 720p，MiniMax H3 只认
+  // 480p/608p… 和 16:9/9:16），本地猜不准。只传用户明确写了的参数，其余用模型默认值，
+  // 不合法时由上游返回具体原因。没有 explicit 标记的调用方视为全部显式。
+  const explicit = options.explicit;
+  const pick = (key) => {
+    const value = options[key];
+    if (value == null || value === "auto") return null;
+    return !explicit || explicit[key] === true ? value : null;
+  };
+  const normalized = {
+    aspectRatio: pick("aspectRatio"),
+    duration: pick("duration"),
+    resolution: pick("resolution"),
+  };
   const warnings = [];
   let model = `${modelName || ""}`;
   const suffix = videoTaskSuffix(model);
@@ -186,7 +197,7 @@ function normalizeOpenAIVideoOptions(options, imageCount, modelName) {
   }
 
   const finalSuffix = videoTaskSuffix(model);
-  const imageLimit = finalSuffix ? OPENAI_VIDEO_REFERENCE_LIMITS[finalSuffix] : 1;
+  const imageLimit = finalSuffix ? OPENAI_VIDEO_REFERENCE_LIMITS[finalSuffix] : imageCount;
   if (imageCount > imageLimit) {
     warnings.push(
       `${model} 最多支持 ${imageLimit} 张参考图，已忽略其余 ${imageCount - imageLimit} 张`
@@ -194,29 +205,6 @@ function normalizeOpenAIVideoOptions(options, imageCount, modelName) {
   }
   if (finalSuffix === "i2v" && Math.min(imageCount, imageLimit) === 2) {
     warnings.push("图生视频模型会把第 2 张图当作尾帧");
-  }
-
-  if (normalized.aspectRatio === "auto") {
-    normalized.aspectRatio = null;
-  } else if (normalized.aspectRatio) {
-    const compatibleRatio = nearestSupportedAspectRatio(
-      normalized.aspectRatio,
-      OPENAI_VIDEO_ASPECT_RATIOS
-    );
-    if (compatibleRatio !== normalized.aspectRatio) {
-      warnings.push(
-        `不支持 ${normalized.aspectRatio} 比例，已调整为同方向最接近的 ${compatibleRatio}`
-      );
-      normalized.aspectRatio = compatibleRatio;
-    }
-  }
-
-  const duration = Number.parseInt(normalized.duration, 10);
-  if (Number.isFinite(duration) && duration < OPENAI_VIDEO_MIN_SECONDS) {
-    warnings.push(
-      `最短 ${OPENAI_VIDEO_MIN_SECONDS} 秒，已将 ${duration} 秒调整为 ${OPENAI_VIDEO_MIN_SECONDS} 秒`
-    );
-    normalized.duration = OPENAI_VIDEO_MIN_SECONDS;
   }
 
   return { options: normalized, imageLimit, warnings, model };
