@@ -10,6 +10,7 @@ import Config from "./core/config.js";
 import { installOsCompatPatch } from "./utils/osCompat.js";
 import { startConfigServer } from "./web/configServer.js";
 import { bindBotRoute, cleanupBotRoutes, isBotOfflineEvent } from "./core/botLifecycle.js";
+import { onShutdown, shutdown } from "./core/shutdown.js";
 
 logger.info(logger.magenta("-----------------sakura框架-----------------"))
 logger.info(logger.magenta("  ____   ____   __  __  __ __ _____   ____ "))
@@ -310,47 +311,35 @@ Config.onChange((newConfig) => {
 
 // =================== 优雅退出处理 ===================
 
-let isShuttingDown = false;
+// 先断开连接停止接收新事件，再等插件资源（浏览器等）关闭，最后关 Redis
+onShutdown("断开连接", () => {
+  disconnectAllClients();
+  logger.info("所有连接已断开");
+}, { order: -10 });
 
-async function gracefulShutdown(signal) {
-  if (isShuttingDown) return;
-  isShuttingDown = true;
-
-  logger.info(`收到 ${signal} 信号，正在优雅关闭...`);
-
-  try {
-    disconnectAllClients();
-    logger.info("所有连接已断开");
-
-    if (global.redis) {
-      await global.redis.quit();
-      logger.info("Redis 连接已关闭");
-    }
-  } catch (e) {
-    logger.error(`关闭过程出错: ${e}`);
+onShutdown("Redis", async () => {
+  if (global.redis) {
+    await global.redis.quit();
+    logger.info("Redis 连接已关闭");
   }
-
-  setTimeout(() => {
-    process.exit(0);
-  }, 500);
-}
+}, { order: 10 });
 
 // 只监听 IPC 消息，不直接监听 SIGINT/SIGTERM
 // 因为父进程会通过 IPC 发送 shutdown 消息
 process.on("message", (msg) => {
   if (msg === "shutdown") {
-    gracefulShutdown("IPC shutdown");
+    shutdown("IPC shutdown");
   }
 });
 
 // 作为备用，如果直接运行此脚本（不通过 app.js）
 if (!process.send) {
-  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 
 process.on("disconnect", () => {
-  gracefulShutdown("IPC disconnect");
+  shutdown("IPC disconnect");
 });
 
 export { bot as api } from "./api/client.js";

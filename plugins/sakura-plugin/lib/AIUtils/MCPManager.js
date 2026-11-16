@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import Setting from "../setting.js";
+import { onShutdown } from "../../../../src/core/shutdown.js";
 import {
     DEFAULT_TAVILY_MCP_URL,
     buildTavilyRawContentParameter,
@@ -107,7 +108,8 @@ class MCPManager {
         this._connected = false;
 
         const cleanup = () => this.close().catch(() => {});
-        process.once("exit", cleanup);
+        // exit 回调里等不了异步关闭，stdio MCP 子进程交给框架退出流程等待
+        onShutdown("MCP", () => this.close());
         process.once("SIGINT", cleanup);
         process.once("SIGTERM", cleanup);
     }

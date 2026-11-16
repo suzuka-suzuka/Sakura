@@ -1,5 +1,6 @@
 import fs from "fs";
 import { logger } from "../../src/utils/logger.js";
+import { shutdown } from "../../src/core/shutdown.js";
 import { getLatestBotLogPath } from "../../src/utils/logPaths.js";
 import {
   filterLogEntriesByLevel,
@@ -61,7 +62,8 @@ export class SystemPlugin extends plugin {
     if (process.send) {
       process.send("restart");
     }
-    process.exit(0);
+    // 走完整退出流程，等浏览器等资源关闭后再退出，避免遗留 Chromium
+    await shutdown("#重启");
   });
 
   shutdown = Command(/^#关机$/, async (e) => {

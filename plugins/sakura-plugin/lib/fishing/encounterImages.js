@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildEncounterHtml } from "./encounterRenderer.js";
 import { analyzeEncounterChoices, generateEncounterMaps, validateEncounterInput } from "./encounter.js";
+import { isShuttingDown, onShutdown } from "../../../../src/core/shutdown.js";
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 let fontPromise = null;
@@ -16,6 +17,7 @@ export function getEncounterFontData() {
 }
 
 async function getBrowser() {
+  if (isShuttingDown()) throw new Error("进程正在退出，不再启动浏览器");
   if (!browserPromise) browserPromise = (async () => {
     // 顺序加载 CJS 配置，避免 Node 22 在并行导入时的加载器异常。
     const { default: puppeteer } = await import("puppeteer");
@@ -72,4 +74,5 @@ export async function closeFishingEncounterBrowser() {
   await running?.then(browser => browser.close()).catch(() => {});
 }
 
-process.once("exit", () => { void closeFishingEncounterBrowser(); });
+// exit 回调里等不了异步关闭，交给框架退出流程等待
+onShutdown("钓鱼渲染浏览器", closeFishingEncounterBrowser);

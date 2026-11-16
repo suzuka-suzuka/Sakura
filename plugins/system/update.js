@@ -3,6 +3,7 @@ import _ from "lodash";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { shutdown } from "../../src/core/shutdown.js";
 
 const require = createRequire(import.meta.url);
 const { exec, execSync } = require("child_process");
@@ -470,6 +471,7 @@ export class GlobalUpdate extends plugin {
     if (process.send) {
       process.send("restart");
     }
-    process.exit(0);
+    // 走完整退出流程，等浏览器等资源关闭后再退出，避免遗留 Chromium
+    await shutdown("更新后重启");
   }
 }
