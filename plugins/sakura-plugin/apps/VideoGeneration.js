@@ -9,7 +9,7 @@ const VIDEO_COMMAND_PATTERN = /^#v(?![a-z])\s*(.*)$/i;
 async function replyVideoSource(e, result) {
   if (/^https?:\/\//i.test(result.source) || /^data:video\//i.test(result.source)) {
     await e.reply(
-      `${result.provider === "gemini" ? "Gemini Omni" : "Grok"} 视频生成好了，但本地下载失败，先给你原始链接：${result.source}`
+      `${{ gemini: "Gemini Omni", openai: "OpenAI 视频" }[result.provider] || "Grok"} 视频生成好了，但本地下载失败，先给你原始链接：${result.source}`
     );
     return;
   }

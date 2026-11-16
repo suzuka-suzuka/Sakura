@@ -3,6 +3,7 @@ import { bot } from "../../../../src/api/client.js";
 import { logger } from "../../../../src/utils/logger.js";
 import { getRecentGroupMessages } from "./groupMessageStore.js";
 import { getMessageIdentifier } from "./messageIdentifiers.js";
+import { formatBeijingClock } from "./currentTime.js";
 
 const roleMap = {
   owner: "群主",
@@ -10,10 +11,7 @@ const roleMap = {
   member: "普通成员",
 };
 
-const formatDate = (timestamp) => {
-  const date = new Date(timestamp * 1000);
-  return date.toLocaleTimeString("zh-CN", { hour12: false });
-};
+const formatDate = formatBeijingClock;
 
 async function getChatHistoryGroup(group, num) {
   if (!group) return [];
@@ -325,12 +323,7 @@ export async function buildGroupPrompt(groupId, options = {}) {
     const botName =
       botMemberInfo?.card || botMemberInfo?.nickname || bot.self_id;
 
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, "0");
-    const day = String(today.getDate()).padStart(2, "0");
-    systemPromptWithContext += `今天是 ${year}年${month}月${day}日。`;
-
+    // 当前时间由 getAI 按调用方要求追加在系统提示词末尾，这里不写
     systemPromptWithContext += `你目前正在一个QQ群聊中。`;
     systemPromptWithContext += `\n群名称: ${groupInfo.group_name}, 群号: ${groupId}。`;
     systemPromptWithContext += `你现在是这个QQ群的成员，你的昵称是“${botName}”(QQ:${bot.self_id})。`;

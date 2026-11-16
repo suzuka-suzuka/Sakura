@@ -8,6 +8,7 @@ import {
   generateGrokVideoAndWait,
 } from "./cliProxyMediaClient.js";
 import { tagMediaError } from "./mediaErrorMessages.js";
+import { generateOpenAIVideoAndWait } from "./openaiVideoClient.js";
 import {
   createRouteExecutionPlan,
   executeRoutePlan,
@@ -29,10 +30,15 @@ import { VIDEO_GENERATION_TIMEOUT_MS } from "./videoGenerationConstants.js";
 
 const GEMINI_OMNI_MODEL = "gemini-omni-flash-preview";
 const GEMINI_ASPECT_RATIOS = new Set(["16:9", "9:16"]);
+const OPENAI_VIDEO_ASPECT_RATIOS = new Set(["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"]);
+const OPENAI_VIDEO_MIN_SECONDS = 4;
 const VIDEO_REFERENCE_LIMITS = {
   grok: 7,
   gemini: 10,
 };
+// OpenAI Videos 中转站按模型名后缀区分任务：i2v 只收首帧 + 尾帧，multi 最多 9 张；
+// 没有后缀的模型按标准 OpenAI 只带一张 input_reference。
+const OPENAI_VIDEO_REFERENCE_LIMITS = { t2v: 0, i2v: 2, multi: 9 };
 
 function resolveVideoSelection(requestedRoute = null, selfId = null) {
   const scope = selfId == null ? {} : { selfId };
@@ -72,7 +78,9 @@ function videoConfigFromRouteAttempt(attempt) {
   const config = attempt.requestConfig;
   return {
     name: config.name,
-    provider: config.channelType === "gemini" ? "gemini" : "grok",
+    provider: config.channelType === "gemini"
+      ? "gemini"
+      : config.videoApiFormat === "openai" ? "openai" : "grok",
     vertex: config.vertex === true,
     model: config.model,
     baseURL: config.baseURL,
@@ -156,12 +164,74 @@ async function buildGeminiInput(prompt, images = []) {
   };
 }
 
+function videoTaskSuffix(model) {
+  return `${model || ""}`.match(/-(t2v|i2v|multi)$/i)?.[1]?.toLowerCase() || null;
+}
+
+function normalizeOpenAIVideoOptions(options, imageCount, modelName) {
+  const normalized = { ...options };
+  const warnings = [];
+  let model = `${modelName || ""}`;
+  const suffix = videoTaskSuffix(model);
+
+  // 后缀决定任务类型：有图却选了文生模型、没图却选了图生模型时，换成同系列的对应模型。
+  if (suffix === "t2v" && imageCount > 0) {
+    const swapped = model.replace(/-t2v$/i, "-i2v");
+    warnings.push(`${model} 是文生视频模型，带了参考图，已改用 ${swapped}`);
+    model = swapped;
+  } else if ((suffix === "i2v" || suffix === "multi") && imageCount === 0) {
+    const swapped = model.replace(/-(i2v|multi)$/i, "-t2v");
+    warnings.push(`${model} 需要参考图，没有图片，已改用 ${swapped}`);
+    model = swapped;
+  }
+
+  const finalSuffix = videoTaskSuffix(model);
+  const imageLimit = finalSuffix ? OPENAI_VIDEO_REFERENCE_LIMITS[finalSuffix] : 1;
+  if (imageCount > imageLimit) {
+    warnings.push(
+      `${model} 最多支持 ${imageLimit} 张参考图，已忽略其余 ${imageCount - imageLimit} 张`
+    );
+  }
+  if (finalSuffix === "i2v" && Math.min(imageCount, imageLimit) === 2) {
+    warnings.push("图生视频模型会把第 2 张图当作尾帧");
+  }
+
+  if (normalized.aspectRatio === "auto") {
+    normalized.aspectRatio = null;
+  } else if (normalized.aspectRatio) {
+    const compatibleRatio = nearestSupportedAspectRatio(
+      normalized.aspectRatio,
+      OPENAI_VIDEO_ASPECT_RATIOS
+    );
+    if (compatibleRatio !== normalized.aspectRatio) {
+      warnings.push(
+        `不支持 ${normalized.aspectRatio} 比例，已调整为同方向最接近的 ${compatibleRatio}`
+      );
+      normalized.aspectRatio = compatibleRatio;
+    }
+  }
+
+  const duration = Number.parseInt(normalized.duration, 10);
+  if (Number.isFinite(duration) && duration < OPENAI_VIDEO_MIN_SECONDS) {
+    warnings.push(
+      `最短 ${OPENAI_VIDEO_MIN_SECONDS} 秒，已将 ${duration} 秒调整为 ${OPENAI_VIDEO_MIN_SECONDS} 秒`
+    );
+    normalized.duration = OPENAI_VIDEO_MIN_SECONDS;
+  }
+
+  return { options: normalized, imageLimit, warnings, model };
+}
+
 export function normalizeVideoGenerationOptions(
   provider,
   options = {},
   imageCount = 0,
-  _modelName = ""
+  modelName = ""
 ) {
+  if (provider === "openai") {
+    return normalizeOpenAIVideoOptions(options, imageCount, modelName);
+  }
+
   const normalized = { ...options };
   const warnings = [];
   const referenceLimit = VIDEO_REFERENCE_LIMITS[provider];
@@ -434,6 +504,35 @@ async function generateVideoOnce(channel, prompt, images, options) {
       };
     } catch (error) {
       throw tagMediaError(error, "grok", "video");
+    }
+  }
+
+  if (channel.provider === "openai") {
+    try {
+      return {
+        result: {
+          provider: "openai",
+          source: await generateOpenAIVideoAndWait(
+            {
+              model: normalized.model,
+              prompt,
+              images: compatibleImages,
+              seconds: compatibleOptions.duration
+                ? String(compatibleOptions.duration)
+                : undefined,
+              metadata: {
+                ...(compatibleOptions.aspectRatio && { ratio: compatibleOptions.aspectRatio }),
+                ...(compatibleOptions.resolution && { resolution: compatibleOptions.resolution }),
+              },
+            },
+            channel,
+            path.join(plugindata, "openai", "videos")
+          ),
+        },
+        warnings: normalized.warnings,
+      };
+    } catch (error) {
+      throw tagMediaError(error, "openai", "video");
     }
   }
 

@@ -2,7 +2,7 @@ import { AbstractTool } from './AbstractTool.js'
 
 export class SearchMusicTool extends AbstractTool {
   name = 'searchMusic'
-  progressText = '找歌'
+  progressText = '音乐搜索'
   progressDetail = 'keyword'
 
   parameters = {

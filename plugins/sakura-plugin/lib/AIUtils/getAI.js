@@ -22,6 +22,7 @@ import {
 } from "./messageParts.js";
 import { buildOpenAICompatibleWebSearchTool } from "./openAIWebSearchTool.js";
 import { collectGeminiStream } from "./geminiStream.js";
+import { buildCurrentTimeLine } from "./currentTime.js";
 
 const OPENAI_REASONING_EFFORTS = new Set([
   "none",
@@ -47,6 +48,36 @@ const GEMINI_CONTENT_FINISH_REASONS = new Set([
   "RECITATION",
   "IMAGE_SAFETY",
 ]);
+
+/**
+ * 系统提示词 = 人设 + 群聊上下文（开启时）+ 当前时间（要求时）。
+ * 当前时间只在调用方要求时加（routingContext.includeCurrentTime === true），多数后台任务用不到；
+ * 它每分钟都变，放在末尾，不影响前面人设部分的提示词缓存。
+ */
+async function buildSystemInstruction(e, presetPrompt, enableGroupContext, { includeCurrentTime = false } = {}) {
+  const sections = [];
+  if (presetPrompt && presetPrompt.trim()) {
+    sections.push(presetPrompt.trim());
+  }
+
+  const contextOptions =
+    typeof enableGroupContext === "object" && enableGroupContext !== null ? enableGroupContext : null;
+  if ((contextOptions || enableGroupContext === true) && e?.group_id) {
+    const groupContextOptions = {};
+    if (!contextOptions?.noHeader && e?.sender) {
+      groupContextOptions.sender = e.sender;
+    }
+    const systemPromptWithContext = await buildGroupPrompt(e.group_id, groupContextOptions);
+    if (systemPromptWithContext.trim()) {
+      sections.push(systemPromptWithContext.trim());
+    }
+  }
+
+  if (includeCurrentTime) {
+    sections.push(buildCurrentTimeLine());
+  }
+  return sections.join("\n");
+}
 
 /**
  * 协议实现内的失败：记日志后以 Error 对象返回（不抛出），由路由按动作决定怎么回退。
@@ -357,7 +388,8 @@ async function _getOpenAIResponse(
   presetPrompt,
   enableGroupContext,
   enableTools,
-  historyContents = []
+  historyContents = [],
+  promptOptions = {}
 ) {
   if (!isRequestConfigComplete(channel, "openai")) {
     return requestFailure("无效或不完整的渠道配置", ROUTE_FAILURE_ACTIONS.NEXT, { level: "error" });
@@ -377,36 +409,7 @@ async function _getOpenAIResponse(
   try {
     let messages = [];
 
-    let fullSystemInstructionText = "";
-    if (presetPrompt && presetPrompt.trim()) {
-      fullSystemInstructionText += presetPrompt.trim();
-    }
-
-    let groupContextOptions = {};
-    let shouldEnableGroupContext = false;
-
-    if (typeof enableGroupContext === "object" && enableGroupContext !== null) {
-      shouldEnableGroupContext = true;
-      if (!enableGroupContext.noHeader && e?.sender) {
-        groupContextOptions.sender = e.sender;
-      }
-    } else if (enableGroupContext === true) {
-      shouldEnableGroupContext = true;
-      if (e?.sender) {
-        groupContextOptions.sender = e.sender;
-      }
-    }
-
-    if (shouldEnableGroupContext && e?.group_id) {
-      const systemPromptWithContext = await buildGroupPrompt(
-        e.group_id,
-        groupContextOptions
-      );
-      if (systemPromptWithContext.trim()) {
-        if (fullSystemInstructionText) fullSystemInstructionText += "\n";
-        fullSystemInstructionText += systemPromptWithContext.trim();
-      }
-    }
+    const fullSystemInstructionText = await buildSystemInstruction(e, presetPrompt, enableGroupContext, promptOptions);
     if (fullSystemInstructionText) {
       messages.push({ role: "system", content: fullSystemInstructionText });
     }
@@ -710,7 +713,8 @@ async function _getOpenAIResponse(
           presetPrompt,
           enableGroupContext,
           enableTools,
-          historyContents
+          historyContents,
+          promptOptions
         );
       }
       // 带上之后反而因为这个字段被拒，说明判断错了，撤销学习结果。
@@ -729,7 +733,8 @@ async function _getGeminiResponse(
   presetPrompt,
   enableGroupContext,
   enableTools,
-  historyContents = []
+  historyContents = [],
+  promptOptions = {}
 ) {
   if (!isRequestConfigComplete(channel, "gemini")) {
     return requestFailure("无效或不完整的渠道配置。", ROUTE_FAILURE_ACTIONS.NEXT, { level: "error" });
@@ -744,37 +749,7 @@ async function _getGeminiResponse(
 
   try {
     const ai = createGeminiClient(channel);
-    if (presetPrompt && presetPrompt.trim()) {
-      fullSystemInstructionText += presetPrompt.trim();
-    }
-
-    let groupContextOptions = {};
-    let shouldEnableGroupContext = false;
-
-    if (typeof enableGroupContext === "object" && enableGroupContext !== null) {
-      shouldEnableGroupContext = true;
-      if (!enableGroupContext.noHeader && e?.sender) {
-        groupContextOptions.sender = e.sender;
-      }
-    } else if (enableGroupContext === true) {
-      shouldEnableGroupContext = true;
-      if (e?.sender) {
-        groupContextOptions.sender = e.sender;
-      }
-    }
-
-    if (shouldEnableGroupContext && e?.group_id) {
-      const systemPromptWithContext = await buildGroupPrompt(
-        e.group_id,
-        groupContextOptions
-      );
-      if (systemPromptWithContext.trim()) {
-        if (fullSystemInstructionText) {
-          fullSystemInstructionText += "\n";
-        }
-        fullSystemInstructionText += systemPromptWithContext.trim();
-      }
-    }
+    fullSystemInstructionText = await buildSystemInstruction(e, presetPrompt, enableGroupContext, promptOptions);
 
     if (historyContents.length > 0) {
       finalContentsForGemini.push(...prepareHistoryForGemini(historyContents));
@@ -1092,6 +1067,7 @@ export async function getAI(
         enableGroupContext,
         enableTools,
         historyContents,
+        { includeCurrentTime: routingContext?.includeCurrentTime === true },
       ];
       let result;
       try {

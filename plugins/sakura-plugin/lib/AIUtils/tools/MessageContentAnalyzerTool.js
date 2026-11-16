@@ -186,9 +186,6 @@ async function deleteGcsUpload(uploadedFile) {
 
 export class MessageContentAnalyzerTool extends AbstractTool {
   name = "messageContentAnalyzer";
-  // 撤回、加精这类操作瞬间完成，不显示进度
-  progressText = ({ type } = {}) =>
-    ["image", "video", "forward", "file"].includes(type) ? "查看内容" : null;
 
   parameters = {
     properties: {

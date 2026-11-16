@@ -6,7 +6,8 @@ import Setting from "../../setting.js";
 
 export class ImageGeneratorTool extends AbstractTool {
   name = "ImageGenerator";
-  progressText = "绘画";
+  progressText = ({ outputFormat, seq } = {}) =>
+    outputFormat === "gif" ? "动图生成" : (Array.isArray(seq) ? seq.length : seq) ? "图像编辑" : "图像生成";
   progressDetail = "prompt";
 
   parameters = {

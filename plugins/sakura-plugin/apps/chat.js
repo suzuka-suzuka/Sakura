@@ -257,6 +257,7 @@ export class AIChat extends plugin {
         queryParts,
         prompt: Prompt,
         groupContext,
+        includeCurrentTime: matchedProfile.currentTime !== false,
         toolGroup,
         history: currentFullHistory,
         onIntermediateText: async (text) => {

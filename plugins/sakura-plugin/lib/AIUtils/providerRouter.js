@@ -516,6 +516,7 @@ function buildRequestConfig(target, provider, credential) {
     model: target.model,
     ...resolveGenerationSettings(null, target),
     nativeWebSearch: target.nativeWebSearch === true,
+    videoApiFormat: target.videoApiFormat === "openai" ? "openai" : "grok",
     providerId: provider.id,
     credentialId: credential.id,
     targetId: target.id,

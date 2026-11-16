@@ -74,7 +74,6 @@ const TOOL_CONFIG_KEYS = {
 // MCP config key → server ID 映射
 const MCP_KEY_TO_SERVER = {
   "McpFetch": "fetch",
-  "McpMemory": "memory",
   "McpTavily": "tavily",
 };
 
@@ -96,7 +95,6 @@ export const AVAILABLE_TOOL_OPTIONS = [
   { key: "Memory", label: "记忆工具" },
   { key: "ImageSearch", label: "图片搜索" },
   { key: "McpFetch", label: "网络请求(MCP)" },
-  { key: "McpMemory", label: "知识图谱(MCP)" },
   { key: "VoxCPMVoice", label: "语音发送" },
 ];
 
@@ -257,29 +255,18 @@ const firstUrl = (args = {}) => args.url || args.urls?.[0] || args.website;
 const MCP_TOOL_NOTICE = {
   tavily_search: ["网页搜索", (args) => args.query || args.topic],
   tavily_extract: ["网页提取", firstUrl],
-  tavily_map: ["网站结构发现", firstUrl],
-  tavily_crawl: ["网站抓取", firstUrl],
+  tavily_map: ["站点地图", firstUrl],
+  tavily_crawl: ["站点爬取", firstUrl],
   tavily_research: ["深度研究", (args) => args.query || args.topic],
-  tavily_skill: ["技能搜索", (args) => args.query || args.topic],
-  fetch: ["网络访问", (args) => args.url],
-  create_entities: ["记忆写入", (args) => args.entities?.[0]?.name],
-  create_relations: ["记忆关联", (args) => {
-    const relation = args.relations?.[0];
-    return relation ? `${relation.from || "节点"} -> ${relation.to || "节点"}` : "";
-  }],
-  add_observations: ["记忆补充", (args) => args.observations?.[0]?.content || args.observations?.[0]],
-  delete_entities: ["记忆清理", (args) => args.entityNames?.[0]],
-  delete_relations: ["记忆清理", () => "关系"],
-  delete_observations: ["记忆清理", () => "观察记录"],
-  read_graph: ["记忆读取", () => "知识图谱"],
-  search_nodes: ["记忆检索", (args) => args.query],
-  open_nodes: ["记忆查看", (args) => args.names?.[0]],
+  tavily_skill: ["技能检索", (args) => args.query || args.topic],
+  fetch: ["网页抓取", (args) => args.url],
 };
 
 function buildNotice(action, detail) {
   if (!action) return null;
   const text = shortenProgressText(typeof detail === "string" ? detail : "");
-  return { action, lines: [{ text: text ? `${action}：${text}` : action }] };
+  // 动作名已经是转发标题，节点里只放详情；没有详情时才写动作名
+  return { action, lines: [{ text: text || action }] };
 }
 
 /**
@@ -316,7 +303,7 @@ function describeToolCall({ name, args } = {}) {
     const [action, getDetail] = mcpNotice;
     return buildNotice(action, getDetail(toolArgs));
   }
-  return buildNotice(`调用 ${alias}`, "");
+  return buildNotice(alias, "");
 }
 
 /** 一批工具调用要展示的内容；不需要展示的工具不在其中 */

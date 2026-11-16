@@ -299,6 +299,7 @@ export class Mimic extends plugin {
         queryParts,
         prompt: selectedPresetPrompt,
         groupContext: true,
+        includeCurrentTime: true,
         toolGroup,
         history: currentFullHistory,
         onIntermediateText: async (text) => {

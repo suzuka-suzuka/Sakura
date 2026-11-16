@@ -17,36 +17,9 @@ const BASE_SERVERS = [
         args: ["-m", "mcp_server_fetch", "--ignore-robots-txt"],
         description: "网络请求 访问网页URL 抓取获取网页文本内容 爬取网站数据 查看在线文档",
     },
-    {
-        id: "memory",
-        transport: "stdio",
-        command: "npx",
-        args: ["-y", "@modelcontextprotocol/server-memory"],
-        masterOnly: true,
-        description: "记忆 知识图谱 存储实体关系 持久化记录信息 查找历史记忆 记住用户偏好 建立关联关系",
-    },
 ];
 
 const TAVILY_SERVER_ID = "tavily";
-
-function formatCurrentChineseDate(date = new Date()) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}年${month}月${day}日`;
-}
-
-function withRuntimeToolContext(serverId, tool) {
-    if (serverId !== TAVILY_SERVER_ID || !tool || typeof tool !== "object") {
-        return tool;
-    }
-
-    const dateHint = `今天日期：${formatCurrentChineseDate()}。当问题涉及“今天”“最新”“最近”等相对时间时，以此日期作为当前日期。`;
-    return {
-        ...tool,
-        description: [tool.description, dateHint].filter(Boolean).join("\n"),
-    };
-}
 
 function buildTavilyDefaultParameters(config = {}) {
     return {
@@ -262,7 +235,7 @@ class MCPManager {
         const allTools = [];
         for (const server of eligibleServers) {
             const tools = this.clientTools.get(server.id) || [];
-            allTools.push(...tools.map((tool) => withRuntimeToolContext(server.id, tool)));
+            allTools.push(...tools);
         }
 
         logger.info(`[MCP] 注入 server: [${eligibleServers.map((server) => server.id).join(", ")}]`);

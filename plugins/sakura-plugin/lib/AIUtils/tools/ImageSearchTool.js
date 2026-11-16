@@ -37,7 +37,7 @@ export function formatImageSearchToolResult(result) {
 
 export class ImageSearchTool extends AbstractTool {
   name = 'ImageSearch'
-  progressText = '搜图'
+  progressText = '以图搜图'
 
   description = '当你需要根据图片查找其来源、作品信息或相关内容时使用。'
 

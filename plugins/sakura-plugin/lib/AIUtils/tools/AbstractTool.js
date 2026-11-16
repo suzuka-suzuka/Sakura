@@ -5,7 +5,8 @@ export class AbstractTool {
 
   description = ''
 
-  // 工具调用转发里的动作名，如 "搜索"。null 表示不在转发里展示（瞬间完成或本身就会发出可见结果）。
+  // 工具调用转发里的动作名（转发标题），尽量四个字以内，如 "联网搜索"。
+  // null 表示不在转发里展示（瞬间完成、本身就是聊天动作或会发出可见结果）。
   // 也可以是 (args) => string|null，按参数决定。
   progressText = null
 

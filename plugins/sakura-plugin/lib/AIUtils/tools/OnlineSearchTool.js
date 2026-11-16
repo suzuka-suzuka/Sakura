@@ -2,6 +2,7 @@ import { AbstractTool } from './AbstractTool.js'
 import Setting from '../../setting.js'
 import { getAI } from '../getAI.js'
 import { modelKey, normalizeModelList } from '../aiModels.js'
+import { formatBeijingDateTime } from '../currentTime.js'
 
 const MAX_LISTED_SOURCES = 10
 
@@ -31,21 +32,10 @@ export function resolveSearchModels(e) {
   return usable
 }
 
-function currentTimeText(now = new Date()) {
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(now)
-}
-
-export function buildSearchPrompt(now = new Date()) {
+// 当前时间由 getAI 追加在系统提示词末尾（调用时传 includeCurrentTime）
+export function buildSearchPrompt() {
   return [
-    `你是联网检索助手。当前时间：${currentTimeText(now)}（北京时间）。`,
+    '你是联网检索助手。',
     '用你的联网搜索能力查找问题相关的最新信息，然后给出整理后的结论。',
     '要求：',
     '1. 只陈述搜索到的信息，不编造；查不到就直接说明没有找到可靠信息。',
@@ -107,7 +97,8 @@ export function summarizeSources(citations = []) {
 export function formatSearchResult(result, { includeLinks = false, now = new Date() } = {}) {
   const text = String(result?.text || '').trim()
   const sources = summarizeSources(result?.citations)
-  const lines = [`检索时间：${currentTimeText(now)}（北京时间）`, text || '（搜索模型没有返回内容）']
+  // 结果会留在对话历史里，记下检索时间，之后的对话能判断这条结果新不新
+  const lines = [`检索时间：${formatBeijingDateTime(now)}（北京时间）`, text || '（搜索模型没有返回内容）']
   if (sources.length === 0) return lines.join('\n')
 
   if (!includeLinks) {
@@ -165,7 +156,8 @@ export class OnlineSearchTool extends AbstractTool {
       buildSearchPrompt(),
       false,
       false,
-      []
+      [],
+      { includeCurrentTime: true }
     )
     if (typeof result === 'string') {
       return `联网搜索失败：${result}`

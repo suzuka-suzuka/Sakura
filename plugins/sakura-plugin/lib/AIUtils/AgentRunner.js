@@ -58,6 +58,7 @@ async function runScopedAgentLoop({
   toolGroup,
   history = [],
   maxToolCalls = getAgentMaxToolCalls(e),
+  includeCurrentTime = false,
   onIntermediateText = null,
   includeUserHistoryPart = (part) => !part.inlineData,
 }) {
@@ -65,7 +66,7 @@ async function runScopedAgentLoop({
   const turnStartIndex = currentFullHistory.length;
   const taskId = startAiTask(e);
   const progress = createToolProgress(e);
-  const routingContext = {};
+  const routingContext = { includeCurrentTime };
   let toolCallCount = 0;
   let finalText = "";
   let effectivePrompt = prompt;
