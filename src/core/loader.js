@@ -29,6 +29,7 @@ import {
 } from "./economyHook.js";
 import { canRunBotScopedTask } from "./botLifecycle.js";
 import { ackScope } from "./event.js";
+import { isPoweredOff } from "./powerState.js";
 
 /** 指令处理超过这个时长仍没回复，就先贴个表情表示"收到了" */
 const ACK_DELAY_MS = 400;
@@ -87,6 +88,13 @@ async function runCronInScope(instance, handler, selfId = null, fireDate = new D
   if (!canRunBotScopedTask(selfId, getBot)) {
     logger.debug(
       `[${instance.name}] 跳过离线账号 ${selfId} 的定时任务: ${handler.methodName}`
+    );
+    return false;
+  }
+
+  if (isPoweredOff(selfId)) {
+    logger.debug(
+      `[${instance.name}] 账号 ${selfId} 已软关机，跳过定时任务: ${handler.methodName}`
     );
     return false;
   }
@@ -763,6 +771,8 @@ export class PluginLoader {
     }
 
     const eventObj = new Event(e, bot);
+    // 软关机的账号只放行标了 whileOff 的处理器（#开机、掉线通知）；多步对话也跳过，免得挂着的上下文吞掉 #开机
+    const poweredOff = isPoweredOff(e.self_id);
 
     // 使用 eventStorage 传播事件对象到所有异步操作中，
     // 确保 setTimeout 等回调中 setContext/finish/getContext 能获取正确的事件
@@ -775,10 +785,12 @@ export class PluginLoader {
     };
     return logContext.run(_logCtx, () => withBotContext(e.self_id, () => eventStorage.run(eventObj, async () => {
 
-      let context = buildContextKey(e, true) ? contexts[buildContextKey(e, true)] : null;
-
-      if (!context && e.user_id) {
-        context = contexts[buildContextKey(e, false)];
+      let context = null;
+      if (!poweredOff) {
+        context = buildContextKey(e, true) ? contexts[buildContextKey(e, true)] : null;
+        if (!context && e.user_id) {
+          context = contexts[buildContextKey(e, false)];
+        }
       }
       if (context) {
         const { plugin, method } = context;
@@ -796,6 +808,7 @@ export class PluginLoader {
       const handlers = this.categorizedHandlers ? (this.categorizedHandlers[e.post_type] || []) : this.executableHandlers;
       for (const item of handlers) {
         const { instance, handler } = item;
+        if (poweredOff && !handler.whileOff) continue;
         instance.e = eventObj;
         let economy = null;
         let cancelAck = null;

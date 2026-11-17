@@ -13,7 +13,8 @@ export class OfflineNotify extends plugin {
     });
   }
 
-  handleOffline = OnEvent("notice.bot_offline", async (e) => {
+  // 软关机期间也照发：账号掉线后收不到 #开机，得先让主人知道
+  handleOffline = OnEvent("notice.bot_offline", { whileOff: true }, async (e) => {
     const pendingMasters = new Set(normalizeMasters(Config.getForSelf(e.self_id, "master")));
     if (pendingMasters.size === 0) {
       return false;

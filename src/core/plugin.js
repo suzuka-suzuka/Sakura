@@ -22,6 +22,7 @@ export const HANDLER_METADATA = Symbol.for("HANDLER_METADATA");
  *
  * 配置对象里的 ack 控制"收到指令"的表情回应（见 loader 的 scheduleAck）：
  * 不写 = 处理超过一小段时间还没回复就自动贴 124；false = 不贴；数字 = 换成该表情 ID。
+ * whileOff: true 表示账号软关机期间仍然响应（见 core/powerState.js），只该给 #开机 这种指令用。
  */
 export function Command(reg, ...args) {
   const handler = args.pop();
@@ -34,6 +35,7 @@ export function Command(reg, ...args) {
   let economy;
   let preflight;
   let ack;
+  let whileOff;
 
   if (typeof eventOrPriorityOrOptions === "number") {
     p = eventOrPriorityOrOptions;
@@ -54,6 +56,7 @@ export function Command(reg, ...args) {
     economy = eventOrPriorityOrOptions.economy;
     preflight = eventOrPriorityOrOptions.preflight;
     ack = eventOrPriorityOrOptions.ack;
+    whileOff = eventOrPriorityOrOptions.whileOff === true;
   }
 
   if (typeof handler === "function") {
@@ -66,6 +69,7 @@ export function Command(reg, ...args) {
       economy,
       preflight,
       ack,
+      whileOff,
     };
   }
   return handler;
@@ -77,6 +81,8 @@ export function Command(reg, ...args) {
  * @param {number|string|object} [priorityOrPermissionOrOptions] 优先级 (number) 或 权限 (string: 'master'|'white') 或 配置对象
  * @param {number|string} [priorityOrPermission] 优先级或权限 (取决于前一个参数)
  * @param {Function} handler 处理函数
+ *
+ * 配置对象里的 whileOff: true 表示账号软关机期间仍然处理，只该给掉线通知这种必须送达的事件用。
  */
 export function OnEvent(eventName, ...args) {
   const handler = args.pop();
@@ -87,12 +93,14 @@ export function OnEvent(eventName, ...args) {
   let permission;
   let economy;
   let preflight;
+  let whileOff;
 
   if (typeof arg1 === "object" && arg1 !== null) {
     priority = arg1.priority;
     permission = arg1.permission;
     economy = arg1.economy;
     preflight = arg1.preflight;
+    whileOff = arg1.whileOff === true;
   } else if (typeof arg1 === "number") {
     priority = arg1;
     if (typeof arg2 === "string") {
@@ -119,6 +127,7 @@ export function OnEvent(eventName, ...args) {
       permission,
       economy,
       preflight,
+      whileOff,
     };
   }
   return handler;

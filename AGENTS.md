@@ -81,6 +81,8 @@ Handlers run in priority order (lower = earlier). **Returning `false` passes thr
 
 "Got it" reactions are automatic: the loader (`scheduleAck`) reacts 124 to a group `Command` that is still running after 400ms without having replied (`e.reply` / `sendForwardMsg` / `e.react` on the trigger message mark it responded — counted per handler run via `ackScope` in `event.js`, so a reply from an earlier pass-through handler such as the random sticker does not suppress a later command's ack). Don't hand-write `e.react(124)` in commands. Opt out with `ack: false` on the Command options or the plugin constructor; a number swaps the emoji. `OnEvent` handlers are not covered.
 
+Soft shutdown: master `#软关机` / `#开机` (`plugins/system/admin.js`; `#关机` is still the hard stop). State is per account in `core/powerState.js`, persisted to `data/power-state.json`, so an account stays off across restarts. While an account is off the loader skips its multi-step contexts, its cron runs, and every handler except those marked `whileOff: true` (a `Command` / `OnEvent` option; only `#开机` and the bot-offline notice in `offline.js` use it — an account that drops offline can't receive `#开机`, so the master must still hear about it). Work already in flight and plugin-internal timers are not interrupted.
+
 Globals injected onto `global`: `logger`, `Command`, `OnEvent`, `Cron`, `plugin`, `Event`, `segment`, `bot`, `redis`. Plugin code uses these without importing.
 
 ### Repo layout note

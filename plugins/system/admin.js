@@ -1,7 +1,9 @@
 import fs from "fs";
 import { logger } from "../../src/utils/logger.js";
 import { shutdown } from "../../src/core/shutdown.js";
+import { powerOff, powerOn } from "../../src/core/powerState.js";
 import { getLatestBotLogPath } from "../../src/utils/logPaths.js";
+import { formatTime } from "./permission.js";
 import {
   filterLogEntriesByLevel,
   filterLogEntriesByScope,
@@ -80,6 +82,21 @@ export class SystemPlugin extends plugin {
         });
       });
     }
+  });
+
+  // 软关机：进程不退出，这个账号只处理主人的 #开机 和掉线通知，重启后仍保持关机
+  softShutdown = Command(/^#软关机$/, async (e) => {
+    powerOff(e.self_id);
+    await e.reply("已软关机，之后只响应主人的 #开机");
+  });
+
+  boot = Command(/^#开机$/, { whileOff: true }, async (e) => {
+    const since = powerOn(e.self_id);
+    if (since == null) {
+      await e.reply("已经是开机状态了");
+      return;
+    }
+    await e.reply(`已开机，这次软关机了${formatTime(Math.floor((Date.now() - since) / 1000))}`);
   });
 
   getLogs = Command(/^#(全部)?(错误)?日志$/, async (e) => {
