@@ -79,6 +79,8 @@ import {
   getNextWeatherByTime,
   getWeatherByTime,
   isBossFish,
+  isCrownEligible,
+  isCrownWeight,
   isPerfectCatch,
   resolveBossAttack,
   resolveKoiWishShiny,
@@ -97,6 +99,13 @@ import {
 } from "../lib/fishing/fishData.js";
 import { getShinyFishImagePath } from "../lib/fishing/shinyImage.js";
 import {
+  backfillCrowns,
+  getFishKingRanking,
+  getGroupRecords,
+  getRecordFish,
+  getSpeciesRecordRanking,
+} from "../lib/fishing/records.js";
+import {
   acquireRedisLock,
   completeFishingAttempt,
   releaseRedisLock,
@@ -107,6 +116,14 @@ import { dataCleanupGuards } from "../lib/GroupDataCleaner.js";
 const fishingSessions = new FishingSessionStore();
 
 const fishData = getFishData();
+
+// 王冠上线前钓到的达标个体按最大重量补记；只加不减，热重载重复执行也没有副作用。
+try {
+  const crowned = backfillCrowns();
+  if (crowned > 0) logger.info(`[钓鱼] 按历史最大重量补记王冠 ${crowned} 条`);
+} catch (err) {
+  logger.error(`[钓鱼] 补记王冠失败: ${err.stack || err}`);
+}
 
 function applyRodDamage(fishingManager, userId, rodConfig, damage) {
   const result = fishingManager.damageRod(userId, rodConfig.id, damage);
@@ -152,7 +169,34 @@ function formatCatchTail(expGain, isPerfect, settleResult, dexProgress) {
     ? `\n📖 图鉴新收录！(${dexProgress.collected}/${dexProgress.total})`
     : "";
   const shinyDexMsg = settleResult?.newlyShiny ? `\n🌈 图鉴异色标记点亮！` : "";
-  return `${perfectMsg}\n✨ 经验：+${expGain}${levelUpMsg}${staminaResetMsg}${dexMsg}${shinyDexMsg}`;
+  const crownDexMsg = settleResult?.newlyCrowned ? `\n👑 图鉴王冠标记点亮！` : "";
+  return `${perfectMsg}\n✨ 经验：+${expGain}${levelUpMsg}${staminaResetMsg}${dexMsg}${shinyDexMsg}${crownDexMsg}`;
+}
+
+function formatRecordWeight(weight) {
+  return Math.round((Number(weight) || 0) * 100) / 100;
+}
+
+// 群名片优先；查不到（例如接口失败）时退回 QQ 号，不影响主流程。
+async function getMemberDisplayName(e, userId) {
+  try {
+    const info = await e.getInfo(userId);
+    return String(info?.card || info?.nickname || userId);
+  } catch (err) {
+    return String(userId);
+  }
+}
+
+// 只在纪录易主或本群首次钓获时播报。刷新自己保持的纪录等于个人最大重量变大，
+// 刚开服的群几乎每竿都会触发，不单独提示。原保持者只写名字，不 @。
+async function formatGroupRecordMsg(e, settleResult) {
+  const record = settleResult?.groupRecord;
+  if (!record) return "";
+  const previous = record.previous;
+  if (!previous) return record.firstCatch ? "\n🏆 本群首次钓获，纪录归你！" : "\n🏆 创下本群纪录！";
+  if (previous.userId === String(e.user_id)) return "";
+  const name = await getMemberDisplayName(e, previous.userId);
+  return `\n🏆 刷新本群纪录！原纪录 ${formatRecordWeight(previous.weight)}（${name}）`;
 }
 
 function formatEncounterSuccess(encounterResult, { coins = true } = {}) {
@@ -241,7 +285,7 @@ function formatBossCombatStatus(state, fishingManager, userId) {
   const rodBar = createProgressBar(rod.currentDurability, rod.maxDurability, 10);
   const coinStolen = Math.max(0, Number(state.bossCoinStolen) || 0);
   return [
-    `👑 生命\n${hpBar} ${state.bossHp}/${state.bossMaxHp}`,
+    `🔱 生命\n${hpBar} ${state.bossHp}/${state.bossMaxHp}`,
     `📏 距离\n${distanceBar} ${Math.max(0, Math.round(state.distance))}/100`,
     `⚡ 张力\n${tensionBar} ${Math.max(0, Math.round(state.tension))}/100`,
     `🎣 鱼竿\n${rodBar} ${rod.currentDurability}/${rod.maxDurability}`,
@@ -624,7 +668,7 @@ export default class Fishing extends plugin {
       if (refundMsg) reasons.push(refundMsg.trim());
 
       await e.reply([
-        `👑 【${state.fish.name}】发动了【${mechanic.name}】！\n`,
+        `🔱 【${state.fish.name}】发动了【${mechanic.name}】！\n`,
         `🎣 鱼竿耐久 -${attackResult.rodDamage}\n`,
         effectMessages.length > 0 ? `${effectMessages.join("\n")}\n` : "",
         `${reasons.join("\n")}\n❌ 首领挑战失败！`,
@@ -634,7 +678,7 @@ export default class Fishing extends plugin {
     }
 
     await e.reply([
-      `👑 【${state.fish.name}】发动了【${mechanic.name}】！\n`,
+      `🔱 【${state.fish.name}】发动了【${mechanic.name}】！\n`,
       `🎣 鱼竿耐久 -${attackResult.rodDamage}\n`,
       effectMessages.length > 0 ? `${effectMessages.join("\n")}\n` : "",
       formatBossCombatStatus(state, fishingManager, e.user_id),
@@ -673,7 +717,7 @@ export default class Fishing extends plugin {
       state.bossCoinStolen = 0;
 
       await e.reply([
-        `👑 首领战开始！【${state.fish.name}】现身！\n`,
+        `🔱 首领战开始！【${state.fish.name}】现身！\n`,
         `🌀 特殊机制【${state.fish.boss_mechanic.name}】：${state.fish.boss_mechanic.description}\n\n`,
         `${formatBossCombatStatus(state, fishingManager, e.user_id)}\n\n`,
         `📝 指令：\n  「拉」拉近距离并增加张力\n  「溜」降低张力但会拉远距离\n  「攻」发起攻击（${BOSS_PLAYER_ATTACK_COOLDOWN_MS / 1000}秒冷却）\n`,
@@ -1023,7 +1067,7 @@ export default class Fishing extends plugin {
           ? `\n🔔 ${nightmareStatus.deepPressureLayers} 层深压回响生效中`
           : "",
         wishRarity ? `\n🌠 星愿闪耀！这一竿将迎来【${wishRarity}】品质！` : "",
-        isBossBait ? `\n👑 首领鱼饵的气息正在水中扩散，当地首领正向鱼钩逼近……` : "",
+        isBossBait ? `\n🔱 首领鱼饵的气息正在水中扩散，当地首领正向鱼钩逼近……` : "",
       ].join("");
 
       Object.assign(state, {
@@ -1081,13 +1125,13 @@ export default class Fishing extends plugin {
         if (isBossFish(fish) && currentState.isOverweight) {
           await e.reply([
             shinyHint,
-            `👑 水面轰然炸开，【${fish.name}】吞下了首领鱼饵！\n`,
+            `🔱 水面轰然炸开，【${fish.name}】吞下了首领鱼饵！\n`,
             `⚖️ 这股力量太大了！鱼线可能撑不住……回复「收竿」迎战，回复「放弃」保平安！`,
           ], false, true);
         } else if (isBossFish(fish)) {
           await e.reply([
             shinyHint,
-            `👑 水面轰然炸开，【${fish.name}】吞下了首领鱼饵！\n`,
+            `🔱 水面轰然炸开，【${fish.name}】吞下了首领鱼饵！\n`,
             `⚔️ 快回复「收竿」进入首领战！`,
           ], false, true);
         } else if (currentState.isOverweight) {
@@ -1553,7 +1597,7 @@ export default class Fishing extends plugin {
           if (bossFight && state.bossHp > 0) {
             state.distance = 5;
             await e.reply(
-              `👑 已经把【${fish.name}】逼到岸边，但它仍有 ${state.bossHp} 点生命，猛地撑住了！\n` +
+              `🔱 已经把【${fish.name}】逼到岸边，但它仍有 ${state.bossHp} 点生命，猛地撑住了！\n` +
               `⚔️ 用「攻」削减生命，同时继续控制张力。\n` +
               formatBossCombatStatus(state, fishingManager, userId),
             );
@@ -2206,6 +2250,8 @@ export default class Fishing extends plugin {
         ? (state.wealthBonus || 0) : 0;
       // 异色属于鱼本身的价格，先乘异色再加财神，财神金额不吃异色倍率。
       const finalPrice = applyEncounterReward(Math.round((price * shinyMultiplier + wealthBonus) * buffMultiplier * merchantMultiplier), encounterMultiplier);
+      // 王冠只看真实重量在本鱼种区间的位置；好运护符钓起的同样计入。
+      const isCrown = isCrownWeight(fish);
 
       const settleResult = settlement.settleCoinCatch({
         sessionId: state.id,
@@ -2216,10 +2262,13 @@ export default class Fishing extends plugin {
         expGain,
         weight: fish.actualWeight,
         shiny: isShiny,
+        crown: isCrown,
+        trackRecord: isCrownEligible(fish),
         rewardItemId: bossReward?.rewardItemId || null,
         rewardItemCount: bossReward?.rewardItemCount || 0,
       });
       const dexProgress = getDexProgress(fishingManager, userId, settleResult);
+      const recordMsg = await formatGroupRecordMsg(e, settleResult);
       const newMastery = fishingManager.getRodMastery(userId, rodConfig.id);
 
       let priceBoostMsg = "";
@@ -2274,9 +2323,9 @@ export default class Fishing extends plugin {
         fishImageSegment,
         `📝 ${fish.description}\n`,
         bossVictory
-          ? `👑 类型：钓点首领｜🌀 ${fish.boss_mechanic.name}\n`
+          ? `🔱 类型：钓点首领｜🌀 ${fish.boss_mechanic.name}\n`
           : `📊 稀有度：${rarity.color}${fish.rarity}${weatherTag}\n`,
-        `⚖️ 重量：${fishWeight}\n`,
+        `⚖️ 重量：${fishWeight}${isCrown ? " 👑" : ""}\n`,
         bossVictory
           ? `🎮 玩家操作：${state.fightingRounds} 次｜承受反击：${state.bossAttackRounds || 0} 次\n`
           : "",
@@ -2290,7 +2339,7 @@ export default class Fishing extends plugin {
         bossRewardMsg,
         debtPenaltyMsg,
         debtMsg,
-        `${earningsMsg}${formatCatchTail(expGain, isPerfect, settleResult, dexProgress)}`,
+        `${earningsMsg}${formatCatchTail(expGain, isPerfect, settleResult, dexProgress)}${recordMsg}`,
       ];
       await e.reply(resultMsg);
       return true;
@@ -2522,7 +2571,7 @@ export default class Fishing extends plugin {
     fishingManager.equipBait(e.user_id, bait.id);
     await e.reply(
       `🪱 饵料挂好啦！当前使用【${bait.name}】，库存 ${count} 个。` +
-      (bait.boss_bait ? "\n👑 下一竿必定呼出当前钓点首领。" : "")
+      (bait.boss_bait ? "\n🔱 下一竿必定呼出当前钓点首领。" : "")
     );
     return true;
   });
@@ -2873,6 +2922,7 @@ export default class Fishing extends plugin {
 
     // 按稀有度分区组装三态条目：未发现 / 目击（搏斗过但从未钓上）/ 已收录
     const historyMap = new Map(history.map((row) => [row.fishId, row]));
+    const groupRecords = getGroupRecords(e.group_id);
     const sections = Object.keys(RARITY_CONFIG)
       .map((rarity) => {
         const entries = dexFishData
@@ -2886,13 +2936,15 @@ export default class Fishing extends plugin {
             else if (encounterCount > 0) status = "sighted";
             return {
               fishId: fish.id,
-              name: isBossFish(fish) ? `👑${fish.name}` : fish.name,
+              name: isBossFish(fish) ? `🔱${fish.name}` : fish.name,
               rarity,
               status,
               successCount,
               escapeCount: Math.max(0, encounterCount - successCount),
               maxWeight: record?.maxWeight || 0,
               shinyCount: record?.shinyCount || 0,
+              crownCount: record?.crownCount || 0,
+              isGroupRecord: groupRecords.get(fish.id)?.userId === String(targetId),
             };
           });
         return {
@@ -2915,6 +2967,16 @@ export default class Fishing extends plugin {
         sum + section.entries.filter((entry) => entry.shinyCount > 0).length,
       0,
     );
+    const crownCollected = sections.reduce(
+      (sum, section) =>
+        sum + section.entries.filter((entry) => entry.crownCount > 0).length,
+      0,
+    );
+    const recordsHeld = sections.reduce(
+      (sum, section) =>
+        sum + section.entries.filter((entry) => entry.isGroupRecord).length,
+      0,
+    );
     const userData = fishingManager.getUserData(targetId);
 
     try {
@@ -2927,6 +2989,8 @@ export default class Fishing extends plugin {
         collected,
         sighted,
         shinyCollected,
+        crownCollected,
+        recordsHeld,
         total: dexFishData.length,
         locationLabel: dexLocationConfig
           ? `${dexLocationConfig.emoji}${dexLocationConfig.name}`
@@ -2945,7 +3009,7 @@ export default class Fishing extends plugin {
             prompt: `📖 点击查看钓鱼图鉴（共 ${images.length} 页）`,
             news: [
               { text: `📖 已收录 ${collected}/${dexFishData.length}` },
-              { text: `🌈 异色 ${shinyCollected}` },
+              { text: `🌈 异色 ${shinyCollected} · 👑 王冠 ${crownCollected}` },
               { text: `👀 目击 ${sighted}` },
               { text: `📚 共 ${images.length} 页` },
             ],
@@ -3180,6 +3244,72 @@ export default class Fishing extends plugin {
       await e.reply(segment.image(image));
     } catch (err) {
       logger.error(`生成钓鱼排行榜图片失败: ${err}`);
+    }
+    return true;
+  });
+
+  // 鱼王榜：不带参数按保持的本群纪录数排名，带鱼名时看该鱼种的本群前五。
+  // 指令名避开「记录」：#钓鱼记录 是图鉴的旧别名，容易打混。
+  fishKingRanking = Command(/^#?鱼王榜\s*(.*)$/, { ack: true }, async (e) => {
+    if (!this.checkWhitelist(e)) return false;
+    // 图鉴里首领名字带 🔱 前缀（旧版是 👑），照抄过来也能认
+    const fishName = e.msg.replace(/^#?鱼王榜/, "").trim().replace(/^[🔱👑]/u, "").trim();
+    const toRankingItem = async (userId, index, valueText, subText) => ({
+      rank: index + 1,
+      userId,
+      nickname: await getMemberDisplayName(e, userId),
+      avatarUrl: `https://q1.qlogo.cn/g?b=qq&nk=${userId}&s=640`,
+      valueText,
+      subText,
+    });
+
+    let data;
+    if (fishName) {
+      const fish = fishData.find((item) => item.name === fishName);
+      if (!fish) {
+        await e.reply(`找不到鱼种【${fishName}】，请填写图鉴里的完整鱼名。`, 10);
+        return true;
+      }
+      if (!getRecordFish(fish.id)) {
+        await e.reply(`【${fish.name}】属于${fish.rarity}，不参与本群纪录。`, 10);
+        return true;
+      }
+      const rows = getSpeciesRecordRanking(e.group_id, fish.id, 5);
+      if (rows.length === 0) {
+        await e.reply(`本群还没有人钓到过【${fish.name}】，纪录虚位以待！`, 10);
+        return true;
+      }
+      data = {
+        title: `🏆 ${fish.name} · 本群纪录`,
+        list: await Promise.all(rows.map((row, index) => toRankingItem(
+          row.userId,
+          index,
+          `⚖️ ${formatRecordWeight(row.weight)}${isCrownWeight(fish, row.weight) ? " 👑" : ""}`,
+          `🎣 捕获 ×${row.successCount}`,
+        ))),
+      };
+    } else {
+      const ranking = getFishKingRanking(e.group_id, 10);
+      if (ranking.length === 0) {
+        await e.reply("本群还没有人创下纪录，快去钓鱼吧！", 10);
+        return true;
+      }
+      data = {
+        title: "👑 鱼王榜",
+        list: await Promise.all(ranking.map((item, index) => toRankingItem(
+          item.userId,
+          index,
+          `🏆 纪录 ${item.records}`,
+          `👑 王冠 ${item.crowns} 种`,
+        ))),
+      };
+    }
+
+    try {
+      const image = await new FishingImageGenerator().generateFishingRankingImage(data);
+      await e.reply(segment.image(image));
+    } catch (err) {
+      logger.error(`生成鱼王榜图片失败: ${err.stack || err}`);
     }
     return true;
   });

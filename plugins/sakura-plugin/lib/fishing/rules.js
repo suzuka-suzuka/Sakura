@@ -165,6 +165,24 @@ export function resolveKoiWishShiny(fish, hasKoiWish = false, random = Math.rand
   };
 }
 
+// 王冠：成功钓起、重量落在本鱼种区间顶部 5% 的个体，判定直接复用售价公式的重量进度。
+// 与异色同口径：宝藏、噩梦、福袋和鱼雷不参与，首领参与。王冠只进图鉴和纪录，不另外加价。
+export const CROWN_WEIGHT_PROGRESS = 0.95;
+
+export function isCrownEligible(fish) {
+  return !fish?.isFortuneBag && isShinyEligible(fish);
+}
+
+export function isCrownWeight(fish, weight = fish?.actualWeight) {
+  if (!isCrownEligible(fish) || !Array.isArray(fish.weight)) return false;
+  const [minWeight, maxWeight] = fish.weight.map(Number);
+  const value = Number(weight);
+  if (!Number.isFinite(minWeight) || !Number.isFinite(maxWeight) || maxWeight <= minWeight) return false;
+  if (!Number.isFinite(value) || value <= 0) return false;
+  // 重量只存两位小数，门槛扣掉浮点误差，与「(重量-下限)/(上限-下限) ≥ 0.95」保持一致。
+  return value >= minWeight + (maxWeight - minWeight) * CROWN_WEIGHT_PROGRESS - 1e-9;
+}
+
 export function getFishingLocationConfig(locationId) {
   return FISHING_LOCATIONS[locationId] || null;
 }

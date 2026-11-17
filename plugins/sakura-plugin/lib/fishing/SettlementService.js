@@ -7,6 +7,7 @@ import {
 } from "./rules.js";
 
 import { FORTUNE_BAG_OWNER_EXP } from "../economy/fortuneBagRules.js";
+import { getGroupRecordHolder } from "./records.js";
 
 function normalizeNonNegativeInteger(value) {
   const number = Number(value);
@@ -69,9 +70,24 @@ export default class FishingSettlementService {
     return true;
   }
 
-  _recordCatch({ fishId, success, earnings, rodId, masteryGain, recordCatch, weight, shiny = false }) {
+  _recordCatch({
+    fishId,
+    success,
+    earnings,
+    rodId,
+    masteryGain,
+    recordCatch,
+    weight,
+    shiny = false,
+    crown = false,
+    trackRecord = false,
+  }) {
     let newlyRecorded = false;
     let newlyShiny = false;
+    let newlyCrowned = false;
+    // 本次重量刷新了本群纪录时为 { previous, firstCatch }：previous 是原保持者，
+    // 没有带重量的旧纪录时为 null；firstCatch 表示本群从没有人成功钓起过这个鱼种。
+    let groupRecord = null;
     if (recordCatch) {
       const successIncrement = success ? 1 : 0;
       db.prepare(`
@@ -86,22 +102,45 @@ export default class FishingSettlementService {
         const shinyIncrement = success && shiny ? 1 : 0;
         // 图鉴口径：仅成功渔获刷新最大重量；新收录 = success_count 首次由 0 变正
         const recordedWeight = success ? normalizeWeight(weight) : 0;
+        // 王冠同样只认成功捕获，判定由调用方按鱼种重量区间给出
+        const crownIncrement = success && crown && recordedWeight > 0 ? 1 : 0;
         if (success) {
           const previous = db.prepare(`
-              SELECT success_count, shiny_count FROM fishing_counts
+              SELECT success_count, shiny_count, crown_count FROM fishing_counts
               WHERE group_id = ? AND user_id = ? AND fish_id = ?
           `).get(this.groupId, this.userId, fishId);
           newlyRecorded = !(previous?.success_count > 0);
           newlyShiny = shinyIncrement > 0 && !(previous?.shiny_count > 0);
+          newlyCrowned = crownIncrement > 0 && !(previous?.crown_count > 0);
+          // 保持者必须在写入本次重量之前读：严格超过才算刷新，同重量仍归先创下者。
+          if (trackRecord && recordedWeight > 0) {
+            const holder = getGroupRecordHolder(this.groupId, fishId);
+            if (holder && recordedWeight > holder.weight) {
+              groupRecord = { previous: holder, firstCatch: false };
+            } else if (!holder) {
+              // 很早期的行只有捕获次数、没有重量，这种鱼种不能算本群首次钓获。
+              const caughtBefore = db.prepare(`
+                  SELECT 1 FROM fishing_counts
+                  WHERE group_id = ? AND fish_id = ? AND success_count > 0
+                  LIMIT 1
+              `).get(this.groupId, fishId);
+              groupRecord = { previous: null, firstCatch: !caughtBefore };
+            }
+          }
         }
+        const now = Date.now();
+        // SET 里的列引用读的都是更新前的值，所以创下时间按旧的 max_weight 比较。
         db.prepare(`
-            INSERT INTO fishing_counts (group_id, user_id, fish_id, count, success_count, max_weight, shiny_count)
-            VALUES (?, ?, ?, 1, ?, ?, ?)
+            INSERT INTO fishing_counts
+            (group_id, user_id, fish_id, count, success_count, max_weight, shiny_count, crown_count, max_weight_at)
+            VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)
             ON CONFLICT(group_id, user_id, fish_id)
             DO UPDATE SET count = count + 1,
                           success_count = success_count + ?,
+                          max_weight_at = CASE WHEN ? > COALESCE(max_weight, 0) THEN ? ELSE max_weight_at END,
                           max_weight = MAX(COALESCE(max_weight, 0), ?),
-                          shiny_count = COALESCE(shiny_count, 0) + ?
+                          shiny_count = COALESCE(shiny_count, 0) + ?,
+                          crown_count = COALESCE(crown_count, 0) + ?
         `).run(
           this.groupId,
           this.userId,
@@ -109,9 +148,14 @@ export default class FishingSettlementService {
           successIncrement,
           recordedWeight,
           shinyIncrement,
+          crownIncrement,
+          recordedWeight > 0 ? now : null,
           successIncrement,
           recordedWeight,
+          now,
+          recordedWeight,
           shinyIncrement,
+          crownIncrement,
         );
       }
     }
@@ -124,7 +168,7 @@ export default class FishingSettlementService {
           DO UPDATE SET mastery = mastery + ?
       `).run(this.groupId, this.userId, rodId, masteryGain, masteryGain);
     }
-    return { newlyRecorded, newlyShiny };
+    return { newlyRecorded, newlyShiny, newlyCrowned, groupRecord };
   }
 
   // 抽成印记连乘后全额抵债，未清部分利滚利；欠款达到阈值则勾销并叠一层印记。
@@ -282,6 +326,8 @@ export default class FishingSettlementService {
     expGain = 0,
     weight = 0,
     shiny = false,
+    crown = false,
+    trackRecord = false,
     rewardItemId = null,
     rewardItemCount = 0,
   }) {
@@ -348,7 +394,7 @@ export default class FishingSettlementService {
         `).run(this.groupId, this.userId, safeRewardItemId, safeRewardItemCount);
       }
 
-      const { newlyRecorded, newlyShiny } = this._recordCatch({
+      const { newlyRecorded, newlyShiny, newlyCrowned, groupRecord } = this._recordCatch({
         fishId,
         success: true,
         earnings: debtResult.earnings,
@@ -357,6 +403,8 @@ export default class FishingSettlementService {
         recordCatch: true,
         weight,
         shiny: Boolean(shiny),
+        crown: Boolean(crown),
+        trackRecord: Boolean(trackRecord),
       });
       const levelUp = this._grantExp(safeExpGain);
       return {
@@ -365,6 +413,8 @@ export default class FishingSettlementService {
         levelUp,
         newlyRecorded,
         newlyShiny,
+        newlyCrowned,
+        groupRecord,
         rewardItemId: safeRewardItemId,
         rewardItemCount: safeRewardItemCount,
       };

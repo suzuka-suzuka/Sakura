@@ -147,6 +147,8 @@ class DB {
         success_count INTEGER DEFAULT 0,
         max_weight REAL DEFAULT 0,
         shiny_count INTEGER DEFAULT 0,
+        crown_count INTEGER DEFAULT 0,
+        max_weight_at INTEGER,
         PRIMARY KEY (group_id, user_id, fish_id)
       );
 
@@ -257,6 +259,16 @@ class DB {
     if (!this.db.pragma('table_info(fishing_stats)').some(column => column.name === 'nightmare_vulnerable')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN nightmare_vulnerable INTEGER DEFAULT 0');
     }
+    // 王冠次数与最大重量的创下时间。旧数据的王冠由钓鱼插件按最大重量补记；
+    // 创下时间留空，排序时视为最早，同重量仍由老纪录保持。
+    if (!this.db.pragma('table_info(fishing_counts)').some(column => column.name === 'crown_count')) {
+      this.db.exec('ALTER TABLE fishing_counts ADD COLUMN crown_count INTEGER DEFAULT 0');
+    }
+    if (!this.db.pragma('table_info(fishing_counts)').some(column => column.name === 'max_weight_at')) {
+      this.db.exec('ALTER TABLE fishing_counts ADD COLUMN max_weight_at INTEGER');
+    }
+    // 本群纪录按「群＋鱼种」查保持者；主键是 (群, 用户, 鱼种)，只靠它要扫全群的行。
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_fishing_counts_group_fish ON fishing_counts (group_id, fish_id)');
   }
 
   prepare(sql) {

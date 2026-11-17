@@ -131,6 +131,8 @@ export default class FishingImageGenerator extends EconomyImageGenerator {
     collected,
     sighted,
     shinyCollected = 0,
+    crownCollected = 0,
+    recordsHeld = 0,
     total,
     locationLabel = null,
     pageIndex = null,
@@ -143,7 +145,13 @@ export default class FishingImageGenerator extends EconomyImageGenerator {
     const cellWidth = (width - padding * 2 - cellGap * (columns - 1)) / columns
     const cellHeight = 180
     const sectionTitleHeight = 56
-    const headerHeight = 270
+    // 收集标记单独占页眉第四行，有标记时页眉加高一行
+    const markerLine = [
+      shinyCollected > 0 ? `🌈 异色 ${shinyCollected}` : "",
+      crownCollected > 0 ? `👑 王冠 ${crownCollected}` : "",
+      recordsHeld > 0 ? `🏆 本群纪录 ${recordsHeld}` : "",
+    ].filter(Boolean).join(" · ")
+    const headerHeight = markerLine ? 300 : 270
 
     let contentHeight = 0
     for (const section of sections) {
@@ -177,10 +185,16 @@ export default class FishingImageGenerator extends EconomyImageGenerator {
     }
 
     ctx.fillStyle = '#5D4037'
-    ctx.font = `26px ${this.fontFamily}`
     const locationSuffix = locationLabel ? ` · 📍${locationLabel}` : ""
-    const shinySuffix = shinyCollected > 0 ? ` · 🌈 异色 ${shinyCollected}` : ""
-    ctx.fillText(`📖 已收录 ${collected}/${total} · 👀 目击 ${sighted}${shinySuffix}${locationSuffix}`, 200, 130)
+    const summary = `📖 已收录 ${collected}/${total} · 👀 目击 ${sighted}${locationSuffix}`
+    // 数字和钓点名都长时会顶出右边界，按实际宽度略缩字号
+    let summarySize = 26
+    ctx.font = `${summarySize}px ${this.fontFamily}`
+    while (summarySize > 20 && ctx.measureText(summary).width > width - 200 - padding) {
+      summarySize -= 1
+      ctx.font = `${summarySize}px ${this.fontFamily}`
+    }
+    ctx.fillText(summary, 200, 130)
 
     const barX = 200
     const barY = 146
@@ -208,6 +222,7 @@ export default class FishingImageGenerator extends EconomyImageGenerator {
       200,
       235
     )
+    if (markerLine) ctx.fillText(markerLine, 200, 268)
 
     let cursorY = headerHeight
     for (const section of sections) {
@@ -264,6 +279,19 @@ export default class FishingImageGenerator extends EconomyImageGenerator {
             ctx.fillText('🌈', badgeX, badgeY + 7)
             ctx.textAlign = 'left'
           }
+          // 钓到过王冠个体：左上角王冠角标，与右上角异色角标对称
+          if (entry.crownCount > 0) {
+            const badgeX = imgX + 14
+            const badgeY = imgY + 14
+            ctx.beginPath()
+            ctx.arc(badgeX, badgeY, 15, 0, Math.PI * 2)
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.85)'
+            ctx.fill()
+            ctx.font = `20px ${this.fontFamily}`
+            ctx.textAlign = 'center'
+            ctx.fillText('👑', badgeX, badgeY + 7)
+            ctx.textAlign = 'left'
+          }
         } else if (entry.status === 'sighted') {
           await this.drawFishSilhouette(ctx, entry.fishId, imgX, imgY, imgSize)
         } else {
@@ -316,7 +344,15 @@ export default class FishingImageGenerator extends EconomyImageGenerator {
               ctx.fillText(`捕获 ×${successCount}`, centerX, y + 155)
             }
             if (entry.maxWeight > 0) {
-              ctx.fillText(`最大 ${Math.round(entry.maxWeight * 100) / 100}`, centerX, y + 174)
+              const maxWeightText = `最大 ${Math.round(entry.maxWeight * 100) / 100}`
+              if (entry.isGroupRecord) {
+                // 保持本群纪录：奖杯前缀＋金色字
+                ctx.fillStyle = '#B8860B'
+                ctx.font = `bold 16px ${this.fontFamily}`
+                ctx.fillText(`🏆 ${maxWeightText}`, centerX, y + 174)
+              } else {
+                ctx.fillText(maxWeightText, centerX, y + 174)
+              }
             }
           } else {
             ctx.fillText(`逃走 ${entry.escapeCount} 次`, centerX, y + 155)
@@ -381,9 +417,9 @@ export default class FishingImageGenerator extends EconomyImageGenerator {
       ctx.font = `bold 24px ${this.fontFamily}`
 
       const nicknameX = 220
-      // 右侧显示收益和次数
-      const valueText = `💰 ${item.totalEarnings}`
-      const countText = `🎣 ${item.totalCatch}次`
+      // 右侧两行：默认是收益和次数，其他榜单（如鱼王榜）可自带文字
+      const valueText = item.valueText ?? `💰 ${item.totalEarnings}`
+      const countText = item.subText ?? `🎣 ${item.totalCatch}次`
 
       ctx.fillStyle = "#FF1493"
       ctx.font = `bold 26px ${this.fontFamily}`
