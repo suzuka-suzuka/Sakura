@@ -99,7 +99,7 @@ import {
 } from "../lib/fishing/fishData.js";
 import { getShinyFishImagePath } from "../lib/fishing/shinyImage.js";
 import {
-  backfillCrowns,
+  backfillCrownsOnce,
   getFishKingRanking,
   getGroupRecords,
   getRecordFish,
@@ -117,10 +117,10 @@ const fishingSessions = new FishingSessionStore();
 
 const fishData = getFishData();
 
-// 王冠上线前钓到的达标个体按最大重量补记；只加不减，热重载重复执行也没有副作用。
+// 王冠上线前钓到的达标个体按最大重量补记，整个库只做一次；之后启动或热重载直接跳过。
 try {
-  const crowned = backfillCrowns();
-  if (crowned > 0) logger.info(`[钓鱼] 按历史最大重量补记王冠 ${crowned} 条`);
+  const crowned = backfillCrownsOnce();
+  if (crowned != null) logger.info(`[钓鱼] 王冠一次性补记完成：按历史最大重量补记 ${crowned} 条`);
 } catch (err) {
   logger.error(`[钓鱼] 补记王冠失败: ${err.stack || err}`);
 }

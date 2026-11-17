@@ -152,6 +152,12 @@ class DB {
         PRIMARY KEY (group_id, user_id, fish_id)
       );
 
+      -- 一次性数据迁移的完成标记（如王冠补记），记过就不再重跑。
+      CREATE TABLE IF NOT EXISTS data_migrations (
+        name TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS fishing_location_unlocks (
         group_id TEXT NOT NULL,
         user_id TEXT NOT NULL,
@@ -259,7 +265,7 @@ class DB {
     if (!this.db.pragma('table_info(fishing_stats)').some(column => column.name === 'nightmare_vulnerable')) {
       this.db.exec('ALTER TABLE fishing_stats ADD COLUMN nightmare_vulnerable INTEGER DEFAULT 0');
     }
-    // 王冠次数与最大重量的创下时间。旧数据的王冠由钓鱼插件按最大重量补记；
+    // 王冠次数与最大重量的创下时间。旧数据的王冠由钓鱼插件按最大重量补记一次（见 data_migrations）；
     // 创下时间留空，排序时视为最早，同重量仍由老纪录保持。
     if (!this.db.pragma('table_info(fishing_counts)').some(column => column.name === 'crown_count')) {
       this.db.exec('ALTER TABLE fishing_counts ADD COLUMN crown_count INTEGER DEFAULT 0');

@@ -86,28 +86,36 @@ export function getSpeciesRecordRanking(groupId, fishId, limit = 5) {
     }));
 }
 
-// 补记王冠：最大重量已过王冠线、却没有王冠次数的行记 1 次。
-// 过线的最大重量本身就是一次王冠渔获，所以只会命中王冠上线前的旧数据，
-// 以及鱼种重量区间重新校准后新过线的老纪录。只加不减，每次启动跑一遍也没有副作用。
-export function backfillCrowns() {
-  if (recordFishById.size === 0) return 0;
-  const rows = db.prepare(`
-      SELECT group_id AS groupId, user_id AS userId, fish_id AS fishId, max_weight AS maxWeight
-      FROM fishing_counts
-      WHERE COALESCE(crown_count, 0) = 0 AND max_weight > 0
-  `).all();
-  const pending = rows.filter((row) => {
-    const fish = recordFishById.get(row.fishId);
-    return fish && isCrownWeight(fish, row.maxWeight);
-  });
-  if (pending.length === 0) return 0;
-  const update = db.prepare(`
-      UPDATE fishing_counts
-      SET crown_count = 1
-      WHERE group_id = ? AND user_id = ? AND fish_id = ? AND COALESCE(crown_count, 0) = 0
-  `);
-  return db.transaction(() => pending.reduce(
-    (total, row) => total + update.run(row.groupId, row.userId, row.fishId).changes,
-    0,
-  ))();
+const CROWN_BACKFILL_MIGRATION = "fishing_crown_backfill";
+
+// 王冠上线时的一次性补记：最大重量已过王冠线、却没有王冠次数的行记 1 次。
+// 补记和完成标记在同一个事务里，做过就不再做。之后王冠只在钓起时按当时的规则判定，
+// 重新校准重量区间也不会让老纪录凭空过线拿到王冠。
+// 返回补记条数；已经做过返回 null。鱼类数据没加载成功时不记完成，留到下次启动再补。
+export function backfillCrownsOnce() {
+  if (recordFishById.size === 0) return null;
+  return db.transaction(() => {
+    const done = db.prepare("SELECT 1 FROM data_migrations WHERE name = ?").get(CROWN_BACKFILL_MIGRATION);
+    if (done) return null;
+    const rows = db.prepare(`
+        SELECT group_id AS groupId, user_id AS userId, fish_id AS fishId, max_weight AS maxWeight
+        FROM fishing_counts
+        WHERE COALESCE(crown_count, 0) = 0 AND max_weight > 0
+    `).all();
+    const update = db.prepare(`
+        UPDATE fishing_counts
+        SET crown_count = 1
+        WHERE group_id = ? AND user_id = ? AND fish_id = ? AND COALESCE(crown_count, 0) = 0
+    `);
+    let changed = 0;
+    for (const row of rows) {
+      const fish = recordFishById.get(row.fishId);
+      if (fish && isCrownWeight(fish, row.maxWeight)) {
+        changed += update.run(row.groupId, row.userId, row.fishId).changes;
+      }
+    }
+    db.prepare("INSERT INTO data_migrations (name, applied_at) VALUES (?, ?)")
+      .run(CROWN_BACKFILL_MIGRATION, Date.now());
+    return changed;
+  }).immediate();
 }
