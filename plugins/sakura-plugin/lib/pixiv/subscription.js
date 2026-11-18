@@ -159,6 +159,8 @@ export function filterTagSubscriptionIllusts(illusts, filterConfig, freshnessPer
  * @param {object} config pixiv配置
  * @param {object} subscriptionConfig 订阅配置
  * @param {boolean} isR18Enabled 是否允许R18
+ * @returns {Promise<{illusts: Array, fetched: number, skippedRejected: number, errors: string[]}>}
+ *   出错只记 debug 并收进 errors，由调用方汇总成一行
  */
 export async function searchTagSubscription(tag, groupIds, config, subscriptionConfig, isR18Enabled) {
   const {
@@ -176,6 +178,7 @@ export async function searchTagSubscription(tag, groupIds, config, subscriptionC
   const filterSignature = [minBookmark, minBookRate, minBookPerHour, freshnessPeriod].join(':')
   let fetchedCount = 0
   let skippedRejected = 0
+  const errors = []
 
   let shouldStopSearching = false
 
@@ -188,7 +191,7 @@ export async function searchTagSubscription(tag, groupIds, config, subscriptionC
       const illusts = await webSearchTagPage(tag, page, config, isR18Enabled)
 
       if (!illusts || illusts.length === 0) {
-        logger.info(`[标签订阅] 第${page}页无数据，停止扫描`)
+        logger.debug(`[标签订阅] 标签「${tag}」第${page}页无数据，停止扫描`)
         break
       }
 
@@ -247,7 +250,8 @@ export async function searchTagSubscription(tag, groupIds, config, subscriptionC
             }
           }
         } catch (err) {
-          logger.warn(`[标签订阅] 获取作品 ${illust.id} 详情失败: ${err.message}`)
+          errors.push(`作品 ${illust.id} 详情: ${err.message}`)
+          logger.debug(`[标签订阅] 获取作品 ${illust.id} 详情失败: ${err.message}`)
         }
 
         // 请求间隔
@@ -258,12 +262,14 @@ export async function searchTagSubscription(tag, groupIds, config, subscriptionC
         break
       }
     } catch (err) {
-      logger.warn(`[标签订阅] 搜索第${page}页失败: ${err.message}`)
+      // 一页搜失败（Cookie 失效、被限流），后面几页多半也会失败，留到下一轮
+      errors.push(`「${tag}」第${page}页搜索: ${err.message}`)
+      logger.debug(`[标签订阅] 标签「${tag}」搜索第${page}页失败: ${err.message}`)
+      break
     }
   }
 
-  logger.info(`[标签订阅] 标签「${tag}」本轮拉取详情 ${fetchedCount} 个，跳过近期未达标 ${skippedRejected} 个`)
-  return qualifiedIllusts
+  return { illusts: qualifiedIllusts, fetched: fetchedCount, skippedRejected, errors }
 }
 
 /**
@@ -295,6 +301,7 @@ async function fetchArtistWorksWeb(userId, config) {
  * @param {Array<string>} groupIds 订阅了该画师的群号列表
  * @param {object} config pixiv配置
  * @param {object} subscriptionConfig 订阅配置
+ * @returns {Promise<{illusts: Array, fetched: number, errors: string[]}>}
  */
 export async function searchArtistSubscription(artistId, groupIds, config, subscriptionConfig) {
   const {
@@ -305,14 +312,16 @@ export async function searchArtistSubscription(artistId, groupIds, config, subsc
   const redis = getRedis()
   const qualifiedIllusts = []
   const now = Date.now()
+  let fetchedCount = 0
+  const errors = []
 
   try {
     // 获取画师所有作品 ID
     const illustIds = await fetchArtistWorksWeb(artistId, config)
 
     if (!illustIds || illustIds.length === 0) {
-      logger.info(`[画师订阅] 画师 ${artistId} 无作品`)
-      return []
+      logger.debug(`[画师订阅] 画师 ${artistId} 无作品`)
+      return { illusts: [], fetched: 0, errors }
     }
 
     // 取最新的若干作品进行检查
@@ -340,6 +349,7 @@ export async function searchArtistSubscription(artistId, groupIds, config, subsc
 
       // 获取作品详情
       try {
+        fetchedCount++
         const detailRes = await pixivCli.illustDetail({ illustId })
         if (detailRes?.status === 200 && detailRes.data?.illust) {
           const detail = detailRes.data.illust
@@ -356,17 +366,19 @@ export async function searchArtistSubscription(artistId, groupIds, config, subsc
           qualifiedIllusts.push(detail)
         }
       } catch (err) {
-        logger.warn(`[画师订阅] 获取作品 ${illustId} 详情失败: ${err.message}`)
+        errors.push(`作品 ${illustId} 详情: ${err.message}`)
+        logger.debug(`[画师订阅] 获取作品 ${illustId} 详情失败: ${err.message}`)
       }
 
       // 请求间隔
       await new Promise(resolve => setTimeout(resolve, 1000))
     }
   } catch (err) {
-    logger.error(`[画师订阅] 获取画师 ${artistId} 作品列表失败: ${err.message}`)
+    errors.push(`画师 ${artistId} 作品列表: ${err.message}`)
+    logger.debug(`[画师订阅] 获取画师 ${artistId} 作品列表失败: ${err.message}`)
   }
 
-  return qualifiedIllusts
+  return { illusts: qualifiedIllusts, fetched: fetchedCount, errors }
 }
 
 /**

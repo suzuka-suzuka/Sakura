@@ -17,6 +17,24 @@ function getTaskBot() {
   return selfId == null ? null : getBot(selfId)
 }
 
+function formatDuration(ms) {
+  const sec = Math.round(ms / 1000)
+  return sec < 60 ? `${sec} 秒` : `${Math.floor(sec / 60)} 分 ${sec % 60} 秒`
+}
+
+/**
+ * 订阅检查每轮只在 info 级别打一行汇总，逐个标签/画师的明细在 debug 级别。
+ * 有出错时整行升为 warn，并带上最近一次的错误。
+ */
+function logRunSummary(logTag, parts, errors) {
+  const text = `${logTag} 检查完成：${parts.filter(Boolean).join('，')}`
+  if (errors.length === 0) {
+    logger.info(text)
+  } else {
+    logger.warn(`${text}，出错 ${errors.length} 次（最近一次：${errors[errors.length - 1]}）`)
+  }
+}
+
 export class PixivTask extends plugin {
   constructor() {
     super({
@@ -219,17 +237,17 @@ export class PixivTask extends plugin {
     if (!taskBot) return
 
     const config = this.appconfig
+    const tagSubscriptions = config.tagSubscriptions || []
+    if (tagSubscriptions.length === 0) {
+      logger.debug("[标签订阅定时] 无订阅，跳过")
+      return
+    }
+
     if (!config.cookie || !config.refresh_token) {
       logger.warn("[标签订阅定时] 未配置 Pixiv Cookie 或 RefreshToken，跳过")
       return
     }
 
-    const tagSubscriptions = config.tagSubscriptions || []
-
-    if (tagSubscriptions.length === 0) {
-      logger.info("[标签订阅定时] 无订阅，跳过")
-      return
-    }
     const subConfig = {
       maxPages: config.tagSubMaxPages || 5,
       freshnessPeriod: config.tagSubFreshnessPeriod || 86400,
@@ -247,36 +265,48 @@ export class PixivTask extends plugin {
       }
     }
 
-    logger.info(`[标签订阅定时] 共整理出 ${tagToGroups.size} 个标签订阅任务...`)
+    const startedAt = Date.now()
+    const stats = { fetched: 0, skippedRejected: 0, pushed: 0, deferred: 0, errors: [] }
 
     for (const [tag, groupIds] of tagToGroups.entries()) {
       try {
-        logger.info(`[标签订阅定时] 正在搜索标签「${tag}」...`)
-
         const isR18Enabled = groupIds.some(gid => this.r18Config.Groups?.includes(Number(gid)))
-        const illusts = await searchTagSubscription(tag, groupIds, config, subConfig, isR18Enabled)
+        const result = await searchTagSubscription(tag, groupIds, config, subConfig, isR18Enabled)
+        stats.fetched += result.fetched
+        stats.skippedRejected += result.skippedRejected
+        stats.errors.push(...result.errors)
+        logger.debug(`[标签订阅定时] 标签「${tag}」拉取详情 ${result.fetched} 个，跳过近期未达标 ${result.skippedRejected} 个，符合条件 ${result.illusts.length} 个`)
 
-        if (illusts.length === 0) {
-          logger.info(`[标签订阅定时] 标签「${tag}」无符合条件的新作品`)
+        if (result.illusts.length === 0) {
           continue
         }
 
-        logger.info(`[标签订阅定时] 标签「${tag}」找到 ${illusts.length} 个新作品，准备分发`)
-
-        await this.distributeSubscriptionIllusts(taskBot, illusts, groupIds, {
+        const sent = await this.distributeSubscriptionIllusts(taskBot, result.illusts, groupIds, {
           name: tag,
           type: 'tag',
           sentTtl: subConfig.freshnessPeriod,
           maxPerGroup: this.subMaxPushPerRun,
           logTag: '[标签订阅定时]',
         })
+        stats.pushed += sent.pushed
+        stats.deferred += sent.deferred
+        stats.errors.push(...sent.errors)
       } catch (err) {
-        logger.error(`[标签订阅定时] 处理标签「${tag}」失败: ${err.message}`)
+        stats.errors.push(`标签「${tag}」: ${err.message}`)
+        logger.debug(`[标签订阅定时] 处理标签「${tag}」失败: ${err.stack || err.message}`)
       }
 
       await new Promise(resolve => setTimeout(resolve, 5000))
     }
-    logger.info("[标签订阅定时] 检查完成")
+
+    logRunSummary('[标签订阅定时]', [
+      `${tagToGroups.size} 个标签`,
+      `拉取详情 ${stats.fetched} 个`,
+      `跳过近期未达标 ${stats.skippedRejected} 个`,
+      `推送 ${stats.pushed} 次`,
+      stats.deferred > 0 && `顺延 ${stats.deferred} 次`,
+      `耗时 ${formatDuration(Date.now() - startedAt)}`,
+    ], stats.errors)
   });
 
 
@@ -285,14 +315,14 @@ export class PixivTask extends plugin {
     if (!taskBot) return
 
     const config = this.appconfig
-    if (!config.cookie || !config.refresh_token) {
-      logger.warn("[画师订阅定时] 未配置 Pixiv Cookie 或 RefreshToken，跳过")
+    const artistSubscriptions = config.artistSubscriptions || []
+    if (artistSubscriptions.length === 0) {
+      logger.debug("[画师订阅定时] 无订阅，跳过")
       return
     }
-    const artistSubscriptions = config.artistSubscriptions || []
 
-    if (artistSubscriptions.length === 0) {
-      logger.info("[画师订阅定时] 无订阅，跳过")
+    if (!config.cookie || !config.refresh_token) {
+      logger.warn("[画师订阅定时] 未配置 Pixiv Cookie 或 RefreshToken，跳过")
       return
     }
 
@@ -309,21 +339,21 @@ export class PixivTask extends plugin {
       }
     }
 
-    logger.info(`[画师订阅定时] 共整理出 ${artistToGroups.size} 位画师订阅任务...`)
+    const startedAt = Date.now()
+    const stats = { fetched: 0, pushed: 0, deferred: 0, errors: [] }
 
     for (const [artistId, groupIds] of artistToGroups.entries()) {
       try {
-        logger.info(`[画师订阅定时] 正在检查群订阅的画师「${artistId}」...`)
+        const result = await searchArtistSubscription(artistId, groupIds, config, subConfig)
+        stats.fetched += result.fetched
+        stats.errors.push(...result.errors)
+        logger.debug(`[画师订阅定时] 画师「${artistId}」拉取详情 ${result.fetched} 个，新作品 ${result.illusts.length} 个`)
 
-        const illusts = await searchArtistSubscription(artistId, groupIds, config, subConfig)
-
-        if (illusts.length === 0) {
-          logger.info(`[画师订阅定时] 画师「${artistId}」无新作品`)
+        if (result.illusts.length === 0) {
           continue
         }
-        logger.info(`[画师订阅定时] 画师「${artistId}」找到 ${illusts.length} 个新作品，准备分发`)
 
-        await this.distributeSubscriptionIllusts(taskBot, illusts, groupIds, {
+        const sent = await this.distributeSubscriptionIllusts(taskBot, result.illusts, groupIds, {
           name: artistId,
           type: 'artist',
           // 已发送标记要比保质期活得久，否则保质期内会重复推送
@@ -331,14 +361,24 @@ export class PixivTask extends plugin {
           maxPerGroup: this.subMaxPushPerRun,
           logTag: '[画师订阅定时]',
         })
+        stats.pushed += sent.pushed
+        stats.deferred += sent.deferred
+        stats.errors.push(...sent.errors)
       } catch (err) {
-        logger.error(`[画师订阅定时] 处理画师「${artistId}」失败: ${err.message}`)
+        stats.errors.push(`画师「${artistId}」: ${err.message}`)
+        logger.debug(`[画师订阅定时] 处理画师「${artistId}」失败: ${err.stack || err.message}`)
       }
 
       await new Promise(resolve => setTimeout(resolve, 5000))
     }
 
-    logger.info("[画师订阅定时] 检查完成")
+    logRunSummary('[画师订阅定时]', [
+      `${artistToGroups.size} 位画师`,
+      `拉取详情 ${stats.fetched} 个`,
+      `推送 ${stats.pushed} 次`,
+      stats.deferred > 0 && `顺延 ${stats.deferred} 次`,
+      `耗时 ${formatDuration(Date.now() - startedAt)}`,
+    ], stats.errors)
   });
 
   get subMaxPushPerRun() {
@@ -349,11 +389,13 @@ export class PixivTask extends plugin {
    * 把订阅找到的作品分发到各群。
    * 按发布时间从早到晚推，每个群每轮最多推 maxPerGroup 个；
    * 没轮到的不标记已发送，下一轮还会被找出来，过了保质期就不再推。
+   * @returns {Promise<{pushed: number, deferred: number, errors: string[]}>}
    */
   async distributeSubscriptionIllusts(taskBot, illusts, groupIds, { name, type, sentTtl, maxPerGroup, logTag }) {
     const ordered = [...illusts].sort((a, b) => new Date(a.create_date) - new Date(b.create_date))
     const pushedCount = new Map()
     const deferredCount = new Map()
+    const errors = []
 
     for (const illust of ordered) {
       let sentToAny = false
@@ -373,7 +415,8 @@ export class PixivTask extends plugin {
             sentToAny = true
           }
         } catch (err) {
-          logger.error(`${logTag} 向群 ${groupId} 推送「${name}」的作品 ${illust.id} 失败: ${err.message}`)
+          errors.push(`向群 ${groupId} 推送「${name}」的作品 ${illust.id}: ${err.message}`)
+          logger.debug(`${logTag} 向群 ${groupId} 推送「${name}」的作品 ${illust.id} 失败: ${err.message}`)
         }
       }
 
@@ -382,9 +425,16 @@ export class PixivTask extends plugin {
       }
     }
 
+    let deferred = 0
     for (const [groupId, count] of deferredCount) {
-      logger.info(`${logTag} 群 ${groupId} 本轮已推满 ${maxPerGroup} 个「${name}」作品，剩余 ${count} 个顺延到下一轮`)
+      deferred += count
+      logger.debug(`${logTag} 群 ${groupId} 本轮已推满 ${maxPerGroup} 个「${name}」作品，剩余 ${count} 个顺延到下一轮`)
     }
+
+    let pushed = 0
+    for (const count of pushedCount.values()) pushed += count
+
+    return { pushed, deferred, errors }
   }
 
   /**
@@ -396,7 +446,7 @@ export class PixivTask extends plugin {
 
 
     if (isR18 && !this.r18Config.Groups?.includes(Number(groupId))) {
-      logger.info(`[订阅推送] 群 ${groupId} 未开启R18，跳过作品 ${illust.id}`)
+      logger.debug(`[订阅推送] 群 ${groupId} 未开启R18，跳过作品 ${illust.id}`)
       return false
     }
 
