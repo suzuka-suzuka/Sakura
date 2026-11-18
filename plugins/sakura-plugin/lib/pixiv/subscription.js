@@ -48,6 +48,25 @@ export async function markAsSent(groupId, pid, type = 'tag', expireSeconds = 864
   await redis.set(key, '1', 'EX', expireSeconds)
 }
 
+// 标签订阅里没过筛选的作品，这段时间内不再重复拉详情。
+// 收藏数还会涨，作品之后可能达标，所以只记一阵子，不能永久跳过。
+const TAG_REJECTED_TTL = 7200
+
+/**
+ * 标签订阅未达标作品的 Redis Key
+ * 键里带上筛选阈值：阈值按账号配置，各账号阈值不同时互不影响
+ */
+function getTagRejectedKey(pid, filterSignature) {
+  return `pixiv:subscription:tag:rejected:${filterSignature}:${pid}`
+}
+
+// 作品发布时间不会变。记下来后，画师的旧作品不用每轮再拉一次详情来确认它已过保质期
+const ARTIST_CREATED_TTL = 7 * 86400
+
+function getArtistCreatedKey(pid) {
+  return `pixiv:subscription:artist:created:${pid}`
+}
+
 /**
  * 通过 Web API 搜索标签
  * @param {string} tag 标签
@@ -151,8 +170,12 @@ export async function searchTagSubscription(tag, groupIds, config, subscriptionC
   } = subscriptionConfig
 
   const pixivCli = await getPixivClient()
+  const redis = getRedis()
   const qualifiedIllusts = []
   const now = Date.now()
+  const filterSignature = [minBookmark, minBookRate, minBookPerHour, freshnessPeriod].join(':')
+  let fetchedCount = 0
+  let skippedRejected = 0
 
   let shouldStopSearching = false
 
@@ -191,8 +214,15 @@ export async function searchTagSubscription(tag, groupIds, config, subscriptionC
           continue
         }
 
+        const rejectedKey = getTagRejectedKey(illust.id, filterSignature)
+        if (await redis.exists(rejectedKey) === 1) {
+          skippedRejected++
+          continue
+        }
+
         // 获取作品详情
         try {
+          fetchedCount++
           const detailRes = await pixivCli.illustDetail({ illustId: illust.id })
           if (detailRes?.status === 200 && detailRes.data?.illust) {
             const detail = detailRes.data.illust
@@ -212,6 +242,8 @@ export async function searchTagSubscription(tag, groupIds, config, subscriptionC
 
             if (filtered.length > 0) {
               qualifiedIllusts.push(filtered[0])
+            } else {
+              await redis.set(rejectedKey, '1', 'EX', TAG_REJECTED_TTL)
             }
           }
         } catch (err) {
@@ -230,6 +262,7 @@ export async function searchTagSubscription(tag, groupIds, config, subscriptionC
     }
   }
 
+  logger.info(`[标签订阅] 标签「${tag}」本轮拉取详情 ${fetchedCount} 个，跳过近期未达标 ${skippedRejected} 个`)
   return qualifiedIllusts
 }
 
@@ -269,6 +302,7 @@ export async function searchArtistSubscription(artistId, groupIds, config, subsc
   } = subscriptionConfig
 
   const pixivCli = await getPixivClient()
+  const redis = getRedis()
   const qualifiedIllusts = []
   const now = Date.now()
 
@@ -298,12 +332,21 @@ export async function searchArtistSubscription(artistId, groupIds, config, subsc
         continue
       }
 
+      // 发布时间已知且过了保质期：ID 按新到旧排，后面的只会更旧，不用拉详情
+      const knownCreated = Number(await redis.get(getArtistCreatedKey(illustId)))
+      if (knownCreated && now - knownCreated > freshnessPeriod * 1000) {
+        break
+      }
+
       // 获取作品详情
       try {
         const detailRes = await pixivCli.illustDetail({ illustId })
         if (detailRes?.status === 200 && detailRes.data?.illust) {
           const detail = detailRes.data.illust
           const createDate = new Date(detail.create_date).getTime()
+          if (Number.isFinite(createDate)) {
+            await redis.set(getArtistCreatedKey(illustId), String(createDate), 'EX', ARTIST_CREATED_TTL)
+          }
 
           // 检查是否超出保质期
           if (now - createDate > freshnessPeriod * 1000) {

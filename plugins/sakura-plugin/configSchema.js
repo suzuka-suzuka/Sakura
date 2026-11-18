@@ -449,6 +449,7 @@ export const PixivSchema = z.object({
     // 画师订阅配置
     artistSubscriptions: z.array(ArtistSubscriptionSchema).default([]).describe('画师订阅|#nameField:groupId|为每个群配置要订阅的画师'),
     artistSubFreshnessPeriod: z.number().default(43200).describe('画师订阅保质期(秒)|只推送发布时间在此范围内的作品'),
+    subMaxPushPerRun: z.number().int().min(1).default(3).describe('订阅每轮推送上限|#min:1|每个标签/画师每次检查时，每个群最多推送的作品数；超出的按发布时间顺延到下一轮'),
 }).describe('Pixiv 功能');
 
 export const BotSchema = z.object({

@@ -263,25 +263,13 @@ export class PixivTask extends plugin {
 
         logger.info(`[标签订阅定时] 标签「${tag}」找到 ${illusts.length} 个新作品，准备分发`)
 
-        for (const illust of illusts) {
-          let sentToAny = false
-          for (const groupId of groupIds) {
-            try {
-              const sent = await isAlreadySent(groupId, illust.id, 'tag')
-              if (sent) continue
-
-              await this.sendSubscriptionIllust(taskBot, groupId, illust, tag, 'tag')
-              await markAsSent(groupId, illust.id, 'tag', subConfig.freshnessPeriod)
-              sentToAny = true
-            } catch (err) {
-              logger.error(`[标签订阅定时] 向群 ${groupId} 推送标签「${tag}」的作品 ${illust.id} 失败: ${err.message}`)
-            }
-          }
-
-          if (sentToAny) {
-            await new Promise(resolve => setTimeout(resolve, 2000))
-          }
-        }
+        await this.distributeSubscriptionIllusts(taskBot, illusts, groupIds, {
+          name: tag,
+          type: 'tag',
+          sentTtl: subConfig.freshnessPeriod,
+          maxPerGroup: this.subMaxPushPerRun,
+          logTag: '[标签订阅定时]',
+        })
       } catch (err) {
         logger.error(`[标签订阅定时] 处理标签「${tag}」失败: ${err.message}`)
       }
@@ -335,25 +323,14 @@ export class PixivTask extends plugin {
         }
         logger.info(`[画师订阅定时] 画师「${artistId}」找到 ${illusts.length} 个新作品，准备分发`)
 
-        for (const illust of illusts) {
-          let sentToAny = false
-          for (const groupId of groupIds) {
-            try {
-              const sent = await isAlreadySent(groupId, illust.id, 'artist')
-              if (sent) continue
-
-              await this.sendSubscriptionIllust(taskBot, groupId, illust, artistId, 'artist')
-              await markAsSent(groupId, illust.id, 'artist', 86400)
-              sentToAny = true
-            } catch (err) {
-              logger.error(`[画师订阅定时] 向群 ${groupId} 推送画师「${artistId}」的作品 ${illust.id} 失败: ${err.message}`)
-            }
-          }
-
-          if (sentToAny) {
-            await new Promise(resolve => setTimeout(resolve, 2000))
-          }
-        }
+        await this.distributeSubscriptionIllusts(taskBot, illusts, groupIds, {
+          name: artistId,
+          type: 'artist',
+          // 已发送标记要比保质期活得久，否则保质期内会重复推送
+          sentTtl: Math.max(86400, subConfig.freshnessPeriod),
+          maxPerGroup: this.subMaxPushPerRun,
+          logTag: '[画师订阅定时]',
+        })
       } catch (err) {
         logger.error(`[画师订阅定时] 处理画师「${artistId}」失败: ${err.message}`)
       }
@@ -364,6 +341,55 @@ export class PixivTask extends plugin {
     logger.info("[画师订阅定时] 检查完成")
   });
 
+  get subMaxPushPerRun() {
+    return Math.max(1, Math.floor(Number(this.appconfig.subMaxPushPerRun)) || 3)
+  }
+
+  /**
+   * 把订阅找到的作品分发到各群。
+   * 按发布时间从早到晚推，每个群每轮最多推 maxPerGroup 个；
+   * 没轮到的不标记已发送，下一轮还会被找出来，过了保质期就不再推。
+   */
+  async distributeSubscriptionIllusts(taskBot, illusts, groupIds, { name, type, sentTtl, maxPerGroup, logTag }) {
+    const ordered = [...illusts].sort((a, b) => new Date(a.create_date) - new Date(b.create_date))
+    const pushedCount = new Map()
+    const deferredCount = new Map()
+
+    for (const illust of ordered) {
+      let sentToAny = false
+      for (const groupId of groupIds) {
+        try {
+          if (await isAlreadySent(groupId, illust.id, type)) continue
+
+          if ((pushedCount.get(groupId) || 0) >= maxPerGroup) {
+            deferredCount.set(groupId, (deferredCount.get(groupId) || 0) + 1)
+            continue
+          }
+
+          const pushed = await this.sendSubscriptionIllust(taskBot, groupId, illust, name, type)
+          await markAsSent(groupId, illust.id, type, sentTtl)
+          if (pushed) {
+            pushedCount.set(groupId, (pushedCount.get(groupId) || 0) + 1)
+            sentToAny = true
+          }
+        } catch (err) {
+          logger.error(`${logTag} 向群 ${groupId} 推送「${name}」的作品 ${illust.id} 失败: ${err.message}`)
+        }
+      }
+
+      if (sentToAny) {
+        await new Promise(resolve => setTimeout(resolve, 2000))
+      }
+    }
+
+    for (const [groupId, count] of deferredCount) {
+      logger.info(`${logTag} 群 ${groupId} 本轮已推满 ${maxPerGroup} 个「${name}」作品，剩余 ${count} 个顺延到下一轮`)
+    }
+  }
+
+  /**
+   * @returns {Promise<boolean>} 是否真的推送了（R18 不允许或无图时返回 false）
+   */
   async sendSubscriptionIllust(taskBot, groupId, illust, subscriptionName, type) {
     const config = this.appconfig
     const isR18 = illust.x_restrict !== 0
@@ -371,14 +397,14 @@ export class PixivTask extends plugin {
 
     if (isR18 && !this.r18Config.Groups?.includes(Number(groupId))) {
       logger.info(`[订阅推送] 群 ${groupId} 未开启R18，跳过作品 ${illust.id}`)
-      return
+      return false
     }
 
     const imageUrls = getIllustImageUrls(illust, "", 3)
 
     if (imageUrls.length === 0) {
       logger.warn(`[订阅推送] 作品 ${illust.id} 无图片链接`)
-      return
+      return false
     }
 
     const typeLabel = type === 'tag' ? '标签' : '画师'
@@ -427,6 +453,7 @@ export class PixivTask extends plugin {
       initialRecallTime: isR18 ? (config.recallTime ?? 10) : 0,
       fallbackRecallTime: config.recallTime ?? 10,
     })
+    return true
   }
 
 
