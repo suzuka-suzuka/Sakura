@@ -37,43 +37,73 @@ export function prioritizeRouteAttempt(plan, preferredAttempt) {
   };
 }
 
-function redactRouterError(error, credential) {
+const ROUTER_ERROR_MAX_LENGTH = 200;
+
+// 上游错误常是整段 JSON，只取里面的 message，去掉“详见某链接”的尾巴，再脱敏截短。
+function briefRouterError(error, credential) {
   let message = error?.message || String(error || "未知错误");
+  try {
+    const parsed = JSON.parse(message);
+    const inner = parsed?.error?.message ?? parsed?.message;
+    if (typeof inner === "string" && inner.trim()) message = inner;
+  } catch {
+    // 不是 JSON，原样用。
+  }
+
   const secrets = [credential?.apiKey].filter(
     (value) => typeof value === "string" && value.length > 0
   );
-
   for (const secret of secrets) {
     message = message.split(secret).join("[REDACTED]");
   }
 
-  return message
+  message = message
     .replace(/Bearer\s+[^\s,;]+/gi, "Bearer [REDACTED]")
     .replace(/([?&](?:key|api_key)=)[^&\s]+/gi, "$1[REDACTED]")
+    .replace(
+      /\s*(?:please\s+)?(?:refer to|see)\s+https?:\/\/\S+(?:\s+for more (?:details|information))?\.?/gi,
+      ""
+    )
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 1000);
+    .trim();
+
+  return message.length > ROUTER_ERROR_MAX_LENGTH
+    ? `${message.slice(0, ROUTER_ERROR_MAX_LENGTH)}…`
+    : message;
 }
 
 function routerLogValue(value) {
   return JSON.stringify(String(value ?? ""));
 }
 
+function attemptLabel(attempt) {
+  const where = [attempt?.provider?.id, attempt?.credential?.id].filter(Boolean).join("/");
+  const target = attempt?.target?.id || "未知模型";
+  return where ? `${target}(${where})` : target;
+}
+
 const FAILURE_ACTION_LABELS = {
   next: "回退",
-  next_model: "跳过该模型其余 Key",
-  next_provider: "跳过该供应商",
+  next_model: "跳过该模型其余 Key，改用",
+  next_provider: "跳过该供应商，改用",
   abort: "终止",
 };
 
+const COOLDOWN_SCOPE_LABELS = {
+  credential: "Key",
+  provider: "供应商",
+};
+
+/**
+ * 一次尝试失败的单行日志，例如：
+ * [AI Router] 调用失败 [1/3] gemini-pro(vertex/key1) 429 限流，Key 冷却 60s → 回退 gemini-flash(vertex/key1) | Resource exhausted.
+ */
 export function formatRouteAttemptFailure({
-  routeId,
   attempt,
   error,
   attemptNumber,
   totalAttempts,
   nextAttempt = null,
-  retryDelayMs = 0,
   failure = null,
 }) {
   const action = failure?.action === "abort"
@@ -81,38 +111,19 @@ export function formatRouteAttemptFailure({
     : nextAttempt
       ? FAILURE_ACTION_LABELS[failure?.action] || FAILURE_ACTION_LABELS.next
       : "尝试耗尽";
-  const status = error?.status == null ? "unknown" : String(error.status);
-  const fields = [
-    "[AI Router] 调用失败",
-    `route=${routerLogValue(routeId)}`,
-    `attempt=${attemptNumber}/${totalAttempts}`,
-    `target=${routerLogValue(attempt?.target?.id)}`,
-    `provider=${routerLogValue(attempt?.provider?.id)}`,
-    `credential=${routerLogValue(attempt?.credential?.id)}`,
-    `model=${routerLogValue(attempt?.requestConfig?.model)}`,
-    `status=${status}`,
-    `action=${action}`,
-  ];
 
-  if (failure?.reason) fields.push(`reason=${routerLogValue(failure.reason)}`);
+  let line = `[AI Router] 调用失败 [${attemptNumber}/${totalAttempts}] ${attemptLabel(attempt)}`;
+  const cause = [error?.status, failure?.reason].filter(Boolean).join(" ");
+  if (cause) line += ` ${cause}`;
   if (failure?.cooldown) {
-    fields.push(
-      `cooldown=${failure.cooldown.scope}:${Math.round(failure.cooldown.ms / 1000)}s`
-    );
+    const scope = COOLDOWN_SCOPE_LABELS[failure.cooldown.scope] || failure.cooldown.scope;
+    line += `，${scope} 冷却 ${Math.round(failure.cooldown.ms / 1000)}s`;
   }
+  line += ` → ${action}`;
+  if (nextAttempt && failure?.action !== "abort") line += ` ${attemptLabel(nextAttempt)}`;
 
-  if (nextAttempt) {
-    fields.push(
-      `nextTarget=${routerLogValue(nextAttempt.target?.id)}`,
-      `nextProvider=${routerLogValue(nextAttempt.provider?.id)}`,
-      `nextCredential=${routerLogValue(nextAttempt.credential?.id)}`,
-      `nextModel=${routerLogValue(nextAttempt.requestConfig?.model)}`,
-      `delayMs=${Math.max(0, Number(retryDelayMs) || 0)}`
-    );
-  }
-
-  fields.push(`error=${routerLogValue(redactRouterError(error, attempt?.credential))}`);
-  return fields.join(" ");
+  const message = briefRouterError(error, attempt?.credential);
+  return message ? `${line} | ${message}` : line;
 }
 
 function positiveInteger(value, fallback = 1) {
@@ -460,13 +471,11 @@ export async function executeRoutePlan({
       ? null
       : attempts.slice(index + 1).find((candidate) => !isSkipped(candidate)) || null;
     log(formatRouteAttemptFailure({
-      routeId,
       attempt,
       error: lastError,
       attemptNumber: index + 1,
       totalAttempts: attempts.length,
       nextAttempt,
-      retryDelayMs,
       failure,
     }));
 

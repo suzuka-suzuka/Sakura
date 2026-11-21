@@ -82,14 +82,15 @@ async function buildSystemInstruction(e, presetPrompt, enableGroupContext, { inc
 /**
  * 协议实现内的失败：记日志后以 Error 对象返回（不抛出），由路由按动作决定怎么回退。
  */
-function requestFailure(
-  message,
-  action = ROUTE_FAILURE_ACTIONS.NEXT,
-  { level = "warn", detail } = {}
-) {
-  if (detail === undefined) logger[level](message);
-  else logger[level](message, detail);
+// 失败原因由路由统一记一行（见 formatRouteAttemptFailure），这里只补记路由日志里没有的原始响应。
+function requestFailure(message, action = ROUTE_FAILURE_ACTIONS.NEXT, { detail } = {}) {
+  if (detail !== undefined) logger.warn(`[AI Router] ${message} 原始响应：`, detail);
   return createRouteFailure(message, action, { isAIRequestError: true, status: null });
+}
+
+// 上游/网络错误的消息已经在路由日志里；堆栈只对排查代码问题有用，放 debug 级别。
+function logRequestErrorStack(error) {
+  if (error?.stack) logger.debug(`[AI Router] 请求异常堆栈：${error.stack}`);
 }
 
 function geminiFinishReasonAction(finishReason) {
@@ -392,7 +393,7 @@ async function _getOpenAIResponse(
   promptOptions = {}
 ) {
   if (!isRequestConfigComplete(channel, "openai")) {
-    return requestFailure("无效或不完整的渠道配置", ROUTE_FAILURE_ACTIONS.NEXT, { level: "error" });
+    return requestFailure("无效或不完整的渠道配置");
   }
 
   const passbackKey = reasoningPassbackKey(channel);
@@ -674,9 +675,9 @@ async function _getOpenAIResponse(
     
     if (!completion || !completion.choices || !Array.isArray(completion.choices)) {
       return requestFailure(
-        `API 节点返回了异常格式(${typeof completion}): ${JSON.stringify(completion)}`,
+        `API 节点返回了异常格式(${typeof completion})`,
         ROUTE_FAILURE_ACTIONS.NEXT,
-        { level: "error" }
+        { detail: JSON.stringify(completion) }
       );
     }
 
@@ -720,8 +721,7 @@ async function _getOpenAIResponse(
       // 带上之后反而因为这个字段被拒，说明判断错了，撤销学习结果。
       reasoningPassbackTargets.delete(passbackKey);
     }
-    const errorMessage = `API 调用失败: ${error.message}`;
-    logger.error(errorMessage, error);
+    logRequestErrorStack(error);
     throw normalizeRequestError(error);
   }
 }
@@ -737,7 +737,7 @@ async function _getGeminiResponse(
   promptOptions = {}
 ) {
   if (!isRequestConfigComplete(channel, "gemini")) {
-    return requestFailure("无效或不完整的渠道配置。", ROUTE_FAILURE_ACTIONS.NEXT, { level: "error" });
+    return requestFailure("无效或不完整的渠道配置。");
   }
 
   const { model: GEMINI_MODEL } = channel;
@@ -1014,8 +1014,7 @@ async function _getGeminiResponse(
       rawParts: responseParts,
     }, citations);
   } catch (error) {
-    const errorMessage = `API 调用失败: ${error.message}`;
-    logger.error(errorMessage);
+    logRequestErrorStack(error);
     throw normalizeRequestError(error, { timedOut: timeoutSignal?.aborted === true });
   }
 }
@@ -1089,7 +1088,7 @@ export async function getAI(
     return outcome.value;
   }
 
-  const errorMessage = `模型“${routeId}”请求失败：${outcome.error?.message || "未知错误"}`;
-  logger.error(errorMessage);
-  return errorMessage;
+  // 具体原因上面每次尝试的路由日志里都有，这里只记结论。
+  logger.error(`[AI Router] ${routeId} 请求失败`);
+  return `模型“${routeId}”请求失败：${outcome.error?.message || "未知错误"}`;
 }
