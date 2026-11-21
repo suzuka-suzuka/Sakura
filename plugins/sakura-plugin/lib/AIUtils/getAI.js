@@ -1056,7 +1056,7 @@ export async function getAI(
         ? { ...attempt.requestConfig, nativeWebSearch: false }
         : attempt.requestConfig;
       logger.info(
-        `[AI Router] models=${routeId} model=${attempt.target.id} provider=${attempt.provider.id} key=${attempt.credential.id} timeoutMs=${config.timeoutMs}`
+        `[AI Router] model=${attempt.target.id} provider=${attempt.provider.id} key=${attempt.credential.id}`
       );
 
       const args = [
