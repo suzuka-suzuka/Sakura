@@ -15,33 +15,33 @@ export class forwardMessage extends plugin {
 
   handleForwardedMessage = OnEvent("message.group", async (e) => {
     const forwardRules = this.appconfig.forwardRules || [];
-    const rule = forwardRules.find(r => r.sourceGroupIds && r.sourceGroupIds.includes(e.group_id));
-
-    if (!rule || !rule.targetGroupIds || rule.targetGroupIds.length === 0) {
+    const rules = forwardRules.filter(r =>
+      r.sourceGroupIds && r.sourceGroupIds.includes(e.group_id) &&
+      r.targetGroupIds && r.targetGroupIds.length > 0
+    );
+    if (rules.length === 0 || !Array.isArray(e.message)) {
       return false;
     }
 
-    const { enableImage = true, enableVideo = true, enableRecord = true } = rule;
-    let shouldForward = false;
+    const isRecord = e.message.some(m => m.type === 'forward');
+    const isVideo = !isRecord && e.message.some(m => m.type === 'video');
+    const isImage = !isRecord && !isVideo &&
+      e.message.length > 0 &&
+      e.message.every(m => m.type === 'image' && !(m.data?.sub_type === 1));
 
-    if (Array.isArray(e.message)) {
-      if (e.message.some(m => m.type === 'forward')) {
-        if (enableRecord) shouldForward = true;
-      } else if (e.message.some(m => m.type === 'video')) {
-        if (enableVideo) shouldForward = true;
-      } else if (
-        e.message.length > 0 &&
-        e.message.every(m => m.type === 'image' && !(m.data?.sub_type === 1))
-      ) {
-        if (enableImage) shouldForward = true;
+    // 同一来源群可配置多条规则，每条按自己的开关判断，目标群去重
+    const targetIds = new Set();
+    for (const rule of rules) {
+      const { enableImage = true, enableVideo = true, enableRecord = true } = rule;
+      const shouldForward =
+        (isRecord && enableRecord) || (isVideo && enableVideo) || (isImage && enableImage);
+      if (!shouldForward) continue;
+      for (const targetId of rule.targetGroupIds) {
+        if (targetId !== e.group_id) targetIds.add(targetId);
       }
     }
 
-    if (!shouldForward) {
-      return false;
-    }
-
-    for (const targetId of rule.targetGroupIds) {
+    for (const targetId of targetIds) {
       try {
         const targetGroup = e.bot.pickGroup(targetId);
         if (targetGroup) {
