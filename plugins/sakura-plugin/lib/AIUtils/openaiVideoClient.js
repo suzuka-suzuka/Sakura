@@ -82,6 +82,7 @@ async function request(config, endpoint, { method = "GET", json = null, form = n
       `${API_DISPLAY_NAME}请求失败：${method} ${endpoint} 返回 ${response.status}，${message.slice(0, 500)}`
     );
     error.status = response.status;
+    error.headers = response.headers;
     error.upstreamMessage = innermostErrorMessage(payload);
     throw error;
   }

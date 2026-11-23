@@ -10,6 +10,7 @@ import {
   isRequestConfigComplete,
   prioritizeRouteAttempt,
   ROUTE_FAILURE_ACTIONS,
+  upstreamRetryDelayMs,
 } from "./providerRouter.js";
 import { formatModelList, modelListKey } from "./aiModels.js";
 import { createGeminiClient } from "./vertexAuth.js";
@@ -112,6 +113,8 @@ function normalizeRequestError(error, { timedOut = false } = {}) {
   wrapped.originalName = error?.name;
   wrapped.code = error?.code ?? error?.cause?.code;
   wrapped.timedOut = timedOut || error?.timedOut === true;
+  // 包装后响应头和错误体就丢了，先把上游要求的等待时间取出来留给路由冷却用。
+  wrapped.retryAfterMs = upstreamRetryDelayMs(error);
   return wrapped;
 }
 

@@ -91,12 +91,22 @@ const FAILURE_ACTION_LABELS = {
 
 const COOLDOWN_SCOPE_LABELS = {
   credential: "Key",
+  model: "该模型 Key",
   provider: "供应商",
 };
 
+function formatCooldown(ms) {
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 120) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 120) return `${minutes}min`;
+  const rest = minutes % 60;
+  return rest ? `${Math.floor(minutes / 60)}h${rest}min` : `${minutes / 60}h`;
+}
+
 /**
  * 一次尝试失败的单行日志，例如：
- * [AI Router] 调用失败 [1/3] gemini-pro(vertex/key1) 429 限流，Key 冷却 60s → 回退 gemini-flash(vertex/key1) | Resource exhausted.
+ * [AI Router] 调用失败 [1/3] gemini-pro(vertex/key1) 429 限流，该模型 Key 冷却 60s → 回退 gemini-flash(vertex/key1) | Resource exhausted.
  */
 export function formatRouteAttemptFailure({
   attempt,
@@ -117,7 +127,8 @@ export function formatRouteAttemptFailure({
   if (cause) line += ` ${cause}`;
   if (failure?.cooldown) {
     const scope = COOLDOWN_SCOPE_LABELS[failure.cooldown.scope] || failure.cooldown.scope;
-    line += `，${scope} 冷却 ${Math.round(failure.cooldown.ms / 1000)}s`;
+    line += `，${scope} 冷却 ${formatCooldown(failure.cooldown.ms)}`;
+    if (failure.cooldown.upstream) line += "（上游指定）";
   }
   line += ` → ${action}`;
   if (nextAttempt && failure?.action !== "abort") line += ` ${attemptLabel(nextAttempt)}`;
@@ -248,7 +259,21 @@ const routeCooldowns = new Map();
 const CREDENTIAL_ERROR_PATTERN =
   /api[\s_-]?key|unauthori[sz]ed|invalid[\s_-]?(?:token|credential|authentication)|authentication|permission[\s_-]?denied|insufficient[\s_-]?(?:quota|balance)|billing|余额|额度|令牌/i;
 const QUOTA_ERROR_PATTERN =
-  /insufficient[\s_-]?(?:quota|balance)|quota|billing|余额|额度|exceeded your current/i;
+  /insufficient[\s_-]?(?:quota|balance)|quota|billing|usage[\s_-]?limit|余额|额度|exceeded your current/i;
+// 上游给的等待时间最多信 24 小时，防止异常值让某个 Key 长期排在末尾。
+const UPSTREAM_RETRY_MAX_MS = 24 * 60 * 60 * 1000;
+// google.rpc.RetryInfo 的 retryDelay 是 Duration 的 JSON 形式，如 "1769s"、"0.5s"。
+const RETRY_INFO_DELAY_PATTERN = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/;
+// 文字里的重置时间，如 "resets in 5 hours, 52 minutes"、"resets in 5h52m"。
+// 中转站转发 Gemini 套餐限额时，retryDelay 只是它自己账号池的冷却，额度真正恢复要看这句。
+const DURATION_PART_SOURCE =
+  String.raw`(\d+(?:\.\d+)?)\s*(days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])`;
+const DURATION_PART_PATTERN = new RegExp(DURATION_PART_SOURCE, "gi");
+const RESET_IN_PATTERN = new RegExp(
+  String.raw`resets?\s+in\s+((?:${DURATION_PART_SOURCE}[\s,]*(?:and\s+)?)+)`,
+  "i"
+);
+const DURATION_UNIT_MS = { d: 86400000, h: 3600000, m: 60000, s: 1000 };
 const TIMEOUT_ERROR_NAMES = new Set(["TimeoutError", "APIConnectionTimeoutError"]);
 const TIMEOUT_ERROR_CODES = new Set([
   "ETIMEDOUT",
@@ -276,6 +301,62 @@ function isTimeoutFailure(error, status) {
   return /timed?[\s_-]?out|超时/i.test(String(error?.message || ""));
 }
 
+function headerValue(headers, name) {
+  if (!headers) return null;
+  if (typeof headers.get === "function") return headers.get(name);
+  return headers[name] ?? null;
+}
+
+function retryAfterHeaderMs(headers, now) {
+  const raw = String(headerValue(headers, "retry-after") ?? "").trim();
+  if (!raw) return 0;
+  if (/^\d+(?:\.\d+)?$/.test(raw)) return Math.round(Number(raw) * 1000);
+  const date = Date.parse(raw);
+  return Number.isFinite(date) ? date - now : 0;
+}
+
+function retryInfoDelayMs(text) {
+  const match = RETRY_INFO_DELAY_PATTERN.exec(text);
+  return match ? Math.round(Number(match[1]) * 1000) : 0;
+}
+
+function resetInDelayMs(text) {
+  const phrase = RESET_IN_PATTERN.exec(text)?.[1];
+  if (!phrase) return 0;
+  let total = 0;
+  for (const [, amount, unit] of phrase.matchAll(DURATION_PART_PATTERN)) {
+    total += Number(amount) * DURATION_UNIT_MS[unit[0].toLowerCase()];
+  }
+  return Math.round(total);
+}
+
+function jsonText(value) {
+  if (value == null || typeof value !== "object") return "";
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * 上游明确要求等多久再试（毫秒），0 表示没给。
+ * 认 HTTP Retry-After 头、google.rpc.RetryInfo.retryDelay（Gemini 和转发它的中转站会带）
+ * 和正文里的 "resets in …"，几处都有时取最长的。
+ * Gemini SDK 把整段错误 JSON 放在 message 里；OpenAI SDK 把错误体放在 error.error、响应头放在 error.headers。
+ */
+export function upstreamRetryDelayMs(error, now = Date.now()) {
+  if (!error) return 0;
+  const texts = [String(error.message || ""), jsonText(error.error)];
+  const delay = Math.max(
+    Number(error.retryAfterMs) || 0,
+    retryAfterHeaderMs(error.headers ?? error.response?.headers, now),
+    ...texts.map(retryInfoDelayMs),
+    ...texts.map(resetInDelayMs)
+  );
+  return Math.min(Math.max(delay, 0), UPSTREAM_RETRY_MAX_MS);
+}
+
 /** 根据错误判断下一步怎么回退、要不要让 Key 或供应商冷却一段时间。 */
 export function classifyRouteFailure(error) {
   if (error?.routeAction) {
@@ -295,13 +376,15 @@ export function classifyRouteFailure(error) {
 
   if (status === 429) {
     const quota = QUOTA_ERROR_PATTERN.test(message);
+    const upstreamMs = upstreamRetryDelayMs(error);
+    // 429 多按模型计（Gemini 配额、中转站账号池都是），只冷却这个 Key 上的这个模型，
+    // 同一 Key 的其他模型照常排队；上游给了等待时间就按它来。
     return {
       action: ROUTE_FAILURE_ACTIONS.NEXT,
       reason: quota ? "额度耗尽" : "限流",
-      cooldown: {
-        scope: "credential",
-        ms: quota ? CREDENTIAL_COOLDOWN_MS : RATE_LIMIT_COOLDOWN_MS,
-      },
+      cooldown: upstreamMs > 0
+        ? { scope: "model", ms: upstreamMs, upstream: true }
+        : { scope: "model", ms: quota ? CREDENTIAL_COOLDOWN_MS : RATE_LIMIT_COOLDOWN_MS },
     };
   }
 
@@ -343,6 +426,17 @@ function credentialCooldownKey(attempt) {
   )}`;
 }
 
+function modelCooldownKey(attempt) {
+  const target = attempt?.target || {};
+  return `${credentialCooldownKey(attempt)}:model:${target.model || target.id || ""}`;
+}
+
+function cooldownKey(attempt, scope) {
+  if (scope === "provider") return providerCooldownKey(attempt);
+  if (scope === "model") return modelCooldownKey(attempt);
+  return credentialCooldownKey(attempt);
+}
+
 function remainingCooldown(key, now) {
   const entry = routeCooldowns.get(key);
   if (!entry) return 0;
@@ -356,6 +450,7 @@ function remainingCooldown(key, now) {
 /** 该尝试还要冷却多久（毫秒），0 表示可用。 */
 export function routeAttemptCooldownMs(attempt, now = Date.now()) {
   return Math.max(
+    remainingCooldown(modelCooldownKey(attempt), now),
     remainingCooldown(credentialCooldownKey(attempt), now),
     remainingCooldown(providerCooldownKey(attempt), now)
   );
@@ -379,13 +474,11 @@ function setCooldown(key, ms, now) {
 export function recordRouteFailure(attempt, failure, now = Date.now()) {
   const cooldown = failure?.cooldown;
   if (!cooldown) return;
-  const key = cooldown.scope === "provider"
-    ? providerCooldownKey(attempt)
-    : credentialCooldownKey(attempt);
-  setCooldown(key, cooldown.ms, now);
+  setCooldown(cooldownKey(attempt, cooldown.scope), cooldown.ms, now);
 }
 
 export function recordRouteSuccess(attempt) {
+  routeCooldowns.delete(modelCooldownKey(attempt));
   routeCooldowns.delete(credentialCooldownKey(attempt));
   routeCooldowns.delete(providerCooldownKey(attempt));
 }
