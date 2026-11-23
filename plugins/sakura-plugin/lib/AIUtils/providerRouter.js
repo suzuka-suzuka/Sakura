@@ -234,7 +234,6 @@ const ROUTE_KIND_BY_MODULE = {
   VideoRoutes: "video",
 };
 const MODEL_KIND_LABELS = { chat: "对话", image: "图片", video: "视频" };
-const ROUTE_RETRY_DELAY_MS = 1000;
 // 单次请求的尝试预算：保证列表里每个模型至少轮到一次，剩余名额按列表顺序分给前面模型的其他 Key。
 const MAX_ROUTE_ATTEMPTS = 8;
 
@@ -501,12 +500,9 @@ function attemptTargetKey(attempt) {
   return `${attempt?.provider?.id || ""}\u0000${attempt?.target?.id || ""}`;
 }
 
-function defaultSleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /**
- * 按计划逐个尝试，统一处理失败分类、冷却和日志。
+ * 按计划逐个尝试，统一处理失败分类、冷却和日志。失败后立即换下一个，不等待：
+ * 换 Key、换模型、换供应商各自的限流互不相干，干等只会拖慢回复。
  * run(attempt) 成功时返回结果，失败时抛错。
  * 返回 { ok: true, value, attempt } 或 { ok: false, error, attempt }。
  */
@@ -514,7 +510,6 @@ export async function executeRoutePlan({
   plan,
   routeId = plan?.route?.id,
   run,
-  sleep = defaultSleep,
   log = (message) => logger.warn(message),
 }) {
   const now = Date.now();
@@ -535,7 +530,6 @@ export async function executeRoutePlan({
   const isSkipped = (attempt) =>
     skippedTargets.has(attemptTargetKey(attempt)) ||
     skippedProviders.has(attempt?.provider?.id);
-  const retryDelayMs = Math.max(0, Number(plan?.route?.retryDelayMs) || 0);
 
   let lastError = null;
   let lastAttempt = null;
@@ -573,10 +567,6 @@ export async function executeRoutePlan({
     }));
 
     if (!nextAttempt) break;
-    // 换到别的供应商时没必要等待；同一供应商换 Key 才稍等一下，给限流留点余地。
-    if (retryDelayMs > 0 && nextAttempt.provider?.id === attempt.provider?.id) {
-      await sleep(retryDelayMs);
-    }
   }
 
   return { ok: false, error: lastError, attempt: lastAttempt };
@@ -651,7 +641,6 @@ export function createRouteExecutionPlan(reference, options = {}) {
     key: modelListKey(names),
     kind,
     models: names,
-    retryDelayMs: ROUTE_RETRY_DELAY_MS,
   };
 
   const missing = [];
