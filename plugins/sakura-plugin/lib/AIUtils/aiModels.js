@@ -50,9 +50,11 @@ export function usesVertex(provider) {
   return provider?.protocol === "gemini" && provider?.vertex === true;
 }
 
-function maskSecret(secret) {
-  const text = String(secret || "");
-  return text.length > 8 ? `…${text.slice(-4)}` : "…";
+// 日志里的 Key 标签：序号对应面板里 Key 列表的位置；长 Key 附末 4 位方便和中转站后台对账，
+// 8 位以内的短 Key 只给序号，露末 4 位等于把 Key 写进日志。
+function credentialLabel(apiKey, index) {
+  const text = String(apiKey || "");
+  return text.length > 8 ? `Key${index + 1}(…${text.slice(-4)})` : `Key${index + 1}`;
 }
 
 /**
@@ -69,7 +71,7 @@ export function providerCredentials(provider) {
     }));
   }
   return normalizeModelList(provider.apiKeys).map((apiKey, index) => ({
-    id: `Key${index + 1}(${maskSecret(apiKey)})`,
+    id: credentialLabel(apiKey, index),
     apiKey,
     serviceAccountRef: "",
   }));
