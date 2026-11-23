@@ -252,8 +252,11 @@ const RATE_LIMIT_COOLDOWN_MS = 60 * 1000;
 const PROVIDER_COOLDOWN_MS = 2 * 60 * 1000;
 const COOLDOWN_MAX_ENTRIES = 500;
 
-// 进程内的短期状态：重启即清空，不需要持久化。
+// 冷却以内存 Map 为准（排序时同步读，一次请求要读好几遍）；同时写一份带 TTL 的 Redis 键，
+// 重启后读回来，免得长冷却（上游给的几个小时、供应商超时）一重启就失效、又撞一次。
 const routeCooldowns = new Map();
+const COOLDOWN_REDIS_PREFIX = "sakura:ai-route-cooldown:v1";
+let cooldownRestore = null;
 
 const CREDENTIAL_ERROR_PATTERN =
   /api[\s_-]?key|unauthori[sz]ed|invalid[\s_-]?(?:token|credential|authentication)|authentication|permission[\s_-]?denied|insufficient[\s_-]?(?:quota|balance)|billing|余额|额度|令牌/i;
@@ -455,9 +458,11 @@ export function routeAttemptCooldownMs(attempt, now = Date.now()) {
   );
 }
 
-function setCooldown(key, ms, now) {
-  if (!(ms > 0)) return;
-  if (routeCooldowns.size >= COOLDOWN_MAX_ENTRIES && !routeCooldowns.has(key)) {
+/** 只延长不缩短；返回是否真的写入了。 */
+function rememberCooldown(key, until, now) {
+  const current = routeCooldowns.get(key);
+  if (current && current.until >= until) return false;
+  if (!current && routeCooldowns.size >= COOLDOWN_MAX_ENTRIES) {
     for (const [existingKey, entry] of routeCooldowns) {
       if (entry.until <= now) routeCooldowns.delete(existingKey);
     }
@@ -465,9 +470,31 @@ function setCooldown(key, ms, now) {
       routeCooldowns.delete(routeCooldowns.keys().next().value);
     }
   }
-  const current = routeCooldowns.get(key);
+  routeCooldowns.set(key, { until });
+  return true;
+}
+
+function cooldownRedis() {
+  const client = globalThis.redis;
+  return client && typeof client.set === "function" ? client : null;
+}
+
+function redisCooldownKey(key) {
+  return `${COOLDOWN_REDIS_PREFIX}:${key}`;
+}
+
+// Redis 写删失败只记一行：内存里的冷却照常生效，最多是重启后少恢复一条。
+function warnCooldownRedis(action, error) {
+  logger.warn(`[AI Router] Redis 冷却记录${action}失败：${error?.message || error}`);
+}
+
+function setCooldown(key, ms, now) {
+  if (!(ms > 0)) return;
   const until = now + ms;
-  if (!current || current.until < until) routeCooldowns.set(key, { until });
+  if (!rememberCooldown(key, until, now)) return;
+  cooldownRedis()
+    ?.set(redisCooldownKey(key), String(until), "PX", Math.ceil(ms))
+    .catch((error) => warnCooldownRedis("写入", error));
 }
 
 export function recordRouteFailure(attempt, failure, now = Date.now()) {
@@ -477,14 +504,63 @@ export function recordRouteFailure(attempt, failure, now = Date.now()) {
 }
 
 export function recordRouteSuccess(attempt) {
-  routeCooldowns.delete(modelCooldownKey(attempt));
-  routeCooldowns.delete(credentialCooldownKey(attempt));
-  routeCooldowns.delete(providerCooldownKey(attempt));
+  // 内存在首次路由前已从 Redis 恢复，内存里没有的键 Redis 里也没有，不必每次成功都去删。
+  const cleared = [
+    modelCooldownKey(attempt),
+    credentialCooldownKey(attempt),
+    providerCooldownKey(attempt),
+  ].filter((key) => routeCooldowns.delete(key));
+  if (cleared.length === 0) return;
+  cooldownRedis()
+    ?.del(...cleared.map(redisCooldownKey))
+    .catch((error) => warnCooldownRedis("清除", error));
 }
 
+/** 只清内存，Redis 里的键按 TTL 自然过期。 */
 export function resetRouteCooldowns() {
   routeCooldowns.clear();
 }
+
+async function restoreCooldowns(client) {
+  try {
+    const now = Date.now();
+    let restored = 0;
+    let cursor = "0";
+    do {
+      const [next, keys] = await client.scan(
+        cursor,
+        "MATCH",
+        `${COOLDOWN_REDIS_PREFIX}:*`,
+        "COUNT",
+        100
+      );
+      cursor = next;
+      if (keys.length === 0) continue;
+      const values = await client.mget(...keys);
+      keys.forEach((redisKey, index) => {
+        const until = Number(values[index]);
+        if (!(until > now)) return;
+        const key = redisKey.slice(COOLDOWN_REDIS_PREFIX.length + 1);
+        if (rememberCooldown(key, until, now)) restored++;
+      });
+    } while (cursor !== "0");
+    if (restored > 0) logger.info(`[AI Router] 已从 Redis 恢复 ${restored} 条冷却记录`);
+  } catch (error) {
+    warnCooldownRedis("恢复", error);
+  }
+}
+
+/** 进程里只恢复一次；Redis 还没就绪时不记成已恢复，下次再试。 */
+export function ensureRouteCooldownsRestored() {
+  if (cooldownRestore) return cooldownRestore;
+  const client = cooldownRedis();
+  if (!client) return Promise.resolve();
+  cooldownRestore = restoreCooldowns(client);
+  return cooldownRestore;
+}
+
+// 框架在加载插件前已连上 Redis，导入时就开始恢复；第一次路由会等它完成。
+ensureRouteCooldownsRestored();
 
 /** 稳定地把冷却中的尝试挪到末尾：都在冷却时仍会按原顺序尝试，不会直接报错。 */
 export function orderAttemptsByCooldown(attempts = [], now = Date.now()) {
@@ -512,6 +588,7 @@ export async function executeRoutePlan({
   run,
   log = (message) => logger.warn(message),
 }) {
+  await ensureRouteCooldownsRestored();
   const now = Date.now();
   const attempts = orderAttemptsByCooldown(plan?.attempts || [], now);
   const cooling = attempts.filter((attempt) => routeAttemptCooldownMs(attempt, now) > 0);
