@@ -25,7 +25,6 @@ import {
   splitToolMediaResult,
 } from "../toolResultProtocol.js";
 import { buildToolResultLogPart } from "../toolResultLog.js";
-import { shortenProgressText } from "../toolProgress.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -264,7 +263,8 @@ const MCP_TOOL_NOTICE = {
 
 function buildNotice(action, detail) {
   if (!action) return null;
-  const text = shortenProgressText(typeof detail === "string" ? detail : "");
+  // 节点里放完整详情，不截断；只有转发外显的预览会缩短
+  const text = typeof detail === "string" ? detail.trim() : "";
   // 动作名已经是转发标题，节点里只放详情；没有详情时才写动作名
   return { action, lines: [{ text: text || action }] };
 }
@@ -279,7 +279,7 @@ function describeToolCall({ name, args } = {}) {
   if (tool) {
     const action = typeof tool.getProgressText === "function" ? tool.getProgressText(toolArgs) : null;
     if (!action) return null;
-    // NAI 把主提示词和每个角色的提示词分开列出来，不截断
+    // NAI 把主提示词和每个角色的提示词分开列出来
     if (name === "NaiPainting") {
       const mainPrompt = String(toolArgs.prompt || "").trim() || "（未提供 Prompt）";
       const characters = (Array.isArray(toolArgs.characters) ? toolArgs.characters : [])
