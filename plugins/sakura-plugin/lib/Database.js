@@ -246,6 +246,30 @@ class DB {
         metadata TEXT,
         created_at INTEGER
       );
+
+      -- 单次提醒。时间均为毫秒时间戳；group_id 为空串表示私聊。
+      -- user_id 是设置人，也是提醒对象（AI 只能给用户自己设提醒）；用这个列名，群数据清理会在其离群、Bot 退群时一并删掉。
+      -- status: pending 待发 / sending 发送中 / sent 已发 / cancelled 已取消 / failed 多次发送失败 / missed 错过太久不再补发
+      CREATE TABLE IF NOT EXISTS once_reminders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        self_id TEXT NOT NULL,
+        group_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        user_name TEXT NOT NULL DEFAULT '',
+        content TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        source_message_id TEXT NOT NULL DEFAULT '',
+        origin TEXT NOT NULL DEFAULT '',
+        due_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        claimed_at INTEGER,
+        finished_at INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_once_reminders_due
+      ON once_reminders (status, due_at);
     `);
 
     // 图片随福袋持久保存，避免 QQ 临时链接失效；旧福袋仍保留纯文字内容。

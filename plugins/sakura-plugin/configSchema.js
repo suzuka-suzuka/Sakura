@@ -544,6 +544,7 @@ const ReminderTaskItemSchema = z.object({
     groupId: z.number().default(0).describe('目标群号|#groupSelect|填写后向该群推送，0 表示不使用群推送'),
     qq: z.string().default('').describe('目标QQ|在群内可用于@某人；不填则仅发送文本'),
     content: z.string().default('早安~').describe('提醒内容|#textarea|定时任务发送的文本内容'),
+    note: z.string().default('').describe('便条|#textarea|AI 设置提醒时记下的背景和原话，到点生成文案时参考；可留空'),
     createdAt: z.string().default('').describe('创建时间|ISO 时间字符串'),
     source: z.string().default('').describe('来源|任务来源标记'),
 }).describe('定时提醒项');

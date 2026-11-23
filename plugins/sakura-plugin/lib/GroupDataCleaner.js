@@ -19,9 +19,11 @@ export class GroupDataCleaner {
     return this.groupTables;
   }
 
+  // 只取合法群号：单次提醒等表用空串表示私聊，不能被当成“已退出的群”整群删除。
   groups() {
     return [...new Set(this.tables().flatMap(({ name }) =>
-      this.db.prepare(`SELECT DISTINCT group_id FROM ${quote(name)}`).all().map(row => String(row.group_id))))];
+      this.db.prepare(`SELECT DISTINCT group_id FROM ${quote(name)}`).all().map(row => String(row.group_id))))]
+      .filter(validId);
   }
 
   members(groupId) {

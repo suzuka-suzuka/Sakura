@@ -307,6 +307,7 @@ export async function runDuePersonalMemories(selfId, { redis = null, now = Date.
           `记忆中的“我”固定指当前账号（QQ：${selfId}），无论其是否发言；涉及该账号时写“我”，不带其QQ。`,
           "正文省略所属用户的主语和QQ，保留完整事实。涉及其他群友，已知QQ写“昵称（QQ：号码）”，未知不编造。",
           "每条一件事，不重复记录未变化的事实。",
+          "一次性的提醒、待办和约好的时间点（如“明天三点提醒我交报告”）不记，它们由提醒功能单独处理；长期习惯和固定作息可以记。",
           '只输出 JSON：{"memories":[{"content":"事实"}]}，不加其他字段；无新事实时 memories=[]。',
           `已有个人记忆：\n${getExistingMemoryText(e, "user", job.source) || "无"}`,
         ].join("\n");

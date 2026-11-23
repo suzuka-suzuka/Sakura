@@ -2,8 +2,9 @@ import { CronExpressionParser } from 'cron-parser'
 import Setting from '../lib/setting.js'
 import { isCronDue } from '../lib/cron.js'
 import {
-  initializeOnceReminderListener,
-  renderReminderContentWithAI,
+  deliverRepeatReminder,
+  migrateLegacyOnceReminders,
+  runDueOnceReminders,
 } from '../lib/AIUtils/reminder.js'
 import { getCurrentBotSelfId } from '../../../src/api/client.js'
 
@@ -22,22 +23,23 @@ export class reminderTask extends plugin {
 
   async init() {
     try {
-      this.removeOnceReminderListener = await initializeOnceReminderListener()
+      await migrateLegacyOnceReminders()
     } catch (error) {
-      logger.error(`[reminderTask] 初始化一次性提醒监听失败: ${error.message}`)
+      logger.error(`[reminderTask] 迁移旧版单次提醒失败: ${error.message}`)
     }
-  }
-
-  destroy() {
-    this.removeOnceReminderListener?.()
-    this.removeOnceReminderListener = null
-    super.destroy()
   }
 
   reminderTaskDispatcher = Cron('* * * * *', async (fireDate) => {
     const selfId = getCurrentBotSelfId()
     if (selfId == null) {
       return
+    }
+
+    // 单次提醒存在 SQLite，每分钟扫一次到期项；离线期间错过的会在这里补发。
+    try {
+      await runDueOnceReminders(selfId)
+    } catch (error) {
+      logger.error(`[reminderTask] 单次提醒扫描失败: ${error.message}`)
     }
 
     const config = Setting.getConfig('reminderTask')
@@ -198,33 +200,14 @@ export class reminderTask extends plugin {
   }
 
   async sendTaskMessage(task, selfId) {
-    const currentBot = this.getBot(selfId)
-    if (!currentBot) {
-      logger.warn('[reminderTask] bot 不可用，跳过本次发送')
-      return
-    }
-
-    const rawContent = String(task.content || '').trim()
     const groupId = Number(task.groupId || 0)
     const qq = String(task.qq || '').trim()
-    const content = await renderReminderContentWithAI(rawContent, {
-      groupId,
-      qq,
-      taskId: task.id,
-    })
-
-    if (groupId > 0) {
-      const message = qq ? [segment.at(qq), segment.text(` ${content}`)] : content
-      await currentBot.pickGroup(groupId).sendMsg(message)
+    if (!(groupId > 0) && !/^\d{5,11}$/.test(qq)) {
+      logger.warn(`[reminderTask] 任务目标无效: ${task.id || 'unknown'}`)
       return
     }
 
-    if (qq && /^\d{5,11}$/.test(qq)) {
-      await currentBot.pickFriend(Number(qq)).sendMsg(content)
-      return
-    }
-
-    logger.warn(`[reminderTask] 任务目标无效: ${task.id || 'unknown'}`)
+    await deliverRepeatReminder(task, selfId)
   }
 
   filterVisibleTasks(e, tasks) {
@@ -247,6 +230,7 @@ export class reminderTask extends plugin {
     const targetText = groupId > 0
       ? `群 ${groupId}${qq ? ` @${qq}` : ''}`
       : (qq ? `私聊 ${qq}` : '未设置目标')
+    const note = String(task.note || '').trim()
 
     return {
       content: [
@@ -255,8 +239,9 @@ export class reminderTask extends plugin {
         `cron：${cron}`,
         `目标：${targetText}`,
         `内容：${content}`,
+        note && `便条：${note}`,
         `创建时间：${createdAt}`,
-      ].join('\n'),
+      ].filter(Boolean).join('\n'),
     }
   }
 }
