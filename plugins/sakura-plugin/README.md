@@ -14,7 +14,7 @@ config/sakura-plugin/*.yaml
 
 在框架环境之外，本插件还需要以下能力：
 
-- Node.js 20 或更高版本。
+- Node.js 22 或更高版本（`@google/genai` 3.x 要求）。
 - pnpm 9 或更高版本。
 - Redis，经济、上下文、定时任务、订阅等功能需要使用。
 - Chrome / Chromium，菜单、签到、画像、表情包列表等截图渲染依赖 Puppeteer。
@@ -103,13 +103,11 @@ config/sakura-plugin/
 
 `AI.utilityModels` 是后台辅助模型，用于欢迎词、结构化分析、记忆整理、提醒改写（设置提醒时的人设没有可用模型时）和表情识图等后台任务。`AI.geminiModels` 用于向量检索和消息视频分析，只会使用其中 Gemini / Vertex 供应商的模型；不选时这些功能不可用。
 
-生成参数放在模型上：温度、Top-P、联网搜索和对应协议的思考参数。网页会根据模型所选供应商的协议，只显示 OpenAI 或 Gemini 对应的选项；不常改的参数收在“高级选项”里。超时默认对话和图片 300 秒、视频 900 秒，可在模型的高级选项里单独调整。
+生成参数放在模型上：联网搜索和对应协议的思考等级。网页会根据模型所选供应商的协议，只显示 OpenAI 或 Gemini 对应的选项；不常改的参数收在“高级选项”里。超时默认对话和图片 300 秒、视频 900 秒，可在模型的高级选项里单独调整。温度和 Top-P 不提供配置，一律用模型默认值。
+
+Gemini 的思考等级对应 `thinkingLevel`：最少 / 低 / 中 / 高 / 很高（`MINIMAL` / `LOW` / `MEDIUM` / `HIGH` / `XHIGH`），选“模型默认”时不发送。每个模型只支持其中一部分：最少只有 Gemini 3.x Flash / Flash-Lite 有，很高只有 Gemini 4 Hydrogen / Neon 有，选了不支持的档位请求会失败。Gemini 2.5 不接受 `thinkingLevel`，只能用“模型默认”。Gemini 3 起没有完全关闭思考的选项，旧配置里的“关闭”会按“最少”处理。
 
 旧版的 `Routes.yaml`、`ImageRoutes.yaml`、`VideoRoutes.yaml` 会在启动时自动迁移成 `Models.yaml`，各处引用的路由 ID 换成对应的模型列表（按原优先级排序）；旧文件备份在配置目录的 `_migration-backup/` 里。
-
-- `temperature` / `topP` 为 `-1` 时不发送，使用模型默认值。
-- Gemini `geminiThinkingBudget: -2` 表示使用思考等级，`-1` 表示自动预算，`0` 表示关闭。
-- 一般只调整 temperature 或 Top-P 其中一个。
 
 编辑模型时，先选择供应商，模型名会从该供应商的远程模型端点动态加载并缓存；刷新按钮会绕过缓存。远程列表不可用时可以直接输入模型名。
 

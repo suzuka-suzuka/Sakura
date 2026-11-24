@@ -99,6 +99,9 @@ export function buildGeminiClientOptions(config = {}) {
   } else {
     if (!apiKey) throw new Error("Gemini API Key 不能为空。");
     options.apiKey = apiKey;
+    // SDK 3.x 把 Gemini API 的默认版本改成了 v1，而 -preview 模型、-latest 别名只在 v1beta 上有，固定回 v1beta。
+    // Vertex 的默认仍是 v1beta1，不用管。
+    options.apiVersion = "v1beta";
   }
 
   if (baseURL || (Number.isFinite(timeout) && timeout > 0)) {

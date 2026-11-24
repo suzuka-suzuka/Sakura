@@ -17,7 +17,7 @@ Sakura 是一个基于 Node.js 的 QQ 机器人框架，支持 OneBot 正向/反
 
 ## 环境要求
 
-- Node.js 20 或更高版本，建议使用当前 LTS。
+- Node.js 22 或更高版本（`@google/genai` 3.x 要求），建议使用当前 LTS。
 - pnpm 9 或更高版本。
 - Redis 6 或更高版本。
 - Chrome / Chromium，用于 Puppeteer 截图渲染菜单、画像、卡片等图片。

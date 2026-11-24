@@ -12,7 +12,13 @@ import {
 } from './lib/AIUtils/tavilyConfig.js';
 
 const OPENAI_REASONING_EFFORT_OPTIONS = ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
-const GEMINI_THINKING_LEVEL_OPTIONS = ['default', 'off', 'minimal', 'low', 'medium', 'high'];
+// Gemini 3 起只用 thinkingLevel，官方共五档，每个模型只支持其中一部分；没有“关闭”，
+// 旧配置里的 off 按最接近的 minimal 处理。
+const GEMINI_THINKING_LEVEL_OPTIONS = ['default', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+const geminiThinkingLevel = z.preprocess(
+    (value) => (value === 'off' ? 'minimal' : value),
+    z.enum(GEMINI_THINKING_LEVEL_OPTIONS),
+);
 
 const nonEmptyString = (label) => z.string().trim().min(1, `${label}不能为空`);
 
@@ -188,14 +194,11 @@ const ModelSchema = z.object({
     type: z.enum(MODEL_TYPES).default('chat').describe(`用途|#optionLabels:${MODEL_TYPE_LABELS}|决定它出现在哪些模型选择框里`),
     nativeWebSearch: z.boolean().default(false).describe('联网搜索|#showIf:type=chat|使用模型自带的联网搜索；OpenAI 兼容端点传 web_search，Gemini 传 Google Search'),
     openaiReasoningEffort: z.enum(OPENAI_REASONING_EFFORT_OPTIONS).default('default').describe('思考等级|#showIf:type=chat|#protocol:openai|#optionLabels:default=模型默认,none=不思考,minimal=最少,low=低,medium=中,high=高,xhigh=很高,max=最高'),
-    geminiThinkingLevel: z.enum(GEMINI_THINKING_LEVEL_OPTIONS).default('default').describe('思考等级|#showIf:type=chat|#protocol:gemini|#optionLabels:default=模型默认,off=关闭,minimal=最少,low=低,medium=中,high=高'),
+    geminiThinkingLevel: geminiThinkingLevel.default('default').describe('思考等级|#showIf:type=chat|#protocol:gemini|#optionLabels:default=模型默认,minimal=最少,low=低,medium=中,high=高,xhigh=很高|各模型支持的档位不同：最少只有 Gemini 3.x Flash / Flash-Lite 有，很高只有 Gemini 4 Hydrogen / Neon 有；选了模型不支持的档位会请求失败。Gemini 2.5 只能用模型默认'),
     videoApiFormat: z.enum(['grok', 'openai']).default('grok').describe('视频接口|#showIf:type=video|#protocol:openai|#optionLabels:grok=Grok/CPA,openai=OpenAI|Grok/CPA 走 /videos/generations；OpenAI 走标准 Videos API（/videos），适用于 Seedance、可灵等中转站'),
     name: z.string().trim().default('').describe('别名|#advanced|#placeholder:留空就用模型名|同一个模型要配两套参数，或者不同供应商有同名模型时才需要填'),
     stream: z.boolean().default(false).describe('流式响应|#advanced|#showIf:type=chat|边生成边接收，全部收完后再回复；某些中转站只有流式才稳定'),
-    temperature: z.number().min(-1).max(2).default(-1).describe('温度|#advanced|#showIf:type=chat|#step:0.1|-1 表示使用模型默认值'),
-    topP: z.number().min(-1).max(1).default(-1).describe('Top-P|#advanced|#showIf:type=chat|#step:0.05|-1 表示使用模型默认值；一般不要和温度同时调整'),
     openaiEnableThinking: z.boolean().default(false).describe('enable_thinking 开关|#advanced|#showIf:type=chat|#protocol:openai|向兼容端点额外传入非标准的 enable_thinking 参数'),
-    geminiThinkingBudget: z.number().int().min(-2).default(-2).describe('思考预算|#advanced|#showIf:type=chat|#protocol:gemini|-2 跟随思考等级；-1 由模型决定；0 关闭；正数为固定 token 预算'),
     timeoutSeconds: z.number().int().min(0).max(3600).default(0).describe('超时（秒）|#advanced|0 表示按用途使用默认值：对话和图片 300 秒，视频 900 秒'),
 });
 

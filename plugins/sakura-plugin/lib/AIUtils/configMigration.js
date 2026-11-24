@@ -18,20 +18,14 @@ const CHAT_SETTING_FIELDS = [
   "openaiReasoningEffort",
   "geminiThinkingLevel",
   "stream",
-  "temperature",
-  "topP",
   "openaiEnableThinking",
-  "geminiThinkingBudget",
 ];
 const CHAT_SETTING_DEFAULTS = {
   nativeWebSearch: false,
   openaiReasoningEffort: "default",
   geminiThinkingLevel: "default",
   stream: false,
-  temperature: -1,
-  topP: -1,
   openaiEnableThinking: false,
-  geminiThinkingBudget: -2,
 };
 
 function readYaml(filePath) {

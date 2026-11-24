@@ -39,6 +39,7 @@ const GEMINI_THINKING_LEVELS = {
   low: ThinkingLevel.LOW,
   medium: ThinkingLevel.MEDIUM,
   high: ThinkingLevel.HIGH,
+  xhigh: ThinkingLevel.XHIGH,
 };
 // Gemini 因这些原因中止时，同一模型换 Key 也会被拦，直接换下一个模型。
 const GEMINI_CONTENT_FINISH_REASONS = new Set([
@@ -502,13 +503,6 @@ async function _getOpenAIResponse(
       requestPayload.enable_thinking = true;
     }
 
-    if (Number.isFinite(channel.temperature)) {
-      requestPayload.temperature = channel.temperature;
-    }
-    if (Number.isFinite(channel.topP)) {
-      requestPayload.top_p = channel.topP;
-    }
-
     const reasoningEffort = normalizeOpenAIReasoningEffort(channel.openaiReasoningEffort);
     if (reasoningEffort) {
       requestPayload.reasoning_effort = reasoningEffort;
@@ -783,21 +777,10 @@ async function _getGeminiResponse(
       requestConfig.abortSignal = timeoutSignal;
     }
 
-    if (Number.isFinite(channel.temperature)) {
-      requestConfig.temperature = channel.temperature;
-    }
-    if (Number.isFinite(channel.topP)) {
-      requestConfig.topP = channel.topP;
-    }
-
-    if (Number.isInteger(channel.geminiThinkingBudget) && channel.geminiThinkingBudget >= -1) {
-      requestConfig.thinkingConfig = {
-        thinkingBudget: channel.geminiThinkingBudget,
-      };
-    } else if (GEMINI_THINKING_LEVELS[channel.geminiThinkingLevel]) {
-      requestConfig.thinkingConfig = {
-        thinkingLevel: GEMINI_THINKING_LEVELS[channel.geminiThinkingLevel],
-      };
+    // 只发 thinkingLevel；“模型默认”时不带 thinkingConfig，交给模型自己的默认档位。
+    const thinkingLevel = GEMINI_THINKING_LEVELS[channel.geminiThinkingLevel];
+    if (thinkingLevel) {
+      requestConfig.thinkingConfig = { thinkingLevel };
     }
 
     if (fullSystemInstructionText.trim()) {

@@ -194,37 +194,16 @@ export function orderScheduledItems(items, strategy, cursorKey) {
     });
 }
 
-function configuredNumber(value) {
-  return Number.isFinite(value) && value >= 0 ? value : undefined;
+function explicitLevel(value) {
+  return value && value !== "default" ? value : undefined;
 }
 
 export function resolveGenerationSettings(_route, target) {
-  const openaiReasoningEffort = target.openaiReasoningEffort && target.openaiReasoningEffort !== "default"
-    ? target.openaiReasoningEffort
-    : undefined;
-
-  let geminiThinkingLevel;
-  let geminiThinkingBudget;
-  const explicitBudget = Number(target.geminiThinkingBudget);
-  if (Number.isInteger(explicitBudget) && explicitBudget >= -1) {
-    geminiThinkingBudget = explicitBudget;
-  } else {
-    const targetLevel = target.geminiThinkingLevel || "default";
-    if (targetLevel === "off") {
-      geminiThinkingBudget = 0;
-    } else if (targetLevel !== "default") {
-      geminiThinkingLevel = targetLevel;
-    }
-  }
-
   return {
-    temperature: configuredNumber(target.temperature),
-    topP: configuredNumber(target.topP),
     openaiEnableThinking: target.openaiEnableThinking === true,
-    openaiReasoningEffort,
+    openaiReasoningEffort: explicitLevel(target.openaiReasoningEffort),
     stream: target.stream === true,
-    geminiThinkingLevel,
-    geminiThinkingBudget,
+    geminiThinkingLevel: explicitLevel(target.geminiThinkingLevel),
   };
 }
 
