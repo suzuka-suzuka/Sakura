@@ -129,6 +129,7 @@ export function formatRouteAttemptFailure({
     const scope = COOLDOWN_SCOPE_LABELS[failure.cooldown.scope] || failure.cooldown.scope;
     line += `，${scope} 冷却 ${formatCooldown(failure.cooldown.ms)}`;
     if (failure.cooldown.upstream) line += "（上游指定）";
+    else if (failure.cooldown.strikes > 1) line += `（连续第 ${failure.cooldown.strikes} 次）`;
   }
   line += ` → ${action}`;
   if (nextAttempt && failure?.action !== "abort") line += ` ${attemptLabel(nextAttempt)}`;
@@ -230,11 +231,18 @@ const CREDENTIAL_COOLDOWN_MS = 10 * 60 * 1000;
 const RATE_LIMIT_COOLDOWN_MS = 60 * 1000;
 const PROVIDER_COOLDOWN_MS = 2 * 60 * 1000;
 const COOLDOWN_MAX_ENTRIES = 500;
+// 没带等待时间的 429 连续撞上时冷却翻倍（限流 60s→2→4…，额度耗尽 10min→20…），封顶 1 小时；
+// 成功一次清零，冷却结束后 1 小时内没再撞就忘掉，下次从基准重新算。
+const RATE_LIMIT_BACKOFF_MAX_MS = 60 * 60 * 1000;
+const RATE_LIMIT_STRIKE_FORGET_MS = 60 * 60 * 1000;
 
 // 冷却以内存 Map 为准（排序时同步读，一次请求要读好几遍）；同时写一份带 TTL 的 Redis 键，
 // 重启后读回来，免得长冷却（上游给的几个小时、供应商超时）一重启就失效、又撞一次。
+// 连续 429 次数同样内存为准、Redis 留底。
 const routeCooldowns = new Map();
+const rateLimitStrikes = new Map();
 const COOLDOWN_REDIS_PREFIX = "sakura:ai-route-cooldown:v1";
+const STRIKE_REDIS_PREFIX = "sakura:ai-route-strikes:v1";
 let cooldownRestore = null;
 
 const CREDENTIAL_ERROR_PATTERN =
@@ -359,13 +367,17 @@ export function classifyRouteFailure(error) {
     const quota = QUOTA_ERROR_PATTERN.test(message);
     const upstreamMs = upstreamRetryDelayMs(error);
     // 429 多按模型计（Gemini 配额、中转站账号池都是），只冷却这个 Key 上的这个模型，
-    // 同一 Key 的其他模型照常排队；上游给了等待时间就按它来。
+    // 同一 Key 的其他模型照常排队；上游给了等待时间就按它来，没给的按连续次数退避。
     return {
       action: ROUTE_FAILURE_ACTIONS.NEXT,
       reason: quota ? "额度耗尽" : "限流",
       cooldown: upstreamMs > 0
         ? { scope: "model", ms: upstreamMs, upstream: true }
-        : { scope: "model", ms: quota ? CREDENTIAL_COOLDOWN_MS : RATE_LIMIT_COOLDOWN_MS },
+        : {
+          scope: "model",
+          ms: quota ? CREDENTIAL_COOLDOWN_MS : RATE_LIMIT_COOLDOWN_MS,
+          backoff: true,
+        },
     };
   }
 
@@ -437,20 +449,37 @@ export function routeAttemptCooldownMs(attempt, now = Date.now()) {
   );
 }
 
+/** 写入有上限的 Map：满了先清过期的，还满就丢最早的。 */
+function setBounded(map, key, value, now, expiresAt) {
+  if (!map.has(key) && map.size >= COOLDOWN_MAX_ENTRIES) {
+    for (const [existingKey, entry] of map) {
+      if (expiresAt(entry) <= now) map.delete(existingKey);
+    }
+    if (map.size >= COOLDOWN_MAX_ENTRIES) map.delete(map.keys().next().value);
+  }
+  map.set(key, value);
+}
+
 /** 只延长不缩短；返回是否真的写入了。 */
 function rememberCooldown(key, until, now) {
   const current = routeCooldowns.get(key);
   if (current && current.until >= until) return false;
-  if (!current && routeCooldowns.size >= COOLDOWN_MAX_ENTRIES) {
-    for (const [existingKey, entry] of routeCooldowns) {
-      if (entry.until <= now) routeCooldowns.delete(existingKey);
-    }
-    if (routeCooldowns.size >= COOLDOWN_MAX_ENTRIES) {
-      routeCooldowns.delete(routeCooldowns.keys().next().value);
-    }
-  }
-  routeCooldowns.set(key, { until });
+  setBounded(routeCooldowns, key, { until }, now, (entry) => entry.until);
   return true;
+}
+
+function currentStrikes(key, now) {
+  const entry = rateLimitStrikes.get(key);
+  if (!entry) return 0;
+  if (entry.forgetAt <= now) {
+    rateLimitStrikes.delete(key);
+    return 0;
+  }
+  return entry.count;
+}
+
+function rememberStrikes(key, entry, now) {
+  setBounded(rateLimitStrikes, key, entry, now, (item) => item.forgetAt);
 }
 
 function cooldownRedis() {
@@ -460,6 +489,10 @@ function cooldownRedis() {
 
 function redisCooldownKey(key) {
   return `${COOLDOWN_REDIS_PREFIX}:${key}`;
+}
+
+function redisStrikeKey(key) {
+  return `${STRIKE_REDIS_PREFIX}:${key}`;
 }
 
 // Redis 写删失败只记一行：内存里的冷却照常生效，最多是重启后少恢复一条。
@@ -476,53 +509,95 @@ function setCooldown(key, ms, now) {
     .catch((error) => warnCooldownRedis("写入", error));
 }
 
+function setStrikes(key, count, forgetAt, now) {
+  rememberStrikes(key, { count, forgetAt }, now);
+  cooldownRedis()
+    ?.set(redisStrikeKey(key), JSON.stringify({ count, forgetAt }), "PX", Math.ceil(forgetAt - now))
+    .catch((error) => warnCooldownRedis("写入", error));
+}
+
+/**
+ * 记下这次失败的冷却，返回实际生效的 failure（日志按它写）。
+ * 没带等待时间的 429 按连续次数翻倍；冷却还没过时又撞上（被当兜底打到，或并发请求先一步记过）
+ * 不加次数，免得一次限流被翻好几倍。
+ */
 export function recordRouteFailure(attempt, failure, now = Date.now()) {
   const cooldown = failure?.cooldown;
-  if (!cooldown) return;
-  setCooldown(cooldownKey(attempt, cooldown.scope), cooldown.ms, now);
+  if (!cooldown) return failure;
+  const key = cooldownKey(attempt, cooldown.scope);
+  if (!cooldown.backoff) {
+    setCooldown(key, cooldown.ms, now);
+    return failure;
+  }
+
+  const cooling = remainingCooldown(key, now) > 0;
+  const strikes = Math.max(1, currentStrikes(key, now) + (cooling ? 0 : 1));
+  const ms = Math.min(cooldown.ms * 2 ** (strikes - 1), RATE_LIMIT_BACKOFF_MAX_MS);
+  setCooldown(key, ms, now);
+  const until = routeCooldowns.get(key)?.until ?? now + ms;
+  setStrikes(key, strikes, until + RATE_LIMIT_STRIKE_FORGET_MS, now);
+  return { ...failure, cooldown: { ...cooldown, ms: until - now, strikes } };
 }
 
 export function recordRouteSuccess(attempt) {
   // 内存在首次路由前已从 Redis 恢复，内存里没有的键 Redis 里也没有，不必每次成功都去删。
-  const cleared = [
+  const keys = [
     modelCooldownKey(attempt),
     credentialCooldownKey(attempt),
     providerCooldownKey(attempt),
-  ].filter((key) => routeCooldowns.delete(key));
+  ];
+  const cleared = [
+    ...keys.filter((key) => routeCooldowns.delete(key)).map(redisCooldownKey),
+    ...keys.filter((key) => rateLimitStrikes.delete(key)).map(redisStrikeKey),
+  ];
   if (cleared.length === 0) return;
   cooldownRedis()
-    ?.del(...cleared.map(redisCooldownKey))
+    ?.del(...cleared)
     .catch((error) => warnCooldownRedis("清除", error));
 }
 
 /** 只清内存，Redis 里的键按 TTL 自然过期。 */
 export function resetRouteCooldowns() {
   routeCooldowns.clear();
+  rateLimitStrikes.clear();
+}
+
+async function scanRedisPrefix(client, prefix, onEntry) {
+  let cursor = "0";
+  do {
+    const [next, keys] = await client.scan(cursor, "MATCH", `${prefix}:*`, "COUNT", 100);
+    cursor = next;
+    if (keys.length === 0) continue;
+    const values = await client.mget(...keys);
+    keys.forEach((redisKey, index) => onEntry(redisKey.slice(prefix.length + 1), values[index]));
+  } while (cursor !== "0");
+}
+
+function parseStrikes(value) {
+  try {
+    const { count, forgetAt } = JSON.parse(value);
+    return Number.isInteger(count) && count > 0 && Number.isFinite(forgetAt)
+      ? { count, forgetAt }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 async function restoreCooldowns(client) {
   try {
     const now = Date.now();
     let restored = 0;
-    let cursor = "0";
-    do {
-      const [next, keys] = await client.scan(
-        cursor,
-        "MATCH",
-        `${COOLDOWN_REDIS_PREFIX}:*`,
-        "COUNT",
-        100
-      );
-      cursor = next;
-      if (keys.length === 0) continue;
-      const values = await client.mget(...keys);
-      keys.forEach((redisKey, index) => {
-        const until = Number(values[index]);
-        if (!(until > now)) return;
-        const key = redisKey.slice(COOLDOWN_REDIS_PREFIX.length + 1);
-        if (rememberCooldown(key, until, now)) restored++;
-      });
-    } while (cursor !== "0");
+    await scanRedisPrefix(client, COOLDOWN_REDIS_PREFIX, (key, value) => {
+      const until = Number(value);
+      if (until > now && rememberCooldown(key, until, now)) restored++;
+    });
+    await scanRedisPrefix(client, STRIKE_REDIS_PREFIX, (key, value) => {
+      const entry = parseStrikes(value);
+      if (entry && entry.forgetAt > now && !rateLimitStrikes.has(key)) {
+        rememberStrikes(key, entry, now);
+      }
+    });
     if (restored > 0) logger.info(`[AI Router] 已从 Redis 恢复 ${restored} 条冷却记录`);
   } catch (error) {
     warnCooldownRedis("恢复", error);
@@ -602,8 +677,7 @@ export async function executeRoutePlan({
       lastAttempt = attempt;
     }
 
-    const failure = classifyRouteFailure(lastError);
-    recordRouteFailure(attempt, failure);
+    const failure = recordRouteFailure(attempt, classifyRouteFailure(lastError));
     if (failure.action === ROUTE_FAILURE_ACTIONS.NEXT_MODEL) {
       skippedTargets.add(attemptTargetKey(attempt));
     } else if (failure.action === ROUTE_FAILURE_ACTIONS.NEXT_PROVIDER) {
