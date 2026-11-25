@@ -41,9 +41,41 @@ const LENS_ENTRY_SELECTORS = [
   '[aria-label*="按圖片"][role="button"]',
 ]
 
+// 弹窗里"上传文件"按钮的文字，按整段文字精确匹配，避免命中"将图片放到此处或上传文件"这类外层容器
+const LENS_UPLOAD_BUTTON_LABELS = [
+  '上传文件',
+  '上傳檔案',
+  '上傳文件',
+  'upload a file',
+  'upload file',
+  'ファイルをアップロード',
+]
+
 const GOOGLE_LENS_LANGUAGE = 'zh-CN'
 const GOOGLE_LENS_ACCEPT_LANGUAGE = 'zh-CN,zh;q=0.9,en;q=0.8'
 const GOOGLE_IMAGES_URL = 'https://images.google.com/?hl=zh-CN&gl=CN'
+const LENS_POPUP_TIMEOUT = 10000
+const LENS_FILE_CHOOSER_TIMEOUT = 10000
+const LENS_DEBUG_SCREENSHOT = 'google-lens-debug.png'
+// 结果页：结果约 1 秒出来，AI 概览要再过 2~8 秒才开始流式输出，而且不一定有
+const LENS_RESULTS_TIMEOUT = 15000
+const LENS_AI_OVERVIEW_WAIT = 10000
+const LENS_AI_OVERVIEW_SETTLE = 2000
+const LENS_RESULTS_MAX_WAIT = 30000
+// 被 Google 限流（/sorry 页，HTTP 429）时换新浏览器会话重试，间隔按次数翻倍：3s、6s
+const GOOGLE_BLOCKED_RETRIES = 2
+const GOOGLE_BLOCKED_RETRY_DELAY = 3000
+
+class GoogleBlockedError extends Error {
+  constructor(message = 'Google 返回了人机验证/异常流量页面，请先在浏览器中完成验证，或更换出口 IP/稍后再试。') {
+    super(message)
+    this.name = 'GoogleBlockedError'
+  }
+}
+
+function isGoogleSorryUrl(url) {
+  return /\/sorry\//i.test(String(url || ''))
+}
 
 async function findLensUploadEntry(page) {
   for (const selector of LENS_ENTRY_SELECTORS) {
@@ -79,6 +111,150 @@ async function findLensUploadEntry(page) {
   return element
 }
 
+function toElementOrNull(handle) {
+  const element = handle.asElement()
+  if (!element) handle.dispose().catch(() => {})
+  return element
+}
+
+// Lens 的 input 不一定在表单里（目前直接挂在 body 上），也可能藏在 shadow root 里
+async function findLensFileInput(page) {
+  const handle = await page.evaluateHandle(() => {
+    const inputs = []
+    const walk = (root) => {
+      root.querySelectorAll('input[type="file"]').forEach(el => inputs.push(el))
+      root.querySelectorAll('*').forEach(el => {
+        if (el.shadowRoot) walk(el.shadowRoot)
+      })
+    }
+    walk(document)
+
+    return inputs.find(el => el.name === 'encoded_image') ||
+      inputs.find(el => /image/i.test(el.accept || '')) ||
+      inputs[0] ||
+      null
+  })
+
+  return toElementOrNull(handle)
+}
+
+async function findLensUploadButton(page) {
+  const handle = await page.evaluateHandle((labels) => {
+    const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase()
+    const normalizedLabels = labels.map(label => normalize(label))
+    const candidates = Array.from(document.querySelectorAll('[role="button"], button, a, span'))
+
+    return candidates.find(el => {
+      const text = normalize(el.textContent || el.getAttribute('aria-label'))
+      return normalizedLabels.includes(text) && el.getClientRects().length > 0
+    }) || null
+  }, LENS_UPLOAD_BUTTON_LABELS)
+
+  return toElementOrNull(handle)
+}
+
+// check 抛错（如导航中执行上下文被销毁）按未满足处理，继续轮询
+async function pollUntil(check, timeout, interval = 300) {
+  const deadline = Date.now() + timeout
+
+  while (true) {
+    if (await check().catch(() => false)) return true
+    if (Date.now() >= deadline) return false
+    await delay(interval)
+  }
+}
+
+async function waitForLensUploadControl(page, timeout) {
+  let control = null
+
+  await pollUntil(async () => {
+    const input = await findLensFileInput(page)
+    if (input) return (control = { input })
+
+    const button = await findLensUploadButton(page)
+    if (button) return (control = { button })
+
+    return false
+  }, timeout, 500)
+
+  return control
+}
+
+async function openLensUploadControl(page, lensIcon) {
+  // 先用 DOM click：坐标点击会被登录提示、推广浮层之类的遮罩吞掉，弹窗就不会打开
+  await lensIcon.evaluate(el => el.click())
+  const control = await waitForLensUploadControl(page, LENS_POPUP_TIMEOUT)
+  if (control) return control
+
+  // 少数情况下入口只响应真实鼠标事件，再试一次
+  await lensIcon.click().catch(() => {})
+  return waitForLensUploadControl(page, LENS_POPUP_TIMEOUT / 2)
+}
+
+async function uploadImageToLens(page, control, imagePath) {
+  if (control.input) {
+    await control.input.uploadFile(imagePath)
+    return
+  }
+
+  // 有的版本只在点"上传文件"时才临时创建 input（不挂进 DOM），只能拦截文件选择框
+  const [chooser] = await Promise.all([
+    page.waitForFileChooser({ timeout: LENS_FILE_CHOOSER_TIMEOUT }),
+    control.button.evaluate(el => el.click()),
+  ])
+  await chooser.accept([imagePath])
+}
+
+// 等结果出现；有 AI 概览就等它连续 LENS_AI_OVERVIEW_SETTLE 不再变化（生成完），
+// 没有就在结果出现后最多再等 LENS_AI_OVERVIEW_WAIT。被重定向到 /sorry 立即返回
+async function waitForLensResults(page) {
+  const start = Date.now()
+  let resultsAt = 0
+  let lastSnapshot = ''
+  let stableSince = 0
+
+  while (!isGoogleSorryUrl(page.url())) {
+    const now = Date.now()
+    if (now - start >= LENS_RESULTS_MAX_WAIT) return
+
+    const state = await page.evaluate(() => {
+      const text = document.body?.innerText || ''
+      return {
+        hasResults: document.querySelectorAll('a[href]:not([href*="google.com"])').length > 3 ||
+          Boolean(document.querySelector('a[href*="/goto"]')),
+        hasAiOverview: /AI 概览|AI Overview/.test(text),
+        snapshot: `${document.querySelectorAll('a[href]').length}|${text.length}`,
+      }
+    }).catch(() => null)
+
+    if (state?.hasResults) {
+      if (!resultsAt) resultsAt = now
+      if (state.snapshot !== lastSnapshot) {
+        lastSnapshot = state.snapshot
+        stableSince = now
+      }
+
+      if (state.hasAiOverview ? now - stableSince >= LENS_AI_OVERVIEW_SETTLE : now - resultsAt >= LENS_AI_OVERVIEW_WAIT) {
+        return
+      }
+    } else if (now - start >= LENS_RESULTS_TIMEOUT) {
+      return
+    }
+
+    await delay(500)
+  }
+}
+
+async function saveDebugScreenshot(page) {
+  const screenshotPath = path.resolve(plugindata, LENS_DEBUG_SCREENSHOT)
+  try {
+    await page.screenshot({ path: screenshotPath, fullPage: true })
+    return screenshotPath
+  } catch {
+    return ''
+  }
+}
+
 async function assertGooglePageUsable(page) {
   const pageState = await page.evaluate(() => ({
     url: window.location.href,
@@ -89,10 +265,10 @@ async function assertGooglePageUsable(page) {
 
   if (
     pageState.hasCaptcha ||
-    /\/sorry\//i.test(pageState.url) ||
+    isGoogleSorryUrl(pageState.url) ||
     /unusual traffic|detected unusual traffic|captcha|recaptcha|人机验证|異常なトラフィック/i.test(pageState.text)
   ) {
-    throw new Error('Google 返回了人机验证/异常流量页面，请先在浏览器中完成验证，或更换出口 IP/稍后再试。')
+    throw new GoogleBlockedError()
   }
 }
 
@@ -116,7 +292,31 @@ async function prepareChineseGoogleLocale(page) {
 }
 
 export async function searchGoogleLens(imagePath, options = {}) {
-  const { googleLogin = true } = options
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      // 重试时不再等 120 秒手动登录，第一次已经等过了
+      return await runGoogleLensSearch(imagePath, attempt === 0 ? options : { ...options, waitForLogin: false })
+    } catch (error) {
+      if (error instanceof GoogleBlockedError) {
+        if (attempt < GOOGLE_BLOCKED_RETRIES) {
+          const wait = GOOGLE_BLOCKED_RETRY_DELAY * 2 ** attempt
+          logger.warn(`[ImageSearch][GoogleLens] Google 限流（人机验证/429），${wait / 1000} 秒后重试（${attempt + 1}/${GOOGLE_BLOCKED_RETRIES}）`)
+          await delay(wait)
+          continue
+        }
+
+        logger.error(`[ImageSearch][GoogleLens] Google 连续 ${attempt + 1} 次限流，放弃本次搜图`)
+        throw new GoogleBlockedError(`Google 连续 ${attempt + 1} 次返回人机验证/限流页面，请稍后再试，或在浏览器中完成验证/更换出口 IP。`)
+      }
+
+      logger.error('[ImageSearch][GoogleLens] 执行过程遭遇异常:', error)
+      throw error
+    }
+  }
+}
+
+async function runGoogleLensSearch(imagePath, options = {}) {
+  const { googleLogin = true, waitForLogin = googleLogin } = options
   const userDataDir = path.resolve(plugindata, 'google-lens-profile')
   const profileExists = fs.existsSync(userDataDir)
   const useProfile = profileExists || googleLogin
@@ -145,7 +345,7 @@ export async function searchGoogleLens(imagePath, options = {}) {
 
     const signInButton = await page.$('a[href^="https://accounts.google.com/ServiceLogin"]')
     if (signInButton) {
-      if (googleLogin) {
+      if (waitForLogin) {
         logger.info('[ImageSearch][GoogleLens] 检测到未登录状态，请在弹出的浏览器窗口中手动登录，程序将等待 120秒...')
         try {
           await page.waitForFunction(() => !document.querySelector('a[href^="https://accounts.google.com/ServiceLogin"]'), { timeout: 120000 })
@@ -187,36 +387,32 @@ export async function searchGoogleLens(imagePath, options = {}) {
       throw new Error(`无法在谷歌页面中找到 Lens 上传入口。当前页面: ${pageBrief.title || '无标题'} ${pageBrief.url} ${pageBrief.text}`)
     }
 
-    await lensIcon.click()
-    await delay(3000)
-
-    const fileInputs = await page.$$('input[type="file"]')
-    if (!fileInputs.length) {
-      throw new Error('弹出区域内没有找到文件上传控件。')
+    const uploadControl = await openLensUploadControl(page, lensIcon)
+    if (!uploadControl) {
+      await assertGooglePageUsable(page)
+      const pageBrief = await getPageBrief(page)
+      const screenshotPath = await saveDebugScreenshot(page)
+      if (screenshotPath) {
+        logger.warn(`[ImageSearch][GoogleLens] 未找到上传控件，页面截图已保存到 ${screenshotPath}`)
+      }
+      throw new Error(`弹出区域内没有找到文件上传控件。当前页面: ${pageBrief.title || '无标题'} ${pageBrief.url} ${pageBrief.text}`)
     }
-
-    const absoluteImagePath = path.resolve(imagePath)
-    await fileInputs[0].uploadFile(absoluteImagePath)
 
     const urlBeforeUpload = page.url()
-    try {
-      await page.waitForFunction(
-        (prevUrl) => window.location.href !== prevUrl && (
-          window.location.href.includes('/search') || window.location.href.includes('lens.google')
-        ),
-        { timeout: 30000 },
-        urlBeforeUpload
-      )
-    } catch {
-    }
+    await uploadImageToLens(page, uploadControl, path.resolve(imagePath))
 
-    try {
-      await page.waitForFunction(
-        () => document.querySelectorAll('a[href]:not([href*="google.com"])').length > 3 ||
-          Boolean(document.querySelector('a[href*="/goto"]')),
-        { timeout: 15000 }
-      )
-    } catch {
+    // 上传后页面会跳转：跨导航的 waitForFunction 在 rebrowser-puppeteer 下等不到新文档，
+    // 每次都会白等满超时，所以这里改成在 Node 侧轮询
+    await pollUntil(async () => {
+      const url = page.url()
+      return url !== urlBeforeUpload && (url.includes('/search') || url.includes('lens.google'))
+    }, 30000)
+
+    await waitForLensResults(page)
+
+    // 结果页正文可能本来就提到"人机验证"之类的词，这里只认 /sorry 地址，不复用正文匹配
+    if (isGoogleSorryUrl(page.url())) {
+      throw new GoogleBlockedError()
     }
 
     const scrapedData = await page.evaluate(() => {
@@ -488,9 +684,6 @@ export async function searchGoogleLens(imagePath, options = {}) {
       aiText: sanitizeGoogleAiText(resolvedData.aiText),
       items: dedupeBy(resolvedData.results, item => `${item.url}|${item.title}`),
     }
-  } catch (error) {
-    logger.error('[ImageSearch][GoogleLens] 执行过程遭遇异常:', error)
-    throw error
   } finally {
     await browser.close()
   }
