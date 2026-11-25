@@ -166,7 +166,11 @@ export function sanitizeGoogleAiText(text = '') {
     .trim()
 
   // 移除开头的 "AI 概览" 或 "AI Overview"（可能带空格或换行）
-  normalized = normalized.replace(/^(AI\s*概览|AI\s*Overview)\n?/i, '').trim()
+  normalized = normalized
+    .replace(/^(AI\s*概览|AI\s*Overview)\n?/i, '')
+    .trim()
+    .replace(/^AI\s*模式已回复[:：]?\s*/u, '')
+    .trim()
 
   normalized = normalized
     .replace(/\s*在 AI 模式下深入探索[\s\S]*$/u, '')

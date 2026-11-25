@@ -565,31 +565,55 @@ async function runGoogleLensSearch(imagePath, options = {}) {
           /^(更多|更多内容|反馈|分享|复制链接|打开|查看|访问|搜索|图片|网页|登录|设置|工具|more|feedback|share|copy link|open|visit|search|images|sign in|settings|tools)$/i.test(normalized)
       }
 
+      // 同一网址常同时出现在行内角标（只有站名，如 "Pinterest"）和来源卡片（站名 + 标题）里，保留更完整的那个标题
       const collectLinks = (root, allowGoogleLink = false) => {
-        const seen = new Set()
-        const seenUrls = new Set()
-        const links = []
+        const linksByUrl = new Map()
 
         Array.from(root.querySelectorAll('a[href]')).forEach(a => {
-          const text = normalizeInlineText(
-            a.innerText ||
+          const cardLines = String(a.innerText || '').split('\n').map(line => normalizeInlineText(line)).filter(Boolean)
+          let text = cardLines.join(' · ') || normalizeInlineText(
             a.textContent ||
             a.getAttribute('aria-label') ||
             a.getAttribute('title') ||
             '链接'
           )
-          const url = normalizeHref(a.href, allowGoogleLink, text)
+          if (text.length > 80) text = `${text.slice(0, 79)}…`
 
+          const url = normalizeHref(a.href, allowGoogleLink, text)
           if (!url || isNoisyLinkText(text)) return
 
-          const key = `${text}|${url}`
-          if (seen.has(key) || seenUrls.has(url)) return
-          seen.add(key)
-          seenUrls.add(url)
-          links.push({ text, url })
+          const existing = linksByUrl.get(url)
+          if (!existing) {
+            linksByUrl.set(url, { text, url })
+          } else if (text.length > existing.text.length) {
+            existing.text = text
+          }
         })
 
-        return links
+        return Array.from(linksByUrl.values())
+      }
+
+      // 读正文时临时隐藏来源卡片（多行文字的 <a>：站名 + 标题）和行内来源角标（"Pinterest +1" 这类 <button>），
+      // 否则它们的文字会穿插进 innerText；单行的 <a> 可能是正文里的行内链接，保留。读完恢复原样
+      const readAnswerText = (root) => {
+        const hidden = Array.from(root.querySelectorAll('button, a[href]')).filter(el =>
+          el.tagName === 'BUTTON' || String(el.innerText || '').trim().includes('\n')
+        )
+        const saved = hidden.map(el => [el.style.getPropertyValue('display'), el.style.getPropertyPriority('display')])
+        hidden.forEach(el => el.style.setProperty('display', 'none', 'important'))
+
+        try {
+          return root.innerText
+        } finally {
+          hidden.forEach((el, index) => {
+            const [value, priority] = saved[index]
+            if (value) {
+              el.style.setProperty('display', value, priority)
+            } else {
+              el.style.removeProperty('display')
+            }
+          })
+        }
       }
 
       const applyMarkdownLinks = (text, links) => {
@@ -621,9 +645,12 @@ async function runGoogleLensSearch(imagePath, options = {}) {
 
           for (let index = 0; index < 6; index += 1) {
             if (container && container.innerText && container.innerText.length > header.innerText.length + 30) {
-              const collectedLinks = collectLinks(container, true)
+              // 只取答案主列：标题栏里藏着"前往 Google 首页""开始新的 AI 模式搜索"之类的按钮链接；
+              // Google 自家链接也不收（/url?q=、/goto 跳转仍会被 normalizeHref 解出真实地址）
+              const answerRoot = container.querySelector('[data-container-id="main-col"]') || container
+              const collectedLinks = collectLinks(answerRoot, false)
               aiLinks = collectedLinks.map(link => link.url)
-              aiText = applyMarkdownLinks(container.innerText, collectedLinks)
+              aiText = applyMarkdownLinks(readAnswerText(answerRoot), collectedLinks)
               break
             }
             if (container) container = container.parentElement
