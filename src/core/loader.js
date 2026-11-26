@@ -42,6 +42,19 @@ const DEFAULT_ACK_EMOJI = 124;
 const PRIVATE_MESSAGE_PLUGIN = "system";
 
 /**
+ * 是不是「邀请 bot 进群」的申请。SnowLuma 带 invited_id=bot 自己；NapCat 不带 invited_id。
+ * 群成员邀请别人入群 SnowLuma 也报 invite，但 invited_id 是被邀请人，不算。
+ */
+function isBotGroupInvite(e) {
+  if (e.post_type !== "request" || e.request_type !== "group" || e.sub_type !== "invite") {
+    return false;
+  }
+  const invitedId = Number(e.invited_id);
+  if (!Number.isSafeInteger(invitedId) || invitedId <= 0) return true;
+  return invitedId === Number(e.self_id);
+}
+
+/**
  * 群聊指令的统一"收到"回应：处理慢于 ACK_DELAY_MS 且这个指令自己没回复过才贴表情。
  * 很快放行(return false)或直接回复的指令不会被打扰。
  * scope 是本次执行的回应记录（见 event.js 的 ackScope），前面别的处理器回复过不算。返回取消函数。
@@ -759,7 +772,8 @@ export class PluginLoader {
         }
       }
 
-      if (group_id) {
+      // 邀请 bot 进群时 bot 还不在那个群，群号不在白名单里，按群过滤会把邀请吞掉
+      if (group_id && !isBotGroupInvite(e)) {
         if (config.whiteGroups.length > 0) {
           const whiteGroups = config.whiteGroups.map(String);
           if (!whiteGroups.includes(String(group_id))) {
