@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <title>私聊 AI 设置</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>私聊 AI 设置</span>
+    </div>
+    <div class="account" id="account" hidden>
+      <span class="account-id" id="accountId"></span>
+      <button type="button" class="link-button" id="logoutButton">退出</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel" id="loginView" hidden>
+      <h1>登录</h1>
+      <p class="muted">在 QQ 私聊里给机器人发送 <code>#设置</code>，会收到登录链接和登录码。点链接会自动登录，打不开时把登录码填在下面。</p>
+      <form id="loginForm" class="stack" novalidate>
+        <label class="field">
+          <span class="field-label">登录码</span>
+          <input id="codeInput" name="code" inputmode="text" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" maxlength="16" placeholder="例如 ABCD2345" required>
+        </label>
+        <button type="submit" class="primary" id="loginButton">登录</button>
+        <p class="message" id="loginMessage" role="status"></p>
+      </form>
+    </section>
+
+    <form id="settingsView" class="stack-lg" hidden novalidate>
+      <div class="status" id="statusBox" role="status">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="statusText"></span>
+      </div>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>人设</h2>
+          <span class="counter" id="personaCounter"></span>
+        </div>
+        <p class="muted">写清楚 AI 的名字、性格、说话方式、和你的关系，越具体越好。修改人设后，之前的对话记录会自动清空。</p>
+        <textarea id="personaInput" rows="12" placeholder="例如：你叫小樱，是我的青梅竹马，性格温柔但有点爱吐槽。说话简短口语化，喜欢用“呐”结尾。你叫我“阿哲”。"></textarea>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>AI 接口</h2>
+        </div>
+        <p class="muted">用你自己的 API Key，费用由你的账户承担。支持 OpenAI 兼容格式的接口。Key 加密保存，页面上只显示首尾几位。</p>
+
+        <div class="presets" id="presets" role="group" aria-label="常用接口">
+          <button type="button" class="chip" data-url="https://api.deepseek.com/v1" data-model="deepseek-chat">DeepSeek</button>
+          <button type="button" class="chip" data-url="https://api.siliconflow.cn/v1">硅基流动</button>
+          <button type="button" class="chip" data-url="https://openrouter.ai/api/v1">OpenRouter</button>
+          <button type="button" class="chip" data-url="https://generativelanguage.googleapis.com/v1beta/openai">Gemini</button>
+          <button type="button" class="chip" data-url="https://api.moonshot.cn/v1">Kimi</button>
+        </div>
+
+        <div class="stack">
+          <label class="field">
+            <span class="field-label">接口地址</span>
+            <input id="baseURLInput" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://api.example.com/v1">
+          </label>
+          <label class="field">
+            <span class="field-label">API Key</span>
+            <input id="apiKeyInput" type="password" autocomplete="new-password" spellcheck="false" placeholder="sk-...">
+            <span class="field-hint" id="apiKeyHint"></span>
+          </label>
+          <label class="field">
+            <span class="field-label">模型</span>
+            <div class="input-row">
+              <input id="modelInput" list="modelList" autocomplete="off" spellcheck="false" placeholder="例如 deepseek-chat">
+              <button type="button" class="secondary" id="fetchModelsButton">获取列表</button>
+            </div>
+            <datalist id="modelList"></datalist>
+            <span class="field-hint" id="modelHint"></span>
+          </label>
+          <div class="input-row">
+            <button type="button" class="secondary" id="testButton">测试连接</button>
+            <p class="message inline" id="testMessage" role="status"></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>对话记录</h2>
+        </div>
+        <div class="input-row spread">
+          <p class="muted" id="historyText"></p>
+          <button type="button" class="danger" id="clearHistoryButton">清空</button>
+        </div>
+      </section>
+
+      <div class="savebar">
+        <p class="message" id="saveMessage" role="status"></p>
+        <button type="submit" class="primary" id="saveButton">保存</button>
+      </div>
+    </form>
+
+    <p class="loading" id="loadingView">加载中…</p>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

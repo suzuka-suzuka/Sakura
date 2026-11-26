@@ -409,6 +409,8 @@ async function _getOpenAIResponse(
     ...(channel.baseURL?.trim() && { baseURL: channel.baseURL.trim() }),
     maxRetries: 0,
     ...(Number.isFinite(timeoutMs) && timeoutMs > 0 && { timeout: Math.trunc(timeoutMs) }),
+    // 用户自带接口时由调用方传入受限的 fetch（只连公网 HTTPS、不跟随重定向）
+    ...(typeof channel.fetch === "function" && { fetch: channel.fetch }),
   });
 
   try {
@@ -1002,6 +1004,38 @@ async function _getGeminiResponse(
   } catch (error) {
     logRequestErrorStack(error);
     throw normalizeRequestError(error, { timedOut: timeoutSignal?.aborted === true });
+  }
+}
+
+/**
+ * 用调用方给的单个 OpenAI 兼容渠道直接请求，不走模型路由，也不记 Key 冷却。
+ * 给用户自带 Key 的私聊 AI 用：Key 属于用户本人，不能混进全局的冷却和轮换。
+ * 不带工具、不带群上下文。成功返回与 getAI 相同的结果对象，失败返回错误说明字符串。
+ */
+export async function getAIWithChannel(
+  channel,
+  e,
+  queryParts,
+  presetPrompt,
+  historyContents = [],
+  { includeCurrentTime = false } = {}
+) {
+  const config = { ...channel, channelType: "openai" };
+  try {
+    const result = await _getOpenAIResponse(
+      config,
+      e,
+      queryParts,
+      presetPrompt,
+      false,
+      false,
+      historyContents,
+      { includeCurrentTime }
+    );
+    if (result instanceof Error) return result.message || "未知错误";
+    return { ...result, sourceProtocol: "openai" };
+  } catch (error) {
+    return normalizeRequestError(error).message || "未知错误";
   }
 }
 

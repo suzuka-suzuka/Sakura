@@ -156,6 +156,21 @@ export const ActiveChatSchema = z.object({
     Groups: z.array(z.number()).default([]).describe('主动聊天群号|#groupSelect|在这些群中启用主动聊天功能'),
 }).describe('主动聊天');
 
+export const DEFAULT_PRIVATE_CHAT_BASE_PROMPT = '你正在 QQ 私聊里和一位用户聊天，下面的人设是这位用户为你设定的，请按人设说话。\n回复要像真人聊天一样自然，不要使用 Markdown 格式（标题、列表、加粗、代码块）。';
+
+export const PrivateChatSchema = z.object({
+    enable: z.boolean().default(false).describe('启用私聊 AI|#group:基本|好友私聊发的每条消息都交给 AI 回复；用户要先在设置页面里填好人设和自己的 API'),
+    basePrompt: z.string().default(DEFAULT_PRIVATE_CHAT_BASE_PROMPT).describe('底座提示词|#group:基本|#textarea|放在用户人设前面，用户改不了；写私聊的说话规则'),
+    mergeSeconds: z.number().min(0).max(30).default(3).describe('连发合并等待（秒）|#group:对话|#step:0.5|最后一条消息之后安静这么久再回复，连发的几条合成一次'),
+    historyRounds: z.number().int().min(0).max(200).default(20).describe('保留对话轮数|#group:对话|每个用户保留最近多少轮对话'),
+    maxPersonaLength: z.number().int().min(100).max(20000).default(4000).describe('人设字数上限|#group:对话'),
+    timeoutSeconds: z.number().int().min(10).max(600).default(120).describe('请求超时（秒）|#group:对话'),
+    splitMessage: z.boolean().default(true).describe('按行拆成几条发|#group:对话|回复里有换行时拆成多条消息，最多 5 条'),
+    publicUrl: z.string().trim().default('').describe('设置页面对外地址|#group:设置页面|#placeholder:https://ai.example.com|发给用户的登录链接用这个地址；反代到下面的端口'),
+    webHost: z.string().trim().default('127.0.0.1').describe('监听地址|#group:设置页面|#advanced|走反代时保持 127.0.0.1；改成 0.0.0.0 会直接对外开放'),
+    webPort: z.number().int().min(1).max(65535).default(1136).describe('监听端口|#group:设置页面|不能和配置面板的端口相同'),
+}).describe('私聊 AI|好友私聊直接和 AI 聊天，人设和 API 由用户在设置页面自己填');
+
 export const AutoCleanupSchema = z.object({
     groups: z.array(z.number()).default([]).describe('自动清理群号|#groupSelect|清除小于1级和半年未发言的人'),
 }).describe('自动清理');
@@ -570,6 +585,7 @@ export const configSchema = {
     'roles': RolesSchema,
     'mimic': MimicSchema,
     'ActiveChat': ActiveChatSchema,
+    'PrivateChat': PrivateChatSchema,
     'TavilyMCP': TavilyMCPSchema,
     'EditImage': EditImageSchema,
     'nai': NaiSchema,
@@ -614,6 +630,7 @@ export const schemaNavigation = [
             { key: 'roles', title: '人设', icon: 'users', description: '角色的系统提示词，在触发设定、伪人和戳一戳里按名字引用。', modules: ['roles'] },
             { key: 'mimic', title: '伪人', icon: 'ghost', modules: ['mimic'] },
             { key: 'ai-extra', title: '主动聊天与联网', icon: 'brain', modules: ['ActiveChat', 'TavilyMCP'] },
+            { key: 'private-chat', title: '私聊 AI', icon: 'message', description: '私聊只走这个入口：好友发的消息都交给 AI，人设和 API 由用户在设置页面自己填。', modules: ['PrivateChat'] },
         ],
     },
     {

@@ -36,6 +36,12 @@ const ACK_DELAY_MS = 400;
 const DEFAULT_ACK_EMOJI = 124;
 
 /**
+ * 私聊消息只交给这个插件目录（框架自带的管理指令），以及显式声明 allowPrivate 的插件/处理器。
+ * 其余插件的指令和监听都只在群里生效，私聊留给专门的私聊入口。
+ */
+const PRIVATE_MESSAGE_PLUGIN = "system";
+
+/**
  * 群聊指令的统一"收到"回应：处理慢于 ACK_DELAY_MS 且这个指令自己没回复过才贴表情。
  * 很快放行(return false)或直接回复的指令不会被打扰。
  * scope 是本次执行的回应记录（见 event.js 的 ackScope），前面别的处理器回复过不算。返回取消函数。
@@ -119,6 +125,8 @@ export class PluginLoader {
     this.pluginDirs = [];
     this.watchers = [];
     this.loadedPlugins = new Map();
+    /** 能处理私聊消息的插件实例（plugins/system 或声明了 allowPrivate），用于过滤私聊里挂着的多步对话 */
+    this.privateInstances = new WeakSet();
     this.configToPlugins = new Map();
     /** 记录每个插件文件对应的动态 import URL，用于卸载时清理模块缓存 */
     this.loadedModuleUrls = new Map();
@@ -294,6 +302,8 @@ export class PluginLoader {
 
           const handlers = instance[PLUGIN_HANDLERS] || [];
           const pluginName = this._getPluginNameFromPath(filePath);
+          const pluginAllowsPrivate = pluginName === PRIVATE_MESSAGE_PLUGIN || instance.allowPrivate === true;
+          if (pluginAllowsPrivate) this.privateInstances.add(instance);
 
           for (const handler of handlers) {
             if (handler.type === "cron" && handler.cronExpression) {
@@ -337,6 +347,7 @@ export class PluginLoader {
                 handler,
                 priority,
                 filePath,
+                privateAllowed: pluginAllowsPrivate || handler.allowPrivate === true,
               });
             }
           }
@@ -785,12 +796,17 @@ export class PluginLoader {
     };
     return logContext.run(_logCtx, () => withBotContext(e.self_id, () => eventStorage.run(eventObj, async () => {
 
+      const privateMessage = e.post_type === "message" && e.message_type === "private";
       let context = null;
       if (!poweredOff) {
         context = buildContextKey(e, true) ? contexts[buildContextKey(e, true)] : null;
         if (!context && e.user_id) {
           context = contexts[buildContextKey(e, false)];
         }
+      }
+      // 群里发起、按用户挂着的多步对话也会接到私聊消息；不处理私聊的插件不让它吞掉
+      if (context && privateMessage && !this.privateInstances.has(context.plugin)) {
+        context = null;
       }
       if (context) {
         const { plugin, method } = context;
@@ -809,6 +825,7 @@ export class PluginLoader {
       for (const item of handlers) {
         const { instance, handler } = item;
         if (poweredOff && !handler.whileOff) continue;
+        if (privateMessage && !item.privateAllowed) continue;
         instance.e = eventObj;
         let economy = null;
         let cancelAck = null;

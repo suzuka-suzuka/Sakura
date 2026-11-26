@@ -270,6 +270,20 @@ class DB {
 
       CREATE INDEX IF NOT EXISTS idx_once_reminders_due
       ON once_reminders (status, due_at);
+
+      -- 私聊 AI：每个 QQ 一行，用户在设置网页里填人设和自己的 OpenAI 兼容接口。
+      -- api_key 是加密后的密文（见 lib/privateChat/secret.js）；history 是 getAI 格式的对话历史 JSON。
+      -- 没有 group_id 列，群数据清理不会碰它。
+      CREATE TABLE IF NOT EXISTS private_chat_users (
+        user_id TEXT PRIMARY KEY,
+        persona TEXT NOT NULL DEFAULT '',
+        api_base_url TEXT NOT NULL DEFAULT '',
+        api_model TEXT NOT NULL DEFAULT '',
+        api_key TEXT NOT NULL DEFAULT '',
+        history TEXT NOT NULL DEFAULT '[]',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `);
 
     // 图片随福袋持久保存，避免 QQ 临时链接失效；旧福袋仍保留纯文字内容。

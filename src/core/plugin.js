@@ -23,6 +23,7 @@ export const HANDLER_METADATA = Symbol.for("HANDLER_METADATA");
  * 配置对象里的 ack 控制"收到指令"的表情回应（见 loader 的 scheduleAck）：
  * 不写 = 处理超过一小段时间还没回复就自动贴 124；false = 不贴；数字 = 换成该表情 ID。
  * whileOff: true 表示账号软关机期间仍然响应（见 core/powerState.js），只该给 #开机 这种指令用。
+ * allowPrivate: true 表示私聊里也响应。私聊消息默认只交给 plugins/system 的处理器（见 loader），其他插件要显式声明。
  */
 export function Command(reg, ...args) {
   const handler = args.pop();
@@ -36,6 +37,7 @@ export function Command(reg, ...args) {
   let preflight;
   let ack;
   let whileOff;
+  let allowPrivate;
 
   if (typeof eventOrPriorityOrOptions === "number") {
     p = eventOrPriorityOrOptions;
@@ -57,6 +59,7 @@ export function Command(reg, ...args) {
     preflight = eventOrPriorityOrOptions.preflight;
     ack = eventOrPriorityOrOptions.ack;
     whileOff = eventOrPriorityOrOptions.whileOff === true;
+    allowPrivate = eventOrPriorityOrOptions.allowPrivate === true;
   }
 
   if (typeof handler === "function") {
@@ -70,6 +73,7 @@ export function Command(reg, ...args) {
       preflight,
       ack,
       whileOff,
+      allowPrivate,
     };
   }
   return handler;
@@ -83,6 +87,7 @@ export function Command(reg, ...args) {
  * @param {Function} handler 处理函数
  *
  * 配置对象里的 whileOff: true 表示账号软关机期间仍然处理，只该给掉线通知这种必须送达的事件用。
+ * allowPrivate: true 表示也处理私聊消息（同 Command）。
  */
 export function OnEvent(eventName, ...args) {
   const handler = args.pop();
@@ -94,6 +99,7 @@ export function OnEvent(eventName, ...args) {
   let economy;
   let preflight;
   let whileOff;
+  let allowPrivate;
 
   if (typeof arg1 === "object" && arg1 !== null) {
     priority = arg1.priority;
@@ -101,6 +107,7 @@ export function OnEvent(eventName, ...args) {
     economy = arg1.economy;
     preflight = arg1.preflight;
     whileOff = arg1.whileOff === true;
+    allowPrivate = arg1.allowPrivate === true;
   } else if (typeof arg1 === "number") {
     priority = arg1;
     if (typeof arg2 === "string") {
@@ -128,6 +135,7 @@ export function OnEvent(eventName, ...args) {
       economy,
       preflight,
       whileOff,
+      allowPrivate,
     };
   }
   return handler;
@@ -182,6 +190,7 @@ export class plugin {
       log = false,
       permission,
       ack,  // 插件级默认的指令表情回应，单个 Command 的 ack 优先
+      allowPrivate = false,  // 整个插件都处理私聊消息（默认只有 plugins/system 处理）
       configWatch,  // 声明依赖的配置文件名，配置变更时自动重载插件
     } = config;
 
@@ -191,6 +200,7 @@ export class plugin {
     this.log = log;
     this.permission = permission;
     this.ack = ack;
+    this.allowPrivate = allowPrivate === true;
     this.configWatch = configWatch;  // 如 "teatime" 或 ["teatime", "AI"]
     this.jobs = [];
     this._eventFallback = null;
