@@ -928,6 +928,7 @@ export class Group {
  *   bot.sendGroupMsg(group_id, message)         // 保留的自定义方法
  *   bot.setGroupBan({ group_id, user_id, ... }) // Proxy 自动转发 → ws.set_group_ban(params)
  *   bot.anyNewApi({ ... })                       // 任何 OneBot v11 API 无需修改代码
+ *   bot.callApi("set_qq_avatar", { file })       // 失败时抛错而不是返回 null
  */
 export class OneBotApi {
   constructor(ws, selfId) {
@@ -1039,11 +1040,20 @@ export class OneBotApi {
   }
 
   /**
-   * 兜底请求方法 —— 直接调用 OneBotWsClient.send()
+   * 调用协议端接口，失败时抛出协议端返回的错误。
+   * 需要把失败原因告诉用户、或要分清成败时用这个：sendRequest 失败返回 null，
+   * 而 set_*_request 之类的接口成功时 data 本来就是 null。
+   */
+  async callApi(action, params) {
+    return this.ws.send(action, params || {}, { selfId: this._selfId });
+  }
+
+  /**
+   * 兜底请求方法：失败只记日志并返回 null（驼峰代理方法都走这里）
    */
   async sendRequest(action, params) {
     try {
-      return await this.ws.send(action, params || {}, { selfId: this._selfId });
+      return await this.callApi(action, params);
     } catch (e) {
       logger.error(`Request ${action} failed: ${e.message || e}`);
       return null;

@@ -11,14 +11,6 @@ const NOTICE_TTL = 7 * 24 * 60 * 60;
 const HINT = "引用本条回复「同意」或「拒绝」";
 
 /**
- * 直接走 ws 调接口：bot 代理上的 sendRequest 失败时只记日志返回 null，
- * 而 set_*_request 成功时 data 本来就是 null，分不出成败。这里要把失败原因告诉主人。
- */
-function callStrict(e, action, params) {
-  return e.bot.ws.send(action, params, { selfId: e.self_id });
-}
-
-/**
  * 是不是「有人邀请 bot 进群」。
  * SnowLuma：invited_id 就是 bot 自己（群成员邀请别人入群也是 invite，invited_id 是被邀请人）。
  * NapCat 邀请 bot 时不带 invited_id；SnowLuma 解析不到被邀请人时也不带，这时看 bot 在不在群里。
@@ -36,7 +28,7 @@ async function isBotInvite(e) {
 /** bot 不在群里，get_group_info 查不到；群名从群系统消息里找，查不到就只显示群号 */
 async function findInviteGroupName(e) {
   try {
-    const data = await callStrict(e, "get_group_system_msg", { group_id: e.group_id, count: 20 });
+    const data = await e.bot.callApi("get_group_system_msg", { group_id: e.group_id, count: 20 });
     // SnowLuma 返回数组，NapCat 返回 { invited_requests, join_requests }
     const list = Array.isArray(data)
       ? data
@@ -152,11 +144,12 @@ export class RequestNotify extends plugin {
       }
 
       const { target } = request;
+      // 用 callApi 而不是代理方法：set_*_request 成功时 data 本来就是 null，失败原因要告诉主人
       try {
         if (request.kind === "friend") {
-          await callStrict(e, "set_friend_add_request", { flag: request.flag, approve });
+          await e.bot.callApi("set_friend_add_request", { flag: request.flag, approve });
         } else {
-          await callStrict(e, "set_group_add_request", {
+          await e.bot.callApi("set_group_add_request", {
             flag: request.flag,
             sub_type: request.sub_type || "invite",
             approve,

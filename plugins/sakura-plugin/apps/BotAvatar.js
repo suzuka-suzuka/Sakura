@@ -81,8 +81,7 @@ export class BotAvatar extends plugin {
       }
 
       try {
-        // 直接走 ws.send：代理的 sendRequest 失败时只返回 null，主人需要看到协议端给的错误
-        await e.bot.ws.send("set_qq_avatar", { file }, { selfId: e.self_id });
+        await e.bot.callApi("set_qq_avatar", { file });
       } catch (err) {
         logger.error(`[换头像] 设置头像失败: ${err.message}`);
         await e.reply(`换头像失败：${err.message}`);
