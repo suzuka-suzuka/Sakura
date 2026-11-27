@@ -74,6 +74,7 @@ const ACTION_MAP = {
   delete_group_folder:     "delete_group_folder",
 
   // 头像/信息
+  set_qq_avatar:           "set_avatar",
   set_avatar:              "set_avatar",
   set_nickname:            "set_nickname",
 };
@@ -769,6 +770,11 @@ export class MilkyClient extends EventEmitter {
           group_id:      params.group_id,
           message:       convertToMilky(params.message),
         };
+
+      // OneBot 扩展（NapCat 等）用 file，Milky 用 uri
+      case "set_qq_avatar":
+      case "set_avatar":
+        return { uri: toMilkyUri(params.uri || params.file || "") };
 
       case "send_private_msg":
         return {
