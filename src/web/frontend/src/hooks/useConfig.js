@@ -1,10 +1,26 @@
 import { useState, useEffect, useCallback } from 'react';
 import { clearAuthState, readAuthToken, storeAuthState, touchAuthToken } from '../utils/authStorage';
+import { normalizeAccountSelfId, resolvePluginScopeSelfId } from '../utils/accountScope';
 import { invalidateDynamicOptions } from './useDynamicOptions';
 
 const API_BASE = '';
+const PLUGIN_SELF_ID_STORAGE_KEY = 'sakura_plugin_self_id';
+const DEFAULT_SCOPE_KEY = '__default__';
+const BOT_ACCOUNTS_REFRESH_INTERVAL_MS = 3000;
 
-// 一个实例只服务一个 QQ 号，面板里的配置就是这个实例的配置，没有账号作用域
+function normalizeSelfId(value) {
+    return normalizeAccountSelfId(value);
+}
+
+function scopeKeyOf(selfId) {
+    return selfId == null ? DEFAULT_SCOPE_KEY : String(selfId);
+}
+
+function buildScopedQuery(selfId) {
+    const normalizedSelfId = normalizeSelfId(selfId);
+    return normalizedSelfId == null ? '' : `?selfId=${normalizedSelfId}`;
+}
+
 export function useConfig() {
     const [config, setConfig] = useState(null);
     const [schema, setSchema] = useState(null);
@@ -20,6 +36,12 @@ export function useConfig() {
     const [pluginMeta, setPluginMeta] = useState({});
     const [pluginSchemas, setPluginSchemas] = useState({});
     const [pluginConfigs, setPluginConfigs] = useState({});
+    const [botAccounts, setBotAccounts] = useState([]);
+    const [configuredAccountIds, setConfiguredAccountIds] = useState([]);
+    const [selectedPluginSelfId, setSelectedPluginSelfIdState] = useState(null);
+
+    const [accountSchema, setAccountSchema] = useState(null);
+    const [accountConfigs, setAccountConfigs] = useState({});
 
     const headers = useCallback(() => {
         if (token) {
@@ -31,6 +53,16 @@ export function useConfig() {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
         };
     }, [token]);
+
+    const setSelectedPluginSelfId = useCallback((selfId) => {
+        const normalized = normalizeSelfId(selfId);
+        setSelectedPluginSelfIdState(normalized);
+        if (normalized == null) {
+            localStorage.removeItem(PLUGIN_SELF_ID_STORAGE_KEY);
+        } else {
+            localStorage.setItem(PLUGIN_SELF_ID_STORAGE_KEY, String(normalized));
+        }
+    }, []);
 
     const login = useCallback(async (password) => {
         try {
@@ -62,8 +94,14 @@ export function useConfig() {
         setPluginConfigs({});
         setPluginCategories({});
         setPluginMeta({});
+        setBotAccounts([]);
+        setConfiguredAccountIds([]);
+        setAccountSchema(null);
+        setAccountConfigs({});
+        setSelectedPluginSelfIdState(null);
         setBootLoaded(false);
         clearAuthState();
+        localStorage.removeItem(PLUGIN_SELF_ID_STORAGE_KEY);
     }, []);
 
     const fetchSchema = useCallback(async () => {
@@ -81,6 +119,82 @@ export function useConfig() {
             console.error('Failed to fetch schema:', error);
         }
     }, [headers, logout]);
+
+    const fetchAccountSchema = useCallback(async () => {
+        try {
+            const res = await fetch(`${API_BASE}/api/account-schema`, { headers: headers() });
+            if (res.status === 401) {
+                logout();
+                return;
+            }
+            const data = await res.json();
+            if (data.success) {
+                setAccountSchema(data.data);
+            }
+        } catch (error) {
+            console.error('Failed to fetch account schema:', error);
+        }
+    }, [headers, logout]);
+
+    /** 只负责请求，返回账号配置数据；失败返回 null。 */
+    const requestAccountConfig = useCallback(async (selfId) => {
+        const normalizedSelfId = normalizeSelfId(selfId);
+        try {
+            const res = await fetch(
+                `${API_BASE}/api/account-config${buildScopedQuery(normalizedSelfId)}`,
+                { headers: headers() }
+            );
+            if (res.status === 401) {
+                logout();
+                return null;
+            }
+            const data = await res.json();
+            return data.success ? data.data : null;
+        } catch (error) {
+            console.error(
+                `Failed to fetch ${normalizedSelfId == null ? 'default' : `account ${normalizedSelfId}`} config:`,
+                error
+            );
+            return null;
+        }
+    }, [headers, logout]);
+
+    const fetchAccountConfig = useCallback(async (selfId) => {
+        const scopeKey = scopeKeyOf(normalizeSelfId(selfId));
+        const data = await requestAccountConfig(selfId);
+        if (data) {
+            setAccountConfigs((prev) => ({ ...prev, [scopeKey]: data }));
+        }
+    }, [requestAccountConfig]);
+
+    const saveAccountConfig = useCallback(async (selfId, newConfig) => {
+        const normalizedSelfId = normalizeSelfId(selfId);
+        const scopeKey = scopeKeyOf(normalizedSelfId);
+
+        setSaving(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/account-config${buildScopedQuery(normalizedSelfId)}`, {
+                method: 'POST',
+                headers: headers(),
+                body: JSON.stringify({ data: newConfig }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                setAccountConfigs((prev) => ({ ...prev, [scopeKey]: newConfig }));
+                if (normalizedSelfId != null) {
+                    setConfiguredAccountIds((prev) =>
+                        prev.includes(normalizedSelfId) ? prev : [...prev, normalizedSelfId]
+                    );
+                }
+                return { success: true };
+            }
+            return { success: false, errors: data.errors };
+        } catch {
+            return { success: false, errors: [{ message: '保存失败' }] };
+        } finally {
+            setSaving(false);
+        }
+    }, [headers]);
 
     const fetchConfig = useCallback(async () => {
         try {
@@ -120,6 +234,53 @@ export function useConfig() {
             setSaving(false);
         }
     }, [headers]);
+
+    const fetchBotAccounts = useCallback(async () => {
+        try {
+            const res = await fetch(`${API_BASE}/api/bot/info`, { headers: headers() });
+            if (res.status === 401) {
+                logout();
+                return;
+            }
+
+            const data = await res.json();
+            if (!data.success) {
+                setBotAccounts([]);
+                setConfiguredAccountIds([]);
+                setSelectedPluginSelfId(null);
+                return;
+            }
+
+            const accounts = (Array.isArray(data.data?.accounts) ? data.data.accounts : [])
+                .filter((account) => account?.status !== 'offline');
+            const onlineAccountIds = new Set(
+                accounts
+                    .map((account) => normalizeSelfId(account?.self_id))
+                    .filter((selfId) => selfId != null)
+            );
+            const configuredIds = Array.isArray(data.data?.configuredScopeIds)
+                ? data.data.configuredScopeIds
+                : Array.isArray(data.data?.configuredAccountIds)
+                    ? data.data.configuredAccountIds
+                : [];
+            const nextConfiguredIds = configuredIds
+                .map((selfId) => normalizeSelfId(selfId))
+                .filter((selfId) => selfId != null && onlineAccountIds.has(selfId));
+
+            setBotAccounts(accounts);
+            setConfiguredAccountIds(nextConfiguredIds);
+
+            const storedSelfId = normalizeSelfId(localStorage.getItem(PLUGIN_SELF_ID_STORAGE_KEY));
+            const nextSelfId = resolvePluginScopeSelfId(accounts, storedSelfId);
+
+            setSelectedPluginSelfId(nextSelfId);
+        } catch (error) {
+            console.error('Failed to fetch bot info:', error);
+            setBotAccounts([]);
+            setConfiguredAccountIds([]);
+            setSelectedPluginSelfId(null);
+        }
+    }, [headers, logout, setSelectedPluginSelfId]);
 
     const fetchPlugins = useCallback(async () => {
         try {
@@ -169,7 +330,8 @@ export function useConfig() {
         }
     }, [headers, logout]);
 
-    const fetchPluginConfigs = useCallback(async () => {
+    const fetchPluginConfigsForSelf = useCallback(async (selfId) => {
+        const normalizedSelfId = normalizeSelfId(selfId);
         if (!isLoggedIn) {
             return;
         }
@@ -179,9 +341,14 @@ export function useConfig() {
             return;
         }
 
+        const scopeKey = scopeKeyOf(normalizedSelfId);
+
         await Promise.all(currentPlugins.map(async (pluginName) => {
             try {
-                const res = await fetch(`${API_BASE}/api/plugins/${pluginName}/config`, { headers: headers() });
+                const res = await fetch(
+                    `${API_BASE}/api/plugins/${pluginName}/config${buildScopedQuery(normalizedSelfId)}`,
+                    { headers: headers() }
+                );
                 if (res.status === 401) {
                     logout();
                     return;
@@ -189,7 +356,13 @@ export function useConfig() {
 
                 const data = await res.json();
                 if (data.success) {
-                    setPluginConfigs((prev) => ({ ...prev, [pluginName]: data.data }));
+                    setPluginConfigs((prev) => ({
+                        ...prev,
+                        [pluginName]: {
+                            ...(prev[pluginName] || {}),
+                            [scopeKey]: data.data,
+                        },
+                    }));
                 }
             } catch (error) {
                 console.error(`Failed to fetch plugin config for ${pluginName}:`, error);
@@ -197,25 +370,34 @@ export function useConfig() {
         }));
     }, [headers, isLoggedIn, logout, plugins]);
 
-    const savePluginConfig = useCallback(async (pluginName, moduleName, newConfig) => {
+    const savePluginConfig = useCallback(async (pluginName, moduleName, newConfig, selfId = selectedPluginSelfId) => {
+        const normalizedSelfId = normalizeSelfId(selfId);
+        const scopeKey = scopeKeyOf(normalizedSelfId);
+
         setSaving(true);
         try {
-            const res = await fetch(`${API_BASE}/api/plugins/${pluginName}/${moduleName}/config`, {
-                method: 'POST',
-                headers: headers(),
-                body: JSON.stringify({ data: newConfig }),
-            });
+            const res = await fetch(
+                `${API_BASE}/api/plugins/${pluginName}/${moduleName}/config${buildScopedQuery(normalizedSelfId)}`,
+                {
+                    method: 'POST',
+                    headers: headers(),
+                    body: JSON.stringify({ data: newConfig }),
+                }
+            );
             const data = await res.json();
             if (data.success) {
                 setPluginConfigs((prev) => ({
                     ...prev,
                     [pluginName]: {
                         ...(prev[pluginName] || {}),
-                        [moduleName]: newConfig,
+                        [scopeKey]: {
+                            ...(prev[pluginName]?.[scopeKey] || {}),
+                            [moduleName]: newConfig,
+                        },
                     },
                 }));
-                // 只在保存的模块提供动态选项时刷新，刷新期间保留已有字段。
-                invalidateDynamicOptions({ pluginName, moduleName });
+                // 只在保存的模块提供动态选项时刷新对应账号，刷新期间保留已有字段。
+                invalidateDynamicOptions({ pluginName, moduleName, selfId: normalizedSelfId });
                 return { success: true };
             }
             return { success: false, errors: data.errors };
@@ -224,7 +406,7 @@ export function useConfig() {
         } finally {
             setSaving(false);
         }
-    }, [headers]);
+    }, [headers, selectedPluginSelfId]);
 
     const loading = isLoggedIn && !bootLoaded;
 
@@ -240,30 +422,72 @@ export function useConfig() {
                 fetchSchema(),
                 fetchConfig(),
                 fetchPlugins(),
+                fetchBotAccounts(),
+                fetchAccountSchema(),
             ]))
             .finally(() => setBootLoaded(true));
-    }, [isLoggedIn, fetchSchema, fetchConfig, fetchPlugins]);
+    }, [isLoggedIn, fetchSchema, fetchConfig, fetchPlugins, fetchBotAccounts, fetchAccountSchema]);
+
+    useEffect(() => {
+        if (!isLoggedIn) {
+            return;
+        }
+
+        const scopeKey = scopeKeyOf(selectedPluginSelfId);
+        if (accountConfigs[scopeKey] !== undefined) {
+            return undefined;
+        }
+
+        // 请求完成后再写入状态；切换账号或卸载时丢弃过期结果
+        let cancelled = false;
+        Promise.resolve()
+            .then(() => requestAccountConfig(selectedPluginSelfId))
+            .then((data) => {
+                if (!cancelled && data) {
+                    setAccountConfigs((prev) => ({ ...prev, [scopeKey]: data }));
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isLoggedIn, selectedPluginSelfId, accountConfigs, requestAccountConfig]);
 
     useEffect(() => {
         if (!isLoggedIn || Object.keys(plugins).length === 0) {
             return;
         }
 
-        fetchPluginConfigs();
-    }, [isLoggedIn, plugins, fetchPluginConfigs]);
+        fetchPluginConfigsForSelf(selectedPluginSelfId);
+    }, [isLoggedIn, plugins, selectedPluginSelfId, fetchPluginConfigsForSelf]);
+
+    useEffect(() => {
+        if (!isLoggedIn) {
+            return undefined;
+        }
+
+        const interval = window.setInterval(() => {
+            void fetchBotAccounts();
+        }, BOT_ACCOUNTS_REFRESH_INTERVAL_MS);
+
+        return () => window.clearInterval(interval);
+    }, [isLoggedIn, fetchBotAccounts]);
 
     const updateFromWs = useCallback((newConfig) => {
         setConfig(newConfig);
     }, []);
 
-    const updatePluginFromWs = useCallback((pluginName, moduleName, data) => {
+    const updatePluginFromWs = useCallback((pluginName, moduleName, data, selfId = null) => {
+        const scopeKey = scopeKeyOf(normalizeSelfId(selfId));
         // 面板保存也会收到文件热重载的回声；按来源刷新，不清空已有选项。
-        invalidateDynamicOptions({ pluginName, moduleName });
+        invalidateDynamicOptions({ pluginName, moduleName, selfId });
         setPluginConfigs((prev) => ({
             ...prev,
             [pluginName]: {
                 ...(prev[pluginName] || {}),
-                [moduleName]: data,
+                [scopeKey]: {
+                    ...(prev[pluginName]?.[scopeKey] || {}),
+                    [moduleName]: data,
+                },
             },
         }));
     }, []);
@@ -287,5 +511,13 @@ export function useConfig() {
         pluginConfigs,
         savePluginConfig,
         updatePluginFromWs,
+        botAccounts,
+        configuredAccountIds,
+        selectedPluginSelfId,
+        setSelectedPluginSelfId,
+        accountSchema,
+        accountConfigs,
+        fetchAccountConfig,
+        saveAccountConfig,
     };
 }

@@ -1,4 +1,4 @@
-import { getBot } from "../../../src/api/client.js";
+import { getBot, getCurrentBotSelfId } from "../../../src/api/client.js";
 import { runDuePersonalMemories } from "../lib/AIUtils/automaticMemory.js";
 
 export class AutomaticMemory extends plugin {
@@ -7,8 +7,8 @@ export class AutomaticMemory extends plugin {
   }
 
   personalMemoryTask = Cron("* * * * *", async () => {
-    const selfId = getBot()?.self_id;
-    if (selfId == null) return;
+    const selfId = getCurrentBotSelfId();
+    if (selfId == null || !getBot(selfId)) return;
     await runDuePersonalMemories(selfId);
   });
 }

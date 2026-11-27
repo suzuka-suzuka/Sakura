@@ -34,6 +34,7 @@ export async function recallMemories(query, targets = [], options = {}) {
       || ((...args) => memoryVectorStore.search(...args));
     try {
       matches = await vectorSearch(normalizedQuery, largeTargets, {
+        selfId: options.selfId ?? null,
         maxResults: VECTOR_MEMORY_RESULTS_PER_SCOPE,
         resultsPerScope: true,
         includeLowScore: true,
@@ -116,6 +117,6 @@ export async function buildMemoryContext(e, queryParts) {
     }
   }
 
-  const recalled = await recallMemories(extractText(queryParts), targets);
+  const recalled = await recallMemories(extractText(queryParts), targets, { selfId: e.self_id });
   return formatMemoryContext(targets, recalled);
 }

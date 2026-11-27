@@ -6,14 +6,19 @@ import { formatBeijingDateTime } from '../currentTime.js'
 
 const MAX_LISTED_SOURCES = 10
 
+function scopeOf(e) {
+  return e?.self_id == null ? {} : { selfId: e.self_id }
+}
+
 /**
  * 搜索模型列表里只保留开启了自带联网搜索的对话模型，其余跳过并提示。
  */
 export function resolveSearchModels(e) {
-  const configured = normalizeModelList(Setting.getConfig('AI')?.searchModels)
+  const scope = scopeOf(e)
+  const configured = normalizeModelList(Setting.getConfig('AI', scope)?.searchModels)
   if (configured.length === 0) return []
 
-  const entries = Setting.getConfig('Models')?.models || []
+  const entries = Setting.getConfig('Models', scope)?.models || []
   const usable = []
   const skipped = []
   for (const name of configured) {
@@ -131,7 +136,7 @@ export class OnlineSearchTool extends AbstractTool {
 
   /** 没有可用的搜索模型时不提供这个工具。 */
   isAvailable(e) {
-    return normalizeModelList(Setting.getConfig('AI')?.searchModels).length > 0
+    return normalizeModelList(Setting.getConfig('AI', scopeOf(e))?.searchModels).length > 0
   }
 
   func = async function (opts, e) {

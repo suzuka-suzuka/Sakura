@@ -1,14 +1,11 @@
 import db from '../lib/Database.js';
 import { GroupDataCleaner, canDeleteGroupData } from '../lib/GroupDataCleaner.js';
-import { getBot } from '../../../src/api/client.js';
+import { getBots } from '../../../src/api/client.js';
+import accountConfig from '../../../src/core/accountConfig.js';
 
-// 一个实例只有一个号。data_cleanup_accounts 里记着这份数据库见过的所有账号：
-// 从多号共用的数据库拆出来时里面还有别的号，它们一直不在线，整群清理就保守地跳过，只清离群成员。
 const cleaner = new GroupDataCleaner(db, {
-  getBots: () => {
-    const currentBot = getBot();
-    return currentBot ? [currentBot] : [];
-  },
+  getBots,
+  getConfiguredSelfIds: () => accountConfig.listConfiguredSelfIds(),
   canDelete: canDeleteGroupData,
   logger,
 });

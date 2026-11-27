@@ -72,7 +72,7 @@ export class AIChat extends plugin {
   }
 
   getRolesConfig(e) {
-    return Setting.getConfig("roles");
+    return Setting.getConfig("roles", { selfId: e?.self_id });
   }
 
   getRolePrompt(roleName, e) {
@@ -219,7 +219,7 @@ export class AIChat extends plugin {
     await randomReact(e);
 
     if (enableNaiPainting) {
-      const naiConfig = Setting.getConfig("nai");
+      const naiConfig = Setting.getConfig("nai", { selfId: e?.self_id });
       const drawPrompt = naiConfig?.chatDrawPrompt;
       chatDrawCount = naiConfig?.chatDrawCount ?? 1;
       if (typeof drawPrompt === "string" && drawPrompt.trim()) {

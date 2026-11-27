@@ -2,18 +2,38 @@ import { useEffect, useMemo, useState } from 'react';
 import { readAuthToken } from '../utils/authStorage';
 import { useDraftModules } from './draftContext';
 
+const DEFAULT_SCOPE_KEY = '__default__';
+
 /**
  * 动态选项共享缓存
  *
  * 所有 #xxxSelect 字段共用一份 /api/dynamic-options 结果：
- * - 只发一次请求（并发去重）
- * - 配置保存 / WS 推送变更时，只在变更的模块是选项来源时刷新
+ * - 同一账号作用域只发一次请求（并发去重）
+ * - 配置保存 / WS 推送变更时，只刷新对应账号的选项来源模块
  * - 后台刷新保留已有选项，避免字段切回加载占位或丢失协议上下文
+ *
+ * scopeKey -> { data, error, promise, stale }
  */
-const entry = { data: null, error: null, promise: null, stale: true };
+const cache = new Map();
 const listeners = new Set();
 const EMPTY_OPTIONS = [];
 const EMPTY_DETAILS = {};
+
+function normalizeSelfId(value) {
+    if (value == null) return null;
+    const num = Number(value);
+    return Number.isFinite(num) && num > 0 ? num : null;
+}
+
+function scopeKeyOf(selfId) {
+    return selfId == null ? DEFAULT_SCOPE_KEY : String(selfId);
+}
+
+function buildUrl(selfId) {
+    return selfId == null
+        ? '/api/dynamic-options'
+        : `/api/dynamic-options?selfId=${selfId}`;
+}
 
 function notify() {
     for (const listener of [...listeners]) {
@@ -21,9 +41,9 @@ function notify() {
     }
 }
 
-async function requestOptions() {
+async function requestOptions(selfId) {
     const token = readAuthToken({ touch: true });
-    const res = await fetch('/api/dynamic-options', {
+    const res = await fetch(buildUrl(selfId), {
         headers: { Authorization: `Bearer ${token}` },
     });
     const payload = await res.json();
@@ -33,15 +53,21 @@ async function requestOptions() {
     return payload.data;
 }
 
-/** 确保数据有效；请求在途时复用，期间发生的新变更留到下一轮。 */
-function ensureLoaded() {
+/** 确保该作用域的数据有效；请求在途时复用，期间发生的新变更留到下一轮。 */
+function ensureLoaded(selfId) {
+    const key = scopeKeyOf(selfId);
+    let entry = cache.get(key);
+    if (!entry) {
+        entry = { data: null, error: null, promise: null, stale: true };
+        cache.set(key, entry);
+    }
     if (!entry.stale || entry.promise) {
         return;
     }
 
     entry.stale = false;
     entry.error = null;
-    entry.promise = requestOptions()
+    entry.promise = requestOptions(selfId)
         .then((data) => { if (!entry.stale) entry.data = data; })
         .catch((e) => { if (!entry.stale) entry.error = e; })
         .finally(() => {
@@ -51,8 +77,10 @@ function ensureLoaded() {
         });
 }
 
-function readState(uiType) {
-    if (!entry.data && !entry.error) {
+function readState(selfId, uiType) {
+    const entry = cache.get(scopeKeyOf(selfId));
+
+    if (!entry || (!entry.data && !entry.error)) {
         return {
             loading: true,
             isDynamic: true,
@@ -137,19 +165,23 @@ function sameState(a, b) {
 }
 
 /**
- * 配置保存成功或收到 WS 推送时，变更的模块是选项来源才刷新；不传变更则直接刷新。
+ * 配置保存成功或收到 WS 推送时，按账号与来源模块刷新；不传变更则刷新所有缓存。
  * 保留旧数据和在途请求，避免保存响应与 WS 回声连续清空界面。
  */
 export function invalidateDynamicOptions(change = null) {
     // /api/dynamic-options 目前只读取 sakura-plugin 的来源声明。
     if (change && change.pluginName !== 'sakura-plugin') return;
 
-    if (change && entry.data && !Object.values(entry.data.config || {}).some((config) =>
-        config.sources?.some((source) => source.module === change.moduleName)
-    )) return;
-
-    entry.stale = true;
-    entry.error = null;
+    for (const [key, entry] of cache) {
+        if (change) {
+            if (key !== scopeKeyOf(normalizeSelfId(change.selfId))) continue;
+            if (entry.data && !Object.values(entry.data.config || {}).some((config) =>
+                config.sources?.some((source) => source.module === change.moduleName)
+            )) continue;
+        }
+        entry.stale = true;
+        entry.error = null;
+    }
     notify();
 }
 
@@ -157,16 +189,17 @@ export function invalidateDynamicOptions(change = null) {
  * 订阅某个 uiType 的动态选项
  * @returns {{ options: string[], details: object, label: string, loading: boolean, isDynamic: boolean }}
  */
-export function useDynamicOptions(uiType) {
-    const [state, setState] = useState(() => readState(uiType));
+export function useDynamicOptions(scopeSelfId, uiType) {
+    const selfId = normalizeSelfId(scopeSelfId);
+    const [state, setState] = useState(() => readState(selfId, uiType));
 
     useEffect(() => {
         let alive = true;
 
         const sync = () => {
             if (!alive) return;
-            ensureLoaded();
-            const next = readState(uiType);
+            ensureLoaded(selfId);
+            const next = readState(selfId, uiType);
             setState((prev) => (sameState(prev, next) ? prev : next));
         };
 
@@ -177,7 +210,7 @@ export function useDynamicOptions(uiType) {
             alive = false;
             listeners.delete(sync);
         };
-    }, [uiType]);
+    }, [selfId, uiType]);
 
     const drafts = useDraftModules();
     return useMemo(() => {

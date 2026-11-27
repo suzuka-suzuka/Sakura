@@ -73,17 +73,14 @@ export class SystemPlugin extends plugin {
 
     if (process.send) {
       process.send("shutdown");
-    } else if (process.env.pm_id !== undefined && process.env.SAKURA_INSTANCE) {
-      // 直接用 PM2 跑 src/index.js 时只停自己这个实例，别的实例不受影响
+    } else {
       import("child_process").then((cp) => {
-        cp.exec(`pm2 stop ${process.env.SAKURA_INSTANCE}`, (error) => {
+        cp.exec("pm2 stop sakura-bot", (error) => {
           if (error) {
             process.exit(0);
           }
         });
       });
-    } else {
-      process.exit(0);
     }
   });
 

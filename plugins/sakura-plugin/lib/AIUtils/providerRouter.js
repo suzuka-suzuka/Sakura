@@ -708,9 +708,14 @@ function resolveKind(options = {}) {
   return "chat";
 }
 
-function loadModelConfig() {
-  const providers = Setting.getConfig("Providers")?.providers || [];
-  const models = Setting.getConfig("Models")?.models || [];
+function scopeOptions(options) {
+  return options.selfId == null ? {} : { selfId: options.selfId };
+}
+
+function loadModelConfig(options) {
+  const scope = scopeOptions(options);
+  const providers = Setting.getConfig("Providers", scope)?.providers || [];
+  const models = Setting.getConfig("Models", scope)?.models || [];
   return {
     providerMap: new Map(providers.map((provider) => [providerName(provider), provider])),
     models,
@@ -748,6 +753,7 @@ function buildRequestConfig(target, provider, credential) {
  */
 export function createRouteExecutionPlan(reference, options = {}) {
   const kind = resolveKind(options);
+  const scopeKey = options.selfId == null ? "default" : String(options.selfId);
   const protocol = String(options.protocol || "").trim().toLowerCase();
   const names = normalizeModelList(reference);
   const kindLabel = MODEL_KIND_LABELS[kind] || "";
@@ -759,7 +765,7 @@ export function createRouteExecutionPlan(reference, options = {}) {
     throw error;
   }
 
-  const { providerMap, models } = loadModelConfig();
+  const { providerMap, models } = loadModelConfig(options);
   const route = {
     id: formatModelList(names),
     key: modelListKey(names),
@@ -792,7 +798,7 @@ export function createRouteExecutionPlan(reference, options = {}) {
     const credentials = orderScheduledItems(
       providerCredentials(runtimeProvider),
       "round_robin",
-      `provider:${runtimeProvider.id}`
+      `scope:${scopeKey}:provider:${runtimeProvider.id}`
     );
     const modelAttempts = credentials.map((credential) => ({
       route,
@@ -848,7 +854,7 @@ export function resolveRouteReference(routeReference, options = {}) {
   if (!reference) return [];
 
   const kind = resolveKind(options);
-  const { providerMap, models } = loadModelConfig();
+  const { providerMap, models } = loadModelConfig(options);
   const sameKind = models.filter((entry) => (entry.type || "chat") === kind);
   const exact = sameKind.find((entry) => modelKey(entry) === reference)
     || sameKind.find((entry) => modelKey(entry).toLowerCase() === reference.toLowerCase());

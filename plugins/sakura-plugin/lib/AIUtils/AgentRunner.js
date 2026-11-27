@@ -16,7 +16,7 @@ import {
 const DEFAULT_MAX_TOOL_CALLS = 20;
 
 export function getAgentMaxToolCalls(e = null) {
-  const aiConfig = Setting.getConfig("AI") || {};
+  const aiConfig = Setting.getConfig("AI", { selfId: e?.self_id }) || {};
   const value = Number(aiConfig.maxToolCalls);
   return Number.isFinite(value) && value >= 0
     ? Math.floor(value)

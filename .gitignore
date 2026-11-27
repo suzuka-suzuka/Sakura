@@ -54,10 +54,6 @@ CLAUDE.md
 # Local-only tests
 test/
 
-# 多实例：实例列表和各实例的 home 目录（见 docs/multi-instance.md）
-/instances.json
-/instances/
-
 # 钓鱼遭遇离线渲染的独立浏览器配置
 .cache/fishing-encounters-chrome/
 

@@ -1,9 +1,8 @@
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
-import { frameworkDataDir as DATA_DIR } from '../path.js'
 
-const TEMP_DIR = path.join(DATA_DIR, 'temp')
+const TEMP_DIR = path.resolve('data', 'temp')
 
 export function ensureTempDir() {
   if (!fs.existsSync(TEMP_DIR)) {

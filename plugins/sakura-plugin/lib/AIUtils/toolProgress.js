@@ -87,7 +87,7 @@ export class ToolCallForward {
 
 export function isToolCallForwardEnabled(e) {
   try {
-    return Setting.getConfig("AI")?.toolCallForward !== false;
+    return Setting.getConfig("AI", { selfId: e?.self_id })?.toolCallForward !== false;
   } catch {
     return true;
   }

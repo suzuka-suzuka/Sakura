@@ -1,5 +1,5 @@
 import Setting from "../lib/setting.js";
-import { getBot } from "../../../src/api/client.js";
+import { getCurrentBotSelfId } from "../../../src/api/client.js";
 
 const DEFAULT_CRON_EXPRESSION = "0 8 * * *";
 
@@ -12,7 +12,7 @@ export class News60s extends plugin {
   }
 
   newsTask = Cron(DEFAULT_CRON_EXPRESSION, async () => {
-    const selfId = getBot()?.self_id ?? null;
+    const selfId = getCurrentBotSelfId();
     if (selfId == null) {
       logger.warn("[60sNews] 触发定时任务时没有在线账号，已跳过本次推送");
       return;
@@ -25,7 +25,7 @@ export class News60s extends plugin {
     const currentBot = this.getBot(selfId);
     if (!currentBot) return;
 
-    const config = Setting.getConfig("60sNews");
+    const config = Setting.getConfig("60sNews", { selfId });
 
     const groups = Array.isArray(config?.Groups) ? config.Groups : [];
     if (!groups.length) {

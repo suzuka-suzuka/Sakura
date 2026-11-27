@@ -118,13 +118,13 @@ export class Event {
   }
 
   get isMaster() {
-    const config = Config.get();
+    const config = Config.getForSelf(this.self_id);
     return isMasterUser(this.user_id, config.master);
   }
 
   get isWhite() {
     if (this.isMaster) return true;
-    const config = Config.get();
+    const config = Config.getForSelf(this.self_id);
     const whiteUsers = config.whiteUsers || [];
     return whiteUsers.includes(this.user_id);
   }
@@ -138,11 +138,11 @@ export class Event {
   }
 
   getMaster() {
-    return Config.get('master');
+    return Config.getForSelf(this.self_id, 'master');
   }
 
   getWhite() {
-    const config = Config.get();
+    const config = Config.getForSelf(this.self_id);
     const masters = normalizeMasters(config.master);
     const whiteUsers = (config.whiteUsers || []).map(String);
     return [...new Set([...masters, ...whiteUsers])];

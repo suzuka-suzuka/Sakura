@@ -1,4 +1,5 @@
-import { logger, logContext } from "../utils/logger.js";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { logger, logContext, setLoggerBotCount } from "../utils/logger.js";
 
 /**
  * 驼峰 → 下划线
@@ -44,22 +45,158 @@ export const Segment = {
   }),
 };
 
-/**
- * 当前实例的 Bot。一个进程只服务一个 QQ 号（多个号各开一个实例，见 docs/multi-instance.md），
- * 所以这里没有账号路由：bot 就是当前这条连接上的账号，离线时为 null。
- */
-export let bot = null;
+export let bot;
+export const bots = new Map();
+
+const botContextStorage = new AsyncLocalStorage();
+const botStates = new Map();
+const groupOwners = new Map();
+const privateOwners = new Map();
+const warnedRoutingKeys = new Set();
+let botFacade;
 
 function normalizeNumericId(value) {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
 }
 
-function setCurrentBot(instance) {
-  bot = instance;
-  if (typeof global !== "undefined") {
-    global.bot = instance;
+function getOrCreateBotState(selfId) {
+  const id = normalizeNumericId(selfId);
+  if (id == null) return null;
+
+  let state = botStates.get(id);
+  if (!state) {
+    state = {
+      selfId: id,
+      nickname: "Bot",
+      loginInfo: null,
+      groups: new Set(),
+      friends: new Set(),
+    };
+    botStates.set(id, state);
   }
+  return state;
+}
+
+function bindTarget(map, targetId, selfId) {
+  const target = normalizeNumericId(targetId);
+  const id = normalizeNumericId(selfId);
+  if (target == null || id == null) return;
+
+  if (!map.has(target)) {
+    map.set(target, new Set());
+  }
+  map.get(target).add(id);
+}
+
+function unbindTarget(map, targetId, selfId) {
+  const target = normalizeNumericId(targetId);
+  const id = normalizeNumericId(selfId);
+  if (target == null || id == null) return;
+
+  const owners = map.get(target);
+  if (!owners) return;
+  owners.delete(id);
+  if (owners.size === 0) {
+    map.delete(target);
+  }
+}
+
+function syncOwnedTargets(map, currentTargets, nextTargets, selfId) {
+  for (const target of currentTargets) {
+    unbindTarget(map, target, selfId);
+  }
+  currentTargets.clear();
+
+  for (const target of nextTargets) {
+    currentTargets.add(target);
+    bindTarget(map, target, selfId);
+  }
+}
+
+function updateGlobalBotBinding() {
+  setLoggerBotCount(bots.size);
+
+  if (bots.size > 0) {
+    bot = botFacade;
+    if (typeof global !== "undefined") {
+      global.bot = botFacade;
+    }
+    return;
+  }
+
+  bot = undefined;
+  if (typeof global !== "undefined") {
+    global.bot = null;
+  }
+}
+
+function getCurrentContextBot() {
+  const selfId = botContextStorage.getStore();
+  if (selfId == null) return null;
+  return getBot(selfId) || null;
+}
+
+function getDefaultBot() {
+  return getCurrentContextBot() || bots.values().next().value || null;
+}
+
+function warnRouting(kind, targetId, selfIds) {
+  const key = `${kind}:${targetId}:${selfIds.join(",")}`;
+  if (warnedRoutingKeys.has(key)) return;
+  warnedRoutingKeys.add(key);
+  logger.warn(
+    `[BotRouter] ${kind} ${targetId} 同时匹配多个账号: ${selfIds.join(", ")}，将使用第一个可用账号`
+  );
+}
+
+function resolveBotFromOwners(map, kind, targetId) {
+  const normalizedTargetId = normalizeNumericId(targetId);
+  if (normalizedTargetId == null) return null;
+
+  const candidates = Array.from(map.get(normalizedTargetId) || []).filter((selfId) =>
+    bots.has(selfId)
+  );
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return getBot(candidates[0]);
+
+  const currentBot = getCurrentContextBot();
+  if (currentBot && candidates.includes(currentBot.self_id)) {
+    return currentBot;
+  }
+
+  warnRouting(kind, normalizedTargetId, candidates);
+  return getBot(candidates[0]);
+}
+
+function resolveBotForTarget({ selfId, groupId, userId } = {}) {
+  const explicitSelfId = normalizeNumericId(selfId);
+  if (explicitSelfId != null) {
+    return getBot(explicitSelfId) || null;
+  }
+
+  const byGroup = resolveBotFromOwners(groupOwners, "group", groupId);
+  if (byGroup) return byGroup;
+
+  const byPrivate = resolveBotFromOwners(privateOwners, "private", userId);
+  if (byPrivate) return byPrivate;
+
+  return getDefaultBot();
+}
+
+function extractRoutingParams(params = {}) {
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return {};
+  }
+  return {
+    selfId: params.self_id,
+    groupId: params.group_id,
+    userId: params.user_id,
+  };
+}
+
+function isPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 const POSITIONAL_PARAM_BUILDERS = {
@@ -86,36 +223,273 @@ const POSITIONAL_PARAM_BUILDERS = {
   getMsg: (message_id) => ({ message_id }),
 };
 
-/**
- * 取当前 Bot。传了 selfId 时账号对得上才返回，免得把别的号当成自己。
- */
 export function getBot(selfId) {
-  if (!bot) return undefined;
-  if (selfId === undefined || selfId === null || selfId === "") return bot;
-  return normalizeNumericId(selfId) === bot.self_id ? bot : undefined;
+  const id = normalizeNumericId(selfId);
+  return id == null ? undefined : bots.get(id);
 }
 
-/** 面板展示用的账号摘要，离线时为 null */
-export function getBotSummary() {
-  if (!bot) return null;
-  const loginInfo = bot.loginInfo || {};
-  return {
-    self_id: bot.self_id,
-    uin: loginInfo.user_id || bot.self_id,
-    nickname: loginInfo.nickname || bot.nickname || null,
-    status: "online",
-    // 群和好友列表在连接后异步拉取，还没拉到时为 null
-    groupCount: bot.groupCount ?? null,
-    friendCount: bot.friendCount ?? null,
-  };
+export function getBots() {
+  return Array.from(bots.values());
 }
 
-/** 账号下线：传了 selfId 时只在对得上当前账号时注销 */
+export function getCurrentBotSelfId() {
+  return normalizeNumericId(botContextStorage.getStore());
+}
+
+export function withBotContext(selfId, callback) {
+  const id = normalizeNumericId(selfId);
+  return botContextStorage.run(id, callback);
+}
+
+export function rememberBotTargets(event) {
+  const selfId = normalizeNumericId(event?.self_id);
+  if (selfId == null) return;
+
+  const state = getOrCreateBotState(selfId);
+  if (!state) return;
+
+  const groupId = normalizeNumericId(event?.group_id);
+  if (groupId != null) {
+    state.groups.add(groupId);
+    bindTarget(groupOwners, groupId, selfId);
+  }
+
+  const userId = normalizeNumericId(event?.user_id);
+  const shouldTrackPrivateTarget =
+    userId != null &&
+    (
+      event?.message_type === "private" ||
+      event?.request_type === "friend" ||
+      event?.notice_type === "friend_add" ||
+      (!event?.group_id && event?.post_type === "message")
+    );
+
+  if (shouldTrackPrivateTarget) {
+    state.friends.add(userId);
+    bindTarget(privateOwners, userId, selfId);
+  }
+}
+
+export function updateBotDirectory(selfId, { loginInfo, nickname, groups, friends } = {}) {
+  const state = getOrCreateBotState(selfId);
+  if (!state) return;
+
+  if (loginInfo) {
+    state.loginInfo = { ...loginInfo };
+  }
+
+  if (nickname) {
+    state.nickname = nickname;
+  }
+
+  if (Array.isArray(groups)) {
+    const nextGroups = new Set();
+    for (const group of groups) {
+      const groupId = normalizeNumericId(group?.group_id ?? group);
+      if (groupId != null) nextGroups.add(groupId);
+    }
+    syncOwnedTargets(groupOwners, state.groups, nextGroups, state.selfId);
+  }
+
+  if (Array.isArray(friends)) {
+    const nextFriends = new Set();
+    for (const friend of friends) {
+      const userId = normalizeNumericId(friend?.user_id ?? friend);
+      if (userId != null) nextFriends.add(userId);
+    }
+    syncOwnedTargets(privateOwners, state.friends, nextFriends, state.selfId);
+  }
+}
+
+export function getBotSummaries() {
+  return Array.from(bots.values()).map((instance) => {
+    const state = botStates.get(instance.self_id);
+    const loginInfo = state?.loginInfo || {};
+    return {
+      self_id: instance.self_id,
+      uin: loginInfo.user_id || instance.self_id || null,
+      nickname: loginInfo.nickname || state?.nickname || instance.nickname || null,
+      status: "online",
+      // 群和好友列表在连接后异步拉取，还没拉到时为 null
+      groupCount: state?.groups ? state.groups.size : null,
+      friendCount: state?.friends ? state.friends.size : null,
+    };
+  });
+}
+
 export function removeBot(selfId) {
-  if (!bot) return;
-  if (selfId != null && normalizeNumericId(selfId) !== bot.self_id) return;
-  setCurrentBot(null);
+  const id = normalizeNumericId(selfId);
+  if (id == null) return;
+
+  bots.delete(id);
+
+  const state = botStates.get(id);
+  if (state) {
+    for (const groupId of state.groups) {
+      unbindTarget(groupOwners, groupId, id);
+    }
+    for (const userId of state.friends) {
+      unbindTarget(privateOwners, userId, id);
+    }
+    botStates.delete(id);
+  }
+
+  updateGlobalBotBinding();
 }
+
+const botFacadeTarget = {
+  get self_id() {
+    return getDefaultBot()?.self_id;
+  },
+
+  get nickname() {
+    return getDefaultBot()?.nickname || "Bot";
+  },
+
+  get status() {
+    return bots.size > 0 ? "online" : "offline";
+  },
+
+  getBot(selfId) {
+    return getBot(selfId);
+  },
+
+  pickFriend(user_id) {
+    return new Friend(botFacade, user_id);
+  },
+
+  pickGroup(group_id) {
+    return new Group(botFacade, group_id);
+  },
+
+  async getLoginInfo() {
+    const currentBot = getDefaultBot();
+    if (!currentBot) return null;
+    return currentBot.getLoginInfo();
+  },
+
+  async getGroupList() {
+    const mergedGroups = [];
+    const seen = new Map();
+
+    for (const currentBot of bots.values()) {
+      try {
+        const groups = await currentBot.getGroupList();
+        if (Array.isArray(groups)) {
+          updateBotDirectory(currentBot.self_id, { groups });
+          for (const group of groups) {
+            const groupId = normalizeNumericId(group?.group_id);
+            if (groupId == null) continue;
+
+            if (!seen.has(groupId)) {
+              const nextGroup = { ...group, group_id: groupId };
+              nextGroup.bots = [{ self_id: currentBot.self_id, nickname: currentBot.nickname }];
+              seen.set(groupId, nextGroup);
+              mergedGroups.push(nextGroup);
+            } else {
+              const existing = seen.get(groupId);
+              existing.bots ||= [];
+              existing.bots.push({ self_id: currentBot.self_id, nickname: currentBot.nickname });
+            }
+          }
+        }
+      } catch (error) {
+        logger.warn(`[BotRouter] 获取账号 ${currentBot.self_id} 的群列表失败: ${error.message || error}`);
+      }
+    }
+
+    return mergedGroups;
+  },
+
+  async getFriendList() {
+    const mergedFriends = [];
+    const seen = new Map();
+
+    for (const currentBot of bots.values()) {
+      try {
+        const friends = await currentBot.getFriendList();
+        if (Array.isArray(friends)) {
+          updateBotDirectory(currentBot.self_id, { friends });
+          for (const friend of friends) {
+            const userId = normalizeNumericId(friend?.user_id);
+            if (userId == null) continue;
+
+            if (!seen.has(userId)) {
+              const nextFriend = { ...friend, user_id: userId };
+              nextFriend.bots = [{ self_id: currentBot.self_id, nickname: currentBot.nickname }];
+              seen.set(userId, nextFriend);
+              mergedFriends.push(nextFriend);
+            } else {
+              const existing = seen.get(userId);
+              existing.bots ||= [];
+              existing.bots.push({ self_id: currentBot.self_id, nickname: currentBot.nickname });
+            }
+          }
+        }
+      } catch (error) {
+        logger.warn(`[BotRouter] 获取账号 ${currentBot.self_id} 的好友列表失败: ${error.message || error}`);
+      }
+    }
+
+    return mergedFriends;
+  },
+
+  async sendGroupMsg(group_id, message) {
+    const currentBot = resolveBotForTarget({ groupId: group_id });
+    if (!currentBot) return null;
+    return currentBot.sendGroupMsg(group_id, message);
+  },
+
+  async sendPrivateMsg(user_id, message) {
+    const currentBot = resolveBotForTarget({ userId: user_id });
+    if (!currentBot) return null;
+    return currentBot.sendPrivateMsg(user_id, message);
+  },
+
+  async sendForwardMsg(messages, group_id, user_id) {
+    const currentBot = resolveBotForTarget({ groupId: group_id, userId: user_id });
+    if (!currentBot) return null;
+    return currentBot.sendForwardMsg(messages, group_id, user_id);
+  },
+
+  async callMethod(methodName, args) {
+    let params = null;
+    let forwardArgs = args;
+
+    if (args.length === 1 && isPlainObject(args[0])) {
+      params = args[0];
+      forwardArgs = [params];
+    } else if (POSITIONAL_PARAM_BUILDERS[methodName]) {
+      params = POSITIONAL_PARAM_BUILDERS[methodName](...args);
+      forwardArgs = [params];
+    }
+
+    const currentBot = resolveBotForTarget(extractRoutingParams(params));
+    if (!currentBot) return null;
+
+    const method = currentBot[methodName];
+    if (typeof method !== "function") {
+      return undefined;
+    }
+
+    return method(...forwardArgs);
+  },
+};
+
+botFacade = new Proxy(botFacadeTarget, {
+  get(target, prop, receiver) {
+    if (prop in target) {
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+
+    if (typeof prop !== "string") {
+      return undefined;
+    }
+
+    return (...args) => target.callMethod(prop, args);
+  },
+});
 
 export class Friend {
   constructor(bot, user_id) {
@@ -560,9 +934,6 @@ export class OneBotApi {
     this.ws = ws;
     this._selfId = normalizeNumericId(selfId) ?? selfId;
     this.nickname = "Bot";
-    this.loginInfo = null;
-    this.groupCount = null;
-    this.friendCount = null;
 
     // ES6 Proxy: 自动将驼峰方法映射到 OneBotWsClient 的下划线方法
     const proxy = new Proxy(this, {
@@ -586,9 +957,7 @@ export class OneBotApi {
         if (typeof target.ws[snakeName] === "function") {
           return (...args) => {
             let params = args[0];
-            // 传的不是参数对象时按位置参数组装，如 getGroupInfo(groupId)、getGroupMemberInfo(groupId, userId)
-            const isParamObject = params && typeof params === "object" && !Array.isArray(params);
-            if (args.length > 0 && !isParamObject && POSITIONAL_PARAM_BUILDERS[prop]) {
+            if (args.length > 1 && POSITIONAL_PARAM_BUILDERS[prop]) {
               params = POSITIONAL_PARAM_BUILDERS[prop](...args);
             }
             return target.sendRequest(snakeName, params || {});
@@ -600,8 +969,9 @@ export class OneBotApi {
       },
     });
 
-    this._proxy = proxy;
-    setCurrentBot(proxy);
+    bots.set(this._selfId, proxy);
+    updateBotDirectory(this._selfId, { nickname: this.nickname });
+    updateGlobalBotBinding();
 
     this.init();
 
@@ -632,12 +1002,23 @@ export class OneBotApi {
         }
       }
 
-      if (info) {
-        this.loginInfo = { ...info };
+      updateBotDirectory(this._selfId, {
+        loginInfo: info,
+        nickname: this.nickname,
+      });
+
+      const [groupsResult, friendsResult] = await Promise.allSettled([
+        this.getGroupList?.(),
+        this.getFriendList?.(),
+      ]);
+
+      if (groupsResult.status === "fulfilled" && Array.isArray(groupsResult.value)) {
+        updateBotDirectory(this._selfId, { groups: groupsResult.value });
       }
 
-      // getGroupList / getFriendList 会顺手记下数量
-      await Promise.allSettled([this.getGroupList(), this.getFriendList()]);
+      if (friendsResult.status === "fulfilled" && Array.isArray(friendsResult.value)) {
+        updateBotDirectory(this._selfId, { friends: friendsResult.value });
+      }
     } catch (e) {
       // 忽略初始化错误
     }
@@ -645,12 +1026,12 @@ export class OneBotApi {
 
   /** 获取好友对象 */
   pickFriend(user_id) {
-    return new Friend(this._proxy || this, user_id);
+    return new Friend(bots.get(this._selfId) || this, user_id);
   }
 
   /** 获取群对象 */
   pickGroup(group_id) {
-    return new Group(this._proxy || this, group_id);
+    return new Group(bots.get(this._selfId) || this, group_id);
   }
 
   get self_id() {
@@ -678,16 +1059,12 @@ export class OneBotApi {
 
   /** 获取群列表 */
   async getGroupList() {
-    const groups = await this.sendRequest("get_group_list", {});
-    if (Array.isArray(groups)) this.groupCount = groups.length;
-    return groups;
+    return this.sendRequest("get_group_list", {});
   }
 
   /** 获取好友列表 */
   async getFriendList() {
-    const friends = await this.sendRequest("get_friend_list", {});
-    if (Array.isArray(friends)) this.friendCount = friends.length;
-    return friends;
+    return this.sendRequest("get_friend_list", {});
   }
 
   // =================== 消息发送（带日志） ===================
@@ -708,6 +1085,7 @@ export class OneBotApi {
     if (msgLog.length > 200) {
       msgLog = msgLog.substring(0, 200) + "...";
     }
+    const prefix = bots.size > 1 ? `[${this.self_id}] ` : "";
     const ctx = logContext.getStore();
     const target = ctx?.group_id === group_id ? "" : ` ${group_id}`;
     return this.sendRequest("send_group_msg", { group_id, message });
@@ -729,6 +1107,7 @@ export class OneBotApi {
     if (msgLog.length > 200) {
       msgLog = msgLog.substring(0, 200) + "...";
     }
+    const prefix = bots.size > 1 ? `[${this.self_id}] ` : "";
     const ctx = logContext.getStore();
     const target = ctx?.user_id === user_id ? "" : ` ${user_id}`;
     return this.sendRequest("send_private_msg", { user_id, message });
@@ -818,6 +1197,7 @@ export class OneBotApi {
 
   /** 发送合并转发消息（参数处理复杂，保留） */
   async sendForwardMsg(messages, group_id, user_id) {
+    const prefix = bots.size > 1 ? `[${this.self_id}] ` : "";
     const ctx = logContext.getStore();
 
     const shrink = (text) => {

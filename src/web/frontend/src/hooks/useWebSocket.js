@@ -66,6 +66,7 @@ export function useWebSocket(token, onConfigChanged, onPluginConfigChanged, onUn
                                 msg.pluginName,
                                 msg.moduleName,
                                 msg.data,
+                                msg.selfId ?? null,
                             );
                         }
                     } catch (error) {

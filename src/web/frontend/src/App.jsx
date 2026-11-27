@@ -9,11 +9,11 @@ import Sidebar from './components/Sidebar';
 import SearchPalette from './components/SearchPalette';
 import Icon from './components/Icon';
 import { ObjectConfigPage, PageHeader, PluginConfigPage } from './components/ConfigPage';
+import { resolvePluginScopeSelfId } from './utils/accountScope';
 import { buildPluginNavigation, collectFieldLabels, fieldAnchorId } from './utils/schemaLayout';
 
+const DEFAULT_SCOPE_KEY = '__default__';
 const THEME_STORAGE_KEY = 'sakura_theme';
-// 主人和黑白名单在 config.yaml 的根上，单独放到“权限设置”页，不在“连接与基础”里重复显示
-const PERMISSION_KEYS = ['master', 'whiteUsers', 'whiteGroups', 'blackGroups', 'blackUsers'];
 
 function readRoute() {
     const hash = window.location.hash.replace(/^#\/?/, '');
@@ -40,6 +40,35 @@ function readTheme() {
     return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
+function AccountSwitcher({ accounts, selectedSelfId, onSelect }) {
+    if (!accounts || accounts.length < 2) return null;
+    return (
+        <div className="account-switcher" role="radiogroup" aria-label="选择账号">
+            {accounts.map((account) => {
+                const active = Number(account.self_id) === Number(selectedSelfId);
+                return (
+                    <button
+                        key={account.self_id}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        className={`account-chip ${active ? 'active' : ''}`}
+                        onClick={() => onSelect(account.self_id)}
+                        title={`${account.nickname || 'Bot'}（${account.self_id}）`}
+                    >
+                        <img
+                            src={`https://q1.qlogo.cn/g?b=qq&nk=${account.uin || account.self_id}&s=100`}
+                            alt=""
+                            onError={(event) => { event.currentTarget.style.visibility = 'hidden'; }}
+                        />
+                        <span>{account.nickname || account.self_id}</span>
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
+
 function App() {
     const {
         config,
@@ -59,8 +88,15 @@ function App() {
         pluginMeta,
         savePluginConfig,
         updatePluginFromWs,
+        botAccounts,
+        selectedPluginSelfId,
+        setSelectedPluginSelfId,
+        accountSchema,
+        accountConfigs,
+        saveAccountConfig,
     } = useConfig();
 
+    const effectivePluginSelfId = resolvePluginScopeSelfId(botAccounts, selectedPluginSelfId);
     const [route, setRoute] = useState(readRoute);
     const [toasts, setToasts] = useState([]);
     const [theme, setTheme] = useState(readTheme);
@@ -112,8 +148,8 @@ function App() {
         addToast('框架配置已在别处更新', 'info');
     }, [updateFromWs, addToast]);
 
-    const onPluginConfigChanged = useCallback((pluginName, moduleName, data) => {
-        updatePluginFromWs(pluginName, moduleName, data);
+    const onPluginConfigChanged = useCallback((pluginName, moduleName, data, selfId) => {
+        updatePluginFromWs(pluginName, moduleName, data, selfId);
     }, [updatePluginFromWs]);
 
     const { connected } = useWebSocket(isLoggedIn ? token : null, onConfigChanged, onPluginConfigChanged, logout);
@@ -140,7 +176,7 @@ function App() {
                 title: '框架',
                 items: [
                     { key: 'framework', title: '连接与基础', icon: 'plug', route: { kind: 'framework' } },
-                    { key: 'account', title: '权限设置', icon: 'user', route: { kind: 'account' } },
+                    { key: 'account', title: '账号设置', icon: 'user', route: { kind: 'account' } },
                 ],
             },
         ];
@@ -243,13 +279,12 @@ function App() {
                         });
                     }
                 } else {
-                    const isPermission = PERMISSION_KEYS.includes(sectionKey);
                     entries.push({
                         id: `framework:root:${sectionKey}`,
                         kind: 'field',
                         title: sectionTitle,
-                        subtitle: isPermission ? '权限设置' : '连接与基础',
-                        route: { kind: isPermission ? 'account' : 'framework' },
+                        subtitle: '连接与基础',
+                        route: { kind: 'framework' },
                         anchor: fieldAnchorId('root', sectionKey),
                     });
                 }
@@ -269,6 +304,10 @@ function App() {
         async (next) => toResult(await saveConfig(next), '框架配置已保存'),
         [saveConfig, toResult]
     );
+    const handleAccountSave = useCallback(
+        async (next) => toResult(await saveAccountConfig(effectivePluginSelfId, next), '账号配置已保存'),
+        [saveAccountConfig, effectivePluginSelfId, toResult]
+    );
 
     // ===== 渲染 =====
     if (!isLoggedIn) return <LoginPage onLogin={login} />;
@@ -279,6 +318,11 @@ function App() {
             </div>
         );
     }
+
+    const scopeKey = effectivePluginSelfId == null ? DEFAULT_SCOPE_KEY : String(effectivePluginSelfId);
+    const accountSwitcher = (
+        <AccountSwitcher accounts={botAccounts} selectedSelfId={effectivePluginSelfId} onSelect={setSelectedPluginSelfId} />
+    );
 
     const renderPage = () => {
         if (route.kind === 'monitor') {
@@ -302,8 +346,7 @@ function App() {
         if (route.kind === 'framework') {
             const children = schema?.children || {};
             const rootChildren = Object.fromEntries(
-                Object.entries(children).filter(([key, meta]) =>
-                    !(meta.type === 'object' && meta.children) && !PERMISSION_KEYS.includes(key))
+                Object.entries(children).filter(([, meta]) => !(meta.type === 'object' && meta.children))
             );
             const sections = [
                 ...(Object.keys(rootChildren).length > 0
@@ -315,7 +358,6 @@ function App() {
             ];
             return (
                 <ObjectConfigPage
-                    key="framework"
                     title="连接与基础"
                     icon="plug"
                     schema={schema}
@@ -336,19 +378,17 @@ function App() {
         }
 
         if (route.kind === 'account') {
-            const children = schema?.children || {};
-            const permissionChildren = Object.fromEntries(
-                PERMISSION_KEYS.filter((key) => children[key]).map((key) => [key, children[key]])
-            );
             return (
                 <ObjectConfigPage
-                    key="account"
-                    title="权限设置"
+                    key={`account:${scopeKey}`}
+                    title="账号设置"
                     icon="user"
-                    schema={schema}
-                    config={config}
-                    sections={[{ key: null, title: '', meta: { children: permissionChildren } }]}
-                    onSave={handleFrameworkSave}
+                    schema={accountSchema}
+                    config={accountConfigs[scopeKey] ?? null}
+                    sections={accountSchema?.children ? [{ key: null, title: '', meta: accountSchema }] : []}
+                    onSave={handleAccountSave}
+                    scopeSelfId={effectivePluginSelfId}
+                    headerActions={accountSwitcher}
                 />
             );
         }
@@ -357,12 +397,14 @@ function App() {
             const pluginName = route.plugin;
             return (
                 <PluginConfigPage
-                    key={activeKey}
+                    key={`${activeKey}:${scopeKey}`}
                     page={activeItem.page}
                     schemas={pluginSchemas[pluginName] || {}}
-                    configs={pluginConfigs[pluginName] || {}}
+                    configs={pluginConfigs[pluginName]?.[scopeKey] || {}}
+                    scopeSelfId={effectivePluginSelfId}
+                    headerActions={accountSwitcher}
                     onSaveModule={async (module, data) => {
-                        const result = await savePluginConfig(pluginName, module, data);
+                        const result = await savePluginConfig(pluginName, module, data, effectivePluginSelfId);
                         if (result.success) addToast(`已保存`, 'success');
                         else addToast('保存失败，请检查标红的内容', 'error');
                         return result;

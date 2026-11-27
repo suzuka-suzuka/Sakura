@@ -35,6 +35,7 @@ export function prepareEmbeddingRequest(contents, options = {}) {
 
 export async function generateContentEmbedding(contents, options = {}) {
   const {
+    selfId = null,
     taskType = "",
     purpose = "向量生成",
     outputDimensionality = DEFAULT_EMBEDDING_DIMENSIONS,
@@ -45,6 +46,7 @@ export async function generateContentEmbedding(contents, options = {}) {
   });
 
   return executeGeminiCapability({
+    selfId,
     purpose,
     operation: async ({ client }) => {
       const result = await client.models.embedContent({
@@ -66,11 +68,13 @@ export async function generateTextEmbedding(text, options = {}) {
   if (!content) throw new Error("不能为空文本生成向量");
 
   const {
+    selfId = null,
     taskType = "",
     purpose,
     outputDimensionality = DEFAULT_EMBEDDING_DIMENSIONS,
   } = options;
   return generateContentEmbedding(content, {
+    selfId,
     taskType,
     purpose,
     outputDimensionality,

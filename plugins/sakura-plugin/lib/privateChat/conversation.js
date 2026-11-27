@@ -26,7 +26,7 @@ export const DEFAULT_PRIVATE_CHAT_CONFIG = {
 };
 
 export function getPrivateChatConfig(selfId) {
-  return { ...DEFAULT_PRIVATE_CHAT_CONFIG, ...Setting.getConfig("PrivateChat") };
+  return { ...DEFAULT_PRIVATE_CHAT_CONFIG, ...Setting.getConfig("PrivateChat", { selfId }) };
 }
 
 export function isProfileReady(profile) {

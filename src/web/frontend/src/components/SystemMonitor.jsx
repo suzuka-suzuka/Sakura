@@ -162,8 +162,9 @@ export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, loadin
         );
     }
 
-    // 一个实例只有一个号：账号名片和三个环形图并排四等分
-    const account = (botInfo?.accounts || []).find((item) => item?.status !== 'offline') || null;
+    const accounts = (botInfo?.accounts || []).filter((account) => account?.status !== 'offline');
+    // 账号卡按数量定宽：一个号是名片，和三个环形图并排四等分；两个号占半行；更多时独占一行
+    const botsLayout = accounts.length <= 1 ? 'one' : accounts.length === 2 ? 'two' : 'many';
     const os = staticInfo?.os || {};
     const cpu = staticInfo?.cpu || {};
     const graphics = staticInfo?.graphics || {};
@@ -185,15 +186,43 @@ export default function SystemMonitor({ staticInfo, dynamicInfo, botInfo, loadin
     const cpuFreq = cpuSpeed.avg?.toFixed(1) || cpu.speed || '-';
 
     return (
-        <div className="dash dash--bots-one">
-            {!account && (
+        <div className={`dash dash--bots-${botsLayout}`}>
+            {accounts.length === 0 && (
                 <section className="card dash-bots dash-profile dash-profile--empty">
                     <img className="dash-profile-avatar" src={FALLBACK_AVATAR} alt="" />
                     <div className="dash-profile-name">还没有账号连接</div>
                     <div className="dash-profile-meta">连接后会显示在这里</div>
                 </section>
             )}
-            {account && <BotProfile account={account} />}
+            {accounts.length === 1 && <BotProfile account={accounts[0]} />}
+            {accounts.length > 1 && (
+                <DashCard
+                    className="dash-bots"
+                    title="机器人账号"
+                    extra={<span className="field-count">{accounts.length}</span>}
+                >
+                    <div className="bot-cards-row">
+                        {accounts.map((account) => {
+                            const meta = directoryText(account);
+                            return (
+                                <div key={account.self_id} className="bot-card" title={`${account.nickname || ''}（${account.uin}）`}>
+                                    <img
+                                        className="bot-card-avatar"
+                                        src={avatarUrl(account.uin)}
+                                        alt=""
+                                        onError={(event) => { event.target.src = FALLBACK_AVATAR; }}
+                                    />
+                                    <span className="bot-card-text">
+                                        <span className="bot-card-nick">{account.nickname || account.uin}</span>
+                                        <span className="bot-card-id">{account.uin}</span>
+                                        {meta && <span className="bot-card-meta">{meta}</span>}
+                                    </span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </DashCard>
+            )}
 
             <section className="card dash-stat">
                 <CircleProgress value={cpuUsage} label="CPU" subLabel={`${cpuCores}C${cpuThreads}T · ${cpuFreq}GHz`} color="accent" />

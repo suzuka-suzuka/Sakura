@@ -3,39 +3,13 @@ import path from 'path';
 import yaml from 'js-yaml';
 import chokidar from 'chokidar';
 import lodash from 'lodash';
+import { fileURLToPath } from 'url';
 import { logger } from '../utils/logger.js';
-import { CONFIG_DIR } from '../utils/home.js';
-import { ConfigSchema, PERMISSION_CONFIG_KEYS, getDefaultConfig, schemaToMeta } from './configSchema.js';
+import accountConfig from './accountConfig.js';
+import { ConfigSchema, getDefaultConfig, schemaToMeta } from './configSchema.js';
 
-const CONFIG_PATH = path.join(CONFIG_DIR, 'config.yaml');
-/** 拆实例之前按账号存的主人/黑白名单，default.yaml 是只有一个号在线时实际生效的那份 */
-const LEGACY_ACCOUNT_DEFAULT_PATH = path.join(CONFIG_DIR, 'account', 'default.yaml');
-
-/**
- * config.yaml 里还没有主人/黑白名单时，从旧的 config/account/default.yaml 搬过来。
- * 只补缺失的键，不删旧文件（回滚代码还能用）；某个号自己的 <QQ>.yaml 由 scripts/split-instance.mjs 处理。
- */
-function importLegacyPermissionConfig(rawData) {
-    if (PERMISSION_CONFIG_KEYS.some((key) => Object.prototype.hasOwnProperty.call(rawData, key))) {
-        return rawData;
-    }
-    if (!fs.existsSync(LEGACY_ACCOUNT_DEFAULT_PATH)) {
-        return rawData;
-    }
-    try {
-        const legacy = yaml.load(fs.readFileSync(LEGACY_ACCOUNT_DEFAULT_PATH, 'utf8')) || {};
-        const imported = {};
-        for (const key of PERMISSION_CONFIG_KEYS) {
-            if (Array.isArray(legacy[key])) imported[key] = legacy[key];
-        }
-        if (Object.keys(imported).length === 0) return rawData;
-        logger.info(`[Config] 已把 ${LEGACY_ACCOUNT_DEFAULT_PATH} 里的主人和黑白名单并入 config.yaml`);
-        return { ...rawData, ...imported };
-    } catch (e) {
-        logger.error(`[Config] 读取旧的账号配置失败，主人和黑白名单按默认值处理: ${e}`);
-        return rawData;
-    }
-}
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CONFIG_PATH = path.join(__dirname, '../../config/config.yaml');
 
 class Config {
     constructor() {
@@ -83,8 +57,7 @@ class Config {
         try {
             if (fs.existsSync(CONFIG_PATH)) {
                 const fileContents = fs.readFileSync(CONFIG_PATH, 'utf8');
-                const fileData = yaml.load(fileContents) || {};
-                const rawData = importLegacyPermissionConfig(fileData);
+                const rawData = yaml.load(fileContents) || {};
 
                 // 用 Zod 验证（自动补全缺失字段的默认值 + 剥离多余字段）
                 const result = ConfigSchema.safeParse(rawData);
@@ -104,7 +77,7 @@ class Config {
                 }
 
                 // 检查是否需要同步：缺失字段需补全 / 多余字段需清理
-                const needsSchemaSync = !lodash.isEqual(this.config, fileData);
+                const needsSchemaSync = !lodash.isEqual(this.config, rawData);
                 if (needsSchemaSync) {
                     logger.info('[Config] 配置结构与 Schema 不一致，正在同步...');
                     this._syncSave();
@@ -197,6 +170,17 @@ class Config {
             return lodash.get(this.config, key);
         }
         return this.config;
+    }
+
+    getForSelf(selfId, key) {
+        const scopedConfig = {
+            ...this.config,
+            ...accountConfig.getRuntimeConfig(selfId),
+        };
+        if (key) {
+            return lodash.get(scopedConfig, key);
+        }
+        return scopedConfig;
     }
 
     set(key, value) {

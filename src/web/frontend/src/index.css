@@ -1902,6 +1902,54 @@ select.field-input {
   color: var(--dock-text);
 }
 
+/* ========== 账号切换 ========== */
+
+.account-switcher {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 3px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-1), 0 0 0 1px var(--border);
+}
+
+.account-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 11px 0 4px;
+  border-radius: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+  max-width: 180px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.account-chip:hover {
+  color: var(--text);
+}
+
+.account-chip img {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.account-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-chip.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
 /* ========== 抽屉：右侧浮起的面板 ========== */
 
 .drawer-overlay {
@@ -2334,9 +2382,26 @@ select.field-input {
   padding: 18px 20px 20px;
 }
 
+/* 账号卡按账号数量定宽：一个号和三个环形图四等分，两个号占半行，更多时独占一行 */
 .dash--bots-one > .dash-bots,
 .dash--bots-one > .dash-stat {
   grid-column: span 3 !important;
+}
+
+.dash--bots-two > .dash-bots {
+  grid-column: span 6 !important;
+}
+
+.dash--bots-two > .dash-stat {
+  grid-column: span 2 !important;
+}
+
+.dash--bots-many > .dash-bots {
+  grid-column: span 12 !important;
+}
+
+.dash--bots-many > .dash-stat {
+  grid-column: span 4 !important;
 }
 
 .dash-stat {
@@ -2438,6 +2503,60 @@ select.field-input {
 .dash-profile--empty .dash-profile-meta {
   margin-top: 4px;
   color: var(--text-3);
+}
+
+.bot-cards-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.bot-card {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  padding: 10px 12px 10px 10px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.bot-card-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--success);
+}
+
+.bot-card-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.bot-card-nick {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-card-id,
+.bot-card-meta {
+  font-size: 12px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-card-meta {
+  color: var(--text-2);
 }
 
 .circle-progress {
@@ -2664,6 +2783,14 @@ select.field-input {
 }
 
 @media (max-width: 1280px) {
+  .dash--bots-two > .dash-bots {
+    grid-column: span 12 !important;
+  }
+
+  .dash--bots-two > .dash-stat {
+    grid-column: span 4 !important;
+  }
+
   .dash-sys,
   .dash-storage {
     grid-column: span 6 !important;

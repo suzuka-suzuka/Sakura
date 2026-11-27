@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import { logger } from "../utils/logger.js";
-import { DATA_DIR } from "../utils/home.js";
 
 /**
  * 软关机状态，按 Bot 账号记录。
@@ -12,7 +12,8 @@ import { DATA_DIR } from "../utils/home.js";
  * 状态不会过期，所以不放 Redis，写到 data/ 下的 JSON，重启后照样保持关机。
  */
 
-const STATE_PATH = path.join(DATA_DIR, "power-state.json");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const STATE_PATH = path.join(__dirname, "../../data/power-state.json");
 
 /** selfId(字符串) → 软关机时间戳；首次用到时才从文件读 */
 let offAccounts = null;

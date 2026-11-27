@@ -270,6 +270,7 @@ export class EditImage extends plugin {
           quality: options.quality,
           count: options.count,
           channel: options.channel,
+          selfId: e.self_id,
           outputFormat: options.outputFormat,
           frameCount: options.frameCount,
           frameDurationMs: options.frameDurationMs,

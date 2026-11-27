@@ -1,5 +1,5 @@
 import Config from "../../src/core/config.js";
-import { Friend } from "../../src/api/client.js";
+import { Friend, bots } from "../../src/api/client.js";
 import { OnEvent, plugin } from "../../src/core/plugin.js";
 import { normalizeMasters } from "../../src/utils/common.js";
 
@@ -15,7 +15,7 @@ export class OfflineNotify extends plugin {
 
   // 软关机期间也照发：账号掉线后收不到 #开机，得先让主人知道
   handleOffline = OnEvent("notice.bot_offline", { whileOff: true }, async (e) => {
-    const pendingMasters = new Set(normalizeMasters(Config.get("master")));
+    const pendingMasters = new Set(normalizeMasters(Config.getForSelf(e.self_id, "master")));
     if (pendingMasters.size === 0) {
       return false;
     }
@@ -37,9 +37,15 @@ export class OfflineNotify extends plugin {
       }
     };
 
-    // 一个实例只有这一个号；协议端还能发消息时（比如被踢下线前的通知）才送得到
     if (e.bot) {
       await notifyWith(e.bot);
+    }
+
+    for (const [botId, botInstance] of bots) {
+      if (pendingMasters.size === 0) break;
+      if (botId === selfId) continue;
+
+      await notifyWith(botInstance);
     }
 
     return false;

@@ -2,13 +2,25 @@ import fs from 'fs';
 import path from 'path';
 import yaml from 'js-yaml';
 import chokidar from 'chokidar';
+import { fileURLToPath } from 'url';
 import { isDeepStrictEqual } from 'node:util';
 import { logger } from '../utils/logger.js';
-import { CONFIG_DIR } from '../utils/home.js';
+import { getBots, getCurrentBotSelfId } from '../api/client.js';
+import { resolveRuntimeConfigSelfId } from './pluginScope.js';
 
-// 插件配置在 config/<插件>/<模块>.yaml，一个实例一份。
-// 拆实例前留下的 config/<插件>/_accounts/<QQ>/ 不再读取，见 legacyAccountConfig.js。
-const ROOT_CONFIG_DIR = CONFIG_DIR;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT_CONFIG_DIR = path.join(__dirname, '../../config');
+const ACCOUNT_SCOPE_DIR = '_accounts';
+const DEFAULT_SCOPE_KEY = '__default__';
+
+function normalizeSelfId(value) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+function toScopeKey(selfId) {
+    return selfId == null ? DEFAULT_SCOPE_KEY : String(selfId);
+}
 
 class PluginConfigManager {
     constructor() {
@@ -65,21 +77,23 @@ class PluginConfigManager {
         logger.info(`[插件配置] 已注册 ${pluginName} (${moduleCount} 个模块)`);
     }
 
-    getConfig(pluginName, moduleName) {
+    getConfig(pluginName, moduleName, options = {}) {
         const schema = this.schemas[pluginName]?.[moduleName];
         if (!schema) return null;
 
-        const configs = this._ensureLoaded(pluginName);
-        const config = configs?.[moduleName];
+        const selfId = this._resolveSelfId(options);
+        const scope = this._ensureScopeLoaded(pluginName, selfId);
+        const config = scope?.[moduleName];
         return config !== undefined ? config : null;
     }
 
-    getAll(pluginName) {
+    getAll(pluginName, options = {}) {
         if (!this.schemas[pluginName]) return null;
-        return this._ensureLoaded(pluginName);
+        const selfId = this._resolveSelfId(options);
+        return this._ensureScopeLoaded(pluginName, selfId);
     }
 
-    setConfig(pluginName, moduleName, newData) {
+    setConfig(pluginName, moduleName, newData, options = {}) {
         const schema = this.schemas[pluginName]?.[moduleName];
         if (!schema) {
             return { success: false, errors: [{ message: `Schema not found: ${pluginName}/${moduleName}` }] };
@@ -97,14 +111,18 @@ class PluginConfigManager {
             }
         }
 
+        const selfId = this._resolveSelfId(options);
+        const scopeKey = toScopeKey(selfId);
         this.configs[pluginName] ||= {};
-        this.configs[pluginName][moduleName] = result.data;
+        this.configs[pluginName][scopeKey] ||= {};
+        this.configs[pluginName][scopeKey][moduleName] = result.data;
 
-        const configFile = this._getConfigFilePath(pluginName, moduleName);
+        const configFile = this._getConfigFilePath(pluginName, moduleName, selfId);
         this._writeYaml(configFile, result.data);
 
         return {
             success: true,
+            selfId,
             removedFields: unusedPaths.map((pathParts) => this._formatConfigPath(pathParts)),
         };
     }
@@ -146,6 +164,24 @@ class PluginConfigManager {
         return result;
     }
 
+    getConfiguredSelfIds(pluginName) {
+        const accountsDir = this._getAccountsDir(pluginName);
+        if (!fs.existsSync(accountsDir)) {
+            return [];
+        }
+
+        try {
+            return fs.readdirSync(accountsDir, { withFileTypes: true })
+                .filter((entry) => entry.isDirectory())
+                .map((entry) => normalizeSelfId(entry.name))
+                .filter((selfId) => selfId != null && selfId > 0)
+                .sort((a, b) => a - b);
+        } catch (error) {
+            logger.error(`[插件配置] 扫描 ${pluginName} 的账号配置目录失败: ${error}`);
+            return [];
+        }
+    }
+
     onChange(pluginName, callback) {
         if (!this._listeners[pluginName]) {
             this._listeners[pluginName] = [];
@@ -153,38 +189,72 @@ class PluginConfigManager {
         this._listeners[pluginName].push(callback);
     }
 
+    _resolveSelfId(options = {}) {
+        const requestedSelfId = options && Object.prototype.hasOwnProperty.call(options, 'selfId')
+            ? options.selfId
+            : getCurrentBotSelfId();
+        const onlineSelfIds = getBots().map((currentBot) => currentBot.self_id);
+        return resolveRuntimeConfigSelfId(onlineSelfIds, requestedSelfId);
+    }
+
     _getPluginDir(pluginName) {
         return path.join(ROOT_CONFIG_DIR, pluginName);
     }
 
-    _getConfigFilePath(pluginName, moduleName) {
-        return path.join(this._getPluginDir(pluginName), `${moduleName}.yaml`);
+    _getAccountsDir(pluginName) {
+        return path.join(this._getPluginDir(pluginName), ACCOUNT_SCOPE_DIR);
     }
 
-    _ensureLoaded(pluginName) {
+    _getScopeDir(pluginName, selfId) {
+        if (selfId == null) {
+            return this._getPluginDir(pluginName);
+        }
+        return path.join(this._getAccountsDir(pluginName), String(selfId));
+    }
+
+    _getConfigFilePath(pluginName, moduleName, selfId) {
+        return path.join(this._getScopeDir(pluginName, selfId), `${moduleName}.yaml`);
+    }
+
+    _ensureScopeLoaded(pluginName, selfId) {
         const schemaMap = this.schemas[pluginName];
         if (!schemaMap) return null;
 
+        const scopeKey = toScopeKey(selfId);
         this.configs[pluginName] ||= {};
+        this.configs[pluginName][scopeKey] ||= {};
+
         for (const [moduleName, schema] of Object.entries(schemaMap)) {
-            this._ensureModuleLoaded(pluginName, moduleName, schema);
+            this._ensureModuleLoaded(pluginName, moduleName, schema, selfId, scopeKey);
         }
-        return this.configs[pluginName];
+
+        return this.configs[pluginName][scopeKey];
     }
 
-    _ensureModuleLoaded(pluginName, moduleName, schema) {
-        if (Object.prototype.hasOwnProperty.call(this.configs[pluginName], moduleName)) {
+    _ensureModuleLoaded(pluginName, moduleName, schema, selfId, scopeKey) {
+        if (Object.prototype.hasOwnProperty.call(this.configs[pluginName][scopeKey], moduleName)) {
             return;
         }
 
-        const targetFile = this._getConfigFilePath(pluginName, moduleName);
+        const targetFile = this._getConfigFilePath(pluginName, moduleName, selfId);
         if (fs.existsSync(targetFile)) {
-            this._loadModuleConfig(pluginName, moduleName, schema, targetFile);
+            this._loadModuleConfig(pluginName, moduleName, schema, targetFile, scopeKey);
             return;
         }
 
-        const nextConfig = this._getDefaults(schema);
-        this.configs[pluginName][moduleName] = nextConfig;
+        let nextConfig = null;
+        if (selfId != null) {
+            const defaultFile = this._getConfigFilePath(pluginName, moduleName, null);
+            if (fs.existsSync(defaultFile)) {
+                nextConfig = this._readAndNormalizeModule(schema, defaultFile);
+            }
+        }
+
+        if (nextConfig == null) {
+            nextConfig = this._getDefaults(schema);
+        }
+
+        this.configs[pluginName][scopeKey][moduleName] = nextConfig;
         this._writeYaml(targetFile, nextConfig);
     }
 
@@ -212,10 +282,9 @@ class PluginConfigManager {
         }
     }
 
-    _loadModuleConfig(pluginName, moduleName, schema, configFile) {
+    _loadModuleConfig(pluginName, moduleName, schema, configFile, scopeKey) {
         const nextConfig = this._readAndNormalizeModule(schema, configFile);
-        this.configs[pluginName] ||= {};
-        this.configs[pluginName][moduleName] = nextConfig;
+        this.configs[pluginName][scopeKey][moduleName] = nextConfig;
     }
 
     _normalizeModuleData(schema, rawData, context = {}) {
@@ -324,6 +393,11 @@ class PluginConfigManager {
         };
 
         inspectDirectory(pluginDir);
+        const accountsDir = path.join(pluginDir, ACCOUNT_SCOPE_DIR);
+        if (!fs.existsSync(accountsDir)) return;
+        for (const entry of fs.readdirSync(accountsDir, { withFileTypes: true })) {
+            if (entry.isDirectory()) inspectDirectory(path.join(accountsDir, entry.name));
+        }
     }
 
     _normalizeRegisteredConfigFiles(schemaMap, pluginDir) {
@@ -338,6 +412,11 @@ class PluginConfigManager {
         };
 
         inspectDirectory(pluginDir);
+        const accountsDir = path.join(pluginDir, ACCOUNT_SCOPE_DIR);
+        if (!fs.existsSync(accountsDir)) return;
+        for (const entry of fs.readdirSync(accountsDir, { withFileTypes: true })) {
+            if (entry.isDirectory()) inspectDirectory(path.join(accountsDir, entry.name));
+        }
     }
 
     _getDefaults(schema) {
@@ -555,7 +634,7 @@ class PluginConfigManager {
             const parsed = this._parseConfigFile(pluginName, filePath);
             if (!parsed) return;
 
-            const { moduleName } = parsed;
+            const { moduleName, selfId, scopeKey } = parsed;
             const schema = this.schemas[pluginName]?.[moduleName];
             if (!schema) {
                 this._removeUnregisteredConfigFile(
@@ -566,13 +645,25 @@ class PluginConfigManager {
                 );
                 return;
             }
-            logger.info(`[插件配置] 检测到配置更改: ${pluginName}/${moduleName}`);
-            this._loadModuleConfig(pluginName, moduleName, schema, filePath);
+            if (
+                selfId != null &&
+                resolveRuntimeConfigSelfId(
+                    getBots().map((currentBot) => currentBot.self_id),
+                    selfId
+                ) == null
+            ) {
+                return;
+            }
+
+            logger.info(`[插件配置] 检测到配置更改: ${pluginName}/${moduleName}${selfId != null ? ` (${selfId})` : ''}`);
+            this.configs[pluginName] ||= {};
+            this.configs[pluginName][scopeKey] ||= {};
+            this._loadModuleConfig(pluginName, moduleName, schema, filePath, scopeKey);
 
             const listeners = this._listeners[pluginName] || [];
             for (const fn of listeners) {
                 try {
-                    fn(moduleName, this.configs[pluginName][moduleName]);
+                    fn(moduleName, this.configs[pluginName][scopeKey][moduleName], { selfId, scopeKey });
                 } catch (error) {
                     logger.error(`[插件配置] onChange 回调失败: ${error}`);
                 }
@@ -589,10 +680,26 @@ class PluginConfigManager {
             return null;
         }
 
-        // 只认插件目录下直接放的模块文件，子目录（包括旧的 _accounts/）不管
         const parts = relativePath.split(path.sep);
-        if (parts.length !== 1) return null;
-        return { moduleName: path.basename(parts[0], path.extname(parts[0])) };
+        if (parts.length === 1) {
+            return {
+                moduleName: path.basename(parts[0], path.extname(parts[0])),
+                selfId: null,
+                scopeKey: DEFAULT_SCOPE_KEY,
+            };
+        }
+
+        if (parts.length === 3 && parts[0] === ACCOUNT_SCOPE_DIR) {
+            const selfId = normalizeSelfId(parts[1]);
+            if (selfId == null) return null;
+            return {
+                moduleName: path.basename(parts[2], path.extname(parts[2])),
+                selfId,
+                scopeKey: toScopeKey(selfId),
+            };
+        }
+
+        return null;
     }
 
     _mergeObjects(defaults, raw) {
@@ -635,4 +742,5 @@ class PluginConfigManager {
     }
 }
 
+export { DEFAULT_SCOPE_KEY };
 export default new PluginConfigManager();

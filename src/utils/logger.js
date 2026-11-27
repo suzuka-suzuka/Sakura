@@ -3,8 +3,13 @@ import chalk from "chalk";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { BOT_LOG_BASE } from "./logPaths.js";
 
-// 用于自动将当前事件的群 / 用户信息注入到日志前缀
+// 用于自动将当前事件的 self_id / 群 / 用户信息注入到日志前缀
 export const logContext = new AsyncLocalStorage();
+let includeSelfIdPrefix = false;
+
+export function setLoggerBotCount(count = 0) {
+  includeSelfIdPrefix = Number(count) > 1;
+}
 
 log4js.configure({
   appenders: {
@@ -44,10 +49,16 @@ for (const color of colors) {
 function makeLogPrefix() {
   const ctx = logContext.getStore();
   if (!ctx) {
-    return "";
+    return { fullPrefix: "", selfPrefix: "" };
   }
 
   const parts = [];
+  const selfPrefix = includeSelfIdPrefix && ctx.self_id ? `[${ctx.self_id}] ` : "";
+
+  if (selfPrefix) {
+    parts.push(selfPrefix.trimEnd());
+  }
+
   if (ctx.group_id) {
     const groupLabel = ctx.group_name
       ? `${ctx.group_name}(${ctx.group_id})`
@@ -61,7 +72,10 @@ function makeLogPrefix() {
     parts.push(`[${userLabel}]`);
   }
 
-  return parts.length > 0 ? `${parts.join(" ")} ` : "";
+  return {
+    fullPrefix: parts.length > 0 ? `${parts.join(" ")} ` : "",
+    selfPrefix,
+  };
 }
 
 const _patchedMethods = ["error", "warn", "info", "debug", "trace"];
@@ -69,9 +83,15 @@ const logger = new Proxy(_rawLogger, {
   get(target, prop) {
     if (_patchedMethods.includes(prop)) {
       return (...args) => {
-        const fullPrefix = makeLogPrefix();
+        const { fullPrefix, selfPrefix } = makeLogPrefix();
         if (fullPrefix && typeof args[0] === "string") {
-          args[0] = fullPrefix + args[0];
+          let prefixToUse = fullPrefix;
+          if (selfPrefix && args[0].startsWith(selfPrefix)) {
+            prefixToUse = fullPrefix.slice(selfPrefix.length);
+          }
+          if (prefixToUse) {
+            args[0] = prefixToUse + args[0];
+          }
         } else if (fullPrefix) {
           args.unshift(fullPrefix);
         }

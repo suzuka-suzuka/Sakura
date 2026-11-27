@@ -136,7 +136,7 @@ export class GroupDataCleaner {
   }
 
   async run(event = null) {
-    // 定时任务和成员离群事件都会触发，一次只允许一轮核对。
+    // Cron 按 Bot 账号分别调用，但数据库是共享的，一次只允许一轮核对。
     if (this.running) return false;
     if (event && ![event.group_id, event.user_id, event.self_id].every(validId)) return false;
     this.running = true;

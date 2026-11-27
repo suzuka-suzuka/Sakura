@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import OpenAI, { toFile } from "openai";
 import sharp from "sharp";
+import Setting from "../setting.js";
 import { VALID_IMAGE_QUALITIES } from "./imageCommandParser.js";
 import { tagMediaError } from "./mediaErrorMessages.js";
 import {
@@ -171,9 +172,13 @@ async function notifyParameterWarnings(callback, warnings) {
 function resolveImageSelection(
   imageConfig = {},
   requestedRoute = null,
+  selfId = null,
   outputFormat = null
 ) {
-  const featureConfig = imageConfig;
+  const scope = selfId == null ? {} : { selfId };
+  const featureConfig = selfId == null
+    ? imageConfig
+    : Setting.getConfig("EditImage", scope);
   const requested = String(requestedRoute || "").trim();
   const configuredModels = [
     outputFormat === "gif" ? featureConfig.gifModels : null,
@@ -199,6 +204,7 @@ function resolveImageSelection(
   };
   const models = requested
     ? resolveRouteReference(requested, {
+      selfId,
       kind: "image",
       targetMatches: aliasMatchers[alias] && ((candidate) =>
         aliasMatchers[alias](candidate) && (outputFormat !== "gif" || supportsGif(candidate))),
@@ -207,6 +213,7 @@ function resolveImageSelection(
   const routeId = formatModelList(models);
 
   const plan = createRouteExecutionPlan(models, {
+    selfId,
     kind: "image",
     targetMatches: outputFormat === "gif" ? supportsGif : undefined,
   });
@@ -755,7 +762,9 @@ export async function generateImagesWithProvider(
   if (options.quality != null && !VALID_IMAGE_QUALITIES.includes(options.quality)) {
     throw new Error(`图片画质 q 必须是 ${VALID_IMAGE_QUALITIES.join("、")} 之一。`);
   }
-  const config = imageConfig;
+  const config = options.selfId == null
+    ? imageConfig
+    : Setting.getConfig("EditImage", { selfId: options.selfId });
   options = { ...options, defaultGptQuality: config.gptQuality ?? "auto" };
   if (options.outputFormat === "gif") {
     options = {
@@ -768,6 +777,7 @@ export async function generateImagesWithProvider(
   const selection = resolveImageSelection(
     imageConfig,
     options.channel,
+    options.selfId,
     options.outputFormat
   );
   const sourceImages = await normalizeImageInputs(sourceInputs);

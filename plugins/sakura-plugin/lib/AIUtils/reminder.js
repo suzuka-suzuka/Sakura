@@ -2,7 +2,7 @@ import { CronExpressionParser } from 'cron-parser';
 import Setting from '../setting.js';
 import db from '../Database.js';
 import { getRedis } from '../../../../src/utils/redis.js';
-import { getBot } from '../../../../src/api/client.js';
+import { getBot, withBotContext } from '../../../../src/api/client.js';
 import { isPoweredOff } from '../../../../src/core/powerState.js';
 import { hasModels } from "./aiModels.js";
 import { formatBeijingDateTime } from './currentTime.js';
@@ -174,13 +174,13 @@ export function clipText(value, maxLength) {
 // ---------- 重复提醒（存在 reminderTask 配置里，面板可编辑） ----------
 
 export function getRepeatReminderTasks(selfId = null) {
-  const config = Setting.getConfig('reminderTask') || {};
+  const config = Setting.getConfig('reminderTask', { selfId }) || {};
   return Array.isArray(config.tasks) ? config.tasks : [];
 }
 
 // AI 只能给用户自己设提醒，所以 qq 既是提醒对象也是设置人；source 标明来自提醒工具。
 export function addRepeatReminderTask({ targetQQ, groupId, content, note = '', cronExpression, selfId = null }) {
-  const reminderConfig = Setting.getConfig('reminderTask') || {};
+  const reminderConfig = Setting.getConfig('reminderTask', { selfId }) || {};
   const tasks = Array.isArray(reminderConfig.tasks) ? [...reminderConfig.tasks] : [];
 
   const taskId = buildNextReminderTaskId(tasks);
@@ -199,18 +199,18 @@ export function addRepeatReminderTask({ targetQQ, groupId, content, note = '', c
   const ok = Setting.setConfig('reminderTask', {
     ...reminderConfig,
     tasks,
-  });
+  }, { selfId });
 
   return { ok, taskId };
 }
 
 export function removeRepeatReminderTask(taskId, selfId = null) {
-  const reminderConfig = Setting.getConfig('reminderTask') || {};
+  const reminderConfig = Setting.getConfig('reminderTask', { selfId }) || {};
   const tasks = Array.isArray(reminderConfig.tasks) ? [...reminderConfig.tasks] : [];
   const index = tasks.findIndex((task) => String(task?.id || '') === String(taskId));
   if (index < 0) return { ok: false, task: null };
   const [task] = tasks.splice(index, 1);
-  const ok = Setting.setConfig('reminderTask', { ...reminderConfig, tasks });
+  const ok = Setting.setConfig('reminderTask', { ...reminderConfig, tasks }, { selfId });
   return { ok, task };
 }
 
@@ -306,9 +306,9 @@ function armReminderTimer(selfId, dueAt) {
 }
 
 async function dispatchFromTimer(selfId) {
-  // 账号离线或软关机时不发，等每分钟扫描（loader 会跳过软关机的账号）恢复后再补。
+  // 账号离线或软关机时不发，等每分钟扫描（loader 会跳过这些账号）恢复后再补。
   if (!getBot(selfId) || isPoweredOff(selfId)) return;
-  await runDueOnceReminders(selfId);
+  await withBotContext(selfId, () => runDueOnceReminders(selfId));
 }
 
 /**
@@ -453,7 +453,7 @@ function findRolePrompt(name, fallback = '') {
 }
 
 function resolveMimicConfig(groupId, selfId) {
-  const config = Setting.getConfig('mimic') || {};
+  const config = Setting.getConfig('mimic', { selfId }) || {};
   const override = (config.GroupConfigs || []).find((item) => item.group &&
     (Array.isArray(item.group) ? item.group : [item.group]).map(String).includes(String(groupId)));
   if (!override) return config;
@@ -473,7 +473,7 @@ function resolveReminderPersona(origin, groupId, selfId) {
     return prompt ? { route: config.models, prompt, groupContext: true } : null;
   }
   if (typeof origin === 'string' && origin.startsWith('chat:')) {
-    const profiles = Setting.getConfig('AI')?.profiles || [];
+    const profiles = Setting.getConfig('AI', { selfId })?.profiles || [];
     const profile = profiles.find((item) => `chat:${getPrimaryPrefix(item)}` === origin);
     if (!profile) return null;
     const prompt = findRolePrompt(profile.name, profile.Prompt || '');
@@ -540,7 +540,7 @@ export async function composeReminderText(info, currentBot) {
   if (persona && hasModels(persona.route)) {
     attempts.push({ label: '人设', ...persona });
   }
-  const utilityRoute = Setting.getConfig('AI')?.utilityModels;
+  const utilityRoute = Setting.getConfig('AI', { selfId: info.selfId })?.utilityModels;
   if (hasModels(utilityRoute)) {
     attempts.push({ label: '辅助模型', route: utilityRoute, prompt: REMINDER_AI_SYSTEM_PROMPT, groupContext: false });
   }

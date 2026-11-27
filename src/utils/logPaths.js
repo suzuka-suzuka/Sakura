@@ -1,8 +1,11 @@
 import fs from "fs";
 import path from "path";
-import { LOG_DIR } from "./home.js";
+import { fileURLToPath } from "url";
 
-export { LOG_DIR };
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export const PROJECT_ROOT = path.resolve(__dirname, "../..");
+export const LOG_DIR = path.join(PROJECT_ROOT, "logs");
 export const BOT_LOG_BASE = path.join(LOG_DIR, "bot.log");
 
 fs.mkdirSync(LOG_DIR, { recursive: true });

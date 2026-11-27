@@ -14,6 +14,22 @@ import {
     resetHiddenFields,
 } from '../utils/schemaLayout';
 
+function normalizeScopeSelfId(scopeSelfId) {
+    if (scopeSelfId == null) return null;
+    const num = Number(scopeSelfId);
+    return Number.isFinite(num) && num > 0 ? num : null;
+}
+
+function buildScopedUrl(basePath, scopeSelfId) {
+    const normalizedSelfId = normalizeScopeSelfId(scopeSelfId);
+    if (normalizedSelfId == null) {
+        return basePath;
+    }
+
+    const separator = basePath.includes('?') ? '&' : '?';
+    return `${basePath}${separator}selfId=${normalizedSelfId}`;
+}
+
 function getAuthToken() {
     return readAuthToken({ touch: true });
 }
@@ -107,6 +123,7 @@ export function FieldList({
     children,
     value,
     onFieldChange,
+    scopeSelfId = null,
     context = {},
     variant = 'page',
     anchorScope = '',
@@ -126,6 +143,7 @@ export function FieldList({
                     fields={group.fields}
                     value={value}
                     onFieldChange={onFieldChange}
+                    scopeSelfId={scopeSelfId}
                     context={context}
                     variant={variant}
                     anchorScope={anchorScope}
@@ -135,7 +153,7 @@ export function FieldList({
     );
 }
 
-export function FieldGroup({ title, help = '', cardId, fields, value, onFieldChange, context, variant, anchorScope }) {
+export function FieldGroup({ title, help = '', cardId, fields, value, onFieldChange, scopeSelfId, context, variant, anchorScope }) {
     const [showAdvanced, setShowAdvanced] = useState(false);
     const visible = fields.filter(([, meta]) => isFieldVisible(meta, value, context));
     const advanced = visible.filter(([, meta]) => meta.advanced);
@@ -159,6 +177,7 @@ export function FieldGroup({ title, help = '', cardId, fields, value, onFieldCha
                         children={meta.children}
                         value={value?.[key] || {}}
                         onFieldChange={(childKey, childValue) => onFieldChange(key, { ...(value?.[key] || {}), [childKey]: childValue })}
+                        scopeSelfId={scopeSelfId}
                         context={context}
                         variant="nested"
                         groupByCard={false}
@@ -173,6 +192,7 @@ export function FieldGroup({ title, help = '', cardId, fields, value, onFieldCha
                     meta={meta}
                     value={value?.[key]}
                     onChange={(next) => onFieldChange(key, next)}
+                    scopeSelfId={scopeSelfId}
                     formValue={value}
                 />
             </div>
@@ -262,7 +282,7 @@ export function FieldGroup({ title, help = '', cardId, fields, value, onFieldCha
 /**
  * 单个配置字段渲染器：根据 schema 元数据选择控件。
  */
-export default function ConfigField({ name, meta, value, onChange, formValue = null }) {
+export default function ConfigField({ name, meta, value, onChange, scopeSelfId = null, formValue = null }) {
     const { type, description, options, label, help, uiType } = meta;
     const displayName = label || description || name;
 
@@ -328,6 +348,7 @@ export default function ConfigField({ name, meta, value, onChange, formValue = n
                     value={value}
                     onChange={onChange}
                     uiType={uiType}
+                    scopeSelfId={scopeSelfId}
                 />
             );
         }
@@ -345,6 +366,7 @@ export default function ConfigField({ name, meta, value, onChange, formValue = n
                     value={value}
                     onChange={onChange}
                     meta={meta}
+                    scopeSelfId={scopeSelfId}
                 />
             );
         }
@@ -356,6 +378,7 @@ export default function ConfigField({ name, meta, value, onChange, formValue = n
                     value={value}
                     onChange={onChange}
                     meta={meta}
+                    scopeSelfId={scopeSelfId}
                 />
             );
         }
@@ -367,17 +390,18 @@ export default function ConfigField({ name, meta, value, onChange, formValue = n
                     value={value}
                     onChange={onChange}
                     meta={meta}
+                    scopeSelfId={scopeSelfId}
                 />
             );
         }
         if (uiType === 'groupSelect' || meta.items?.uiType === 'groupSelect') {
-            return <GroupSelectField name={name} displayName={displayName} help={help} value={value} onChange={onChange} />;
+            return <GroupSelectField name={name} displayName={displayName} help={help} value={value} onChange={onChange} scopeSelfId={scopeSelfId} />;
         }
         if (uiType === 'toolMultiSelect') {
             return <ToolMultiSelectField name={name} displayName={displayName} help={help} value={value} onChange={onChange} />;
         }
         if (uiType && uiType.endsWith('Array')) {
-            return <DynamicSelectArrayField name={name} displayName={displayName} help={help} value={value} onChange={onChange} uiType={uiType} />;
+            return <DynamicSelectArrayField name={name} displayName={displayName} help={help} value={value} onChange={onChange} uiType={uiType} scopeSelfId={scopeSelfId} />;
         }
         return (
             <ArrayField
@@ -394,7 +418,7 @@ export default function ConfigField({ name, meta, value, onChange, formValue = n
 
     if (type === 'number') {
         if (uiType === 'groupSelect') {
-            return <SingleGroupSelectField name={name} displayName={displayName} help={help} value={value} onChange={onChange} />;
+            return <SingleGroupSelectField name={name} displayName={displayName} help={help} value={value} onChange={onChange} scopeSelfId={scopeSelfId} />;
         }
 
         const hasStep = meta.step != null;
@@ -461,12 +485,13 @@ export default function ConfigField({ name, meta, value, onChange, formValue = n
                 value={value}
                 onChange={onChange}
                 providerId={formValue?.provider || ''}
+                scopeSelfId={scopeSelfId}
             />
         );
     }
 
     if (isString && uiType && !uiType.endsWith('Array')) {
-        return <DynamicSelectField name={name} displayName={displayName} help={help} value={value} onChange={onChange} uiType={uiType} />;
+        return <DynamicSelectField name={name} displayName={displayName} help={help} value={value} onChange={onChange} uiType={uiType} scopeSelfId={scopeSelfId} />;
     }
 
     const isSecret = /api.?key|password|token|secret/i.test(name);
@@ -749,7 +774,7 @@ function ArrayField({ displayName, help, value, onChange, itemType, placeholder 
 /**
  * 群号选择字段 — 弹窗多选 bot 已加入的群，标签显示群名
  */
-function GroupSelectField({ displayName, help, value, onChange }) {
+function GroupSelectField({ displayName, help, value, onChange, scopeSelfId = null }) {
     const [showModal, setShowModal] = useState(false);
     const [groupMap, setGroupMap] = useState(new Map());
     const items = Array.isArray(value) ? value : [];
@@ -757,7 +782,7 @@ function GroupSelectField({ displayName, help, value, onChange }) {
     // 获取群列表，建立 群号→群名 映射
     useEffect(() => {
         const token = getAuthToken();
-        fetch('/api/bot/groups', {
+        fetch(buildScopedUrl('/api/bot/groups', scopeSelfId), {
             headers: { Authorization: `Bearer ${token}` },
         })
             .then(r => r.json())
@@ -769,7 +794,7 @@ function GroupSelectField({ displayName, help, value, onChange }) {
                 }
             })
             .catch(() => { });
-    }, []);
+    }, [scopeSelfId]);
 
     const removeItem = (index) => {
         onChange(items.filter((_, i) => i !== index));
@@ -807,6 +832,7 @@ function GroupSelectField({ displayName, help, value, onChange }) {
                     selected={items}
                     onConfirm={(selected) => { onChange(selected); setShowModal(false); }}
                     onCancel={() => setShowModal(false)}
+                    scopeSelfId={scopeSelfId}
                 />
             )}
         </FieldShell>
@@ -816,7 +842,7 @@ function GroupSelectField({ displayName, help, value, onChange }) {
 /**
  * 群选择弹窗 — 从 bot 群列表中多选
  */
-function GroupSelectModal({ selected, onConfirm, onCancel }) {
+function GroupSelectModal({ selected, onConfirm, onCancel, scopeSelfId = null }) {
     const [groups, setGroups] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -825,7 +851,7 @@ function GroupSelectModal({ selected, onConfirm, onCancel }) {
 
     useEffect(() => {
         const token = getAuthToken();
-        fetch('/api/bot/groups', {
+        fetch(buildScopedUrl('/api/bot/groups', scopeSelfId), {
             headers: { Authorization: `Bearer ${token}` },
         })
             .then(r => r.json())
@@ -838,7 +864,7 @@ function GroupSelectModal({ selected, onConfirm, onCancel }) {
             })
             .catch(e => setError('请求失败: ' + e.message))
             .finally(() => setLoading(false));
-    }, []);
+    }, [scopeSelfId]);
 
     const filtered = groups.filter(g => {
         if (!search) return true;
@@ -920,6 +946,7 @@ function GroupSelectModal({ selected, onConfirm, onCancel }) {
                                         <span className="group-select-name">{g.group_name}</span>
                                         <span className="group-select-id">
                                             {g.group_id}
+                                            {Array.isArray(g.bots) && g.bots.length > 1 ? ` · ${g.bots.length} 个账号` : ''}
                                         </span>
                                     </span>
                                 </div>
@@ -940,13 +967,13 @@ function GroupSelectModal({ selected, onConfirm, onCancel }) {
 /**
  * 单选群号字段 — 下拉选择 bot 已加入的单个群
  */
-function SingleGroupSelectField({ displayName, help, value, onChange }) {
+function SingleGroupSelectField({ displayName, help, value, onChange, scopeSelfId = null }) {
     const [groups, setGroups] = useState([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         const token = getAuthToken();
-        fetch('/api/bot/groups', {
+        fetch(buildScopedUrl('/api/bot/groups', scopeSelfId), {
             headers: { Authorization: `Bearer ${token}` },
         })
             .then(r => r.json())
@@ -957,7 +984,7 @@ function SingleGroupSelectField({ displayName, help, value, onChange }) {
             })
             .catch(() => { })
             .finally(() => setLoading(false));
-    }, []);
+    }, [scopeSelfId]);
 
     return (
         <FieldShell label={displayName} help={help}>
@@ -1015,6 +1042,7 @@ function ObjectArrayField({
     value,
     onChange,
     meta,
+    scopeSelfId = null,
     getContext = null,
     renderBadges = null,
     emptyText = null,
@@ -1163,13 +1191,14 @@ function ObjectArrayField({
                     onCancel={() => setEditing(null)}
                     onConfirm={commit}
                     onDuplicate={editing.index >= 0 && !fixed ? duplicate : null}
+                    scopeSelfId={scopeSelfId}
                 />
             )}
         </FieldShell>
     );
 }
 
-function ItemDrawer({ title, itemMeta, initialDraft, getContext, submitLabel, onCancel, onConfirm, onDuplicate }) {
+function ItemDrawer({ title, itemMeta, initialDraft, getContext, submitLabel, onCancel, onConfirm, onDuplicate, scopeSelfId }) {
     const [draft, setDraft] = useState(initialDraft);
     const context = getContext?.(draft) || {};
     const formRef = useRef(null);
@@ -1209,6 +1238,7 @@ function ItemDrawer({ title, itemMeta, initialDraft, getContext, submitLabel, on
                             children={itemMeta.children}
                             value={draft}
                             onFieldChange={(key, next) => setDraft((prev) => ({ ...prev, [key]: next }))}
+                            scopeSelfId={scopeSelfId}
                             context={context}
                             variant="drawer"
                         />
@@ -1256,7 +1286,7 @@ const MODEL_TYPE_LABELS = { chat: '对话', image: '图片', video: '视频' };
 
 /** 模型列表：按所选供应商的协议显示对应的思考参数。 */
 function ModelEntriesField(props) {
-    const { details: providerDetails } = useDynamicOptions('providerSelect');
+    const { details: providerDetails } = useDynamicOptions(props.scopeSelfId, 'providerSelect');
     const getContext = useCallback(
         (item) => ({ protocol: providerDetails?.[item?.provider]?.protocol || '' }),
         [providerDetails]
@@ -1297,13 +1327,13 @@ function ModelEntriesField(props) {
  * uiType 形如 modelList:chat 或 modelList:chat:gemini（只显示 Gemini 协议的模型），
  * modelList:chat:search 只显示开启了自带联网搜索的模型。
  */
-function ModelListField({ displayName, help, value, onChange, uiType }) {
+function ModelListField({ displayName, help, value, onChange, uiType, scopeSelfId }) {
     const [, kind = 'chat', filter = ''] = uiType.split(':');
     const searchOnly = filter === 'search';
     const protocolFilter = searchOnly ? '' : filter;
     const items = Array.isArray(value) ? value : [];
-    const { options, details, loading } = useDynamicOptions('modelEntrySelect');
-    const { details: providerDetails } = useDynamicOptions('providerSelect');
+    const { options, details, loading } = useDynamicOptions(scopeSelfId, 'modelEntrySelect');
+    const { details: providerDetails } = useDynamicOptions(scopeSelfId, 'providerSelect');
     const [picking, setPicking] = useState(false);
 
     const candidates = options.filter((name) => {
@@ -1728,7 +1758,7 @@ function Combobox({ value, options, onChange, disabled = false, loading = false,
 }
 
 /** 模型名：可以从供应商的模型列表里选，也可以直接输入。 */
-function ModelSelectField({ displayName, help, value, onChange, providerId }) {
+function ModelSelectField({ displayName, help, value, onChange, providerId, scopeSelfId = null }) {
     const [models, setModels] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -1748,7 +1778,7 @@ function ModelSelectField({ displayName, help, value, onChange, providerId }) {
         setError('');
         try {
             const query = `/api/ai/models?providerId=${encodeURIComponent(providerId)}${force ? '&refresh=1' : ''}`;
-            const response = await fetch(query, {
+            const response = await fetch(buildScopedUrl(query, scopeSelfId), {
                 headers: { Authorization: `Bearer ${getAuthToken()}` },
             });
             const payload = await response.json();
@@ -1765,7 +1795,7 @@ function ModelSelectField({ displayName, help, value, onChange, providerId }) {
         } finally {
             if (requestId === requestIdRef.current) setLoading(false);
         }
-    }, [providerId]);
+    }, [providerId, scopeSelfId]);
 
     useEffect(() => {
         const timer = window.setTimeout(() => { void loadModels(false); }, 0);
@@ -1974,8 +2004,8 @@ function ToolMultiSelectModal({ title, options, selected, onConfirm, onCancel })
  * 动态选择字段 — 从 API 获取选项列表
  * uiType: 动态选项类型标识（如 roleSelect, channelSelect）
  */
-function DynamicSelectField({ displayName, help, value, onChange, uiType }) {
-    const { options, label: configLabel, loading, isDynamic } = useDynamicOptions(uiType);
+function DynamicSelectField({ displayName, help, value, onChange, uiType, scopeSelfId = null }) {
+    const { options, label: configLabel, loading, isDynamic } = useDynamicOptions(scopeSelfId, uiType);
 
     // 如果不是动态类型，回退到普通文本输入
     if (!loading && !isDynamic) {
@@ -2018,9 +2048,9 @@ function DynamicSelectField({ displayName, help, value, onChange, uiType }) {
  * 动态多选数组字段 — 从 API 获取选项列表，弹窗多选
  * uiType: 动态选项类型标识（如 roleSelectArray, channelSelectArray）
  */
-function DynamicSelectArrayField({ displayName, help, value, onChange, uiType }) {
+function DynamicSelectArrayField({ displayName, help, value, onChange, uiType, scopeSelfId = null }) {
     const [showModal, setShowModal] = useState(false);
-    const { options, label: configLabel } = useDynamicOptions(uiType);
+    const { options, label: configLabel } = useDynamicOptions(scopeSelfId, uiType);
     const items = Array.isArray(value) ? value : [];
 
     const removeItem = (index) => {

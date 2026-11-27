@@ -6,7 +6,7 @@ import {
   migrateLegacyOnceReminders,
   runDueOnceReminders,
 } from '../lib/AIUtils/reminder.js'
-import { getBot } from '../../../src/api/client.js'
+import { getCurrentBotSelfId } from '../../../src/api/client.js'
 
 export class reminderTask extends plugin {
   constructor() {
@@ -30,7 +30,7 @@ export class reminderTask extends plugin {
   }
 
   reminderTaskDispatcher = Cron('* * * * *', async (fireDate) => {
-    const selfId = getBot()?.self_id ?? null
+    const selfId = getCurrentBotSelfId()
     if (selfId == null) {
       return
     }

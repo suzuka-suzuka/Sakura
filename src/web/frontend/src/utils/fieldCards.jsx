@@ -11,6 +11,7 @@ export function buildFieldCards({
     children,
     value,
     onFieldChange,
+    scopeSelfId = null,
     context = {},
     anchorScope = '',
     groupByCard = true,
@@ -31,6 +32,7 @@ export function buildFieldCards({
                     fields={group.fields}
                     value={value}
                     onFieldChange={onFieldChange}
+                    scopeSelfId={scopeSelfId}
                     context={context}
                     variant="page"
                     anchorScope={anchorScope}

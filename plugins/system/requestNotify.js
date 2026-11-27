@@ -79,7 +79,7 @@ export class RequestNotify extends plugin {
     }
 
     // 多个主人只通知第一个
-    const master = normalizeMasters(Config.get("master"))[0];
+    const master = normalizeMasters(Config.getForSelf(e.self_id, "master"))[0];
     if (!master) return false;
 
     const requester = await describeUser(e, e.user_id);
