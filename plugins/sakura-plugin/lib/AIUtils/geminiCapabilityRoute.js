@@ -7,16 +7,8 @@ import {
 import { formatModelList, normalizeModelList } from "./aiModels.js";
 import { createGeminiClient } from "./vertexAuth.js";
 
-function routeScope(selfId) {
-  return selfId == null ? {} : { selfId };
-}
-
-export function resolveGeminiCapabilityPlan(
-  selfId = null,
-  purpose = "Gemini 能力"
-) {
-  const scope = routeScope(selfId);
-  const aiConfig = Setting.getConfig("AI", scope) || {};
+export function resolveGeminiCapabilityPlan(purpose = "Gemini 能力") {
+  const aiConfig = Setting.getConfig("AI") || {};
   const models = normalizeModelList(aiConfig.geminiModels);
   if (models.length === 0) {
     throw new Error(`${purpose}需要 Gemini 模型，但 AI 设定中没有选择“Gemini 能力模型”。`);
@@ -25,10 +17,7 @@ export function resolveGeminiCapabilityPlan(
 
   let plan;
   try {
-    plan = createRouteExecutionPlan(models, {
-      ...scope,
-      protocol: "gemini",
-    });
+    plan = createRouteExecutionPlan(models, { protocol: "gemini" });
   } catch (error) {
     throw new Error(
       `${purpose}无法使用 Gemini 能力模型「${routeId}」：${error.message}`
@@ -44,7 +33,6 @@ export function resolveGeminiCapabilityPlan(
 }
 
 export async function executeGeminiCapability({
-  selfId = null,
   purpose = "Gemini 能力",
   context = null,
   clientFactory = createGeminiClient,
@@ -57,7 +45,7 @@ export async function executeGeminiCapability({
     throw new TypeError("executeGeminiCapability 需要有效的 clientFactory。");
   }
 
-  const resolved = context || resolveGeminiCapabilityPlan(selfId, purpose);
+  const resolved = context || resolveGeminiCapabilityPlan(purpose);
   const { routeId, plan } = resolved;
 
   const outcome = await executeRoutePlan({

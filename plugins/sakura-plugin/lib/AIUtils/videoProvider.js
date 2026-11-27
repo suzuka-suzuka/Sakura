@@ -38,9 +38,8 @@ const VIDEO_REFERENCE_LIMITS = {
 // 没有后缀的模型（如 minimax-h3-comfyui-*）各有规则，不在本地限制，交给上游校验。
 const OPENAI_VIDEO_REFERENCE_LIMITS = { t2v: 0, i2v: 2, multi: 9 };
 
-function resolveVideoSelection(requestedRoute = null, selfId = null) {
-  const scope = selfId == null ? {} : { selfId };
-  const featureConfig = Setting.getConfig("EditImage", scope);
+function resolveVideoSelection(requestedRoute = null) {
+  const featureConfig = Setting.getConfig("EditImage");
   const requested = String(requestedRoute || "").trim();
   const configuredModels = normalizeModelList(featureConfig.videoModels);
   if (!requested && configuredModels.length === 0) {
@@ -55,7 +54,6 @@ function resolveVideoSelection(requestedRoute = null, selfId = null) {
   };
   const models = requested
     ? resolveRouteReference(requested, {
-      selfId,
       kind: "video",
       targetMatches: aliasMatchers[alias],
     })
@@ -63,7 +61,6 @@ function resolveVideoSelection(requestedRoute = null, selfId = null) {
   const routeId = formatModelList(models);
 
   const plan = createRouteExecutionPlan(models, {
-    selfId,
     kind: "video",
   });
   if (plan.attempts.length === 0) {
@@ -555,9 +552,8 @@ export async function generateVideoWithProvider({
   images = [],
   options = {},
   onParameterWarnings = null,
-  selfId = null,
 }) {
-  const selection = resolveVideoSelection(requestedChannel, selfId);
+  const selection = resolveVideoSelection(requestedChannel);
 
   const { plan, routeId } = selection;
   const outcome = await executeRoutePlan({

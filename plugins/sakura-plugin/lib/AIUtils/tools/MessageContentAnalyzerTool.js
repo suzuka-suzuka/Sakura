@@ -511,10 +511,7 @@ export class MessageContentAnalyzerTool extends AbstractTool {
     let isTempFile = false;
 
     try {
-      const capabilityContext = resolveGeminiCapabilityPlan(
-        e?.self_id,
-        "消息视频分析"
-      );
+      const capabilityContext = resolveGeminiCapabilityPlan("消息视频分析");
       const downloadDir = path.join(plugindata, "video");
       if (!fs.existsSync(downloadDir)) {
         fs.mkdirSync(downloadDir, { recursive: true });
@@ -539,7 +536,6 @@ export class MessageContentAnalyzerTool extends AbstractTool {
       isTempFile = true;
 
       return await executeGeminiCapability({
-        selfId: e?.self_id,
         purpose: "消息视频分析",
         context: capabilityContext,
         operation: async ({ client: ai, config, aiConfig }) => {

@@ -83,11 +83,10 @@ export function PluginConfigPage({
     schemas,
     configs,
     onSaveModule,
-    scopeSelfId = null,
     headerActions = null,
 }) {
     const modules = page.modules;
-    // 切换页面或账号时由外层用 key 重新挂载，草稿自然清空
+    // 切换页面时由外层用 key 重新挂载，草稿自然清空
     const [drafts, setDrafts] = useState({});
     const [issues, setIssues] = useState({});
     const [saving, setSaving] = useState(false);
@@ -179,7 +178,6 @@ export function PluginConfigPage({
             children: schema.children,
             value,
             onFieldChange: (key, next) => updateModule(module, { ...value, [key]: next }),
-            scopeSelfId,
             anchorScope: module,
             title,
             help: schema.help,
@@ -214,7 +212,7 @@ export function PluginConfigPage({
 }
 
 /**
- * 单个配置对象的页面（框架配置、账号配置）。
+ * 单个配置对象的页面（框架配置、权限设置）。
  * sections: [{ key, title, help, meta }]，key 为 null 表示根上的普通字段。
  */
 export function ObjectConfigPage({
@@ -224,7 +222,6 @@ export function ObjectConfigPage({
     config,
     sections,
     onSave,
-    scopeSelfId = null,
     headerActions = null,
     warnings = null,
 }) {
@@ -266,7 +263,6 @@ export function ObjectConfigPage({
                 children: section.meta.children,
                 value,
                 onFieldChange: (key, next) => setDraft({ ...value, [key]: next }),
-                scopeSelfId,
                 anchorScope: 'root',
                 groupByCard: false,
                 title: section.title,
@@ -279,7 +275,6 @@ export function ObjectConfigPage({
             children: section.meta.children,
             value: sectionValue,
             onFieldChange: (key, next) => setDraft({ ...value, [section.key]: { ...sectionValue, [key]: next } }),
-            scopeSelfId,
             anchorScope: section.key,
             groupByCard: false,
             title: section.title,

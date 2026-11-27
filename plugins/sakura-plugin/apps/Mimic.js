@@ -185,7 +185,7 @@ export class Mimic extends plugin {
       refundOnFalse: true,
     },
   }, async (e) => {
-    const lockConfig = Setting.getConfig("AI", { selfId: e?.self_id });
+    const lockConfig = Setting.getConfig("AI");
     let lockKey = null;
     let userLock = null;
 

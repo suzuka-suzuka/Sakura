@@ -1,6 +1,7 @@
 import fs from "fs"
 import path from "path"
 import { fileURLToPath } from "url"
+import { CONFIG_DIR, DATA_DIR, LOG_DIR, SAKURA_HOME, TEMP_DIR, getPluginDataDir } from "../../../src/utils/home.js"
 
 const projectRoot = process.cwd()
 const _path = projectRoot.replace(/\\/g, "/")
@@ -18,11 +19,15 @@ const originalPluginRoot = path.join(projectRoot, "plugins", pluginName)
 const useOriginalPluginRoot = process.env.NODE_ENV === "production" && fs.existsSync(originalPluginRoot)
 const pluginRoot = useOriginalPluginRoot ? originalPluginRoot : runtimePluginRoot
 
-const plugindata = path.join(pluginRoot, "data")
+// 数据、配置、日志按实例 home 存放（见 src/utils/home.js）；代码和资源始终取插件目录
+const plugindata = getPluginDataDir(pluginName)
 const pluginresources = path.join(pluginRoot, "resources")
-const configRoot = path.join(projectRoot, "config")
+const homeRoot = SAKURA_HOME
+const configRoot = CONFIG_DIR
 const pluginConfigDir = path.join(configRoot, pluginName)
-const logRoot = path.join(projectRoot, "logs")
+const logRoot = LOG_DIR
+const frameworkDataDir = DATA_DIR
+const tempRoot = TEMP_DIR
 
 export {
   _path,
@@ -34,7 +39,10 @@ export {
   useOriginalPluginRoot,
   plugindata,
   pluginresources,
+  homeRoot,
   configRoot,
   pluginConfigDir,
   logRoot,
+  frameworkDataDir,
+  tempRoot,
 }

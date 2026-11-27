@@ -1,7 +1,7 @@
 import Setting from "../lib/setting.js"
 import { isCronDue } from "../lib/cron.js"
 import _ from "lodash"
-import { getCurrentBotSelfId } from "../../../src/api/client.js"
+import { getBot } from "../../../src/api/client.js"
 
 // 用 konachan.net 而非 .com：后者被 Cloudflare 拦在 403（TLS 指纹级别，
 // 伪造 UA 无效），原先正是为此才要走 puppeteer-real-browser。
@@ -23,7 +23,7 @@ export class teatime extends plugin {
       return
     }
 
-    const selfId = getCurrentBotSelfId()
+    const selfId = getBot()?.self_id ?? null
     if (selfId == null) {
       logger.warn("[teatime] 触发定时任务时没有在线账号，已跳过本次推送")
       return
@@ -33,7 +33,7 @@ export class teatime extends plugin {
   })
 
   async runForSelf(selfId) {
-    const config = Setting.getConfig("teatime", { selfId })
+    const config = Setting.getConfig("teatime")
     const groups = Array.isArray(config?.Groups) ? config.Groups : []
     if (!groups.length) {
       return

@@ -1055,7 +1055,7 @@ export async function getAI(
     const cachedPlan = routingContext?.plan;
     plan = cachedPlan?.route?.key === modelListKey(models)
       ? cachedPlan
-      : createRouteExecutionPlan(models, { selfId: e?.self_id });
+      : createRouteExecutionPlan(models);
     if (routingContext && typeof routingContext === "object") {
       routingContext.plan = plan;
     }

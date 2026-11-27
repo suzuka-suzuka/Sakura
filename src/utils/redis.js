@@ -71,9 +71,11 @@ export async function onRedisKeyExpired(callback) {
           logger.warn(`[Redis] 设置 notify-keyspace-events 失败: ${err.message}`);
         }
 
+        // 只订阅自己的 db：多个实例共用一个 Redis 时各用各的 db，不能收到别的实例的过期事件
+        const db = Number(redis.options?.db) || 0;
         const subscriber = redis.duplicate();
         await subscriber.connect();
-        await subscriber.psubscribe('__keyevent@*__:expired');
+        await subscriber.psubscribe(`__keyevent@${db}__:expired`);
 
         subscriber.on('pmessage', async (pattern, channel, expiredKey) => {
           for (const listener of expiredListeners) {

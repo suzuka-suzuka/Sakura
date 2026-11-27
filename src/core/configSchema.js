@@ -25,7 +25,8 @@ const MilkyConnectionSchema = z.object({
     heartbeatInterval: z.number().int().min(0).max(300000).default(30000).describe('心跳间隔(ms)，0 为不发送'),
 });
 
-export const ACCOUNT_CONFIG_KEYS = [
+/** 主人和黑白名单。以前按账号存在 config/account/ 下，拆成一号一实例后并回 config.yaml */
+export const PERMISSION_CONFIG_KEYS = [
     'master',
     'whiteUsers',
     'whiteGroups',
@@ -41,6 +42,26 @@ export const ConfigSchema = z.object({
     blockPrivate: z.boolean()
         .default(true)
         .describe('是否屏蔽私聊，主人不受影响'),
+
+    master: z.array(z.union([z.number(), z.string()]))
+        .default([])
+        .describe('主人 QQ 列表'),
+
+    whiteUsers: z.array(z.number())
+        .default([])
+        .describe('白名单 QQ'),
+
+    whiteGroups: z.array(z.number())
+        .default([])
+        .describe('群白名单，填写后仅处理这些群'),
+
+    blackGroups: z.array(z.number())
+        .default([])
+        .describe('群黑名单，仅在群白名单为空时生效'),
+
+    blackUsers: z.array(z.number())
+        .default([])
+        .describe('用户黑名单'),
 
     ws: z.object({
         forward: z.array(ForwardConnectionSchema)
@@ -83,28 +104,6 @@ export const ConfigSchema = z.object({
     })).describe('配置面板设置'),
 });
 
-export const AccountConfigSchema = z.object({
-    master: z.array(z.union([z.number(), z.string()]))
-        .default([])
-        .describe('主人 QQ 列表'),
-
-    whiteUsers: z.array(z.number())
-        .default([])
-        .describe('白名单 QQ'),
-
-    whiteGroups: z.array(z.number())
-        .default([])
-        .describe('群白名单，填写后仅处理这些群'),
-
-    blackGroups: z.array(z.number())
-        .default([])
-        .describe('群黑名单，仅在群白名单为空时生效'),
-
-    blackUsers: z.array(z.number())
-        .default([])
-        .describe('用户黑名单'),
-});
-
 export const FIELD_UI_HINTS = {
     master: { hideSpinner: true },
     whiteGroups: { uiType: 'groupSelect' },
@@ -128,10 +127,6 @@ export const FIELD_UI_HINTS = {
 
 export function getDefaultConfig() {
     return ConfigSchema.parse({});
-}
-
-export function getDefaultAccountConfig() {
-    return AccountConfigSchema.parse({});
 }
 
 export function schemaToMeta(schema, fieldPath = '') {

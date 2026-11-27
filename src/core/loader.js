@@ -17,8 +17,7 @@ import Config from "./config.js";
 import pluginConfigManager from "./pluginConfig.js";
 import schedule from "node-schedule";
 import { logger, logContext } from "../utils/logger.js";
-import { getBot, getBots, withBotContext } from "../api/client.js";
-import { getCronPluginScopeIds } from "./pluginScope.js";
+import { getBot } from "../api/client.js";
 import { isMasterUser } from "../utils/common.js";
 import {
   beforeExecute as beforeEconomyExecute,
@@ -27,9 +26,9 @@ import {
   isHandledResult,
   clearEconomyCommandNamesCache,
 } from "./economyHook.js";
-import { canRunBotScopedTask } from "./botLifecycle.js";
 import { ackScope } from "./event.js";
 import { isPoweredOff } from "./powerState.js";
+import { INSTANCE_KEY, PROJECT_ROOT } from "../utils/home.js";
 
 /** 指令处理超过这个时长仍没回复，就先贴个表情表示"收到了" */
 const ACK_DELAY_MS = 400;
@@ -75,7 +74,13 @@ function scheduleAck(eventObj, instance, handler, scope) {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PLUGIN_RUNTIME_BASE_DIR = path.join(__dirname, "../../temp/plugin-runtime");
+// 快照必须留在项目目录下，插件里的裸模块导入才能向上找到根 node_modules；
+// 多个实例共用一份代码时按实例分开，免得启动时互相清掉对方的快照。
+const PLUGIN_RUNTIME_BASE_DIR = path.join(
+  PROJECT_ROOT,
+  "temp",
+  INSTANCE_KEY ? `plugin-runtime-${INSTANCE_KEY}` : "plugin-runtime"
+);
 const HOT_RELOAD_CODE_DIRS = new Set(["apps", "lib"]);
 const HOT_RELOAD_SHARED_DIRS = new Set([".git", ".runtime", "node_modules", "data", "logs"]);
 
@@ -96,39 +101,21 @@ function shouldUseRuntimeSnapshots() {
   return !isProductionRuntime();
 }
 
-function buildCronScopeIds() {
-  const onlineIds = getBots().map((currentBot) => Number(currentBot.self_id)).filter((selfId) =>
-    Number.isFinite(selfId)
-  );
-  return getCronPluginScopeIds(onlineIds);
-}
-
-async function runCronInScope(instance, handler, selfId = null, fireDate = new Date()) {
-  if (!canRunBotScopedTask(selfId, getBot)) {
+/**
+ * 跑一次定时任务。一个实例只有一个账号，所以每个 Cron 每次只跑一遍；
+ * 账号在线且软关机时跳过（离线时照跑：数据维护类任务不需要连接，要发消息的任务自己判断 bot 是否在线）。
+ */
+async function runCron(instance, handler, fireDate = new Date()) {
+  const currentBot = getBot();
+  if (currentBot && isPoweredOff(currentBot.self_id)) {
     logger.debug(
-      `[${instance.name}] 跳过离线账号 ${selfId} 的定时任务: ${handler.methodName}`
+      `[${instance.name}] 账号 ${currentBot.self_id} 已软关机，跳过定时任务: ${handler.methodName}`
     );
     return false;
   }
 
-  if (isPoweredOff(selfId)) {
-    logger.debug(
-      `[${instance.name}] 账号 ${selfId} 已软关机，跳过定时任务: ${handler.methodName}`
-    );
-    return false;
-  }
-
-  const run = async () => {
-    instance.e = null;
-    await instance[handler.methodName].call(instance, fireDate);
-  };
-
-  if (selfId == null) {
-    await run();
-    return true;
-  }
-
-  await withBotContext(selfId, run);
+  instance.e = null;
+  await instance[handler.methodName].call(instance, fireDate);
   return true;
 }
 
@@ -335,14 +322,7 @@ export class PluginLoader {
                         `[${instance.name}] 触发定时任务: ${handler.methodName}`
                       );
                     }
-                    const scopeIds = pluginName ? buildCronScopeIds() : [];
-                    if (scopeIds.length === 0) {
-                      await runCronInScope(instance, handler, null, fireDate);
-                    } else {
-                      for (const selfId of scopeIds) {
-                        await runCronInScope(instance, handler, selfId, fireDate);
-                      }
-                    }
+                    await runCron(instance, handler, fireDate);
                   } catch (e) {
                     logger.error(
                       `[${instance.name}] 定时任务 ${handler.methodName} 执行出错: ${e}`
@@ -759,7 +739,7 @@ export class PluginLoader {
 
   async deal(e) {
     if (e.post_type !== "meta_event") {
-      const config = Config.getForSelf(e.self_id);
+      const config = Config.get();
       const { group_id, user_id } = e;
 
       if (user_id && config.blackUsers.includes(user_id)) {
@@ -808,7 +788,7 @@ export class PluginLoader {
       group_name: e.group_name,
       user_name: e.sender?.card || e.sender?.nickname,
     };
-    return logContext.run(_logCtx, () => withBotContext(e.self_id, () => eventStorage.run(eventObj, async () => {
+    return logContext.run(_logCtx, () => eventStorage.run(eventObj, async () => {
 
       const privateMessage = e.post_type === "message" && e.message_type === "private";
       let context = null;
@@ -846,7 +826,7 @@ export class PluginLoader {
         try {
           const permission = handler.permission || instance.permission;
           if (permission) {
-            const config = Config.getForSelf(e.self_id);
+            const config = Config.get();
             const uid = String(e.user_id);
             const isUserMaster = isMasterUser(uid, config.master);
 
@@ -894,7 +874,7 @@ export class PluginLoader {
           cancelAck?.();
         }
       }
-    })));
+    }));
   }
 
   checkEvent(e, targetEvent) {

@@ -21,7 +21,7 @@ export class NaiPainting extends plugin {
 
     queryNaiQuota = Command(/^#?查询nai(?:余额|额度)$/i, "master", async (e) => {
         try {
-            const config = Setting.getConfig("nai", { selfId: e.self_id });
+            const config = Setting.getConfig("nai");
             const quota = await getNaiQuota(config);
             const image = await renderNaiQuotaImage(quota);
             await e.reply(segment.image(image));

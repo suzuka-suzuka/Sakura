@@ -33,7 +33,7 @@ async function generateMemoryOrganization(snapshot, e, location) {
     return { memories: [], discarded: [], summary: "" };
   }
 
-  const aiConfig = Setting.getConfig("AI", { selfId: e?.self_id }) || {};
+  const aiConfig = Setting.getConfig("AI") || {};
   if (!hasModels(aiConfig.utilityModels)) {
     throw new Error("未选择后台辅助模型，无法整理记忆");
   }

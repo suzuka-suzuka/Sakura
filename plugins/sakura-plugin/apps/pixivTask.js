@@ -1,5 +1,5 @@
 import Setting from "../lib/setting.js"
-import { getBot, getCurrentBotSelfId } from "../../../src/api/client.js"
+import { getBot } from "../../../src/api/client.js"
 import { getRankingOverview, buildRankingForwardParams } from "../lib/pixiv/ranking.js"
 import {
   searchTagSubscription,
@@ -13,8 +13,7 @@ import { sendPixivImages } from "../lib/pixiv/sendImages.js"
 import { isUgoira } from "../lib/pixiv/ugoira.js"
 
 function getTaskBot() {
-  const selfId = getCurrentBotSelfId()
-  return selfId == null ? null : getBot(selfId)
+  return getBot() || null
 }
 
 function formatDuration(ms) {

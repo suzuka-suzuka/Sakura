@@ -22,17 +22,17 @@ class Setting {
 
   // ===== 配置相关：全部转发给框架 =====
 
-  getConfig(app, options = {}) {
-    return pluginConfigManager.getConfig(PLUGIN_NAME, app, options) || {};
+  getConfig(app) {
+    return pluginConfigManager.getConfig(PLUGIN_NAME, app) || {};
   }
 
-  setConfig(app, data, options = {}) {
-    const result = pluginConfigManager.setConfig(PLUGIN_NAME, app, data, options);
+  setConfig(app, data) {
+    const result = pluginConfigManager.setConfig(PLUGIN_NAME, app, data);
     return result.success;
   }
 
-  merge(options = {}) {
-    return pluginConfigManager.getAll(PLUGIN_NAME, options) || {};
+  merge() {
+    return pluginConfigManager.getAll(PLUGIN_NAME) || {};
   }
 
   analysis(config) {

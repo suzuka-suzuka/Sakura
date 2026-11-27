@@ -28,7 +28,7 @@ import {
   RED_PACKET_MODES,
   TRANSFER_UNLOCK_LEVEL,
 } from "../lib/economy/rules.js";
-import { getBot, getCurrentBotSelfId } from "../../../src/api/client.js";
+import { getBot } from "../../../src/api/client.js";
 import {
   FISHING_BENEFIT_DURATION_SECONDS,
   FISHING_LOCATIONS,
@@ -1008,7 +1008,7 @@ export default class Economy extends plugin {
     }
     if (!expired || expired.length === 0) return;
 
-    const currentBot = getBot(getCurrentBotSelfId());
+    const currentBot = getBot();
     for (const packet of expired) {
       logger.info(
         `[红包] 群 ${packet.groupId} 的红包 ${packet.packetId} 已过期，剩余 ` +

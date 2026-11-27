@@ -51,7 +51,6 @@ export class VideoGeneration extends plugin {
         prompt,
         images: imageRefs,
         options,
-        selfId: e.self_id,
         onParameterWarnings: (warnings) =>
           replyParameterWarnings(e, warnings),
       });

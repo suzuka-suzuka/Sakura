@@ -5,7 +5,7 @@ import _ from "lodash";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import muhammara from "muhammara";
-import { pluginresources } from "../lib/path.js";
+import { pluginresources, tempRoot as TEMP_DIR } from "../lib/path.js";
 import {
   loadConversationHistory,
   clearConversationHistory,
@@ -398,7 +398,7 @@ export class Conversationmanagement extends plugin {
 
       const pdfBytes = await pdfDoc.save();
 
-      const tempDir = path.join(process.cwd(), "temp");
+      const tempDir = TEMP_DIR;
       if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true });
       }

@@ -10,6 +10,45 @@ const { exec, execSync } = require("child_process");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGINS_DIR = path.join(__dirname, "../../plugins");
+const ECOSYSTEM_PATH = path.join(__dirname, "../../ecosystem.config.cjs");
+
+/**
+ * 多个实例共用这份代码，更新后其余在跑的 PM2 实例也要重启才能用上新代码。
+ * 只重启状态是 online 的，主人手动停掉的实例不拉起来。
+ */
+function restartSiblingInstances() {
+  const self = process.env.SAKURA_INSTANCE;
+  if (process.env.pm_id === undefined || !self) return;
+
+  let names = [];
+  try {
+    delete require.cache[require.resolve(ECOSYSTEM_PATH)];
+    names = (require(ECOSYSTEM_PATH).apps || [])
+      .map((app) => app?.name)
+      .filter((name) => name && name !== self);
+  } catch (error) {
+    logger.warn(`[更新] 读取实例列表失败，其他实例需要手动重启: ${error.message || error}`);
+    return;
+  }
+  if (names.length === 0) return;
+
+  let online = new Set();
+  try {
+    const list = JSON.parse(execSync("pm2 jlist", { encoding: "utf-8" }) || "[]");
+    online = new Set(list.filter((proc) => proc?.pm2_env?.status === "online").map((proc) => proc.name));
+  } catch (error) {
+    logger.warn(`[更新] 读取 PM2 进程列表失败，其他实例需要手动重启: ${error.message || error}`);
+    return;
+  }
+
+  for (const name of names) {
+    if (!online.has(name)) continue;
+    logger.info(`[更新] 重启共用代码的实例 ${name}`);
+    exec(`pm2 restart ${name}`, (error) => {
+      if (error) logger.warn(`[更新] 重启实例 ${name} 失败: ${error.message || error}`);
+    });
+  }
+}
 
 let uping = false;
 
@@ -467,6 +506,8 @@ export class GlobalUpdate extends plugin {
       "EX",
       120
     );
+
+    restartSiblingInstances();
 
     if (process.send) {
       process.send("restart");

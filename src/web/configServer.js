@@ -9,9 +9,9 @@ import { fileURLToPath } from 'url';
 import si from 'systeminformation';
 import Config from '../core/config.js';
 import pluginConfigManager from '../core/pluginConfig.js';
-import accountConfig from '../core/accountConfig.js';
 import { logger } from '../utils/logger.js';
-import { bot as botFacade, getBotSummaries } from '../api/client.js';
+import { DATA_DIR, SAKURA_HOME } from '../utils/home.js';
+import { getBot, getBotSummary } from '../api/client.js';
 import { AVAILABLE_TOOL_OPTIONS } from '../../plugins/sakura-plugin/lib/AIUtils/tools/tools.js';
 import {
     getProviderModelDiscoveryFingerprint,
@@ -180,42 +180,14 @@ async function getDynamicSystemInfo() {
 
 async function getBotInfo() {
     try {
-        const onlineAccounts = getBotSummaries();
-        const onlineSelfIds = new Set(
-            onlineAccounts
-                .map((account) => Number(account.self_id))
-                .filter((selfId) => Number.isFinite(selfId) && selfId > 0)
-        );
-        const pluginScopedIds = pluginConfigManager
-            .getConfiguredSelfIds('sakura-plugin')
-            .filter((selfId) => onlineSelfIds.has(Number(selfId)));
-        const configuredAccountIds = accountConfig
-            .listConfiguredSelfIds()
-            .filter((selfId) => onlineSelfIds.has(Number(selfId)));
-        const configuredSelfIds = [...new Set([...pluginScopedIds, ...configuredAccountIds])];
-        const accountMap = new Map();
-
-        for (const account of onlineAccounts) {
-            const id = Number(account.self_id);
-            if (!id) continue; // 过滤 selfId=0 或无效账号
-            accountMap.set(id, {
-                ...account,
-                status: account.status || 'online',
-            });
-        }
-
-        const accounts = Array.from(accountMap.values());
-        if (accounts.length === 0) {
-            return null;
-        }
-
-        // 仅返回在线账号的配置作用域，离线账号不进入配置页。
+        // 一个实例只有一个号，离线时返回 null
+        const account = getBotSummary();
+        if (!account?.self_id) return null;
         return {
-            accounts,
-            total: accounts.length,
-            online: onlineAccounts.length,
-            configuredAccountIds,
-            configuredScopeIds: configuredSelfIds,
+            accounts: [account],
+            total: 1,
+            online: 1,
+            instance: process.env.SAKURA_INSTANCE || null,
         };
     } catch (e) {
         logger.error(`[ConfigServer] 获取 Bot 信息失败: ${e}`);
@@ -225,8 +197,9 @@ async function getBotInfo() {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const PROJECT_ROOT = path.resolve(__dirname, '../..');
-const SESSION_STORE_PATH = path.join(__dirname, '../../data/web-sessions.json');
+// 文件管理默认打开当前实例的 home（未设 SAKURA_HOME 时就是项目根目录）
+const FILES_ROOT = SAKURA_HOME;
+const SESSION_STORE_PATH = path.join(DATA_DIR, 'web-sessions.json');
 
 const MIME_TYPES = {
     '.html': 'text/html; charset=utf-8',
@@ -629,13 +602,6 @@ function readRequestBuffer(req, maxSize) {
     });
 }
 
-function parseSelfIdParam(url) {
-    const raw = url.searchParams.get('selfId');
-    if (raw == null || raw === '') return null;
-    const selfId = Number(raw);
-    return Number.isFinite(selfId) ? selfId : null;
-}
-
 function sendJson(res, data, status = 200) {
     res.writeHead(status, buildResponseHeaders(res._sakuraReq, {
         'Content-Type': 'application/json; charset=utf-8',
@@ -713,27 +679,17 @@ async function handleApi(req, res) {
     if (pathname === '/api/bot/groups' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
         try {
-            if (!botFacade) {
+            const currentBot = getBot();
+            if (!currentBot) {
                 sendJson(res, { success: false, error: 'Bot 未连接' });
                 return true;
             }
-            const selfId = parseSelfIdParam(url);
-            const targetBot = selfId != null ? botFacade.getBot?.(selfId) : botFacade;
-            if (!targetBot) {
-                sendJson(res, { success: false, error: `Account ${selfId} is offline` });
-                return true;
-            }
 
-            const result = selfId != null
-                ? await targetBot.getGroupList()
-                : await botFacade.getGroupList();
+            const result = await currentBot.getGroupList();
             const groups = Array.isArray(result) ? result : [];
             const list = groups.map(g => ({
                 group_id: g.group_id,
                 group_name: g.group_name || String(g.group_id),
-                bots: selfId != null
-                    ? [{ self_id: selfId, nickname: targetBot.nickname || String(selfId) }]
-                    : (g.bots || []),
             }));
             sendJson(res, { success: true, data: list });
         } catch (e) {
@@ -853,25 +809,10 @@ async function handleApi(req, res) {
         return true;
     }
 
-    // ===== 分账号基本配置 =====
-
-    if (pathname === '/api/account-schema' && req.method === 'GET') {
-        if (!requireAuth(req, res)) return true;
-        sendJson(res, { success: true, data: accountConfig.getSchema() });
-        return true;
-    }
-
-    if (pathname === '/api/account-config' && req.method === 'GET') {
-        if (!requireAuth(req, res)) return true;
-        const selfId = parseSelfIdParam(url);
-        sendJson(res, { success: true, data: accountConfig.getRuntimeConfig(selfId) });
-        return true;
-    }
-
     if (pathname === '/api/system/directories' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
         try {
-            const result = listServerDirectories(url.searchParams.get('path'), PROJECT_ROOT);
+            const result = listServerDirectories(url.searchParams.get('path'), FILES_ROOT);
             sendJson(res, { success: true, data: result });
         } catch (error) {
             sendJson(res, {
@@ -885,7 +826,7 @@ async function handleApi(req, res) {
     if (pathname === '/api/files' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
         try {
-            const result = listServerFiles(url.searchParams.get('path'), PROJECT_ROOT);
+            const result = listServerFiles(url.searchParams.get('path'), FILES_ROOT);
             sendJson(res, { success: true, data: result });
         } catch (error) {
             sendServerFileError(res, error, '读取文件夹');
@@ -896,7 +837,7 @@ async function handleApi(req, res) {
     if (pathname === '/api/files/content' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
         try {
-            const result = readServerTextFile(url.searchParams.get('path'), PROJECT_ROOT);
+            const result = readServerTextFile(url.searchParams.get('path'), FILES_ROOT);
             sendJson(res, { success: true, data: result });
         } catch (error) {
             sendServerFileError(res, error, '读取文件');
@@ -912,7 +853,7 @@ async function handleApi(req, res) {
                 body.path,
                 body.content,
                 body.expectedMtimeMs,
-                PROJECT_ROOT,
+                FILES_ROOT,
                 { force: body.force === true },
             );
             sendJson(res, { success: true, data: result });
@@ -926,7 +867,7 @@ async function handleApi(req, res) {
         if (!requireAuth(req, res)) return true;
         try {
             const body = await parseBody(req);
-            const download = getServerDownload(body.path, PROJECT_ROOT);
+            const download = getServerDownload(body.path, FILES_ROOT);
             const ticket = createFileDownloadTicket(download.path);
             sendJson(res, {
                 success: true,
@@ -953,7 +894,7 @@ async function handleApi(req, res) {
                 requestedPath = url.searchParams.get('path');
             }
 
-            const download = getServerDownload(requestedPath, PROJECT_ROOT);
+            const download = getServerDownload(requestedPath, FILES_ROOT);
             if (download.type === 'directory') {
                 let skipped = 0;
                 const zipStream = createDirectoryZipStream(download.path, download.rootName, {
@@ -997,7 +938,7 @@ async function handleApi(req, res) {
         if (!requireAuth(req, res)) return true;
         try {
             const body = await parseBody(req);
-            const result = createServerEntry(body.directory, body.name, body.type, PROJECT_ROOT);
+            const result = createServerEntry(body.directory, body.name, body.type, FILES_ROOT);
             sendJson(res, { success: true, data: result });
         } catch (error) {
             sendServerFileError(res, error, '新建项目');
@@ -1009,7 +950,7 @@ async function handleApi(req, res) {
         if (!requireAuth(req, res)) return true;
         try {
             const body = await parseBody(req);
-            const result = renameServerEntry(body.path, body.name, PROJECT_ROOT);
+            const result = renameServerEntry(body.path, body.name, FILES_ROOT);
             sendJson(res, { success: true, data: result });
         } catch (error) {
             sendServerFileError(res, error, '重命名');
@@ -1021,7 +962,7 @@ async function handleApi(req, res) {
         if (!requireAuth(req, res)) return true;
         try {
             const body = await parseBody(req);
-            const result = deleteServerEntry(body.path, PROJECT_ROOT);
+            const result = deleteServerEntry(body.path, FILES_ROOT);
             sendJson(res, { success: true, data: result });
         } catch (error) {
             sendServerFileError(res, error, '删除');
@@ -1038,24 +979,11 @@ async function handleApi(req, res) {
                 url.searchParams.get('name'),
                 buffer,
                 url.searchParams.get('overwrite') === 'true',
-                PROJECT_ROOT,
+                FILES_ROOT,
             );
             sendJson(res, { success: true, data: result });
         } catch (error) {
             sendServerFileError(res, error, '上传文件');
-        }
-        return true;
-    }
-
-    if (pathname === '/api/account-config' && req.method === 'POST') {
-        if (!requireAuth(req, res)) return true;
-        const selfId = parseSelfIdParam(url);
-        const body = await parseBody(req);
-        const result = accountConfig.setRuntimeConfig(selfId, body.data || body);
-        if (result.success) {
-            sendJson(res, { success: true, message: '保存成功' });
-        } else {
-            sendJson(res, { success: false, error: '配置验证失败', errors: result.errors });
         }
         return true;
     }
@@ -1114,18 +1042,13 @@ async function handleApi(req, res) {
     if (pathname === '/api/ai/models' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
         try {
-            const selfId = parseSelfIdParam(url);
             const providerId = url.searchParams.get('providerId')?.trim();
             if (!providerId) {
                 sendJson(res, { success: false, error: '缺少 providerId' }, 400);
                 return true;
             }
 
-            const providersConfig = pluginConfigManager.getConfig(
-                'sakura-plugin',
-                'Providers',
-                { selfId }
-            );
+            const providersConfig = pluginConfigManager.getConfig('sakura-plugin', 'Providers');
             const provider = providersConfig?.providers?.find(
                 (item) => item.name === providerId
             );
@@ -1135,7 +1058,6 @@ async function handleApi(req, res) {
             }
 
             const result = await listProviderModels(provider, {
-                scopeKey: selfId == null ? 'default' : String(selfId),
                 force: url.searchParams.get('refresh') === '1',
             });
             sendJson(res, { success: true, data: result });
@@ -1149,7 +1071,6 @@ async function handleApi(req, res) {
     if (pathname === '/api/dynamic-options' && req.method === 'GET') {
         if (!requireAuth(req, res)) return true;
         try {
-            const selfId = parseSelfIdParam(url);
             const dynamicConfig = pluginConfigManager.getDynamicOptionsConfig('sakura-plugin');
 
             if (!dynamicConfig) {
@@ -1166,7 +1087,7 @@ async function handleApi(req, res) {
                 const valueDetails = {};
 
                 for (const source of config.sources || []) {
-                    const moduleConfig = pluginConfigManager.getConfig('sakura-plugin', source.module, { selfId });
+                    const moduleConfig = pluginConfigManager.getConfig('sakura-plugin', source.module);
                     if (!moduleConfig) continue;
 
                     const arr = source.path.split('.').reduce((obj, key) => obj?.[key], moduleConfig);
@@ -1267,7 +1188,6 @@ async function handleApi(req, res) {
         }
 
         const { pluginName, moduleName, action } = parsed;
-        const selfId = parseSelfIdParam(url);
 
 
         if (action === 'schema' && req.method === 'GET') {
@@ -1282,7 +1202,7 @@ async function handleApi(req, res) {
 
 
         if (action === 'allConfig' && req.method === 'GET') {
-            const configs = pluginConfigManager.getAll(pluginName, { selfId });
+            const configs = pluginConfigManager.getAll(pluginName);
             if (!configs) {
                 sendJson(res, { success: false, error: `插件 ${pluginName} 未注册` }, 404);
             } else {
@@ -1293,7 +1213,7 @@ async function handleApi(req, res) {
 
 
         if (action === 'config' && moduleName && req.method === 'GET') {
-            const config = pluginConfigManager.getConfig(pluginName, moduleName, { selfId });
+            const config = pluginConfigManager.getConfig(pluginName, moduleName);
             if (config === null) {
                 sendJson(res, { success: false, error: `模块 ${moduleName} 不存在` }, 404);
             } else {
@@ -1333,20 +1253,19 @@ async function handleApi(req, res) {
                 }
             }
             const previousProviders = isProvidersConfig
-                ? pluginConfigManager.getConfig(pluginName, moduleName, { selfId })?.providers || []
+                ? pluginConfigManager.getConfig(pluginName, moduleName)?.providers || []
                 : [];
             const previousDiscoveryFingerprint = isProvidersConfig
                 ? getProviderModelDiscoveryFingerprint(previousProviders)
                 : null;
-            const result = pluginConfigManager.setConfig(pluginName, moduleName, proposedConfig, { selfId });
+            const result = pluginConfigManager.setConfig(pluginName, moduleName, proposedConfig);
             if (result.success) {
                 if (isProvidersConfig) {
-                    const providersConfig = pluginConfigManager.getConfig(pluginName, moduleName, { selfId });
+                    const providersConfig = pluginConfigManager.getConfig(pluginName, moduleName);
                     const providers = providersConfig?.providers || [];
                     const nextDiscoveryFingerprint = getProviderModelDiscoveryFingerprint(providers);
                     if (nextDiscoveryFingerprint !== previousDiscoveryFingerprint) {
-                        const scopeKey = selfId == null ? 'default' : String(selfId);
-                        void refreshProviderModelCatalog(providers, { scopeKey }).then((refreshResults) => {
+                        void refreshProviderModelCatalog(providers).then((refreshResults) => {
                             refreshResults.forEach((refreshResult, index) => {
                                 if (refreshResult.status === 'rejected') {
                                     logger.warn(
@@ -1380,18 +1299,6 @@ async function handleApi(req, res) {
 }
 
 
-
-function broadcastPluginConfigChanged(pluginName, moduleName, selfId = null) {
-    const config = pluginConfigManager.getConfig(pluginName, moduleName, { selfId });
-    broadcastWsMessage({
-        type: 'plugin_config_changed',
-        pluginName,
-        moduleName,
-        data: config,
-        selfId,
-        timestamp: Date.now(),
-    });
-}
 
 function broadcastWsMessage(payload) {
     const message = typeof payload === 'string' ? payload : JSON.stringify(payload);
@@ -1502,13 +1409,12 @@ export function startConfigServer() {
 
     const plugins = pluginConfigManager.getRegisteredPlugins();
     for (const pluginName of Object.keys(plugins)) {
-        pluginConfigManager.onChange(pluginName, (moduleName, newConfig, meta = {}) => {
+        pluginConfigManager.onChange(pluginName, (moduleName, newConfig) => {
             broadcastWsMessage({
                 type: 'plugin_config_changed',
                 pluginName,
                 moduleName,
                 data: newConfig,
-                selfId: meta.selfId ?? null,
                 timestamp: Date.now(),
             });
         });

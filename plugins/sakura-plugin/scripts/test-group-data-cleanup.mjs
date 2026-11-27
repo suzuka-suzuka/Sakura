@@ -226,8 +226,7 @@ test('插件仅每天凌晨 4 点核对，退群和账号记录事件不触发�
   const imports = {
     '../lib/Database.js': { default: {} },
     '../lib/GroupDataCleaner.js': { GroupDataCleaner: class { run(e) { calls.push(e); } observeBots() {} }, canDeleteGroupData() {} },
-    '../../../src/api/client.js': { getBots: () => [] },
-    '../../../src/core/accountConfig.js': { default: { listConfiguredSelfIds: () => [] } },
+    '../../../src/api/client.js': { getBot: () => undefined },
   };
   retained.push(source, context);
   await source.link(specifier => {

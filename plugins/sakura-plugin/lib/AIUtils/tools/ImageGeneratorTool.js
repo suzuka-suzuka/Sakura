@@ -111,7 +111,6 @@ export class ImageGeneratorTool extends AbstractTool {
         {
           aspectRatio,
           imageSize,
-          selfId: e?.self_id,
           outputFormat,
           frameCount,
           frameDurationMs,

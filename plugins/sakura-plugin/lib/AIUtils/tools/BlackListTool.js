@@ -37,9 +37,9 @@ export class BlackListTool extends AbstractTool {
     let result;
 
     if (time === 0) {
-      result = await unblockUser(targetQQ, e?.self_id);
+      result = await unblockUser(targetQQ);
     } else {
-      result = await blockUser(targetQQ, time, e?.self_id);
+      result = await blockUser(targetQQ, time);
     }
 
     return result.message;

@@ -7,7 +7,7 @@ export const MIMIC_HISTORY_TTL_SECONDS = 20 * 60;
 export function getMemoryIdleSeconds(selfId) {
   let minutes;
   try {
-    minutes = Number(Setting.getConfig("AI", { selfId })?.memoryIdleMinutes);
+    minutes = Number(Setting.getConfig("AI")?.memoryIdleMinutes);
   } catch {
     minutes = NaN;
   }

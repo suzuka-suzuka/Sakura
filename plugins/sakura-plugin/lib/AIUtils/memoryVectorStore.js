@@ -50,8 +50,7 @@ class MemoryVectorStore {
     }
   }
 
-  async syncDocument(location, document, options = {}) {
-    const selfId = options.selfId ?? null;
+  async syncDocument(location, document) {
     const existingItems = await this.withIndexLock(() =>
       this.index.listItemsByMetadata({ scopeKey: location.scopeKey })
     );
@@ -67,7 +66,6 @@ class MemoryVectorStore {
       memoriesToIndex.map(async (memory) => ({
         memory,
         vector: await generateTextEmbedding(memory.content, {
-          selfId,
           taskType: "RETRIEVAL_DOCUMENT",
           purpose: "记忆入库",
         }),
@@ -115,7 +113,6 @@ class MemoryVectorStore {
     );
     if (nonEmptyTargets.length === 0) return [];
 
-    const selfId = options.selfId ?? null;
     const limit = Math.min(
       MAX_MEMORY_SEARCH_RESULTS,
       Math.max(1, Number.isInteger(options.maxResults)
@@ -128,13 +125,12 @@ class MemoryVectorStore {
 
     const [queryVector] = await Promise.all([
       generateTextEmbedding(normalizedQuery, {
-        selfId,
         taskType: "RETRIEVAL_QUERY",
         purpose: "记忆检索",
       }),
       Promise.all(
         nonEmptyTargets.map((target) =>
-          this.syncDocument(target.location, target.document, { selfId })
+          this.syncDocument(target.location, target.document)
         )
       ),
     ]);

@@ -4,9 +4,10 @@ import yaml from 'js-yaml';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { spawn, fork } from 'child_process';
+import { CONFIG_DIR, DATA_DIR, IS_DEFAULT_HOME, SAKURA_HOME } from './src/utils/home.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG_PATH = path.join(__dirname, 'config/config.yaml');
+const CONFIG_PATH = path.join(CONFIG_DIR, 'config.yaml');
 const script = path.join(__dirname, 'src/index.js');
 const IS_PM2_MANAGED = process.env.SAKURA_MANAGED_BY_PM2 === '1';
 const MAX_UNEXPECTED_RESTARTS = 1;
@@ -32,7 +33,7 @@ async function checkAndStartRedis() {
     const port = redisConfig.port || 6379;
     const host = redisConfig.host || '127.0.0.1';
     const execPath = redisConfig.execPath;
-    const redisDataDir = path.join(__dirname, 'data');
+    const redisDataDir = DATA_DIR;
 
     if (!execPath) {
         return;
@@ -79,6 +80,9 @@ async function checkAndStartRedis() {
 }
 
 async function start() {
+    if (!IS_DEFAULT_HOME) {
+        console.log(`实例目录 (SAKURA_HOME): ${SAKURA_HOME}`);
+    }
     await checkAndStartRedis();
     startBot();
 }

@@ -1,7 +1,7 @@
 import { OneBotWsClient } from "./core/wsClient.js";
 import { MilkyClient } from "./adapters/milkyClient.js";
 import { logger } from "./utils/logger.js";
-import { OneBotApi, Segment, removeBot, getBot, rememberBotTargets } from "./api/client.js";
+import { OneBotApi, Segment, removeBot, getBot } from "./api/client.js";
 import { logEvent } from "./handlers/logging.js";
 import { PluginLoader } from "./core/loader.js";
 import { Command, OnEvent, plugin, Event, Cron } from "./core/plugin.js";
@@ -9,8 +9,10 @@ import { connectRedis } from "./utils/redis.js";
 import Config from "./core/config.js";
 import { installOsCompatPatch } from "./utils/osCompat.js";
 import { startConfigServer } from "./web/configServer.js";
-import { bindBotRoute, cleanupBotRoutes, isBotOfflineEvent } from "./core/botLifecycle.js";
+import { isBotOfflineEvent } from "./core/botLifecycle.js";
 import { onShutdown, shutdown } from "./core/shutdown.js";
+import { warnLegacyAccountConfig } from "./core/legacyAccountConfig.js";
+import { CONFIG_DIR, IS_DEFAULT_HOME, SAKURA_HOME } from "./utils/home.js";
 
 logger.info(logger.magenta("-----------------sakura框架-----------------"))
 logger.info(logger.magenta("  ____   ____   __  __  __ __ _____   ____ "))
@@ -18,6 +20,9 @@ logger.info(logger.magenta(" (_ (_` / () \\ |  |/  /|  |  || () ) / () \\"))
 logger.info(logger.magenta(".__)__)/__/\\__\\|__|\\__\\ \\___/ |_|\\_\\/__/\\__\\"))
 logger.info(logger.magenta("                                            "))
 logger.info(logger.magenta("-------------sakura框架加载成功-------------"))
+if (!IS_DEFAULT_HOME) {
+  logger.info(`[实例] ${process.env.SAKURA_INSTANCE || "未命名实例"}，目录: ${SAKURA_HOME}`);
+}
 
 global.logger = logger;
 global.Command = Command;
@@ -51,37 +56,67 @@ await loader.loadPlugins();
 // 启动配置面板
 startConfigServer();
 
-// =================== WebSocket 多客户端管理 ===================
+// =================== 连接管理 ===================
+//
+// 一个实例只服务一个 QQ 号。配了多条连接时它们必须连的是同一个号；
+// 别的号连上来时它的事件一律忽略，并提示去另开实例。
 
-/** 所有活跃的 WS 客户端 */
+/** 所有活跃的连接客户端 */
 const wsClients = [];
 
-/** selfId → { client, routeKey }，用于断线时精准清理对应 bot */
-const selfIdToClient = new Map();
+/** 当前账号的事件从哪条连接来：{ client, routeKey }，断线时据此注销账号 */
+let boundRoute = null;
+
+/** 已经提醒过的外来账号，避免每条事件都刷一次日志 */
+const warnedForeignAccounts = new Set();
 
 /** 当前生效的 ws 配置快照，用于热重载比对 */
 let currentWsConfig = null;
 
+function isForeignAccount(selfId) {
+  const current = getBot();
+  return Boolean(current) && Number(selfId) !== Number(current.self_id);
+}
+
+function warnForeignAccount(tag, selfId) {
+  const key = String(selfId);
+  if (warnedForeignAccounts.has(key)) return;
+  warnedForeignAccounts.add(key);
+  logger.error(
+    `${tag} 账号 ${selfId} 也连上来了，但这个实例正在服务账号 ${getBot()?.self_id}。` +
+    `一个实例只服务一个号，${selfId} 的事件会被忽略；多个号请各开一个实例（见 docs/multi-instance.md）`
+  );
+}
+
+/** 账号上线（或换了一条连接继续发事件）：记下连接，首次出现时创建 Bot 实例 */
+function bindAccount(tag, client, selfId, routeKey) {
+  boundRoute = { client, routeKey };
+  let currentBot = getBot(selfId);
+  if (!currentBot) {
+    logger.info(`${tag} 账号上线: ${selfId}`);
+    currentBot = new OneBotApi(client, selfId);
+    warnLegacyAccountConfig(CONFIG_DIR, selfId, logger);
+  }
+  return currentBot;
+}
+
+/** 这条连接断了：当前账号正是从它来的就注销。routeKey 为空表示整个客户端都断了 */
+function releaseRoute(client, routeKey) {
+  if (!boundRoute || boundRoute.client !== client) return null;
+  if (routeKey && boundRoute.routeKey !== routeKey) return null;
+  const selfId = getBot()?.self_id ?? null;
+  boundRoute = null;
+  removeBot();
+  return selfId;
+}
+
 /**
- * 为一个 WsClient 实例绑定所有事件监听
- * @param {OneBotWsClient} client
+ * 为一个连接客户端绑定所有事件监听
+ * @param {OneBotWsClient|MilkyClient} client
  * @param {string} label  日志标识，如 "正向" / "反向"
  */
 function setupClient(client, label) {
   const tag = `[${label}]`;
-
-  function bindSelfId(selfId, routeKey) {
-    bindBotRoute(selfIdToClient, selfId, client, routeKey || label);
-  }
-
-  function cleanupBotsForRoute(routeKey, explicitSelfIds = []) {
-    return cleanupBotRoutes(selfIdToClient, {
-      client,
-      routeKey,
-      selfIds: explicitSelfIds,
-      removeBot,
-    });
-  }
 
   // ---- 统一事件处理 ----
   function handleEvent(data) {
@@ -90,15 +125,13 @@ function setupClient(client, label) {
     const routeKey = data.__routeKey || label;
     const isOffline = isBotOfflineEvent(data);
 
-    if (data.self_id && !isOffline) {
-      bindSelfId(data.self_id, routeKey);
-      rememberBotTargets(data);
+    if (data.self_id && isForeignAccount(data.self_id)) {
+      if (!isOffline) warnForeignAccount(tag, data.self_id);
+      return;
     }
 
-    // 首次出现的 self_id → 注册 bot 实例
-    if (data.self_id && !isOffline && !getBot(data.self_id)) {
-      logger.info(`${tag} 检测到新的 Bot 实例: ${data.self_id}`);
-      new OneBotApi(client, data.self_id);
+    if (data.self_id && !isOffline) {
+      bindAccount(tag, client, data.self_id, routeKey);
     }
 
     try {
@@ -112,9 +145,9 @@ function setupClient(client, label) {
     const dealPromise = loader.deal(data);
 
     if (isOffline && data.self_id) {
-      const removedSelfIds = cleanupBotsForRoute(routeKey, [data.self_id]);
-      if (removedSelfIds.length > 0) {
-        logger.info(`${tag} Bot 实例已注销: ${removedSelfIds.join(", ")}`);
+      const removed = releaseRoute(client, routeKey);
+      if (removed != null) {
+        logger.info(`${tag} 账号已下线: ${removed}`);
       }
     }
 
@@ -139,7 +172,7 @@ function setupClient(client, label) {
   client.on("socket.close", (data) => {
     const routeText = data.routeKey ? ` (${data.routeKey})` : "";
     logger.warn(`${tag} WebSocket 连接断开${routeText} [code: ${data.code}] ${data.reason || ""}`);
-    cleanupBotsForRoute(data.routeKey, data.selfIds || []);
+    releaseRoute(client, data.routeKey);
   });
 
   client.on("socket.error", (data) => {
@@ -153,16 +186,9 @@ function setupClient(client, label) {
   // ---- 生命周期: 初始化 Bot ----
 
   client.on("meta_event.lifecycle.connect", async (data) => {
-    if (!data.self_id) return;
+    if (!data.self_id || isForeignAccount(data.self_id)) return;
 
-    const routeKey = data.__routeKey || label;
-    bindSelfId(data.self_id, routeKey);
-
-    let botInstance = getBot(data.self_id);
-    if (!botInstance) {
-      logger.info(`${tag} 初始化 Bot 实例: ${data.self_id}`);
-      botInstance = new OneBotApi(client, data.self_id);
-    }
+    const botInstance = bindAccount(tag, client, data.self_id, data.__routeKey || label);
 
     try {
       const restartInfoStr = await redis.get("sakura:restart_info");
@@ -269,12 +295,10 @@ function disconnectAllClients() {
       logger.error(`断开连接失败: ${e}`);
     }
   }
-  // 清理 selfIdToClient 和 bot 实例
-  for (const [selfId, bound] of selfIdToClient) {
-    if (wsClients.includes(bound.client)) {
-      selfIdToClient.delete(selfId);
-      removeBot(selfId);
-    }
+  // 当前账号来自这些连接的话一起注销
+  if (boundRoute && wsClients.includes(boundRoute.client)) {
+    boundRoute = null;
+    removeBot();
   }
   wsClients.length = 0;
 }
