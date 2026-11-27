@@ -89,8 +89,8 @@ export class BotAvatar extends plugin {
         return true;
       }
 
+      // 成功不回复，群里靠框架的自动回应表情提示已处理
       logger.info(`[换头像] 账号 ${e.self_id} 已更换头像`);
-      await e.reply("头像换好了，QQ 那边可能要过一会儿才刷新");
       return true;
     }
   );
